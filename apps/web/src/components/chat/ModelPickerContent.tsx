@@ -113,7 +113,23 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         // so jumping into the picker keeps the focused instance visible.
         return props.activeInstanceId;
       }
-      return favorites.length > 0 ? "favorites" : props.activeInstanceId;
+      if (favorites.length > 0) {
+        return "favorites";
+      }
+      // The composer's instance can legitimately offer nothing to pick — an
+      // uninstalled CLI, or a project default naming a provider this host
+      // never configured. Priming there renders "No models found" with no
+      // hint that other rails are populated, so fall through to the first
+      // instance that can actually contribute models.
+      const hasModels = (instanceId: ProviderInstanceId): boolean =>
+        (modelOptionsByInstance.get(instanceId)?.length ?? 0) > 0;
+      if (hasModels(props.activeInstanceId)) {
+        return props.activeInstanceId;
+      }
+      const firstPopulated = instanceEntries.find(
+        (entry) => isProviderInstancePickerReady(entry) && hasModels(entry.instanceId),
+      );
+      return firstPopulated?.instanceId ?? props.activeInstanceId;
     },
   );
   const [expandedLegacyInstances, setExpandedLegacyInstances] = useState(

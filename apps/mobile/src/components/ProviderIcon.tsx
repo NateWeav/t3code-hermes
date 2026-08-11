@@ -1,5 +1,5 @@
 import { useColorScheme } from "react-native";
-import { Path, Svg } from "react-native-svg";
+import { Circle, Path, Rect, Svg } from "react-native-svg";
 
 type ProviderIconProps = {
   readonly provider: string | null | undefined;
@@ -33,6 +33,23 @@ export function ProviderIcon(props: ProviderIconProps) {
         <Path
           fill={fill}
           d="M7.62249 16.7237C4.83113 14.0422 5.3124 9.89222 7.69417 7.49905C9.45541 5.72786 12.341 5.00497 14.86 6.06768L17.5653 4.81138C17.0779 4.45714 16.4533 4.07613 15.7365 3.80839C12.4966 2.46764 8.6178 3.13492 5.98413 5.78141C3.45081 8.32904 2.65415 12.2463 4.02219 15.5889C5.04412 18.0871 3.36889 19.8541 1.68137 21.6377C1.08337 22.2699 0.483318 22.9022 0 23.5716L7.62045 16.7257"
+        />
+      </Svg>
+    );
+  }
+
+  if (props.provider === "hermes") {
+    return (
+      <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+        <Circle cx="12" cy="3.6" r="1.9" fill={mono} />
+        <Rect x="11.1" y="6.4" width="1.8" height="14" rx="0.9" fill={mono} />
+        <Path
+          fill={mono}
+          d="M10.9 8.2C9.1 6.6 6.2 5.9 3 6.3c1.3 1.4 2.6 2.3 4.1 2.8-1.2.2-2.5.2-3.8 0 1.6 1.8 4.2 2.7 7.6 2.6z"
+        />
+        <Path
+          fill={mono}
+          d="M13.1 8.2c1.8-1.6 4.7-2.3 7.9-1.9-1.3 1.4-2.6 2.3-4.1 2.8 1.2.2 2.5.2 3.8 0-1.6 1.8-4.2 2.7-7.6 2.6z"
         />
       </Svg>
     );

@@ -211,6 +211,21 @@ export const GrokIcon: Icon = ({ className, ...props }) => (
   </svg>
 );
 
+export const HermesIcon: Icon = ({ className, ...props }) => (
+  <svg
+    {...props}
+    viewBox="0 0 24 24"
+    fill="none"
+    className={cn("fill-[#0F0F0F] dark:fill-[#F5F5F5]", className)}
+  >
+    {/* Winged caduceus: orb, staff, and a pair of swept wings. */}
+    <circle cx="12" cy="3.6" r="1.9" />
+    <rect x="11.1" y="6.4" width="1.8" height="14" rx="0.9" />
+    <path d="M10.9 8.2C9.1 6.6 6.2 5.9 3 6.3c1.3 1.4 2.6 2.3 4.1 2.8-1.2.2-2.5.2-3.8 0 1.6 1.8 4.2 2.7 7.6 2.6z" />
+    <path d="M13.1 8.2c1.8-1.6 4.7-2.3 7.9-1.9-1.3 1.4-2.6 2.3-4.1 2.8 1.2.2 2.5.2 3.8 0-1.6 1.8-4.2 2.7-7.6 2.6z" />
+  </svg>
+);
+
 export const TraeIcon: Icon = (props) => (
   <svg {...props} viewBox="0 0 24 24" fill="currentColor">
     {/* Back rectangle: left strip + bottom strip drawn separately — empty bottom-left corner is the gap between them */}

@@ -278,18 +278,33 @@ function modeState(): AcpSchema.SessionModeState {
   };
 }
 
-const grokAcpModels: ReadonlyArray<AcpSchema.ModelInfo> = [
-  { modelId: "grok-build", name: "Grok Build" },
-  { modelId: "grok-mock-alt", name: "Grok Mock Alt" },
-];
+/** `T3_ACP_MODEL_IDS=id:Name,id:Name` overrides the advertised model picker. */
+function parseModelOverrides(raw: string | undefined): ReadonlyArray<AcpSchema.ModelInfo> {
+  const entries = (raw ?? "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0)
+    .map((entry) => {
+      const [modelId, name] = entry.split(":");
+      return { modelId: modelId ?? entry, name: name ?? modelId ?? entry };
+    });
+  return entries.length > 0
+    ? entries
+    : [
+        { modelId: "grok-build", name: "Grok Build" },
+        { modelId: "grok-mock-alt", name: "Grok Mock Alt" },
+      ];
+}
+
+const acpModels = parseModelOverrides(process.env.T3_ACP_MODEL_IDS);
 
 function modelState(): AcpSchema.SessionModelState {
-  const modelId = grokAcpModels.some((model) => model.modelId === currentModelId)
+  const modelId = acpModels.some((model) => model.modelId === currentModelId)
     ? currentModelId
-    : "grok-build";
+    : (acpModels[0]?.modelId ?? "grok-build");
   return {
     currentModelId: modelId,
-    availableModels: grokAcpModels,
+    availableModels: acpModels,
   };
 }
 
@@ -382,7 +397,7 @@ const program = Effect.gen(function* () {
 
   yield* agent.handleSetSessionModel((request) =>
     Effect.gen(function* () {
-      if (!grokAcpModels.some((model) => model.modelId === request.modelId)) {
+      if (!acpModels.some((model) => model.modelId === request.modelId)) {
         return yield* AcpError.AcpRequestError.invalidParams(
           `Unknown mock model id: ${request.modelId}`,
           {

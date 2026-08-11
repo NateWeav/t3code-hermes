@@ -163,9 +163,22 @@ export const launchStartupHeartbeat = recordStartupHeartbeat.pipe(
   Effect.asVoid,
 );
 
+/**
+ * Model selection stamped onto auto-bootstrapped projects (and the first
+ * thread created inside them).
+ *
+ * Codex remains the product default, but headless single-provider hosts
+ * routinely run without a Codex CLI. Binding a bootstrapped project to a
+ * provider instance that reports no models leaves the composer's model picker
+ * empty with no in-product way to recover, so the pair is overridable per
+ * deployment. Probe results deliberately are not consulted: bootstrap runs
+ * before provider probes settle, which would make the choice racy.
+ */
 export const getAutoBootstrapDefaultModelSelection = (): ModelSelection => ({
-  instanceId: ProviderInstanceId.make("codex"),
-  model: DEFAULT_MODEL,
+  instanceId: ProviderInstanceId.make(
+    process.env.T3CODE_BOOTSTRAP_PROVIDER_INSTANCE?.trim() || "codex",
+  ),
+  model: process.env.T3CODE_BOOTSTRAP_MODEL?.trim() || DEFAULT_MODEL,
 });
 
 export const resolveWelcomeBase = Effect.gen(function* () {

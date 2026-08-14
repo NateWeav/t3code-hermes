@@ -83,6 +83,7 @@ describe("buildDayColumns", () => {
     const [first] = buildDayColumns(days, byDay, "cost");
 
     expect(first?.bands).toEqual([
+      { provider: "hermes", value: 0 },
       { provider: "codex", value: 10 },
       { provider: "claude", value: 20 },
     ]);

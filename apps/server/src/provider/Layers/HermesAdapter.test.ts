@@ -25,7 +25,11 @@ import {
 } from "@t3tools/contracts";
 
 import { ServerConfig } from "../../config.ts";
-import { hermesPromptSettlementBelongsToContext, makeHermesAdapter } from "./HermesAdapter.ts";
+import {
+  hermesPromptSettlementBelongsToContext,
+  makeHermesAdapter,
+  makeHermesAttachmentPromptPart,
+} from "./HermesAdapter.ts";
 const decodeHermesSettings = Schema.decodeSync(HermesSettings);
 
 const __dirname = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
@@ -118,6 +122,45 @@ it("requires a settlement to match the live Hermes turn", () => {
       liveSessionActiveTurnId: staleTurnId,
       turnId: staleTurnId,
     }),
+  );
+});
+
+it("keeps image attachments inline in Hermes ACP prompts", () => {
+  assert.deepStrictEqual(
+    makeHermesAttachmentPromptPart({
+      attachment: {
+        type: "image",
+        name: "diagram.png",
+        mimeType: "image/png",
+        sizeBytes: 3,
+      },
+      attachmentPath: "/tmp/diagram.png",
+      imageBytes: Uint8Array.from([1, 2, 3]),
+    }),
+    { type: "image", data: "AQID", mimeType: "image/png" },
+  );
+});
+
+it("sends generic files to Hermes as local ACP resource links", () => {
+  const attachmentPath = NodePath.join(NodeOS.tmpdir(), "Hermes notes #1.txt");
+
+  assert.deepStrictEqual(
+    makeHermesAttachmentPromptPart({
+      attachment: {
+        type: "file",
+        name: "notes.txt",
+        mimeType: "text/plain",
+        sizeBytes: 42,
+      },
+      attachmentPath,
+    }),
+    {
+      type: "resource_link",
+      uri: NodeURL.pathToFileURL(attachmentPath).href,
+      name: "notes.txt",
+      mimeType: "text/plain",
+      size: 42,
+    },
   );
 });
 

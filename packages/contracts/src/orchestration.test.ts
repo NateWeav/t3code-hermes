@@ -5,7 +5,10 @@ import * as Schema from "effect/Schema";
 import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
+  ClientOrchestrationCommand,
   ModelSelection,
+  PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
+  PROVIDER_SEND_TURN_MAX_FILE_BYTES,
   OrchestrationCommand,
   OrchestrationEvent,
   OrchestrationGetFullThreadDiffInput,
@@ -53,6 +56,110 @@ const decodeThreadCreatedPayload = Schema.decodeUnknownEffect(ThreadCreatedPaylo
 const decodeOrchestrationCommand = Schema.decodeUnknownEffect(OrchestrationCommand);
 const decodeOrchestrationEvent = Schema.decodeUnknownEffect(OrchestrationEvent);
 const decodeThreadMetaUpdatedPayload = Schema.decodeUnknownEffect(ThreadMetaUpdatedPayload);
+const decodeClientOrchestrationCommand = Schema.decodeUnknownEffect(ClientOrchestrationCommand);
+
+it.effect("decodes generic file uploads without changing image uploads", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeClientOrchestrationCommand({
+      type: "thread.turn.start",
+      commandId: "cmd-attachment-1",
+      threadId: "thread-1",
+      message: {
+        messageId: "msg-attachment-1",
+        role: "user",
+        text: "inspect these",
+        attachments: [
+          {
+            type: "image",
+            name: "diagram.png",
+            mimeType: "image/png",
+            sizeBytes: 5,
+            dataUrl: "data:image/png;base64,aGVsbG8=",
+          },
+          {
+            type: "file",
+            name: "archive.dat",
+            mimeType: "application/octet-stream",
+            sizeBytes: 4,
+            dataUrl: "data:application/octet-stream;base64,AP+AQA==",
+          },
+        ],
+      },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    assert.strictEqual(parsed.type, "thread.turn.start");
+    assert.ok("message" in parsed);
+    if (!("message" in parsed)) return;
+    assert.deepStrictEqual(
+      parsed.message.attachments.map((attachment) => attachment.type),
+      ["image", "file"],
+    );
+  }),
+);
+
+it.effect("rejects generic file uploads above the bounded data-url transport limit", () =>
+  Effect.gen(function* () {
+    const result = yield* Effect.exit(
+      decodeClientOrchestrationCommand({
+        type: "thread.turn.start",
+        commandId: "cmd-attachment-2",
+        threadId: "thread-1",
+        message: {
+          messageId: "msg-attachment-2",
+          role: "user",
+          text: "inspect this",
+          attachments: [
+            {
+              type: "file",
+              name: "too-large.bin",
+              mimeType: "application/octet-stream",
+              sizeBytes: PROVIDER_SEND_TURN_MAX_FILE_BYTES + 1,
+              dataUrl: "data:application/octet-stream;base64,AA==",
+            },
+          ],
+        },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+    assert.strictEqual(result._tag, "Failure");
+  }),
+);
+
+it.effect("rejects turns above the attachment count limit", () =>
+  Effect.gen(function* () {
+    const result = yield* Effect.exit(
+      decodeClientOrchestrationCommand({
+        type: "thread.turn.start",
+        commandId: "cmd-attachment-count",
+        threadId: "thread-1",
+        message: {
+          messageId: "msg-attachment-count",
+          role: "user",
+          text: "inspect these",
+          attachments: Array.from(
+            { length: PROVIDER_SEND_TURN_MAX_ATTACHMENTS + 1 },
+            (_, index) => ({
+              type: "file" as const,
+              name: `file-${index}.txt`,
+              mimeType: "text/plain",
+              sizeBytes: 1,
+              dataUrl: "data:text/plain;base64,YQ==",
+            }),
+          ),
+        },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+    assert.strictEqual(result._tag, "Failure");
+  }),
+);
 
 it.effect("parses turn diff input when fromTurnCount <= toTurnCount", () =>
   Effect.gen(function* () {

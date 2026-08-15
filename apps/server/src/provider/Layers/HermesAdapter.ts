@@ -1,3 +1,5 @@
+import * as NodeURL from "node:url";
+
 import {
   ApprovalRequestId,
   type HermesSettings,
@@ -66,6 +68,38 @@ const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.fromJsonStri
 
 const PROVIDER = ProviderDriverKind.make("hermes");
 const HERMES_RESUME_VERSION = 1 as const;
+
+type HermesPromptAttachment = {
+  readonly type: string;
+  readonly name: string;
+  readonly mimeType: string;
+  readonly sizeBytes: number;
+};
+
+export function makeHermesAttachmentPromptPart(input: {
+  readonly attachment: HermesPromptAttachment;
+  readonly attachmentPath: string;
+  readonly imageBytes?: Uint8Array;
+}): EffectAcpSchema.ContentBlock {
+  if (input.attachment.type === "image") {
+    if (!input.imageBytes) {
+      throw new Error("Image attachment bytes are required.");
+    }
+    return {
+      type: "image",
+      data: Buffer.from(input.imageBytes).toString("base64"),
+      mimeType: input.attachment.mimeType,
+    };
+  }
+
+  return {
+    type: "resource_link",
+    uri: NodeURL.pathToFileURL(input.attachmentPath).href,
+    name: input.attachment.name,
+    mimeType: input.attachment.mimeType,
+    size: input.attachment.sizeBytes,
+  };
+}
 
 function encodeJsonStringForDiagnostics(input: unknown): string | undefined {
   const result = encodeUnknownJsonStringExit(input);
@@ -884,7 +918,7 @@ export function makeHermesAdapter(
               });
 
               const text = input.input?.trim();
-              const imagePromptParts = yield* Effect.forEach(
+              const attachmentPromptParts = yield* Effect.forEach(
                 input.attachments ?? [],
                 (attachment) =>
                   Effect.gen(function* () {
@@ -899,27 +933,30 @@ export function makeHermesAdapter(
                         detail: `Invalid attachment id '${attachment.id}'.`,
                       });
                     }
-                    const bytes = yield* fileSystem.readFile(attachmentPath).pipe(
-                      Effect.mapError(
-                        (cause) =>
-                          new ProviderAdapterRequestError({
-                            provider: PROVIDER,
-                            method: "session/prompt",
-                            detail: cause.message,
-                            cause,
-                          }),
-                      ),
-                    );
-                    return {
-                      type: "image",
-                      data: Buffer.from(bytes).toString("base64"),
-                      mimeType: attachment.mimeType,
-                    } satisfies EffectAcpSchema.ContentBlock;
+                    const imageBytes =
+                      attachment.type === "image"
+                        ? yield* fileSystem.readFile(attachmentPath).pipe(
+                            Effect.mapError(
+                              (cause) =>
+                                new ProviderAdapterRequestError({
+                                  provider: PROVIDER,
+                                  method: "session/prompt",
+                                  detail: cause.message,
+                                  cause,
+                                }),
+                            ),
+                          )
+                        : undefined;
+                    return makeHermesAttachmentPromptPart({
+                      attachment,
+                      attachmentPath,
+                      ...(imageBytes ? { imageBytes } : {}),
+                    });
                   }),
               );
               const promptParts: Array<EffectAcpSchema.ContentBlock> = [
                 ...(text ? [{ type: "text" as const, text }] : []),
-                ...imagePromptParts,
+                ...attachmentPromptParts,
               ];
 
               if (promptParts.length === 0) {

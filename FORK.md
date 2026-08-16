@@ -159,12 +159,72 @@ Project Settings → default model.
 
 ## Tracking upstream
 
-`origin` should point at this fork. Add upstream separately and rebase when you want new releases:
+Syncing is **merge-based, not rebase-based** — this fork's `main` is pushed, so rewriting it would
+break every clone — and it runs nightly at 05:30 UTC from
+[`.github/workflows/sync-upstream.yml`](./.github/workflows/sync-upstream.yml)
+(`workflow_dispatch` also works). The job merges `upstream/main` into `main`, pushes, and then
+dispatches `ci.yml` by hand, because pushes made with the default `GITHUB_TOKEN` do not trigger
+other workflows.
+
+Two kinds of issue come out of it:
+
+- **`upstream-sync-conflict`** — the merge conflicted and was aborted, so `main` is untouched. The
+  issue lists the conflicted files and the run fails. Only one such issue is open at a time; resolve
+  it locally and close it. Note that the conflicted-file list comes from `git ls-files -u`, not from
+  a grep for conflict markers: `apps/web/src/components/chat/ChatComposer.tsx` contains NUL bytes,
+  so grep and rg classify it as binary and skip it silently (git will not even write conflict
+  markers into it). Any sweep you write by hand must read the index, or use `grep -a`.
+- **`hermes-parity-review`** — advisory, and the merge still landed. It fires when the incoming
+  upstream commits touched two or more sibling provider adapters
+  (`Drivers/{Claude,Codex,Cursor,Grok,OpenCode}*.ts`) or anything under `provider/acp/`, because
+  upstream has fixed a bug across every sibling adapter in a commit that merged perfectly cleanly
+  while leaving the Hermes copy broken. Git cannot see that kind of drift; a human has to check
+  `HermesDriver.ts`, `HermesAcpSupport.ts`, and `HermesTextGeneration.ts`.
+
+To sync by hand:
 
 ```bash
 git remote add upstream https://github.com/pingdotgg/t3code
-git fetch upstream && git rebase upstream/main
+git fetch upstream && git merge upstream/main
 ```
 
 The Hermes driver is additive — new files plus registration lines — so conflicts are usually
-limited to `builtInDrivers.ts`, `settings.ts`, and the client branding lists.
+limited to `builtInDrivers.ts`, `settings.ts`, and the client branding lists. Three files carry
+enough fork-specific judgment that they should always be resolved by hand rather than by taking one
+side wholesale: `apps/web/src/components/chat/ChatComposer.tsx`,
+`apps/web/src/components/chat/ChatView.tsx`, and the usage provider list in `usageProviders.ts`.
+
+## CI on the fork
+
+Upstream's workflows target paid Blacksmith runners that only exist in its org, and several deploy
+upstream-only infrastructure. This fork therefore diverges in `.github/workflows/` as follows.
+
+- **Runners.** Every `blacksmith-*` label is replaced: Linux jobs run on `ubuntu-24.04`, Windows on
+  `windows-latest`, and **every macOS job runs on the self-hosted Apple Silicon runner**
+  (`[self-hosted, macOS, ARM64, t3code-mac-arm64]`) — the desktop build matrix's two mac entries
+  (arm64 natively, x64 cross-compiled), `mobile-ipa.yml`, `ci.yml`'s mobile native static analysis,
+  the iOS half of `mobile-showcase-screenshots.yml`, and `macos-self-hosted-build.yml`. GitHub's
+  hosted macOS minutes bill at 10x on a private repo, so this keeps them out of the loop entirely.
+  That machine needs **Xcode** (the IPA build and the simulator screenshots), **Homebrew** (the
+  mobile lint Brewfile), and a **Rust toolchain host** for the resource monitor — and while the
+  laptop is offline those jobs simply queue rather than fail.
+- **Guarded workflows.** `deploy-relay.yml`, `mobile-eas-preview.yml`, `mobile-eas-production.yml`,
+  `web-preview.yml`, `publish-aur.yml`, `pr-vouch.yml`, and `issue-labels.yml` carry a job-level
+  `if: github.repository == 'pingdotgg/t3code'`, so they skip here and still work if this fork is
+  ever merged back. (`release.yml`'s `publish_aur` caller carries the same guard, because the
+  reusable workflow declares `AUR_SSH_PRIVATE_KEY` as required.) `ci.yml`, `pr-size.yml`,
+  `thread-transfer-report.yml`, `mobile-fingerprint-check.yml`, and
+  `mobile-showcase-screenshots.yml` run normally.
+- **Nightly release.** `release.yml` runs once a night at 07:00 UTC (upstream builds every three
+  hours) and produces the desktop artifacts — macOS dmg/zip, Linux AppImage, Windows nsis — plus the
+  updater manifests, attached to a GitHub prerelease. Everything that needs upstream credentials
+  degrades instead of failing: the T3 Connect config resolves to empty values (so builds ship with
+  T3 Connect disabled), the npm `t3` publish is skipped, and the Vercel deploy, the version-bump
+  commit, and the Discord announcement skip when their secrets are absent. macOS and Windows code
+  signing already degrade to unsigned. The desktop updater feed is derived from `GITHUB_REPOSITORY`,
+  so fork builds self-update from fork releases.
+- **iOS IPA.** `mobile-ipa.yml` builds an unsigned, sideloadable `T3Code-<version>.ipa` of the
+  production Expo variant on the self-hosted mac. It has no schedule: run it via
+  `workflow_dispatch` to get a workflow artifact, or let a published release trigger it to have the
+  IPA attached to that release. Install it with AltStore or Sideloadly, which re-sign on install —
+  which is why the build turns code signing off entirely.

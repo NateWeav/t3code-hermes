@@ -255,6 +255,42 @@ describe("AcpRuntimeModel", () => {
     }
   });
 
+  it("extracts Hermes terminal commands from ACP content when raw input is omitted", () => {
+    const created = parseSessionUpdateEvent({
+      sessionId: "session-1",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "tool-1",
+        title: "terminal: git status --short",
+        kind: "execute",
+        status: "pending",
+        content: [
+          {
+            type: "content",
+            content: {
+              type: "text",
+              text: "$ git status --short",
+            },
+          },
+        ],
+      },
+    } satisfies EffectAcpSchema.SessionNotification);
+
+    expect(created.events[0]).toMatchObject({
+      _tag: "ToolCallUpdated",
+      toolCall: {
+        toolCallId: "tool-1",
+        kind: "execute",
+        title: "Ran command",
+        command: "git status --short",
+        detail: "git status --short",
+        data: {
+          command: "git status --short",
+        },
+      },
+    });
+  });
+
   it("trims padded current mode updates before emitting a mode change", () => {
     const result = parseSessionUpdateEvent({
       sessionId: "session-1",

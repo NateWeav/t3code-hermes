@@ -1,0 +1,48 @@
+; systemd USER unit — install at ~/.config/systemd/user/t3code-update.service
+;
+; One-shot self-update for the headless T3 Code (Hermes fork) install. Driven by
+; t3code-update.timer; safe to start by hand at any time.
+;
+;   systemctl --user start t3code-update.service
+;   journalctl --user -u t3code-update -n 200 --no-pager
+;
+; Adjust the two %h-relative paths below if the checkout does not live in ~/t3code.
+
+[Unit]
+Description=Update the T3 Code checkout (Hermes fork) and rebuild the web app
+Documentation=file:%h/t3code/infra/hyperion/README.md
+After=network-online.target
+Wants=network-online.target
+; Nothing to update if the server unit was never installed.
+After=t3code.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/t3code
+; The script re-execs from a private copy of itself, so running it out of the
+; checkout it is about to hard-reset is safe.
+ExecStart=%h/t3code/infra/hyperion/t3code-update.sh
+
+; Host-specific settings (repo URL, branch, health host:port, heap cap).
+; The leading "-" makes the file optional. See t3code-update.env.example.
+EnvironmentFile=-%h/.config/t3code-update.env
+
+; User units get a minimal PATH; node/pnpm are usually not on it.
+Environment=PATH=%h/.local/share/pnpm:%h/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+; Never block on a credential prompt for a private fork — fail fast instead.
+Environment=GIT_TERMINAL_PROMPT=0
+; Do not inherit the server's heap cap; the script sets its own for the build.
+Environment=NODE_OPTIONS=
+
+; pnpm install + the web build on a small ARM box are slow but not unbounded.
+TimeoutStartSec=3600
+; Stay out of the way of the interactive workload on a memory/CPU-tight host.
+Nice=10
+IOSchedulingClass=idle
+; Optional hard cap (needs the memory controller delegated to the user slice).
+; The box has no swap, so a too-low value gets the build OOM-killed rather than
+; slowed down — prefer lowering T3CODE_BUILD_HEAP_MB instead.
+;MemoryMax=4G
+
+; No [Install] section on purpose: this unit is triggered by t3code-update.timer
+; (or started by hand), never enabled to run at boot.

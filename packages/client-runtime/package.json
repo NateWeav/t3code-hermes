@@ -79,6 +79,10 @@
       "types": "./src/state/preview.ts",
       "default": "./src/state/preview.ts"
     },
+    "./state/provider-quota": {
+      "types": "./src/state/providerQuota.ts",
+      "default": "./src/state/providerQuota.ts"
+    },
     "./state/projects": {
       "types": "./src/state/projects.ts",
       "default": "./src/state/projects.ts"

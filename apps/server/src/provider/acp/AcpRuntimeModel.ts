@@ -285,6 +285,16 @@ function extractTextContentFromToolCallContent(
   return chunks.length > 0 ? chunks.join("\n") : undefined;
 }
 
+function extractShellCommandFromToolCallContent(
+  content: ReadonlyArray<EffectAcpSchema.ToolCallContent> | null | undefined,
+): string | undefined {
+  const text = extractTextContentFromToolCallContent(content);
+  if (!text?.startsWith("$ ")) {
+    return undefined;
+  }
+  return text.slice(2).trim() || undefined;
+}
+
 function normalizeToolKind(kind: unknown): string | undefined {
   return typeof kind === "string" && kind.trim().length > 0 ? kind.trim() : undefined;
 }
@@ -325,14 +335,16 @@ function makeToolCallState(
     return undefined;
   }
   const title = input.title?.trim() || undefined;
-  const command = extractToolCallCommand(input.rawInput, title);
+  const kind = normalizeToolKind(input.kind);
+  const command =
+    extractToolCallCommand(input.rawInput, title) ??
+    (kind === "execute" ? extractShellCommandFromToolCallContent(input.content) : undefined);
   const textContent = extractTextContentFromToolCallContent(input.content);
   const normalizedTitle =
     title && title.toLowerCase() !== "terminal" && title.toLowerCase() !== "tool call"
       ? title
       : undefined;
   const data: Record<string, unknown> = { toolCallId };
-  const kind = normalizeToolKind(input.kind);
   if (kind) {
     data.kind = kind;
   }

@@ -27,6 +27,11 @@ function finiteNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function positiveFiniteNumber(value: unknown): number | null {
+  const number = finiteNumber(value);
+  return number !== null && number > 0 ? number : null;
+}
+
 function unixSeconds(value: unknown): number | null {
   const seconds = finiteNumber(value);
   return seconds === null || seconds < 0 ? null : seconds;
@@ -109,7 +114,10 @@ export function readHermesUsageRecords(
         model: row.model.trim(),
         sessionId: row.id,
         totals,
-        reportedCostUsd: finiteNumber(row.actual_cost_usd) ?? finiteNumber(row.estimated_cost_usd),
+        // Hermes initializes unknown costs to numeric zero. Zero is not a
+        // provider-reported price: let T3's model-rate table estimate it.
+        reportedCostUsd:
+          positiveFiniteNumber(row.actual_cost_usd) ?? positiveFiniteNumber(row.estimated_cost_usd),
         dedupeKey: null,
       });
     }

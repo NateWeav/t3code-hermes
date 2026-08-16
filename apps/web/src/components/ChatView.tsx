@@ -121,7 +121,10 @@ import { useTheme } from "../hooks/useTheme";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
+import { makeWindow } from "@t3tools/shared/usageFormat";
 import { useMediaQuery } from "../hooks/useMediaQuery";
+import { deriveLatestContextWindowSnapshot } from "../lib/contextWindow";
+import { useUsage } from "../state/usage";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import {
   selectActiveRightPanel,
@@ -2215,6 +2218,27 @@ function ChatViewContent(props: ChatViewProps) {
   const selectedProvider: ProviderDriverKind = lockedProvider ?? unlockedSelectedProvider;
   const phase = derivePhase(activeThread?.session ?? null);
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
+  const activeContextWindow = useMemo(
+    () => deriveLatestContextWindowSnapshot(threadActivities),
+    [threadActivities],
+  );
+  const usageWindow = useMemo(() => makeWindow(7), []);
+  const sevenDayUsage = useUsage(usageWindow);
+  const lastRefreshedSettledTurnKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    const settledTurnId = latestTurnSettled ? (activeLatestTurn?.turnId ?? null) : null;
+    if (settledTurnId === null || activeThreadId === null) return;
+    const settledTurnKey = `${activeThreadEnvironmentId ?? ""}:${activeThreadId}:${settledTurnId}`;
+    if (lastRefreshedSettledTurnKeyRef.current === settledTurnKey) return;
+    lastRefreshedSettledTurnKeyRef.current = settledTurnKey;
+    sevenDayUsage.refresh();
+  }, [
+    activeLatestTurn?.turnId,
+    activeThreadEnvironmentId,
+    activeThreadId,
+    latestTurnSettled,
+    sevenDayUsage.refresh,
+  ]);
   const workLogEntries = useMemo(() => deriveWorkLogEntries(threadActivities), [threadActivities]);
   const turnPlans = useMemo(() => deriveTurnPlans(threadActivities), [threadActivities]);
   // Native subagent fold: memoized by activity-list identity, shared by the
@@ -6252,6 +6276,21 @@ function ChatViewContent(props: ChatViewProps) {
             availableEditors={availableEditors}
             rightPanelOpen={rightPanelOpen}
             gitCwd={gitCwd}
+            usage={{
+              context: activeContextWindow
+                ? {
+                    usedTokens: activeContextWindow.usedTokens,
+                    totalProcessedTokens: activeContextWindow.totalProcessedTokens ?? null,
+                    maxTokens: activeContextWindow.maxTokens ?? null,
+                    usedPercentage: activeContextWindow.usedPercentage,
+                  }
+                : null,
+              sevenDayTokens: sevenDayUsage.merged.totalTokens,
+              sevenDayCostUsd: sevenDayUsage.merged.costUsd,
+              quota: null,
+              isHistoricalUsagePending: sevenDayUsage.isPending,
+              isHistoricalUsagePartial: sevenDayUsage.isPartial,
+            }}
             onNewThreadInProject={handleNewThreadInActiveProject}
             onRunProjectScript={runProjectScript}
             onAddProjectScript={saveProjectScript}

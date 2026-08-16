@@ -836,6 +836,37 @@ export function makeHermesAdapter(
                       }),
                     );
                     return;
+                  case "UsageUpdated":
+                    yield* offerRuntimeEvent({
+                      type: "thread.token-usage.updated",
+                      ...stamp,
+                      provider: PROVIDER,
+                      threadId: ctx.threadId,
+                      turnId: notificationTurnId,
+                      payload: {
+                        usage: {
+                          usedTokens: event.usedTokens,
+                          maxTokens: event.maxTokens,
+                          ...(event.totalProcessedTokens !== undefined
+                            ? { totalProcessedTokens: event.totalProcessedTokens }
+                            : {}),
+                          ...(event.inputTokens !== undefined
+                            ? { inputTokens: event.inputTokens }
+                            : {}),
+                          ...(event.cachedInputTokens !== undefined
+                            ? { cachedInputTokens: event.cachedInputTokens }
+                            : {}),
+                          ...(event.outputTokens !== undefined
+                            ? { outputTokens: event.outputTokens }
+                            : {}),
+                          ...(event.reasoningOutputTokens !== undefined
+                            ? { reasoningOutputTokens: event.reasoningOutputTokens }
+                            : {}),
+                          compactsAutomatically: true,
+                        },
+                      },
+                    });
+                    return;
                 }
               }),
             ),

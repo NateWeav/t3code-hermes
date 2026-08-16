@@ -56,22 +56,29 @@ jobs:
           echo "$HOMEBREW_PREFIX/bin" >> "$GITHUB_PATH"
           echo "$HOMEBREW_PREFIX/sbin" >> "$GITHUB_PATH"
 
-      - name: Setup Vite+
-        uses: voidzero-dev/setup-vp@v1
+      # Vite+'s downloaded CLI is ad-hoc signed, which macOS can reject for a
+      # non-interactive self-hosted runner before the CLI gets a chance to
+      # install Node or dependencies. This workflow only needs Node and pnpm,
+      # so use their upstream bootstrap path directly.
+      - name: Setup Node
+        uses: actions/setup-node@v6
         with:
           node-version-file: package.json
-          cache: true
-          run-install: |
-            args:
-              - --filter=@t3tools/mobile...
-              - --filter=@t3tools/scripts...
 
-      - name: Expose pnpm
+      - name: Setup pnpm
+        shell: bash
         run: |
+          set -euo pipefail
           pnpm_version="$(node --print "require('./package.json').packageManager.split('@').pop()")"
-          vp_pnpm_bin="$HOME/.vite-plus/package_manager/pnpm/$pnpm_version/pnpm/bin"
-          echo "$vp_pnpm_bin" >> "$GITHUB_PATH"
-          "$vp_pnpm_bin/pnpm" --version
+          corepack enable
+          corepack prepare "pnpm@$pnpm_version" --activate
+          pnpm --version
+
+      - name: Install dependencies
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts \
+            --filter=@t3tools/mobile... \
+            --filter=@t3tools/scripts...
 
       - name: Show toolchain
         run: xcodebuild -version
@@ -107,16 +114,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          workspace="$(find ios -maxdepth 1 -name '*.xcworkspace' | head -n 1)"
-          # The scheme name comes from prebuild (the sanitized Expo app name —
-          # "T3Code" for APP_VARIANT=production), so read it back from the
-          # generated workspace rather than hardcoding it.
-          scheme="$(
-            xcodebuild -list -json -workspace "$workspace" \
-              | jq -r '.workspace.schemes[]' \
-              | grep -v '^Pods' \
-              | head -n 1
-          )"
+          workspace="$(find ios -maxdepth 1 -name '*.xcworkspace' -print -quit)"
+          project="$(find ios -maxdepth 1 -name '*.xcodeproj' ! -name 'Pods.xcodeproj' -print -quit)"
+          if [[ -z "$workspace" || -z "$project" ]]; then
+            echo "Expo prebuild did not generate an iOS workspace and app project." >&2
+            exit 1
+          fi
+
+          # CocoaPods and Swift packages expose dependency schemes in the
+          # workspace, so the first non-Pods scheme may not be the app. Expo
+          # gives the generated app project and its shared scheme the same name.
+          scheme="$(basename "$project" .xcodeproj)"
+          if ! xcodebuild -list -json -workspace "$workspace" \
+            | jq -e --arg scheme "$scheme" '.workspace.schemes | index($scheme) != null' >/dev/null; then
+            echo "Expected app scheme '$scheme' was not found in $workspace." >&2
+            exit 1
+          fi
           echo "workspace=apps/mobile/$workspace" >> "$GITHUB_OUTPUT"
           echo "scheme=$scheme" >> "$GITHUB_OUTPUT"
           echo "Workspace: $workspace, scheme: $scheme"
@@ -144,7 +157,12 @@ jobs:
         run: |
           set -euo pipefail
           products="$RUNNER_TEMP/ipa-build/Build/Products/Release-iphoneos"
-          app="$(find "$products" -maxdepth 1 -name '*.app' | head -n 1)"
+          app="$(find "$products" -maxdepth 1 -type d -name '*.app' -print -quit)"
+          if [[ -z "$app" ]]; then
+            echo "No app bundle was produced in $products:" >&2
+            find "$products" -maxdepth 2 -mindepth 1 -print >&2
+            exit 1
+          fi
           echo "Packaging $app"
 
           staging="$RUNNER_TEMP/ipa-stage"

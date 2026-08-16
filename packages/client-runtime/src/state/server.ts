@@ -714,6 +714,11 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.serverGetUsageSummary,
       staleTimeMs: 60_000,
     }),
+    providerQuota: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:provider-quota",
+      tag: WS_METHODS.serverGetProviderQuota,
+      staleTimeMs: 60_000,
+    }),
     configProjection,
     welcome: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:server:welcome",

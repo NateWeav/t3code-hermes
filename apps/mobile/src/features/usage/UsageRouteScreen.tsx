@@ -1,4 +1,5 @@
 import { useNavigation } from "@react-navigation/native";
+import type { ProviderQuotaAccount } from "@t3tools/contracts";
 import type { DailyTotals, MergedUsage } from "@t3tools/shared/usageMerge";
 import {
   enumerateDays,
@@ -19,6 +20,7 @@ import { AndroidScreenHeader } from "../../components/AndroidScreenHeader";
 import { AppText as Text } from "../../components/AppText";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { useUsage, type EnvironmentUsageStatus } from "../../state/usage";
+import { useProviderQuota } from "../../state/providerQuota";
 import { SettingsSection } from "../settings/components/SettingsSection";
 import { UsageDailyChart } from "./UsageDailyChart";
 import type { UsageChartMetric } from "./usageChartData";
@@ -44,6 +46,7 @@ export function UsageRouteScreen() {
   const { days: windowDays, window } = windowSelection;
   const isPast24Hours = windowDays === 1;
   const { merged, environments, isPending, isPartial, refresh } = useUsage(window);
+  const quota = useProviderQuota();
 
   const days = useMemo(
     () => enumerateDays(window.sinceDay, window.untilDay),
@@ -72,7 +75,9 @@ export function UsageRouteScreen() {
   // The pull spinner tracks re-scans of environments that have answered
   // before. The initial scan renders its own placeholder, and an unreachable
   // environment stays pending forever — neither may pin the spinner on.
-  const refreshing = environments.some((entry) => entry.isPending && entry.summary !== null);
+  const refreshing =
+    quota.environments.some((entry) => entry.isPending && entry.accounts.length > 0) ||
+    environments.some((entry) => entry.isPending && entry.summary !== null);
   const selectWindow = (days: number) => {
     setWindowSelection({
       days,
@@ -107,10 +112,35 @@ export function UsageRouteScreen() {
         className="flex-1"
         contentContainerClassName="gap-6 px-5 pt-4"
         contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 18) + 18 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refreshWindow} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => {
+              quota.refresh();
+              refreshWindow();
+            }}
+          />
+        }
       >
+        <MobileQuotaLimits
+          accounts={quota.accounts}
+          environmentCount={quota.environments.length}
+          error={quota.error}
+          isPending={quota.isPending}
+        />
+
+        <View className="gap-1 border-t border-border pt-6">
+          <Text className="text-xl font-t3-semibold text-foreground">Activity</Text>
+          <Text className="text-sm text-foreground-muted">
+            Token volume and API-equivalent cost from local provider history.
+          </Text>
+        </View>
+
         <SegmentedControl
-          options={WINDOW_OPTIONS.map((option) => ({ value: option.days, label: option.label }))}
+          options={WINDOW_OPTIONS.map((option) => ({
+            value: option.days,
+            label: option.label,
+          }))}
           selected={windowDays}
           onSelect={selectWindow}
         />
@@ -144,6 +174,141 @@ export function UsageRouteScreen() {
           </>
         )}
       </ScrollView>
+    </View>
+  );
+}
+
+type PresentedQuotaAccount = ProviderQuotaAccount & { readonly environmentLabel: string };
+
+function mobileQuotaProvider(account: ProviderQuotaAccount): "codex" | "claude" | "opencode" {
+  return account.provider === "claudeAgent"
+    ? "claude"
+    : account.provider === "opencode"
+      ? "opencode"
+      : "codex";
+}
+
+function mobileFormatReset(resetsAt: string | null): string {
+  if (resetsAt === null) return "Reset unavailable";
+  const reset = new Date(resetsAt);
+  const minutes = Math.ceil((reset.valueOf() - Date.now()) / 60_000);
+  if (!Number.isFinite(minutes)) return "Reset unavailable";
+  if (minutes <= 0) return "Resetting now";
+  if (minutes < 60) return `Resets in ${minutes}m`;
+  if (minutes < 24 * 60) return `Resets in ${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+  return `Resets ${reset.toLocaleDateString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}`;
+}
+
+function MobileQuotaLimits(props: {
+  readonly accounts: readonly PresentedQuotaAccount[];
+  readonly environmentCount: number;
+  readonly error: string | null;
+  readonly isPending: boolean;
+}) {
+  if (props.isPending) {
+    return (
+      <Text className="py-16 text-center text-base text-foreground-muted">
+        Reading plan limits…
+      </Text>
+    );
+  }
+  if (props.accounts.length === 0) {
+    return (
+      <Text className="py-16 text-center text-base text-foreground-muted">
+        {props.error ?? "Configure Codex, Claude, or OpenCode to see plan limits."}
+      </Text>
+    );
+  }
+  return (
+    <View className="gap-4">
+      <View className="gap-1">
+        <Text className="text-xl font-t3-semibold text-foreground">Subscription runway</Text>
+        <Text className="text-sm text-foreground-muted">
+          Plan capacity from provider accounts and local history, separate from token activity and
+          cost.
+        </Text>
+      </View>
+      {props.accounts.map((account) => (
+        <MobileQuotaCard
+          key={`${account.environmentLabel}:${account.providerInstanceId}`}
+          account={account}
+          showEnvironment={props.environmentCount > 1}
+        />
+      ))}
+    </View>
+  );
+}
+
+function MobileQuotaCard(props: {
+  readonly account: PresentedQuotaAccount;
+  readonly showEnvironment: boolean;
+}) {
+  const colors = useProviderColors();
+  const provider = mobileQuotaProvider(props.account);
+  const strongest = props.account.windows.reduce(
+    (current, window) =>
+      current === null || window.usedPercent > current.usedPercent ? window : current,
+    null as ProviderQuotaAccount["windows"][number] | null,
+  );
+  return (
+    <View className="gap-5 rounded-[24px] border-continuous bg-card p-5">
+      <View className="flex-row items-center gap-3">
+        <View className="size-3 rounded-full" style={{ backgroundColor: colors[provider] }} />
+        <View className="min-w-0 flex-1">
+          <Text className="text-base font-t3-medium text-foreground" numberOfLines={1}>
+            {props.account.displayName}
+          </Text>
+          <Text className="text-sm text-foreground-muted" numberOfLines={1}>
+            {[
+              props.account.accountLabel,
+              props.account.planLabel,
+              props.showEnvironment ? props.account.environmentLabel : null,
+            ]
+              .filter(Boolean)
+              .join(" · ") || PROVIDER_LABEL[provider]}
+          </Text>
+        </View>
+      </View>
+      {strongest === null ? (
+        <View className="gap-1">
+          <Text className="text-2xl font-t3-semibold text-foreground">
+            {props.account.status === "setupRequired" ? "Setup needed" : "Unavailable"}
+          </Text>
+          <Text className="text-sm text-foreground-muted">{props.account.message}</Text>
+        </View>
+      ) : (
+        <>
+          <View className="gap-0.5">
+            <Text className="text-4xl font-t3-bold tabular-nums text-foreground">
+              {Math.round(100 - strongest.usedPercent)}% left
+            </Text>
+            <Text className="text-sm text-foreground-muted">
+              Most constrained: {strongest.label}
+            </Text>
+          </View>
+          <View className="gap-4">
+            {props.account.windows.map((window) => (
+              <View key={window.id} className="gap-2">
+                <View className="flex-row justify-between gap-3">
+                  <Text className="text-sm text-foreground">{window.label}</Text>
+                  <Text className="text-sm tabular-nums text-foreground-muted">
+                    {Math.round(window.usedPercent)}% · {mobileFormatReset(window.resetsAt)}
+                  </Text>
+                </View>
+                <View className="h-2 overflow-hidden rounded-full bg-subtle">
+                  <View
+                    className="h-full rounded-full"
+                    style={{
+                      width: `${window.usedPercent}%`,
+                      backgroundColor: window.usedPercent >= 85 ? "#f59e0b" : colors[provider],
+                    }}
+                  />
+                </View>
+              </View>
+            ))}
+          </View>
+        </>
+      )}
     </View>
   );
 }

@@ -1,0 +1,1518 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>T3 Code — Provider Quota Usage Concepts</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --page: #09090b;
+        --panel: #111114;
+        --panel-2: #17171b;
+        --panel-3: #202026;
+        --line: #2b2b32;
+        --line-soft: #222228;
+        --text: #f2f2f3;
+        --muted: #9a9aa3;
+        --muted-2: #6f6f79;
+        --codex: #e7e7e9;
+        --claude: #d97757;
+        --opencode: #8b5cf6;
+        --good: #66d19e;
+        --warn: #f5b849;
+        --bad: #f06a6a;
+        --blue: #60a5fa;
+        --radius: 18px;
+        --shadow: 0 28px 80px rgba(0, 0, 0, 0.38);
+        font-family:
+          Inter,
+          ui-sans-serif,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html {
+        scroll-behavior: smooth;
+      }
+      body {
+        margin: 0;
+        background:
+          radial-gradient(circle at 12% -10%, rgba(124, 58, 237, 0.14), transparent 28rem),
+          radial-gradient(circle at 90% 4%, rgba(217, 119, 87, 0.1), transparent 25rem), var(--page);
+        color: var(--text);
+        line-height: 1.5;
+      }
+      a {
+        color: #b9d5ff;
+      }
+      .page {
+        width: min(1180px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 56px 0 80px;
+      }
+      .eyebrow {
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+      h1 {
+        max-width: 820px;
+        margin: 12px 0 18px;
+        font-size: clamp(40px, 7vw, 76px);
+        line-height: 0.98;
+        letter-spacing: -0.055em;
+      }
+      h2 {
+        margin: 0 0 14px;
+        font-size: clamp(24px, 3vw, 36px);
+        letter-spacing: -0.035em;
+      }
+      h3 {
+        margin: 0;
+        font-size: 18px;
+        letter-spacing: -0.02em;
+      }
+      p {
+        margin: 0;
+      }
+      .lede {
+        max-width: 760px;
+        color: #bebec5;
+        font-size: 18px;
+      }
+      .hero-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 26px;
+      }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        padding: 7px 10px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: rgba(17, 17, 20, 0.78);
+        color: #c9c9ce;
+        font-size: 12px;
+      }
+      .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: currentColor;
+      }
+      .toc {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+        margin: 42px 0 64px;
+      }
+      .toc a {
+        padding: 13px 15px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: rgba(17, 17, 20, 0.72);
+        color: var(--text);
+        text-decoration: none;
+        font-size: 13px;
+      }
+      .toc b {
+        margin-right: 6px;
+        color: var(--muted);
+      }
+      .section {
+        margin-top: 72px;
+      }
+      .section-intro {
+        max-width: 760px;
+        color: var(--muted);
+      }
+      .callout {
+        margin-top: 24px;
+        padding: 18px 20px;
+        border: 1px solid rgba(96, 165, 250, 0.26);
+        border-radius: 14px;
+        background: rgba(96, 165, 250, 0.07);
+        color: #d7e7ff;
+      }
+      .callout strong {
+        color: #fff;
+      }
+      .concept {
+        margin-top: 40px;
+        scroll-margin-top: 20px;
+      }
+      .concept-head {
+        display: grid;
+        grid-template-columns: 64px 1fr auto;
+        align-items: center;
+        gap: 16px;
+        margin-bottom: 16px;
+      }
+      .label {
+        display: grid;
+        place-items: center;
+        width: 58px;
+        height: 58px;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: linear-gradient(145deg, #24242b, #131317);
+        font-size: 27px;
+        font-weight: 800;
+        box-shadow: inset 0 1px rgba(255, 255, 255, 0.04);
+      }
+      .concept-sub {
+        color: var(--muted);
+        font-size: 14px;
+      }
+      .verdict {
+        padding: 7px 10px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        color: var(--muted);
+        font-size: 11px;
+        white-space: nowrap;
+      }
+      .verdict.recommended {
+        border-color: rgba(102, 209, 158, 0.3);
+        background: rgba(102, 209, 158, 0.08);
+        color: #a7e7c8;
+      }
+      .mock-shell {
+        overflow: hidden;
+        border: 1px solid #303038;
+        border-radius: 20px;
+        background: #0d0d10;
+        box-shadow: var(--shadow);
+      }
+      .windowbar {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        height: 38px;
+        padding: 0 14px;
+        border-bottom: 1px solid var(--line-soft);
+        background: #141418;
+      }
+      .traffic {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: #383840;
+      }
+      .window-title {
+        margin-left: auto;
+        margin-right: auto;
+        transform: translateX(-24px);
+        color: #777782;
+        font-size: 11px;
+      }
+      .app {
+        display: grid;
+        grid-template-columns: 226px 1fr;
+        min-height: 470px;
+      }
+      .sidebar {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        padding: 16px 10px 10px;
+        border-right: 1px solid var(--line-soft);
+        background: #121216;
+      }
+      .brand {
+        padding: 0 10px 15px;
+        font-size: 13px;
+        font-weight: 650;
+      }
+      .brand span {
+        color: #777782;
+        font-weight: 500;
+      }
+      .project {
+        margin: 3px 0;
+        padding: 8px 10px;
+        border-radius: 8px;
+        color: #aaaab2;
+        font-size: 12px;
+      }
+      .project.active {
+        background: #1f1f25;
+        color: #eeeef0;
+      }
+      .side-spacer {
+        flex: 1;
+      }
+      .side-icons {
+        display: flex;
+        gap: 7px;
+        padding: 8px;
+        color: #85858f;
+        font-size: 15px;
+      }
+      .main {
+        position: relative;
+        min-width: 0;
+        background: #0d0d10;
+      }
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        height: 52px;
+        padding: 0 22px;
+        border-bottom: 1px solid var(--line-soft);
+        color: #a4a4ad;
+        font-size: 12px;
+      }
+      .chat {
+        display: grid;
+        place-items: end center;
+        min-height: 416px;
+        padding: 36px;
+        background: radial-gradient(
+          circle at 50% 110%,
+          rgba(255, 255, 255, 0.035),
+          transparent 45%
+        );
+      }
+      .composer {
+        width: min(620px, 90%);
+        min-height: 94px;
+        padding: 14px;
+        border: 1px solid #303038;
+        border-radius: 15px;
+        background: #17171b;
+        color: #777782;
+        font-size: 13px;
+      }
+      .composer-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 24px;
+        color: #aaaab2;
+        font-size: 11px;
+      }
+      .meter-card {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: #17171b;
+      }
+      .provider {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+      }
+      .provider-mark {
+        display: grid;
+        place-items: center;
+        width: 22px;
+        height: 22px;
+        border-radius: 7px;
+        background: #24242b;
+        color: white;
+        font-size: 10px;
+        font-weight: 750;
+      }
+      .progress {
+        height: 6px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: #2a2a31;
+      }
+      .progress > i {
+        display: block;
+        height: 100%;
+        border-radius: inherit;
+        background: var(--meter, white);
+      }
+      .mini-progress {
+        height: 3px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: #2a2a31;
+      }
+      .mini-progress i {
+        display: block;
+        height: 100%;
+        border-radius: inherit;
+        background: var(--meter);
+      }
+      .quota-sidebar {
+        margin: 8px 0 4px;
+        padding: 10px;
+      }
+      .quota-sidebar .title-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 9px;
+        color: #9b9ba4;
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+      .quota-sidebar .qrow {
+        margin-top: 10px;
+      }
+      .quota-sidebar .qtop {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 5px;
+        font-size: 10px;
+      }
+      .quota-sidebar .qtop span:last-child {
+        color: #92929b;
+        font-variant-numeric: tabular-nums;
+      }
+      .popover {
+        position: absolute;
+        top: 47px;
+        right: 20px;
+        z-index: 2;
+        width: 335px;
+        padding: 12px;
+        border: 1px solid #34343d;
+        border-radius: 15px;
+        background: rgba(24, 24, 29, 0.98);
+        box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6);
+      }
+      .popover-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 2px 3px 10px;
+        font-size: 12px;
+      }
+      .popover .meter-card {
+        margin-top: 7px;
+        padding: 11px;
+      }
+      .meter-line {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .meter-name {
+        font-size: 12px;
+        font-weight: 650;
+      }
+      .meter-note {
+        color: var(--muted);
+        font-size: 10px;
+      }
+      .meter-value {
+        font-size: 12px;
+        font-weight: 650;
+        font-variant-numeric: tabular-nums;
+      }
+      .meter-card .progress {
+        margin-top: 9px;
+      }
+      .quota-capsule {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        padding: 5px 7px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #17171b;
+      }
+      .tinybar {
+        width: 20px;
+        height: 3px;
+        overflow: hidden;
+        border-radius: 99px;
+        background: #373740;
+      }
+      .tinybar i {
+        display: block;
+        height: 100%;
+        background: var(--meter);
+      }
+      .usage-main {
+        padding: 26px;
+      }
+      .tabs {
+        display: flex;
+        gap: 18px;
+        border-bottom: 1px solid var(--line);
+      }
+      .tab {
+        padding: 0 2px 10px;
+        color: #777782;
+        font-size: 12px;
+      }
+      .tab.active {
+        border-bottom: 2px solid white;
+        color: white;
+      }
+      .usage-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin: 24px 0 14px;
+      }
+      .usage-title h4 {
+        margin: 0;
+        font-size: 14px;
+      }
+      .fresh {
+        color: var(--muted);
+        font-size: 10px;
+      }
+      .quota-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+      }
+      .quota-grid .meter-card {
+        min-height: 170px;
+        padding: 15px;
+      }
+      .quota-grid .big {
+        margin: 20px 0 3px;
+        font-size: 32px;
+        font-weight: 720;
+        letter-spacing: -0.04em;
+      }
+      .two-windows {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin-top: 14px;
+      }
+      .window-stat {
+        padding-top: 10px;
+        border-top: 1px solid var(--line);
+      }
+      .window-stat b {
+        display: block;
+        font-size: 12px;
+      }
+      .window-stat span {
+        color: var(--muted);
+        font-size: 9px;
+      }
+      .picker {
+        position: absolute;
+        left: 50%;
+        bottom: 112px;
+        z-index: 2;
+        width: min(480px, calc(100% - 44px));
+        transform: translateX(-50%);
+        padding: 10px;
+        border: 1px solid #35353e;
+        border-radius: 15px;
+        background: rgba(24, 24, 29, 0.98);
+        box-shadow: 0 24px 70px rgba(0, 0, 0, 0.62);
+      }
+      .picker-title {
+        padding: 4px 6px 9px;
+        color: #868690;
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+      .model-row {
+        display: grid;
+        grid-template-columns: 30px 1fr auto;
+        align-items: center;
+        gap: 10px;
+        padding: 10px;
+        border-radius: 9px;
+      }
+      .model-row.active {
+        background: #25252c;
+      }
+      .model-row b {
+        display: block;
+        font-size: 12px;
+      }
+      .model-row small {
+        display: block;
+        margin-top: 2px;
+        color: var(--muted);
+        font-size: 9px;
+      }
+      .mini-quota {
+        width: 86px;
+      }
+      .mini-quota .numbers {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 4px;
+        color: #9898a1;
+        font-size: 9px;
+      }
+      .proscons {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin-top: 14px;
+      }
+      .note-card {
+        padding: 17px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: rgba(17, 17, 20, 0.72);
+      }
+      .note-card h4 {
+        margin: 0 0 8px;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+      .note-card ul {
+        margin: 0;
+        padding-left: 18px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .note-card li + li {
+        margin-top: 5px;
+      }
+      .comparison {
+        width: 100%;
+        margin-top: 24px;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+      .comparison th,
+      .comparison td {
+        padding: 13px 12px;
+        border-bottom: 1px solid var(--line);
+        text-align: left;
+      }
+      .comparison th {
+        color: var(--muted);
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+      .comparison td:not(:first-child) {
+        color: #c7c7cc;
+      }
+      .score {
+        color: #f5d174;
+        letter-spacing: 0.08em;
+      }
+      .plan-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+        margin-top: 24px;
+      }
+      .plan-card {
+        padding: 20px;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: rgba(17, 17, 20, 0.74);
+      }
+      .plan-card h3 {
+        margin-bottom: 8px;
+      }
+      .plan-card p,
+      .plan-card li {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .plan-card ul,
+      .plan-card ol {
+        margin: 10px 0 0;
+        padding-left: 19px;
+      }
+      .plan-card li + li {
+        margin-top: 6px;
+      }
+      .phase {
+        display: inline-grid;
+        place-items: center;
+        width: 24px;
+        height: 24px;
+        margin-right: 8px;
+        border-radius: 8px;
+        background: #282830;
+        color: white;
+        font-size: 11px;
+      }
+      .schema {
+        overflow-x: auto;
+        margin-top: 18px;
+        padding: 18px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: #0b0b0d;
+        color: #d7d7dd;
+        font:
+          12px/1.65 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          monospace;
+        white-space: pre;
+      }
+      .criteria {
+        columns: 2;
+        column-gap: 36px;
+        margin: 20px 0 0;
+        padding-left: 20px;
+        color: #c0c0c7;
+        font-size: 13px;
+      }
+      .criteria li {
+        break-inside: avoid;
+        margin-bottom: 9px;
+      }
+      .source-list {
+        margin: 18px 0 0;
+        padding-left: 20px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .source-list li + li {
+        margin-top: 8px;
+      }
+      .final-choice {
+        margin-top: 28px;
+        padding: 24px;
+        border: 1px solid rgba(102, 209, 158, 0.28);
+        border-radius: 18px;
+        background: linear-gradient(135deg, rgba(102, 209, 158, 0.1), rgba(96, 165, 250, 0.05));
+      }
+      .final-choice b {
+        color: #b9edd3;
+      }
+      footer {
+        margin-top: 70px;
+        padding-top: 22px;
+        border-top: 1px solid var(--line);
+        color: var(--muted-2);
+        font-size: 11px;
+      }
+      @media (max-width: 800px) {
+        .page {
+          width: min(100% - 22px, 680px);
+          padding-top: 34px;
+        }
+        .toc {
+          grid-template-columns: 1fr 1fr;
+        }
+        .concept-head {
+          grid-template-columns: 52px 1fr;
+        }
+        .label {
+          width: 48px;
+          height: 48px;
+          border-radius: 14px;
+          font-size: 22px;
+        }
+        .verdict {
+          grid-column: 2;
+          justify-self: start;
+        }
+        .app {
+          grid-template-columns: 138px 1fr;
+          min-height: 430px;
+        }
+        .sidebar {
+          padding-left: 6px;
+          padding-right: 6px;
+        }
+        .quota-grid {
+          grid-template-columns: 1fr;
+        }
+        .quota-grid .meter-card:nth-child(n + 2) {
+          display: none;
+        }
+        .popover {
+          right: 9px;
+          width: min(310px, calc(100% - 18px));
+        }
+        .proscons,
+        .plan-grid {
+          grid-template-columns: 1fr;
+        }
+        .criteria {
+          columns: 1;
+        }
+        .main {
+          overflow: hidden;
+        }
+      }
+      @media (max-width: 520px) {
+        .app {
+          grid-template-columns: 1fr;
+        }
+        .sidebar {
+          display: none;
+        }
+        .toc {
+          grid-template-columns: 1fr;
+        }
+        .comparison {
+          display: block;
+          overflow-x: auto;
+          white-space: nowrap;
+        }
+        .chat {
+          padding: 18px;
+        }
+        .usage-main {
+          padding: 18px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <header>
+        <div class="eyebrow">Product concept + implementation plan</div>
+        <h1>Know your runway before the agent hits a wall.</h1>
+        <p class="lede">
+          Four T3-native ways to surface Codex, Claude, and OpenCode Go subscription quotas—modeled
+          on CodexBar’s reset-aware meters, but designed for T3 Code’s web, desktop, mobile, remote,
+          and multi-environment reality.
+        </p>
+        <div class="hero-meta">
+          <span class="pill"><span class="dot" style="color: var(--codex)"></span> Codex</span>
+          <span class="pill"><span class="dot" style="color: var(--claude)"></span> Claude</span>
+          <span class="pill"
+            ><span class="dot" style="color: var(--opencode)"></span> OpenCode Go</span
+          >
+          <span class="pill">Mock data only</span>
+          <span class="pill">Dark theme shown</span>
+        </div>
+      </header>
+
+      <nav class="toc" aria-label="Mockup choices">
+        <a href="#concept-a"><b>A</b> Sidebar meters</a>
+        <a href="#concept-b"><b>B</b> Top-bar popover</a>
+        <a href="#concept-c"><b>C</b> Usage page</a>
+        <a href="#concept-d"><b>D</b> Model picker</a>
+      </nav>
+
+      <section>
+        <h2>First, define “usage” correctly</h2>
+        <p class="section-intro">
+          T3 already has a historical Usage surface that scans local provider transcripts for tokens
+          and API-equivalent cost. This proposal adds a separate quota data model: provider-reported
+          plan capacity, rolling windows, and reset timestamps. A user can spend zero dollars while
+          still consuming a subscription window; those numbers must never be merged.
+        </p>
+        <div class="callout">
+          <strong>Recommended vocabulary:</strong> call the new feature <em>Limits</em> or
+          <em>Quota</em>. Keep <em>Activity</em> for today’s token/cost history. Every meter says
+          “used” or “remaining,” never an unlabeled percentage.
+        </div>
+      </section>
+
+      <section class="concept" id="concept-a">
+        <div class="concept-head">
+          <div class="label">A</div>
+          <div>
+            <h3>Sidebar meters</h3>
+            <p class="concept-sub">Always visible, one compact line per provider.</p>
+          </div>
+          <span class="verdict">Best glanceability</span>
+        </div>
+        <div class="mock-shell">
+          <div class="windowbar">
+            <i class="traffic"></i><i class="traffic"></i><i class="traffic"></i
+            ><span class="window-title">T3 Code</span>
+          </div>
+          <div class="app">
+            <aside class="sidebar">
+              <div class="brand">T3 <span>Code</span></div>
+              <div class="project active">provider-quota-ui</div>
+              <div class="project">mobile-polish</div>
+              <div class="project">server-runtime</div>
+              <div class="side-spacer"></div>
+              <div class="meter-card quota-sidebar">
+                <div class="title-row"><span>Plan limits</span><span>↻</span></div>
+                <div class="qrow">
+                  <div class="qtop"><span>◉ Codex</span><span>72% · 2h 14m</span></div>
+                  <div class="mini-progress"><i style="width: 72%; --meter: var(--codex)"></i></div>
+                </div>
+                <div class="qrow">
+                  <div class="qtop"><span>◒ Claude</span><span>41% · 4h 52m</span></div>
+                  <div class="mini-progress">
+                    <i style="width: 41%; --meter: var(--claude)"></i>
+                  </div>
+                </div>
+                <div class="qrow">
+                  <div class="qtop"><span>◇ OpenCode Go</span><span>86% · 18d</span></div>
+                  <div class="mini-progress">
+                    <i style="width: 86%; --meter: var(--opencode)"></i>
+                  </div>
+                </div>
+              </div>
+              <div class="side-icons">⚙︎　⌁　▥</div>
+            </aside>
+            <div class="main">
+              <div class="topbar"><span>t3code / provider-quota-ui</span><span>⌘ K</span></div>
+              <div class="chat">
+                <div class="composer">
+                  Ask anything, @ to mention…
+                  <div class="composer-row"><span>Codex · GPT-5.6</span><span>↑</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="proscons">
+          <div class="note-card">
+            <h4>Why pick A</h4>
+            <ul>
+              <li>No click required; depletion is visible during every turn.</li>
+              <li>Feels closest to the promise of a menu-bar utility.</li>
+              <li>Clicking the block can open the full Limits page.</li>
+            </ul>
+          </div>
+          <div class="note-card">
+            <h4>Tradeoffs</h4>
+            <ul>
+              <li>Consumes scarce sidebar height and gets noisy with multiple accounts.</li>
+              <li>Collapsed sidebar needs a different indicator.</li>
+              <li>Mobile cannot preserve the always-visible behavior.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="concept" id="concept-b">
+        <div class="concept-head">
+          <div class="label">B</div>
+          <div>
+            <h3>Top-bar capsule + popover</h3>
+            <p class="concept-sub">A tiny worst-case signal expands into provider details.</p>
+          </div>
+          <span class="verdict">Best balance</span>
+        </div>
+        <div class="mock-shell">
+          <div class="windowbar">
+            <i class="traffic"></i><i class="traffic"></i><i class="traffic"></i
+            ><span class="window-title">T3 Code</span>
+          </div>
+          <div class="app">
+            <aside class="sidebar">
+              <div class="brand">T3 <span>Code</span></div>
+              <div class="project active">provider-quota-ui</div>
+              <div class="project">mobile-polish</div>
+              <div class="project">server-runtime</div>
+              <div class="side-spacer"></div>
+              <div class="side-icons">⚙︎　⌁　▥</div>
+            </aside>
+            <div class="main">
+              <div class="topbar">
+                <span>t3code / provider-quota-ui</span
+                ><span class="quota-capsule" aria-label="Usage limits"
+                  ><span>◉</span
+                  ><span class="tinybar"><i style="width: 72%; --meter: var(--codex)"></i></span
+                  ><span class="tinybar"><i style="width: 41%; --meter: var(--claude)"></i></span
+                  ><span class="tinybar"><i style="width: 86%; --meter: var(--opencode)"></i></span
+                ></span>
+              </div>
+              <div class="popover">
+                <div class="popover-head">
+                  <b>Plan limits</b><span class="fresh">Updated just now　↻</span>
+                </div>
+                <div class="meter-card">
+                  <div class="meter-line">
+                    <div class="provider">
+                      <span class="provider-mark">◉</span>
+                      <div>
+                        <div class="meter-name">Codex</div>
+                        <div class="meter-note">5-hour window · resets in 2h 14m</div>
+                      </div>
+                    </div>
+                    <span class="meter-value">72% used</span>
+                  </div>
+                  <div class="progress"><i style="width: 72%; --meter: var(--codex)"></i></div>
+                </div>
+                <div class="meter-card">
+                  <div class="meter-line">
+                    <div class="provider">
+                      <span class="provider-mark" style="color: var(--claude)">◒</span>
+                      <div>
+                        <div class="meter-name">Claude</div>
+                        <div class="meter-note">Weekly · resets Mon 3:00 AM</div>
+                      </div>
+                    </div>
+                    <span class="meter-value">41% used</span>
+                  </div>
+                  <div class="progress"><i style="width: 41%; --meter: var(--claude)"></i></div>
+                </div>
+                <div class="meter-card">
+                  <div class="meter-line">
+                    <div class="provider">
+                      <span class="provider-mark" style="color: var(--opencode)">◇</span>
+                      <div>
+                        <div class="meter-name">OpenCode Go</div>
+                        <div class="meter-note">Monthly · resets Sep 3</div>
+                      </div>
+                    </div>
+                    <span class="meter-value" style="color: var(--warn)">86% used</span>
+                  </div>
+                  <div class="progress"><i style="width: 86%; --meter: var(--warn)"></i></div>
+                </div>
+                <div style="padding: 11px 3px 1px; color: #aebed5; font-size: 11px">
+                  View all limits →
+                </div>
+              </div>
+              <div class="chat">
+                <div class="composer">
+                  Ask anything, @ to mention…
+                  <div class="composer-row"><span>Codex · GPT-5.6</span><span>↑</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="proscons">
+          <div class="note-card">
+            <h4>Why pick B</h4>
+            <ul>
+              <li>Keeps quotas globally available without taking sidebar rows.</li>
+              <li>Shows the three providers together and scales to several windows.</li>
+              <li>The capsule can show only the most constrained provider on narrow layouts.</li>
+            </ul>
+          </div>
+          <div class="note-card">
+            <h4>Tradeoffs</h4>
+            <ul>
+              <li>Top-bar space competes with breadcrumbs and desktop window controls.</li>
+              <li>Meaning of three unlabeled micro-bars must be taught by tooltip.</li>
+              <li>Mobile needs a header button or Usage navigation item.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="concept" id="concept-c">
+        <div class="concept-head">
+          <div class="label">C</div>
+          <div>
+            <h3>Limits inside the Usage page</h3>
+            <p class="concept-sub">
+              A first-class destination alongside existing token and cost activity.
+            </p>
+          </div>
+          <span class="verdict recommended">Recommended foundation</span>
+        </div>
+        <div class="mock-shell">
+          <div class="windowbar">
+            <i class="traffic"></i><i class="traffic"></i><i class="traffic"></i
+            ><span class="window-title">T3 Code — Usage</span>
+          </div>
+          <div class="app">
+            <aside class="sidebar">
+              <div class="brand">T3 <span>Code</span></div>
+              <div class="project">← Back</div>
+              <div class="side-spacer"></div>
+            </aside>
+            <div class="main usage-main">
+              <div class="tabs">
+                <div class="tab active">Limits</div>
+                <div class="tab">Activity</div>
+              </div>
+              <div class="usage-title">
+                <h4>Subscription runway</h4>
+                <span class="fresh">All environments · updated just now　↻</span>
+              </div>
+              <div class="quota-grid">
+                <div class="meter-card">
+                  <div class="provider">
+                    <span class="provider-mark">◉</span>
+                    <div>
+                      <div class="meter-name">Codex</div>
+                      <div class="meter-note">Personal · Plus</div>
+                    </div>
+                  </div>
+                  <div class="big">28% left</div>
+                  <div class="progress"><i style="width: 72%; --meter: var(--codex)"></i></div>
+                  <div class="two-windows">
+                    <div class="window-stat"><b>5 hour</b><span>resets in 2h 14m</span></div>
+                    <div class="window-stat"><b>Weekly 38%</b><span>resets Monday</span></div>
+                  </div>
+                </div>
+                <div class="meter-card">
+                  <div class="provider">
+                    <span class="provider-mark" style="color: var(--claude)">◒</span>
+                    <div>
+                      <div class="meter-name">Claude</div>
+                      <div class="meter-note">Work · Max</div>
+                    </div>
+                  </div>
+                  <div class="big">59% left</div>
+                  <div class="progress"><i style="width: 41%; --meter: var(--claude)"></i></div>
+                  <div class="two-windows">
+                    <div class="window-stat"><b>Session 41%</b><span>resets in 4h 52m</span></div>
+                    <div class="window-stat"><b>Weekly 23%</b><span>resets Sunday</span></div>
+                  </div>
+                </div>
+                <div class="meter-card">
+                  <div class="provider">
+                    <span class="provider-mark" style="color: var(--opencode)">◇</span>
+                    <div>
+                      <div class="meter-name">OpenCode Go</div>
+                      <div class="meter-note">Main workspace</div>
+                    </div>
+                  </div>
+                  <div class="big" style="color: var(--warn)">14% left</div>
+                  <div class="progress"><i style="width: 86%; --meter: var(--warn)"></i></div>
+                  <div class="two-windows">
+                    <div class="window-stat"><b>5 hour 64%</b><span>resets in 1h 08m</span></div>
+                    <div class="window-stat"><b>Monthly 86%</b><span>resets Sep 3</span></div>
+                  </div>
+                </div>
+              </div>
+              <div class="callout" style="margin-top: 14px; padding: 13px 15px; font-size: 11px">
+                <strong>OpenCode Go is getting low.</strong> The monthly window has 14% remaining.
+                Quota comes from the provider and can lag by a few minutes.
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="proscons">
+          <div class="note-card">
+            <h4>Why pick C</h4>
+            <ul>
+              <li>Builds on T3’s existing Usage entry point and mobile screen.</li>
+              <li>
+                Has room for multiple accounts, windows, provenance, stale states, and setup help.
+              </li>
+              <li>Does not overload chat chrome; easiest accessible layout.</li>
+            </ul>
+          </div>
+          <div class="note-card">
+            <h4>Tradeoffs</h4>
+            <ul>
+              <li>Requires navigation; users may discover exhaustion too late.</li>
+              <li>Less faithful to CodexBar’s always-visible promise.</li>
+              <li>Best paired later with a tiny global warning affordance.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="concept" id="concept-d">
+        <div class="concept-head">
+          <div class="label">D</div>
+          <div>
+            <h3>Quota-aware model picker</h3>
+            <p class="concept-sub">Show runway at the moment the user chooses a provider.</p>
+          </div>
+          <span class="verdict">Best context</span>
+        </div>
+        <div class="mock-shell">
+          <div class="windowbar">
+            <i class="traffic"></i><i class="traffic"></i><i class="traffic"></i
+            ><span class="window-title">T3 Code</span>
+          </div>
+          <div class="app">
+            <aside class="sidebar">
+              <div class="brand">T3 <span>Code</span></div>
+              <div class="project active">provider-quota-ui</div>
+              <div class="project">mobile-polish</div>
+              <div class="side-spacer"></div>
+              <div class="side-icons">⚙︎　⌁　▥</div>
+            </aside>
+            <div class="main">
+              <div class="topbar"><span>t3code / provider-quota-ui</span><span>⌘ K</span></div>
+              <div class="picker">
+                <div class="picker-title">Choose model</div>
+                <div class="model-row active">
+                  <span class="provider-mark">◉</span>
+                  <div><b>GPT-5.6</b><small>Codex · Personal</small></div>
+                  <div class="mini-quota">
+                    <div class="numbers"><span>5h quota</span><span>28% left</span></div>
+                    <div class="mini-progress">
+                      <i style="width: 72%; --meter: var(--codex)"></i>
+                    </div>
+                  </div>
+                </div>
+                <div class="model-row">
+                  <span class="provider-mark" style="color: var(--claude)">◒</span>
+                  <div><b>Claude Opus 4.6</b><small>Claude · Work</small></div>
+                  <div class="mini-quota">
+                    <div class="numbers"><span>session</span><span>59% left</span></div>
+                    <div class="mini-progress">
+                      <i style="width: 41%; --meter: var(--claude)"></i>
+                    </div>
+                  </div>
+                </div>
+                <div class="model-row">
+                  <span class="provider-mark" style="color: var(--opencode)">◇</span>
+                  <div><b>Go models</b><small>OpenCode Go · Main</small></div>
+                  <div class="mini-quota">
+                    <div class="numbers">
+                      <span>monthly</span><span style="color: var(--warn)">14% left</span>
+                    </div>
+                    <div class="mini-progress">
+                      <i style="width: 86%; --meter: var(--warn)"></i>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="chat">
+                <div class="composer">
+                  Ask anything, @ to mention…
+                  <div class="composer-row"><span>Codex · GPT-5.6　⌃</span><span>↑</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="proscons">
+          <div class="note-card">
+            <h4>Why pick D</h4>
+            <ul>
+              <li>Turns quota into an actionable provider choice.</li>
+              <li>No persistent chrome cost while the picker is closed.</li>
+              <li>Naturally supports multiple configured provider instances.</li>
+            </ul>
+          </div>
+          <div class="note-card">
+            <h4>Tradeoffs</h4>
+            <ul>
+              <li>Invisible when the user is not switching models.</li>
+              <li>A quota window may not map cleanly to one specific model.</li>
+              <li>Picker loading must never wait on a network refresh.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2>Comparison</h2>
+        <p class="section-intro">
+          Scores prioritize T3’s current architecture, dense daily use, and cross-surface
+          consistency.
+        </p>
+        <table class="comparison">
+          <thead>
+            <tr>
+              <th>Concept</th>
+              <th>At a glance</th>
+              <th>Detail capacity</th>
+              <th>Mobile fit</th>
+              <th>Chrome cost</th>
+              <th>Recommendation</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><b>A · Sidebar</b></td>
+              <td class="score">★★★★★</td>
+              <td class="score">★★☆☆☆</td>
+              <td class="score">★★☆☆☆</td>
+              <td>High</td>
+              <td>Power-user option</td>
+            </tr>
+            <tr>
+              <td><b>B · Top bar</b></td>
+              <td class="score">★★★★☆</td>
+              <td class="score">★★★★☆</td>
+              <td class="score">★★★☆☆</td>
+              <td>Medium</td>
+              <td>Best follow-up</td>
+            </tr>
+            <tr>
+              <td><b>C · Usage page</b></td>
+              <td class="score">★★☆☆☆</td>
+              <td class="score">★★★★★</td>
+              <td class="score">★★★★★</td>
+              <td>None</td>
+              <td><b>Ship first</b></td>
+            </tr>
+            <tr>
+              <td><b>D · Picker</b></td>
+              <td class="score">★★★☆☆</td>
+              <td class="score">★★★☆☆</td>
+              <td class="score">★★★★☆</td>
+              <td>None</td>
+              <td>Contextual enhancement</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="final-choice">
+          <b>Suggested product path: C, then a restrained B.</b> Build the trustworthy detailed
+          destination first. Once the quota contract and refresh behavior are proven, add B as a
+          cached, non-blocking shortcut into that page. If you want exactly one concept, choose C.
+        </div>
+      </section>
+
+      <section class="section">
+        <h2>Implementation plan</h2>
+        <p class="section-intro">
+          The architecture treats quota as environment-owned provider state. Raw credentials and
+          provider payloads remain on the server; clients receive a small typed snapshot.
+        </p>
+        <div class="plan-grid">
+          <article class="plan-card">
+            <h3><span class="phase">1</span>Contract + vocabulary</h3>
+            <ul>
+              <li>Add a provider-neutral quota contract in <code>packages/contracts</code>.</li>
+              <li>
+                Model provider instance, account label, plan label, source, observed time, windows,
+                used ratio, remaining ratio, reset time, freshness, and bounded error.
+              </li>
+              <li>Keep quota separate from the existing transcript-derived UsageSummary.</li>
+              <li>
+                Use open window identifiers so provider-specific windows do not force schema
+                migrations.
+              </li>
+            </ul>
+          </article>
+          <article class="plan-card">
+            <h3><span class="phase">2</span>Server readers</h3>
+            <ul>
+              <li>
+                Codex: query the configured instance’s app-server
+                <code>account/rateLimits/read</code>; reuse the same home/auth isolation as turns.
+              </li>
+              <li>
+                Claude: prefer an authenticated structured source; use a bounded CLI/PTY fallback
+                only if it can be parsed reliably.
+              </li>
+              <li>
+                OpenCode Go: resolve the configured Go account/workspace, reading local data where
+                sufficient and web quota data only with explicit supported credentials.
+              </li>
+              <li>
+                Normalize at adapter boundaries; cache success; never send cookies, tokens, or raw
+                payloads over WebSocket.
+              </li>
+            </ul>
+          </article>
+          <article class="plan-card">
+            <h3><span class="phase">3</span>RPC + refresh</h3>
+            <ul>
+              <li>
+                Add one read RPC per environment with standard orchestration-read authorization.
+              </li>
+              <li>
+                Deduplicate identical provider homes/accounts across environments before merging.
+              </li>
+              <li>Return the last good snapshot with a stale badge after transient failure.</li>
+              <li>
+                Refresh on page entry, manual action, provider config change, and a conservative
+                visibility-aware interval—never per render.
+              </li>
+            </ul>
+          </article>
+          <article class="plan-card">
+            <h3><span class="phase">4</span>Selected UI</h3>
+            <ul>
+              <li>
+                Implement the chosen A–D surface using shared formatters and provider presentation.
+              </li>
+              <li>
+                For C, add <em>Limits / Activity</em> navigation to web and mobile Usage screens.
+              </li>
+              <li>
+                Represent loading, unavailable, setup-needed, stale, partial, and exhausted states.
+              </li>
+              <li>
+                Use semantic text in addition to color; obey reduced motion; no continuously
+                repainting countdown.
+              </li>
+            </ul>
+          </article>
+          <article class="plan-card">
+            <h3><span class="phase">5</span>Settings + diagnostics</h3>
+            <ul>
+              <li>
+                Auto-enable quota for configured instances when a safe credential source exists.
+              </li>
+              <li>Put source-specific setup in Settings → Providers, not the Usage page.</li>
+              <li>Show source and last refresh in diagnostics without exposing secret material.</li>
+              <li>
+                Support refresh disabled/manual mode for remote or battery-sensitive environments.
+              </li>
+            </ul>
+          </article>
+          <article class="plan-card">
+            <h3><span class="phase">6</span>Verification + release</h3>
+            <ul>
+              <li>Fixture-test every provider parser and percent/reset normalization.</li>
+              <li>Contract-test malformed/forward-version payload behavior.</li>
+              <li>
+                Test dedupe, partial environments, stale retention, auth failure, and timezone
+                formatting.
+              </li>
+              <li>
+                Run focused web and mobile component tests, then one integrated pass per applicable
+                client after approval.
+              </li>
+            </ul>
+          </article>
+        </div>
+
+        <div class="schema" aria-label="Illustrative quota contract">
+          ProviderQuotaSnapshot { contractVersion, readAt, environmentId, accounts: [{
+          providerInstanceId, provider: "codex" | "claudeAgent" | "opencode", accountLabel?,
+          planLabel?, source, status, windows: [{ id, label, usedRatio?, remainingRatio?, resetsAt?,
+          unit }], observedAt, staleAt?, message? }] }
+        </div>
+        <p>
+          This schema is illustrative; see <code>packages/contracts/src/providerQuota.ts</code> for
+          the shipped contract.
+        </p>
+      </section>
+
+      <section class="section">
+        <h2>Provider behavior and constraints</h2>
+        <div class="plan-grid">
+          <article class="plan-card">
+            <h3>Codex</h3>
+            <p>
+              The existing adapter already recognizes rate-limit update events, and its app-server
+              client already performs account calls. A dedicated read should work even with no
+              active chat thread and must honor each configured <code>CODEX_HOME</code>.
+            </p>
+          </article>
+          <article class="plan-card">
+            <h3>Claude</h3>
+            <p>
+              Session and weekly windows are provider-reported and can vary by plan. Do not infer
+              quota from transcript tokens. Parsing a human CLI screen is a fallback with fixtures
+              and explicit unsupported handling, not a universal contract.
+            </p>
+          </article>
+          <article class="plan-card">
+            <h3>OpenCode Go</h3>
+            <p>
+              Distinguish the OpenCode runtime from the OpenCode Go subscription. Quota may require
+              workspace identity and authenticated dashboard access. Missing setup should produce a
+              useful setup-needed state, never an empty 0% meter.
+            </p>
+          </article>
+          <article class="plan-card">
+            <h3>Remote + multi-environment</h3>
+            <p>
+              Reads happen on the environment that owns the provider credentials. The UI labels
+              accounts/hosts when needed and deduplicates equivalent sources, while keeping
+              genuinely different personal/work accounts separate.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2>Acceptance criteria</h2>
+        <ul class="criteria">
+          <li>Codex, Claude, and OpenCode Go can each report zero or more named quota windows.</li>
+          <li>Every percentage is explicitly labeled used or remaining.</li>
+          <li>
+            Reset timestamps display in the client’s timezone with an absolute time available.
+          </li>
+          <li>Historical token/cost totals remain unchanged and visually distinct.</li>
+          <li>No secret or raw provider response crosses the wire or appears in logs.</li>
+          <li>A failed refresh preserves the last successful snapshot and marks it stale.</li>
+          <li>Unsupported and setup-needed providers never render as 0% usage.</li>
+          <li>Duplicate homes/accounts from multiple T3 environments count once.</li>
+          <li>New clients degrade safely when talking to older servers and vice versa.</li>
+          <li>Quota UI never blocks chat, provider selection, or thread rendering.</li>
+          <li>Web, desktop, and mobile receive an explicit surface decision.</li>
+          <li>Warnings are conveyed by text/icon as well as color.</li>
+        </ul>
+      </section>
+
+      <section class="section">
+        <h2>Risks, mitigation, and rollback</h2>
+        <div class="plan-grid">
+          <article class="plan-card">
+            <h3>Unstable upstreams</h3>
+            <p>
+              Provider APIs and CLI output can change. Isolate parsing per provider, cap errors,
+              fixture known variants, and degrade one account without collapsing the page.
+            </p>
+          </article>
+          <article class="plan-card">
+            <h3>Credential sensitivity</h3>
+            <p>
+              Prefer existing authenticated provider processes and local state. Never add
+              browser-cookie collection implicitly; any new secret source belongs in provider
+              settings with clear scope.
+            </p>
+          </article>
+          <article class="plan-card">
+            <h3>Refresh cost</h3>
+            <p>
+              Use cached snapshots, single-flight reads, and visibility-aware refresh. Countdown
+              labels derive locally from one timestamp and update at minute granularity only while
+              visible.
+            </p>
+          </article>
+          <article class="plan-card">
+            <h3>Rollback</h3>
+            <p>
+              The quota RPC and UI are additive. Hide the Limits surface behind a server
+              capability/feature flag, stop scheduling reads, and leave the existing Activity page
+              untouched. No data migration is required.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <h2>Open product choices</h2>
+        <ol class="source-list">
+          <li><strong>Pick A, B, C, or D.</strong> Recommendation: C first; B second.</li>
+          <li>
+            Should bars default to <strong>used</strong> (risk-forward) or
+            <strong>remaining</strong> (runway-forward)? The mockups show used bars with explicit
+            remaining headlines in C.
+          </li>
+          <li>
+            Should the first release support multiple accounts per provider, or only the instance
+            selected for the current thread? The contract should support multiple even if v1 UI is
+            narrower.
+          </li>
+          <li>
+            Should low-quota warnings be passive only, or optionally trigger a local notification at
+            80% / 95%?
+          </li>
+        </ol>
+      </section>
+
+      <section class="section">
+        <h2>Research notes</h2>
+        <p class="section-intro">
+          The external reference was used for behavior, not visual cloning. CodexBar emphasizes
+          provider-specific session/weekly/monthly windows, reset countdowns, cached/stale states,
+          and multiple acquisition strategies.
+        </p>
+        <ul class="source-list">
+          <li>
+            <a href="https://github.com/steipete/CodexBar"
+              >CodexBar repository and feature overview</a
+            >
+          </li>
+          <li>
+            <a href="https://github.com/steipete/CodexBar/blob/main/docs/providers.md"
+              >CodexBar provider source and fallback documentation</a
+            >
+          </li>
+        </ul>
+      </section>
+
+      <footer>
+        Prepared as a static PostPlan proposal. Mock values are illustrative and do not represent a
+        real account. No credentials, private URLs, or local filesystem paths are included.
+      </footer>
+    </main>
+  </body>
+</html>

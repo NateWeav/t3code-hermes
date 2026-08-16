@@ -5000,23 +5000,22 @@ function ChatViewContent(props: ChatViewProps) {
     });
     const turnAttachmentsPromise = Promise.all(
       composerImagesSnapshot.map(async (attachment) => ({
-        type: attachment.mimeType.toLowerCase().startsWith("image/")
-          ? ("image" as const)
-          : ("file" as const),
+        type: attachment.type,
         name: attachment.name,
         mimeType: attachment.mimeType || "application/octet-stream",
-        sizeBytes: attachment.sizeBytes,
+        // The server rejects a turn whose decoded payload does not match the
+        // declared size, so this must describe the bytes actually encoded
+        // below rather than the size recorded when the draft was staged.
+        sizeBytes: attachment.file.size,
         dataUrl: await readFileAsDataUrl(attachment.file),
       })),
     );
     const optimisticAttachments = composerImagesSnapshot.map((attachment) => ({
-      type: attachment.mimeType.toLowerCase().startsWith("image/")
-        ? ("image" as const)
-        : ("file" as const),
+      type: attachment.type,
       id: attachment.id,
       name: attachment.name,
       mimeType: attachment.mimeType || "application/octet-stream",
-      sizeBytes: attachment.sizeBytes,
+      sizeBytes: attachment.file.size,
       ...(attachment.type === "image" ? { previewUrl: attachment.previewUrl } : {}),
     }));
     // Sending always returns to the live edge. The new row becomes the

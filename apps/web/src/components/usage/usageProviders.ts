@@ -1,6 +1,6 @@
 import type { UsageProviderKind } from "@t3tools/contracts";
 
-import { ClaudeAI, HermesIcon, type Icon, OpenAI } from "../Icons";
+import { ClaudeAI, HermesIcon, type Icon, OpenAI, OpenCodeIcon } from "../Icons";
 
 type UsageProviderPresentation = {
   readonly label: string;
@@ -14,6 +14,11 @@ type UsageProviderPresentation = {
  * adding a provider only requires its contract support and one entry here.
  */
 export const PROVIDER_PRESENTATION = {
+  opencode: {
+    label: "OpenCode",
+    color: "#7c3aed",
+    mark: OpenCodeIcon,
+  },
   hermes: {
     label: "Hermes",
     color: "#38bdf8",

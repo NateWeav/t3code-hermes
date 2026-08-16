@@ -39,6 +39,7 @@ import { resolveClaudeHomePath } from "../provider/Drivers/ClaudeHome.ts";
 import { resolveCodexHomeLayout } from "../provider/Drivers/CodexHomeLayout.ts";
 import { UsageAggregator } from "./usageAggregation.ts";
 import { readHermesUsageRecords } from "./usageHermes.ts";
+import { readOpenCodeUsageRecords } from "./usageOpenCode.ts";
 import { parseRateTable, type RateTable } from "./usagePricing.ts";
 import {
   listTranscriptFiles,
@@ -220,11 +221,24 @@ export const make = Effect.gen(function* () {
     const claudeDir = yield* resolveClaudeTranscriptDir(claudeHome);
     const codexLayout = yield* resolveCodexHomeLayout(settings.providers.codex);
     const hermesHome = process.env["HERMES_HOME"]?.trim() || path.join(NodeOS.homedir(), ".hermes");
+    const openCodeDataRoot =
+      process.env["XDG_DATA_HOME"]?.trim() || path.join(NodeOS.homedir(), ".local", "share");
+    const configuredOpenCodeDb = process.env["OPENCODE_DB"]?.trim();
+    const openCodeDb = configuredOpenCodeDb
+      ? path.isAbsolute(configuredOpenCodeDb)
+        ? configuredOpenCodeDb
+        : path.join(openCodeDataRoot, "opencode", configuredOpenCodeDb)
+      : path.join(openCodeDataRoot, "opencode", "opencode.db");
 
     return [
       { provider: "claude" as const, dir: claudeDir },
       { provider: "codex" as const, dir: path.join(codexLayout.sharedHomePath, "sessions") },
-      { provider: "hermes" as const, dir: hermesHome },
+      {
+        provider: "hermes" as const,
+        dir: hermesHome,
+        sourcePath: path.join(hermesHome, "state.db"),
+      },
+      { provider: "opencode" as const, dir: path.dirname(openCodeDb), sourcePath: openCodeDb },
     ];
   });
 
@@ -356,11 +370,7 @@ export const make = Effect.gen(function* () {
     const livePaths = new Set<string>();
     const walkedRoots: string[] = [];
 
-    for (const { provider, dir } of dirs) {
-      // Hermes reports a single canonical database rather than a transcript
-      // tree, so the scanned source is a file inside `dir` while the volume
-      // is still probed from the directory itself.
-      const sourcePath = provider === "hermes" ? path.join(dir, "state.db") : dir;
+    for (const { provider, dir, sourcePath = dir } of dirs) {
       const volumeId = yield* Effect.promise(() => readDirectoryVolumeId(dir));
       const exists = yield* fileSystem
         .exists(sourcePath)
@@ -377,7 +387,9 @@ export const make = Effect.gen(function* () {
           message:
             provider === "hermes"
               ? "No Hermes state database on this environment."
-              : "No transcript directory on this environment.",
+              : provider === "opencode"
+                ? "No OpenCode database on this environment."
+                : "No transcript directory on this environment.",
         });
         continue;
       }
@@ -394,6 +406,38 @@ export const make = Effect.gen(function* () {
             malformedRecords: 0,
             distinctSessions: 0,
             message: "Hermes state database could not be read.",
+          });
+          continue;
+        }
+        for (const record of records) {
+          if (aggregator.add(record)) sessionIds.add(record.sessionId);
+        }
+        sources.push({
+          fingerprint: { hostId, provider, resolvedHomePath: sourcePath, volumeId },
+          status: "ok",
+          scannedFiles: 1,
+          skippedFiles: 0,
+          malformedRecords: 0,
+          distinctSessions: sessionIds.size,
+          message: null,
+        });
+        continue;
+      }
+
+      if (provider === "opencode") {
+        const records = yield* Effect.sync(() =>
+          readOpenCodeUsageRecords(sourcePath, windowStartMs),
+        );
+        const sessionIds = new Set<string>();
+        if (records === null) {
+          sources.push({
+            fingerprint: { hostId, provider, resolvedHomePath: sourcePath, volumeId },
+            status: "failed",
+            scannedFiles: 0,
+            skippedFiles: 0,
+            malformedRecords: 0,
+            distinctSessions: 0,
+            message: "OpenCode database could not be read.",
           });
           continue;
         }

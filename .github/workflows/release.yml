@@ -1238,3 +1238,71 @@ jobs:
             --release-version "${{ needs.preflight.outputs.version }}" \
             --tag "${{ needs.preflight.outputs.tag }}" \
             --release-url "https://github.com/${{ github.repository }}/releases/tag/${{ needs.preflight.outputs.tag }}"
+
+  # Fork-only. A nightly that dies in Preflight or a build otherwise leaves no
+  # trace outside the Actions tab, which is how a fortnight of cancelled runs
+  # went unnoticed. `contains(needs.*.result, 'failure')` rather than
+  # `failure()`: several jobs above are deliberately skipped on a fork, and a
+  # skip must not read as a failure or suppress this one.
+  notify_failure:
+    name: Report nightly failure
+    needs:
+      [
+        check_changes,
+        preflight,
+        relay_public_config,
+        build_wsl_node_pty,
+        build,
+        publish_cli,
+        release,
+        publish_aur,
+        deploy_web,
+        finalize,
+        announce_discord,
+      ]
+    if: ${{ always() && github.repository != 'pingdotgg/t3code' && contains(needs.*.result, 'failure') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Compose failure report
+        shell: bash
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          set -uo pipefail
+
+          {
+            echo "The ${{ github.event_name }} release run failed."
+            echo
+            echo "- Channel: \`${{ needs.preflight.outputs.release_channel || 'unresolved' }}\`"
+            echo "- Version: \`${{ needs.preflight.outputs.version || 'unresolved' }}\`"
+            echo "- Commit: \`${{ github.sha }}\`"
+            echo
+            echo "Job results:"
+            echo
+            jq -r 'to_entries[] | "- \(.key): **\(.value.result)**"' <<< "$RESULTS"
+            echo
+            echo "No release was published for this run."
+            echo
+            echo "[Run log](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})"
+          } > "$RUNNER_TEMP/failure.md"
+
+      - name: Report nightly failure
+        uses: ./.github/actions/report-automation-failure
+        with:
+          title: Nightly release failed (${{ github.run_id }})
+          body-file: ${{ runner.temp }}/failure.md
+          label: nightly-release-failed
+          label-description: The nightly release workflow failed.
+          github-token: ${{ github.token }}

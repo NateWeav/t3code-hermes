@@ -91,20 +91,17 @@ jobs:
           git merge --abort || true
           echo "status=conflict" >> "$GITHUB_OUTPUT"
 
-      - name: Report merge conflict
+      - name: Compose merge conflict report
         if: steps.merge.outputs.status == 'conflict'
         shell: bash
         env:
           UPSTREAM_SHA: ${{ steps.merge.outputs.upstream_sha }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
 
-          today="$(date -u +%Y-%m-%d)"
           conflicts="$(cat "$RUNNER_TEMP/conflicts.txt")"
 
           {
-            echo "## Upstream sync conflict"
-            echo
             echo "Merging \`upstream/main\` (\`$UPSTREAM_SHA\`) into \`main\` conflicted."
             echo "The merge was aborted; \`main\` is unchanged."
             echo
@@ -115,39 +112,33 @@ jobs:
             else
               echo "- (none recorded — the merge failed for some other reason; see the run log)"
             fi
-          } > "$RUNNER_TEMP/conflict-issue.md"
+            echo
+            echo "Resolve by hand:"
+            echo
+            echo '```bash'
+            echo "git fetch upstream && git merge upstream/main"
+            echo '```'
+            echo
+            echo "\`ChatComposer.tsx\`, \`ChatView.tsx\`, and \`usageProviders.ts\` carry Hermes"
+            echo "branding and provider lists — resolve those by reading both sides, not by"
+            echo "taking one wholesale. Close this issue once \`main\` is synced."
+            echo
+            echo "[Run log](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})"
+          } > "$RUNNER_TEMP/report.md"
 
-          cat "$RUNNER_TEMP/conflict-issue.md" >> "$GITHUB_STEP_SUMMARY"
+      - name: Report merge conflict
+        if: steps.merge.outputs.status == 'conflict'
+        uses: ./.github/actions/report-automation-failure
+        with:
+          title: Upstream sync conflict (${{ github.run_id }})
+          body-file: ${{ runner.temp }}/report.md
+          label: upstream-sync-conflict
+          label-description: Nightly upstream merge stopped on a conflict.
+          github-token: ${{ github.token }}
 
-          gh label create "$CONFLICT_LABEL" \
-            --color b60205 \
-            --description "Nightly upstream merge stopped on a conflict." \
-            2>/dev/null || true
-
-          open_issues="$(gh issue list --state open --label "$CONFLICT_LABEL" --json number --jq 'length' || echo 0)"
-          if [[ "$open_issues" -gt 0 ]]; then
-            echo "An open $CONFLICT_LABEL issue already exists; not filing another." >> "$GITHUB_STEP_SUMMARY"
-          else
-            {
-              echo
-              echo "Resolve by hand:"
-              echo
-              echo '```bash'
-              echo "git fetch upstream && git merge upstream/main"
-              echo '```'
-              echo
-              echo "\`ChatComposer.tsx\`, \`ChatView.tsx\`, and \`usageProviders.ts\` carry Hermes"
-              echo "branding and provider lists — resolve those by reading both sides, not by"
-              echo "taking one wholesale. Close this issue once \`main\` is synced."
-            } >> "$RUNNER_TEMP/conflict-issue.md"
-
-            gh issue create \
-              --title "Upstream sync conflict ($today)" \
-              --label "$CONFLICT_LABEL" \
-              --body-file "$RUNNER_TEMP/conflict-issue.md"
-          fi
-
-          exit 1
+      - name: Fail on merge conflict
+        if: steps.merge.outputs.status == 'conflict'
+        run: exit 1
 
       - name: Push main
         if: steps.merge.outputs.status == 'merged'
@@ -236,19 +227,14 @@ jobs:
 
       - name: Open Hermes parity review issue
         if: steps.merge.outputs.status == 'merged' && steps.drift.outputs.review == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          gh label create "$PARITY_LABEL" \
-            --color fbca04 \
-            --description "Upstream changed sibling provider adapters; check the Hermes copy." \
-            2>/dev/null || true
-
-          gh issue create \
-            --title "Hermes parity review ($(date -u +%Y-%m-%d))" \
-            --label "$PARITY_LABEL" \
-            --body-file "$RUNNER_TEMP/parity-issue.md"
+        uses: ./.github/actions/report-automation-failure
+        with:
+          title: Hermes parity review (${{ github.run_id }})
+          body-file: ${{ runner.temp }}/parity-issue.md
+          label: hermes-parity-review
+          label-color: fbca04
+          label-description: Upstream changed sibling provider adapters; check the Hermes copy.
+          github-token: ${{ github.token }}
 
       - name: Summarize
         if: always() && (steps.merge.outputs.status == 'merged' || steps.merge.outputs.status == 'up-to-date')
@@ -262,3 +248,42 @@ jobs:
           else
             echo "Merged upstream/main (\`$UPSTREAM_SHA\`) into main and dispatched CI." >> "$GITHUB_STEP_SUMMARY"
           fi
+
+      # Everything above reports the failures it anticipates. This catches the
+      # ones it does not: a crashed step, a rejected push, a `gh` outage. The
+      # conflict path is excluded because it has already filed its own report.
+      - name: Compose unexpected failure report
+        if: failure() && steps.merge.outputs.status != 'conflict'
+        shell: bash
+        env:
+          STATUS: ${{ steps.merge.outputs.status }}
+          UPSTREAM_SHA: ${{ steps.merge.outputs.upstream_sha }}
+        run: |
+          set -uo pipefail
+
+          {
+            echo "The nightly upstream merge failed somewhere other than a merge conflict."
+            echo
+            echo "- Merge status: \`${STATUS:-(never reached)}\`"
+            echo "- Upstream head: \`${UPSTREAM_SHA:-(unknown)}\`"
+            echo
+            if [[ "$STATUS" == "merged" ]]; then
+              echo "The merge itself succeeded. Check whether it reached \`main\`:"
+              echo "if the push step is green the merge landed and only the follow-up"
+              echo "reporting broke, and if it is not, \`main\` is still unsynced."
+            else
+              echo "\`main\` is unchanged."
+            fi
+            echo
+            echo "[Run log](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})"
+          } > "$RUNNER_TEMP/failure.md"
+
+      - name: Report unexpected failure
+        if: failure() && steps.merge.outputs.status != 'conflict'
+        uses: ./.github/actions/report-automation-failure
+        with:
+          title: Upstream sync failed (${{ github.run_id }})
+          body-file: ${{ runner.temp }}/failure.md
+          label: upstream-sync-failed
+          label-description: The nightly upstream merge failed unexpectedly.
+          github-token: ${{ github.token }}

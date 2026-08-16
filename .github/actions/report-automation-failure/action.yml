@@ -1,0 +1,107 @@
+name: Report automation failure
+description: >
+  File (or comment on) a GitHub issue when a fork automation run fails, so a
+  broken nightly is visible in the repo instead of only in the Actions tab.
+
+# This action must never be the reason a failure goes unreported, so every
+# step below degrades instead of aborting: a label that cannot be created
+# yields an unlabeled issue, and a `gh` call that fails still leaves the whole
+# report in the job summary. The nightly upstream merge was silently broken
+# for a day because the previous inline version did the opposite — it hid
+# `gh label create`'s stderr and then died on the missing label.
+
+inputs:
+  title:
+    description: Issue title. Also the fallback heading in the job summary.
+    required: true
+  body-file:
+    description: Path to a markdown file holding the issue body.
+    required: true
+  label:
+    description: Label to file under. Used to find an existing open issue.
+    required: true
+  label-color:
+    description: Hex color (no leading #) used when creating the label.
+    required: false
+    default: b60205
+  label-description:
+    description: Description used when creating the label.
+    required: false
+    default: Automated fork maintenance needs attention.
+  github-token:
+    description: "Token carrying `issues: write` on this repository."
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: File failure issue
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        # Explicit: `gh` otherwise infers the repository from the checkout's
+        # git remotes, and this job may run with an `upstream` remote present.
+        GH_REPO: ${{ github.repository }}
+        TITLE: ${{ inputs.title }}
+        BODY_FILE: ${{ inputs.body-file }}
+        LABEL: ${{ inputs.label }}
+        LABEL_COLOR: ${{ inputs.label-color }}
+        LABEL_DESCRIPTION: ${{ inputs.label-description }}
+      run: |
+        set -uo pipefail
+
+        # The report reaches the summary before any network call, so it
+        # survives even if every `gh` invocation below fails.
+        {
+          echo "## ${TITLE}"
+          echo
+          cat "$BODY_FILE"
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        # Create the label if it is missing, then ask whether it exists rather
+        # than trusting the create's exit code — "already exists" and "no
+        # permission" both look like failure here, and only one is fatal.
+        gh label create "$LABEL" \
+          --color "$LABEL_COLOR" \
+          --description "$LABEL_DESCRIPTION" \
+          2> "$RUNNER_TEMP/label.err" \
+          || echo "::debug::gh label create: $(cat "$RUNNER_TEMP/label.err")"
+
+        # A plain flag rather than an args array: expanding an empty array
+        # under `set -u` is a bash-version question, and a notifier is the last
+        # place that should depend on the answer.
+        have_label=""
+        if gh label list --limit 200 --json name --jq '.[].name' 2>/dev/null | grep -qxF "$LABEL"; then
+          have_label=yes
+        else
+          echo "::warning::Label '$LABEL' is unavailable; filing without it."
+          [[ -s "$RUNNER_TEMP/label.err" ]] && cat "$RUNNER_TEMP/label.err" >&2
+        fi
+
+        # One open issue per label at a time. A nightly that fails five nights
+        # running is one thread with five comments, not five issues.
+        existing=""
+        if [[ -n "$have_label" ]]; then
+          existing="$(gh issue list --state open --label "$LABEL" --limit 1 \
+            --json number --jq '.[0].number // empty' 2>/dev/null || true)"
+        fi
+
+        if [[ -n "$existing" ]]; then
+          if gh issue comment "$existing" --body-file "$BODY_FILE"; then
+            echo "Commented on existing #${existing}." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::error::Could not comment on issue #${existing}. The report is in this job's summary."
+          fi
+        elif [[ -n "$have_label" ]]; then
+          if gh issue create --title "$TITLE" --label "$LABEL" --body-file "$BODY_FILE"; then
+            echo "Filed a new issue." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::error::Could not file an issue. The report is in this job's summary."
+          fi
+        else
+          if gh issue create --title "$TITLE" --body-file "$BODY_FILE"; then
+            echo "Filed a new unlabeled issue." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::error::Could not file an issue. The report is in this job's summary."
+          fi
+        fi

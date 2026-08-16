@@ -44,7 +44,7 @@ const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [],
 });
 
-const VERSION_PROBE_TIMEOUT_MS = 4_000;
+const VERSION_PROBE_TIMEOUT_MS = 10_000;
 const HERMES_ACP_MODEL_DISCOVERY_TIMEOUT_MS = 15_000;
 
 /**

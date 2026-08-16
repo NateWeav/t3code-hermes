@@ -124,9 +124,10 @@ describe("UsageAggregator", () => {
     const result = aggregate([
       record(),
       record({ provider: "codex", model: "gpt-5.6-sol" }),
+      record({ provider: "hermes", model: "custom/gpt-5.6-sol" }),
       record({ model: "claude-opus-5" }),
     ]);
 
-    expect(result.buckets).toHaveLength(3);
+    expect(result.buckets).toHaveLength(4);
   });
 });

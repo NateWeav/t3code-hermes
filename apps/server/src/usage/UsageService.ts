@@ -38,6 +38,7 @@ import * as ServerSettings from "../serverSettings.ts";
 import { resolveClaudeHomePath } from "../provider/Drivers/ClaudeHome.ts";
 import { resolveCodexHomeLayout } from "../provider/Drivers/CodexHomeLayout.ts";
 import { UsageAggregator } from "./usageAggregation.ts";
+import { readHermesUsageRecords } from "./usageHermes.ts";
 import { parseRateTable, type RateTable } from "./usagePricing.ts";
 import {
   listTranscriptFiles,
@@ -196,7 +197,7 @@ export const make = Effect.gen(function* () {
       return nestedExists ? nested : path.join(homePath, "projects");
     });
 
-  /** Resolves the transcript directory for each provider. */
+  /** Resolves the transcript or canonical state source for each provider. */
   const resolveTranscriptDirs = Effect.fn("UsageService.resolveTranscriptDirs")(function* () {
     // A settings failure must surface as an error: swallowing it here would
     // present "zero usage from every provider" as a valid answer.
@@ -217,10 +218,12 @@ export const make = Effect.gen(function* () {
     const claudeHome = yield* resolveClaudeHomePath(settings.providers.claudeAgent);
     const claudeDir = yield* resolveClaudeTranscriptDir(claudeHome);
     const codexLayout = yield* resolveCodexHomeLayout(settings.providers.codex);
+    const hermesHome = process.env["HERMES_HOME"]?.trim() || path.join(NodeOS.homedir(), ".hermes");
 
     return [
       { provider: "claude" as const, dir: claudeDir },
       { provider: "codex" as const, dir: path.join(codexLayout.sharedHomePath, "sessions") },
+      { provider: "hermes" as const, dir: hermesHome },
     ];
   });
 
@@ -326,20 +329,57 @@ export const make = Effect.gen(function* () {
     const walkedRoots: string[] = [];
 
     for (const { provider, dir } of dirs) {
+      // Hermes reports a single canonical database rather than a transcript
+      // tree, so the scanned source is a file inside `dir` while the volume
+      // is still probed from the directory itself.
+      const sourcePath = provider === "hermes" ? path.join(dir, "state.db") : dir;
       const volumeId = yield* Effect.promise(() => readDirectoryVolumeId(dir));
       const exists = yield* fileSystem
-        .exists(dir)
+        .exists(sourcePath)
         .pipe(Effect.catchCause(() => Effect.succeed(false)));
 
       if (!exists) {
         sources.push({
-          fingerprint: { hostId, provider, resolvedHomePath: dir, volumeId },
+          fingerprint: { hostId, provider, resolvedHomePath: sourcePath, volumeId },
           status: "missing",
           scannedFiles: 0,
           skippedFiles: 0,
           malformedRecords: 0,
           distinctSessions: 0,
-          message: "No transcript directory on this environment.",
+          message:
+            provider === "hermes"
+              ? "No Hermes state database on this environment."
+              : "No transcript directory on this environment.",
+        });
+        continue;
+      }
+
+      if (provider === "hermes") {
+        const records = yield* Effect.sync(() => readHermesUsageRecords(sourcePath, windowStartMs));
+        const sessionIds = new Set<string>();
+        if (records === null) {
+          sources.push({
+            fingerprint: { hostId, provider, resolvedHomePath: sourcePath, volumeId },
+            status: "failed",
+            scannedFiles: 0,
+            skippedFiles: 0,
+            malformedRecords: 0,
+            distinctSessions: 0,
+            message: "Hermes state database could not be read.",
+          });
+          continue;
+        }
+        for (const record of records) {
+          if (aggregator.add(record)) sessionIds.add(record.sessionId);
+        }
+        sources.push({
+          fingerprint: { hostId, provider, resolvedHomePath: sourcePath, volumeId },
+          status: "ok",
+          scannedFiles: 1,
+          skippedFiles: 0,
+          malformedRecords: 0,
+          distinctSessions: sessionIds.size,
+          message: null,
         });
         continue;
       }

@@ -73,7 +73,10 @@ jobs:
       !failure() && !cancelled() &&
       (github.event_name != 'schedule' || needs.check_changes.outputs.has_changes == 'true')
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    # Check, typecheck and the full test suite run serially here, where CI
+    # splits them across two parallel jobs budgeted at 10 and 30 minutes. Ten
+    # minutes was never enough and cut every nightly off mid-test-run.
+    timeout-minutes: 25
     outputs:
       release_channel: ${{ steps.release_meta.outputs.release_channel }}
       version: ${{ steps.release_meta.outputs.version }}

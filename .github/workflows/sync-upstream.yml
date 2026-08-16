@@ -149,6 +149,21 @@ jobs:
 
           exit 1
 
+      - name: Push main
+        if: steps.merge.outputs.status == 'merged'
+        run: git push origin HEAD:main
+
+      - name: Trigger CI
+        if: steps.merge.outputs.status == 'merged'
+        # Pushes authenticated with the default GITHUB_TOKEN do not start other
+        # workflows, so CI is dispatched by hand. (The nightly release workflow
+        # is cron-driven and needs no push trigger.)
+        run: gh workflow run ci.yml --ref main
+
+      # Advisory, and deliberately after the push: the merge is already correct
+      # by the time this runs, so a heuristic must never be what keeps it from
+      # landing. This step once died on its own grep and silently discarded a
+      # clean merge.
       - id: drift
         name: Check sibling adapter drift
         if: steps.merge.outputs.status == 'merged'
@@ -165,10 +180,16 @@ jobs:
 
           # grep -a throughout: some tracked sources contain NUL bytes and grep
           # would otherwise treat the stream as binary and print nothing useful.
+          #
+          # `|| true` on every grep: the runner's default shell is `bash -e -o
+          # pipefail`, which `set -uo pipefail` above does not undo. A grep that
+          # matches nothing — the ordinary case for an upstream day that left
+          # the adapters alone — exits 1 and would otherwise kill the step.
           adapters="$(
             grep -aE '^apps/server/src/provider/Drivers/(Claude|Codex|Cursor|Grok|OpenCode)' "$RUNNER_TEMP/incoming.txt" \
               | sed -E 's#^apps/server/src/provider/Drivers/(Claude|Codex|Cursor|Grok|OpenCode).*#\1#' \
-              | sort -u
+              | sort -u \
+              || true
           )"
           adapter_count="$(printf '%s' "$adapters" | grep -ac . || true)"
 
@@ -212,17 +233,6 @@ jobs:
             echo "commit that merged cleanly while leaving the Hermes copy broken — git"
             echo "cannot see that kind of drift. The merge already landed; this is advisory."
           } > "$RUNNER_TEMP/parity-issue.md"
-
-      - name: Push main
-        if: steps.merge.outputs.status == 'merged'
-        run: git push origin HEAD:main
-
-      - name: Trigger CI
-        if: steps.merge.outputs.status == 'merged'
-        # Pushes authenticated with the default GITHUB_TOKEN do not start other
-        # workflows, so CI is dispatched by hand. (The nightly release workflow
-        # is cron-driven and needs no push trigger.)
-        run: gh workflow run ci.yml --ref main
 
       - name: Open Hermes parity review issue
         if: steps.merge.outputs.status == 'merged' && steps.drift.outputs.review == 'true'

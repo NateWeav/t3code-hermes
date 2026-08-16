@@ -415,6 +415,47 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
   } satisfies CodexAppServerProviderSnapshot;
 });
 
+/** Reads account metadata and plan rate limits without starting a chat session. */
+export const readCodexAccountQuota = Effect.fn("readCodexAccountQuota")(function* (input: {
+  readonly binaryPath: string;
+  readonly homePath?: string;
+  readonly launchArgs?: string;
+  readonly cwd: string;
+  readonly environment?: NodeJS.ProcessEnv;
+}) {
+  const resolvedHomePath = input.homePath ? expandHomePath(input.homePath) : undefined;
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const environment = {
+    ...input.environment,
+    ...(resolvedHomePath ? { CODEX_HOME: resolvedHomePath } : {}),
+  };
+  const spawnCommand = yield* resolveSpawnCommand(
+    input.binaryPath,
+    codexAppServerArgs(input.launchArgs),
+    { env: environment, extendEnv: true },
+  );
+  const child = yield* spawner.spawn(
+    ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+      cwd: input.cwd,
+      env: environment,
+      extendEnv: true,
+      forceKillAfter: CODEX_APP_SERVER_PROBE_FORCE_KILL_AFTER,
+      shell: spawnCommand.shell,
+    }),
+  );
+  const clientContext = yield* Layer.build(CodexClient.layerChildProcess(child));
+  const client = yield* Effect.service(CodexClient.CodexAppServerClient).pipe(
+    Effect.provide(clientContext),
+  );
+  yield* client.request("initialize", buildCodexInitializeParams());
+  yield* client.notify("initialized", undefined);
+  const [account, rateLimits] = yield* Effect.all(
+    [client.request("account/read", {}), client.request("account/rateLimits/read", undefined)],
+    { concurrency: "unbounded" },
+  );
+  return { account, rateLimits };
+});
+
 const emptyCodexModelsFromSettings = (codexSettings: CodexSettings): ServerProvider["models"] => {
   const models = new Set<string>();
   for (const model of codexSettings.customModels) {

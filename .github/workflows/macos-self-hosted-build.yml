@@ -1,0 +1,78 @@
+name: macOS Self-Hosted Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: macos-self-hosted-build
+  cancel-in-progress: true
+
+jobs:
+  build_macos_arm64:
+    name: Build macOS arm64 on MacBook Air
+    runs-on: [self-hosted, macOS, ARM64, t3code-mac-arm64]
+    timeout-minutes: 90
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Ensure Electron runtime is installed
+        run: vp run --filter @t3tools/desktop ensure:electron
+
+      - name: Compile desktop application
+        run: vp run build:desktop
+
+      - name: Package unsigned macOS arm64 build
+        shell: bash
+        run: |
+          vp run dist:desktop:artifact \
+            --platform mac \
+            --target dmg \
+            --arch arm64 \
+            --build-version "0.0.0-ci.${GITHUB_RUN_NUMBER}" \
+            --verbose
+
+      - name: Verify build output
+        shell: bash
+        run: |
+          shopt -s nullglob
+          artifacts=(release/*.dmg release/*.zip release/*.blockmap release/*-mac.yml)
+          if (( ${#artifacts[@]} == 0 )); then
+            echo "No macOS release artifacts were produced." >&2
+            exit 1
+          fi
+          printf '%s\n' "${artifacts[@]}"
+
+      - name: Upload macOS arm64 artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: t3code-macos-arm64-${{ github.sha }}
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/*.blockmap
+            release/*-mac.yml
+          if-no-files-found: error
+          retention-days: 14

@@ -76,7 +76,9 @@ concurrency:
 jobs:
   production:
     name: EAS Production ${{ github.event_name == 'push' && 'auto' || inputs.mode }}
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    # Fork guard: EAS production builds/OTAs target upstream's Expo project.
+    if: github.repository == 'pingdotgg/t3code'
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     env:

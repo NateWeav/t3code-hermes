@@ -17,7 +17,10 @@ concurrency:
 jobs:
   deploy_relay:
     name: Deploy production relay
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    # Fork guard: the relay is upstream-only infrastructure (Cloudflare, Clerk,
+    # PlanetScale) and forks hold none of those credentials.
+    if: github.repository == 'pingdotgg/t3code'
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment:
       name: production

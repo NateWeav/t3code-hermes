@@ -5,6 +5,9 @@ on:
   push:
     branches:
       - main
+  # Pushes made by sync-upstream.yml use the default GITHUB_TOKEN, which does
+  # not trigger workflows; that job dispatches this one explicitly instead.
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.sha }}
@@ -13,7 +16,7 @@ concurrency:
 jobs:
   check:
     name: Check
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -59,7 +62,7 @@ jobs:
 
   test:
     name: Test
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -112,7 +115,8 @@ jobs:
 
   mobile_native_static_analysis:
     name: Mobile Native Static Analysis
-    runs-on: blacksmith-6vcpu-macos-26
+    # Self-hosted Apple Silicon runner; queues while that machine is offline.
+    runs-on: [self-hosted, macOS, ARM64, t3code-mac-arm64]
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -140,7 +144,7 @@ jobs:
 
   release_smoke:
     name: Release Smoke
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout

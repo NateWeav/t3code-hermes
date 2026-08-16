@@ -1,0 +1,6 @@
+# actionlint cannot know about the fork's self-hosted runner labels, so declare
+# them here. The runner is a MacBook Air on Apple Silicon; every macOS job in
+# this repo targets it (see FORK.md, "CI on the fork").
+self-hosted-runner:
+  labels:
+    - t3code-mac-arm64

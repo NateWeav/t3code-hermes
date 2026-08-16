@@ -20,6 +20,9 @@ permissions:
 jobs:
   collect-targets:
     name: Collect PR targets
+    # Fork guard: vouching is upstream's contributor process. Skipping this job
+    # also skips `label`, which needs it and has no status-check `if`.
+    if: github.repository == 'pingdotgg/t3code'
     runs-on: ubuntu-24.04
     outputs:
       targets: ${{ steps.collect.outputs.targets }}

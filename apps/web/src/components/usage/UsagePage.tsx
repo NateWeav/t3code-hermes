@@ -23,6 +23,7 @@ import {
 import { ScrollArea } from "../ui/scroll-area";
 import { Button } from "../ui/button";
 import { SidebarInset } from "../ui/sidebar";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { WorkspaceBreadcrumb, WorkspaceBreadcrumbItem } from "../WorkspaceBreadcrumb";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../../workspaceTitlebar";
 import { UsageChartLegend, UsageProviderChart, type UsageChartMetric } from "./UsageProviderChart";
@@ -592,9 +593,16 @@ function QuotaAccountCard({
           </div>
         </div>
         {account.status === "failed" ? (
-          <span title="Showing the last successful values" className="text-amber-500">
-            <AlertTriangleIcon className="size-4" />
-          </span>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <span className="text-amber-500">
+                  <AlertTriangleIcon className="size-4" />
+                </span>
+              }
+            />
+            <TooltipPopup side="top">Showing the last successful values</TooltipPopup>
+          </Tooltip>
         ) : null}
       </div>
 

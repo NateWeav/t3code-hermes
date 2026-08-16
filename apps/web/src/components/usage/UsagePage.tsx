@@ -1,3 +1,7 @@
+import {
+  quotaEnvironmentLabel,
+  type PresentedQuotaAccount,
+} from "@t3tools/client-runtime/state/provider-quota";
 import type { ProviderQuotaAccount, UsageProviderKind } from "@t3tools/contracts";
 import { AlertTriangleIcon, CheckIcon, RefreshCwIcon, XIcon } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -461,8 +465,6 @@ export function UsagePage() {
   );
 }
 
-type PresentedQuotaAccount = ProviderQuotaAccount & { readonly environmentLabel: string };
-
 function quotaProvider(account: ProviderQuotaAccount): UsageProviderKind {
   return account.provider === "claudeAgent"
     ? "claude"
@@ -533,11 +535,11 @@ function QuotaLimitsView({
       ) : accounts.length === 0 ? (
         <div className="flex min-h-52 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border px-6 text-center">
           <span className="text-sm text-foreground">
-            {error ?? "No supported provider instances found."}
+            {error ?? "No provider accounts are reporting plan limits."}
           </span>
           <span className="text-xs text-muted-foreground">
             {error === null
-              ? "Configure Codex, Claude, or OpenCode in Settings → Providers."
+              ? "Sign in to Codex, Claude, or OpenCode in Settings → Providers."
               : "Try refreshing or check the environment connection."}
           </span>
         </div>
@@ -545,7 +547,7 @@ function QuotaLimitsView({
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {accounts.map((account) => (
             <QuotaAccountCard
-              key={`${account.environmentLabel}:${account.providerInstanceId}`}
+              key={account.key}
               account={account}
               showEnvironment={environmentCount > 1}
             />
@@ -564,13 +566,13 @@ function QuotaAccountCard({
   readonly showEnvironment: boolean;
 }) {
   const provider = quotaProvider(account);
-  const strongestWindow = account.windows.reduce(
-    (strongest, window) =>
-      strongest === null || window.usedPercent > strongest.usedPercent ? window : strongest,
-    null as ProviderQuotaAccount["windows"][number] | null,
+  const [firstWindow, ...otherWindows] = account.windows;
+  if (firstWindow === undefined) return null;
+  const strongestWindow = otherWindows.reduce(
+    (strongest, window) => (window.usedPercent > strongest.usedPercent ? window : strongest),
+    firstWindow,
   );
-  const remaining =
-    strongestWindow === null ? null : Math.max(0, 100 - strongestWindow.usedPercent);
+  const remaining = Math.max(0, 100 - strongestWindow.usedPercent);
   const color = PROVIDER_PRESENTATION[provider].color;
   return (
     <article className="flex min-h-52 flex-col rounded-xl border border-border bg-card p-5">
@@ -585,7 +587,7 @@ function QuotaAccountCard({
               {[
                 account.accountLabel,
                 account.planLabel,
-                showEnvironment ? account.environmentLabel : null,
+                showEnvironment ? quotaEnvironmentLabel(account) : null,
               ]
                 .filter(Boolean)
                 .join(" · ") || quotaProviderLabel(account)}
@@ -606,44 +608,33 @@ function QuotaAccountCard({
         ) : null}
       </div>
 
-      {strongestWindow === null ? (
-        <div className="mt-7 flex flex-1 flex-col gap-2">
-          <span className="text-xl font-medium text-foreground">
-            {account.status === "setupRequired" ? "Setup needed" : "Unavailable"}
-          </span>
-          <p className="text-xs leading-relaxed text-muted-foreground">{account.message}</p>
-        </div>
-      ) : (
-        <>
-          <div className="mt-7 text-3xl font-semibold tracking-tight text-foreground tabular-nums">
-            {Math.round(remaining ?? 0)}% left
+      <div className="mt-7 text-3xl font-semibold tracking-tight text-foreground tabular-nums">
+        {Math.round(remaining)}% left
+      </div>
+      <p className="mt-0.5 text-xs text-muted-foreground">
+        Most constrained: {strongestWindow.label}
+      </p>
+      <div className="mt-5 flex flex-col gap-4">
+        {account.windows.map((window) => (
+          <div key={window.id} className="flex flex-col gap-1.5">
+            <div className="flex items-baseline justify-between gap-3 text-xs">
+              <span className="text-foreground">{window.label}</span>
+              <span className="text-muted-foreground tabular-nums">
+                {Math.round(window.usedPercent)}% used · {formatResetTime(window.resetsAt)}
+              </span>
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-full rounded-full"
+                style={{
+                  width: `${window.usedPercent}%`,
+                  backgroundColor: window.usedPercent >= 85 ? "var(--color-amber-500)" : color,
+                }}
+              />
+            </div>
           </div>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Most constrained: {strongestWindow.label}
-          </p>
-          <div className="mt-5 flex flex-col gap-4">
-            {account.windows.map((window) => (
-              <div key={window.id} className="flex flex-col gap-1.5">
-                <div className="flex items-baseline justify-between gap-3 text-xs">
-                  <span className="text-foreground">{window.label}</span>
-                  <span className="text-muted-foreground tabular-nums">
-                    {Math.round(window.usedPercent)}% used · {formatResetTime(window.resetsAt)}
-                  </span>
-                </div>
-                <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-                  <div
-                    className="h-full rounded-full"
-                    style={{
-                      width: `${window.usedPercent}%`,
-                      backgroundColor: window.usedPercent >= 85 ? "var(--color-amber-500)" : color,
-                    }}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
+        ))}
+      </div>
       {account.status === "failed" ? (
         <div className="mt-auto pt-4 text-[10px] text-muted-foreground">{account.message}</div>
       ) : null}

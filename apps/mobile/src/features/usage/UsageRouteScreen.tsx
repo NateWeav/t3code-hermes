@@ -1,4 +1,8 @@
 import { useNavigation } from "@react-navigation/native";
+import {
+  quotaEnvironmentLabel,
+  type PresentedQuotaAccount,
+} from "@t3tools/client-runtime/state/provider-quota";
 import type { ProviderQuotaAccount } from "@t3tools/contracts";
 import type { DailyTotals, MergedUsage } from "@t3tools/shared/usageMerge";
 import {
@@ -178,8 +182,6 @@ export function UsageRouteScreen() {
   );
 }
 
-type PresentedQuotaAccount = ProviderQuotaAccount & { readonly environmentLabel: string };
-
 function mobileQuotaProvider(account: ProviderQuotaAccount): "codex" | "claude" | "opencode" {
   return account.provider === "claudeAgent"
     ? "claude"
@@ -215,7 +217,7 @@ function MobileQuotaLimits(props: {
   if (props.accounts.length === 0) {
     return (
       <Text className="py-16 text-center text-base text-foreground-muted">
-        {props.error ?? "Configure Codex, Claude, or OpenCode to see plan limits."}
+        {props.error ?? "Sign in to Codex, Claude, or OpenCode to see plan limits."}
       </Text>
     );
   }
@@ -230,7 +232,7 @@ function MobileQuotaLimits(props: {
       </View>
       {props.accounts.map((account) => (
         <MobileQuotaCard
-          key={`${account.environmentLabel}:${account.providerInstanceId}`}
+          key={account.key}
           account={account}
           showEnvironment={props.environmentCount > 1}
         />
@@ -245,10 +247,11 @@ function MobileQuotaCard(props: {
 }) {
   const colors = useProviderColors();
   const provider = mobileQuotaProvider(props.account);
-  const strongest = props.account.windows.reduce(
-    (current, window) =>
-      current === null || window.usedPercent > current.usedPercent ? window : current,
-    null as ProviderQuotaAccount["windows"][number] | null,
+  const [firstWindow, ...otherWindows] = props.account.windows;
+  if (firstWindow === undefined) return null;
+  const strongest = otherWindows.reduce(
+    (current, window) => (window.usedPercent > current.usedPercent ? window : current),
+    firstWindow,
   );
   return (
     <View className="gap-5 rounded-[24px] border-continuous bg-card p-5">
@@ -262,53 +265,40 @@ function MobileQuotaCard(props: {
             {[
               props.account.accountLabel,
               props.account.planLabel,
-              props.showEnvironment ? props.account.environmentLabel : null,
+              props.showEnvironment ? quotaEnvironmentLabel(props.account) : null,
             ]
               .filter(Boolean)
               .join(" · ") || PROVIDER_LABEL[provider]}
           </Text>
         </View>
       </View>
-      {strongest === null ? (
-        <View className="gap-1">
-          <Text className="text-2xl font-t3-semibold text-foreground">
-            {props.account.status === "setupRequired" ? "Setup needed" : "Unavailable"}
-          </Text>
-          <Text className="text-sm text-foreground-muted">{props.account.message}</Text>
-        </View>
-      ) : (
-        <>
-          <View className="gap-0.5">
-            <Text className="text-4xl font-t3-bold tabular-nums text-foreground">
-              {Math.round(100 - strongest.usedPercent)}% left
-            </Text>
-            <Text className="text-sm text-foreground-muted">
-              Most constrained: {strongest.label}
-            </Text>
+      <View className="gap-0.5">
+        <Text className="text-4xl font-t3-bold tabular-nums text-foreground">
+          {Math.round(100 - strongest.usedPercent)}% left
+        </Text>
+        <Text className="text-sm text-foreground-muted">Most constrained: {strongest.label}</Text>
+      </View>
+      <View className="gap-4">
+        {props.account.windows.map((window) => (
+          <View key={window.id} className="gap-2">
+            <View className="flex-row justify-between gap-3">
+              <Text className="text-sm text-foreground">{window.label}</Text>
+              <Text className="text-sm tabular-nums text-foreground-muted">
+                {Math.round(window.usedPercent)}% · {mobileFormatReset(window.resetsAt)}
+              </Text>
+            </View>
+            <View className="h-2 overflow-hidden rounded-full bg-subtle">
+              <View
+                className="h-full rounded-full"
+                style={{
+                  width: `${window.usedPercent}%`,
+                  backgroundColor: window.usedPercent >= 85 ? "#f59e0b" : colors[provider],
+                }}
+              />
+            </View>
           </View>
-          <View className="gap-4">
-            {props.account.windows.map((window) => (
-              <View key={window.id} className="gap-2">
-                <View className="flex-row justify-between gap-3">
-                  <Text className="text-sm text-foreground">{window.label}</Text>
-                  <Text className="text-sm tabular-nums text-foreground-muted">
-                    {Math.round(window.usedPercent)}% · {mobileFormatReset(window.resetsAt)}
-                  </Text>
-                </View>
-                <View className="h-2 overflow-hidden rounded-full bg-subtle">
-                  <View
-                    className="h-full rounded-full"
-                    style={{
-                      width: `${window.usedPercent}%`,
-                      backgroundColor: window.usedPercent >= 85 ? "#f59e0b" : colors[provider],
-                    }}
-                  />
-                </View>
-              </View>
-            ))}
-          </View>
-        </>
-      )}
+        ))}
+      </View>
     </View>
   );
 }

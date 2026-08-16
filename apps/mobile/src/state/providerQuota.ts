@@ -1,4 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
+import { presentQuotaAccounts } from "@t3tools/client-runtime/state/provider-quota";
 import type { EnvironmentId, ProviderQuotaAccount } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
@@ -39,16 +40,7 @@ export function useProviderQuota() {
       );
     }
   }, [environments]);
-  const accounts = useMemo(
-    () =>
-      environments.flatMap((environment) =>
-        environment.accounts.map((account) => ({
-          ...account,
-          environmentLabel: environment.label,
-        })),
-      ),
-    [environments],
-  );
+  const accounts = useMemo(() => presentQuotaAccounts(environments), [environments]);
   return {
     accounts,
     environments,

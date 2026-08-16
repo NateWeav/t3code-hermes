@@ -1,0 +1,25 @@
+; systemd USER unit — install at ~/.config/systemd/user/t3code-update.timer
+;
+;   systemctl --user daemon-reload
+;   systemctl --user enable --now t3code-update.timer
+;   systemctl --user list-timers t3code-update.timer
+;
+; Requires lingering (`sudo loginctl enable-linger $USER`) to fire while logged out.
+
+[Unit]
+Description=Nightly self-update for the T3 Code server (Hermes fork)
+Documentation=file:%h/t3code/infra/hyperion/README.md
+
+[Timer]
+Unit=t3code-update.service
+; 09:00 UTC = 05:00 US/Eastern in EDT, 04:00 in EST. Deliberately in UTC so the
+; window does not drift across DST.
+OnCalendar=*-*-* 09:00:00 UTC
+; Spread the load (and the GitHub fetch) over the following half hour.
+RandomizedDelaySec=30m
+AccuracySec=1m
+; Run once after boot if the machine was off when the timer should have fired.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

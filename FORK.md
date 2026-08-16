@@ -130,6 +130,12 @@ systemctl --user daemon-reload && systemctl --user enable --now t3code
 sudo loginctl enable-linger "$USER"   # survive logout and reboot
 ```
 
+**Keeping it current.** [`infra/hyperion/`](./infra/hyperion) has a self-update script plus a
+systemd timer that nightly fetches the fork, stops the service, reinstalls, rebuilds the web app,
+restarts, health-checks, and rolls back on failure. It also converts an rsync'd (non-git) copy of
+the source into a real checkout on first run. See
+[infra/hyperion/README.md](./infra/hyperion/README.md).
+
 **Bind deliberately.** The server controls agents on the host, which is remote code execution by
 design. Bind to a private interface — a Tailscale address, or loopback behind a reverse proxy.
 Do not bind `0.0.0.0` on a machine with a public IP, and do not put it behind Tailscale Funnel.

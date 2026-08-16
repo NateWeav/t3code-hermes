@@ -6,7 +6,9 @@ on:
       - "v*.*.*"
       - "!v*-nightly.*"
   schedule:
-    - cron: "0 */3 * * *"
+    # Once nightly (07:00 UTC). Upstream builds every three hours; the fork
+    # neither needs nor wants that many GitHub-hosted runner minutes.
+    - cron: "0 7 * * *"
   workflow_dispatch:
     inputs:
       channel:
@@ -30,7 +32,7 @@ jobs:
   check_changes:
     name: Check for changes since last nightly
     if: github.event_name == 'schedule'
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     outputs:
       has_changes: ${{ steps.check.outputs.has_changes }}
     steps:
@@ -70,7 +72,7 @@ jobs:
     if: |
       !failure() && !cancelled() &&
       (github.event_name != 'schedule' || needs.check_changes.outputs.has_changes == 'true')
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
       release_channel: ${{ steps.release_meta.outputs.release_channel }}
@@ -178,7 +180,7 @@ jobs:
     name: Resolve T3 Connect public config
     needs: preflight
     if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' }}
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     environment:
       name: production
@@ -214,8 +216,20 @@ jobs:
             args:
               - --filter=t3code-relay...
 
+      - id: relay_credentials
+        name: Detect relay credentials
+        shell: bash
+        run: |
+          if [[ -n "${CLOUDFLARE_ACCOUNT_ID:-}" && -n "${CLOUDFLARE_API_TOKEN:-}" ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "Cloudflare credentials are not configured; skipping the relay state read." >&2
+          fi
+
       - id: relay_state
         name: Read production relay tracing config
+        if: steps.relay_credentials.outputs.available == 'true'
         shell: bash
         run: |
           vp run --filter t3code-relay deploy \
@@ -223,6 +237,15 @@ jobs:
             --read-state \
             --github-output \
             --github-env-file "$RUNNER_TEMP/relay-client-tracing.env"
+
+      - name: Write empty relay client tracing config
+        if: steps.relay_credentials.outputs.available != 'true'
+        shell: bash
+        run: |
+          # Downstream jobs `cat` this file into $GITHUB_ENV, so it must exist
+          # and must stay parseable — an empty file is the only safe stand-in
+          # (a comment line would make the env-file parser fail).
+          : > "$RUNNER_TEMP/relay-client-tracing.env"
 
       - name: Upload relay client tracing config
         uses: actions/upload-artifact@v7
@@ -255,8 +278,22 @@ jobs:
             fi
           done
           if (( ${#missing[@]} > 0 )); then
-            printf 'Missing required relay deployment configuration: %s\n' "${missing[*]}" >&2
-            exit 1
+            if [[ "${GITHUB_REPOSITORY}" == "pingdotgg/t3code" ]]; then
+              printf 'Missing required relay deployment configuration: %s\n' "${missing[*]}" >&2
+              exit 1
+            fi
+
+            # Forks have no T3 Connect infrastructure. Emit empty outputs so the
+            # desktop/CLI builds run with T3 Connect disabled instead of taking
+            # the whole release chain down with them.
+            printf 'Relay public config unavailable (%s); building without T3 Connect.\n' "${missing[*]}"
+            {
+              echo "clerk_publishable_key="
+              echo "clerk_jwt_template="
+              echo "clerk_cli_oauth_client_id="
+              echo "relay_url="
+            } >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
           echo "clerk_publishable_key=$CLERK_PUBLISHABLE_KEY" >> "$GITHUB_OUTPUT"
@@ -274,7 +311,7 @@ jobs:
     name: Build WSL node-pty (linux-x64)
     needs: [preflight]
     if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' }}
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Checkout
@@ -328,7 +365,10 @@ jobs:
     needs: [preflight, relay_public_config, build_wsl_node_pty]
     if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.relay_public_config.result == 'success' }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    # The mac builds share one self-hosted laptop and start from colder caches
+    # than a hosted runner, so they get the same 90 minutes as
+    # macos-self-hosted-build.yml.
+    timeout-minutes: ${{ matrix.platform == 'mac' && 90 || 30 }}
     env:
       T3CODE_CLERK_PUBLISHABLE_KEY: ${{ needs.relay_public_config.outputs.clerk_publishable_key }}
       T3CODE_CLERK_JWT_TEMPLATE: ${{ needs.relay_public_config.outputs.clerk_jwt_template }}
@@ -338,29 +378,33 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Both mac entries run on the self-hosted Apple Silicon runner: x64
+          # cross-builds fine there for electron-builder and for the Rust
+          # resource-monitor target, and it keeps 10x macOS billing off the
+          # nightly. Jobs queue while that machine is offline.
           - label: macOS arm64
-            runner: blacksmith-12vcpu-macos-26
+            runner: [self-hosted, macOS, ARM64, t3code-mac-arm64]
             platform: mac
             target: dmg
             arch: arm64
             rust_target: aarch64-apple-darwin
             resource_key: darwin-arm64
           - label: macOS x64
-            runner: blacksmith-12vcpu-macos-26
+            runner: [self-hosted, macOS, ARM64, t3code-mac-arm64]
             platform: mac
             target: dmg
             arch: x64
             rust_target: x86_64-apple-darwin
             resource_key: darwin-x64
           - label: Linux x64
-            runner: blacksmith-32vcpu-ubuntu-2404
+            runner: ubuntu-24.04
             platform: linux
             target: AppImage
             arch: x64
             rust_target: x86_64-unknown-linux-gnu
             resource_key: linux-x64
           - label: Windows x64
-            runner: blacksmith-32vcpu-windows-2025
+            runner: windows-latest
             platform: win
             target: nsis
             arch: x64
@@ -408,7 +452,9 @@ jobs:
         run: |
           config_path="$RUNNER_TEMP/relay-client-tracing/relay-client-tracing.env"
           tracing_token="$(sed -n 's/^T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN=//p' "$config_path")"
-          echo "::add-mask::$tracing_token"
+          if [[ -n "$tracing_token" ]]; then
+            echo "::add-mask::$tracing_token"
+          fi
           cat "$config_path" >> "$GITHUB_ENV"
 
       - name: Align package versions to release version
@@ -665,8 +711,10 @@ jobs:
   publish_cli:
     name: Publish CLI to npm
     needs: [preflight, relay_public_config, build]
-    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.relay_public_config.result == 'success' && needs.build.result == 'success' }}
-    runs-on: ubuntu-24.04 # blacksmith-8vcpu-ubuntu-2404
+    # The leading repository check is a fork guard: the npm package `t3` is
+    # upstream's and forks cannot publish it.
+    if: ${{ !failure() && !cancelled() && github.repository == 'pingdotgg/t3code' && needs.preflight.result == 'success' && needs.relay_public_config.result == 'success' && needs.build.result == 'success' }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -708,7 +756,9 @@ jobs:
         run: |
           config_path="$RUNNER_TEMP/relay-client-tracing/relay-client-tracing.env"
           tracing_token="$(sed -n 's/^T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN=//p' "$config_path")"
-          echo "::add-mask::$tracing_token"
+          if [[ -n "$tracing_token" ]]; then
+            echo "::add-mask::$tracing_token"
+          fi
           cat "$config_path" >> "$GITHUB_ENV"
 
       - name: Align package versions to release version
@@ -744,8 +794,10 @@ jobs:
   release:
     name: Publish GitHub Release
     needs: [preflight, build, publish_cli]
-    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.build.result == 'success' && needs.publish_cli.result == 'success' }}
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    # The GitHub Release only needs the desktop artifacts, so a skipped
+    # publish_cli (fork, no npm rights) must not block it.
+    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.build.result == 'success' && (needs.publish_cli.result == 'success' || needs.publish_cli.result == 'skipped') }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: write
@@ -859,7 +911,10 @@ jobs:
   publish_aur:
     name: Publish AUR package
     needs: [preflight, release]
-    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.release.result == 'success' }}
+    # The leading repository check is a fork guard: the AUR package is
+    # upstream's, and forks have no AUR_SSH_PRIVATE_KEY to hand the reusable
+    # workflow (which declares it required).
+    if: ${{ !failure() && !cancelled() && github.repository == 'pingdotgg/t3code' && needs.preflight.result == 'success' && needs.release.result == 'success' }}
     uses: ./.github/workflows/publish-aur.yml
     with:
       release_tag: ${{ needs.preflight.outputs.tag }}
@@ -870,7 +925,7 @@ jobs:
     name: Deploy hosted web app
     needs: [preflight, relay_public_config, release]
     if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.relay_public_config.result == 'success' && needs.release.result == 'success' }}
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
       T3CODE_CLERK_PUBLISHABLE_KEY: ${{ needs.relay_public_config.outputs.clerk_publishable_key }}
@@ -885,7 +940,22 @@ jobs:
       T3CODE_WEB_NIGHTLY_DOMAIN: ${{ vars.T3CODE_WEB_NIGHTLY_DOMAIN }}
       VERCEL_TEAM_SLUG: ${{ vars.VERCEL_TEAM_SLUG }}
     steps:
+      # `secrets` is not available in job-level `if`, so the Vercel probe runs
+      # as the first step and every later step is gated on its output. Forks
+      # have no hosted web app; the job reports success with nothing deployed.
+      - id: vercel
+        name: Detect Vercel credentials
+        shell: bash
+        run: |
+          if [[ -n "${VERCEL_TOKEN:-}" && -n "${VERCEL_ORG_ID:-}" && -n "${VERCEL_PROJECT_ID:-}" ]]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "Vercel credentials are not configured; skipping the hosted web deploy." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Checkout
+        if: steps.vercel.outputs.configured == 'true'
         uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.ref }}
@@ -895,6 +965,7 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - name: Setup Vite+
+        if: steps.vercel.outputs.configured == 'true'
         uses: voidzero-dev/setup-vp@v1
         with:
           node-version-file: package.json
@@ -905,34 +976,36 @@ jobs:
               - --filter=@t3tools/web...
 
       - name: Download relay client tracing config
+        if: steps.vercel.outputs.configured == 'true'
         uses: actions/download-artifact@v8
         with:
           name: relay-client-tracing-config
           path: ${{ runner.temp }}/relay-client-tracing
 
       - name: Load relay client tracing config
+        if: steps.vercel.outputs.configured == 'true'
         shell: bash
         run: |
           config_path="$RUNNER_TEMP/relay-client-tracing/relay-client-tracing.env"
           tracing_token="$(sed -n 's/^T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN=//p' "$config_path")"
-          echo "::add-mask::$tracing_token"
+          if [[ -n "$tracing_token" ]]; then
+            echo "::add-mask::$tracing_token"
+          fi
           cat "$config_path" >> "$GITHUB_ENV"
 
       - name: Align package versions to release version
+        if: steps.vercel.outputs.configured == 'true'
         run: node scripts/update-release-package-versions.ts "${{ needs.preflight.outputs.version }}"
 
       - name: Refresh release lockfile
+        if: steps.vercel.outputs.configured == 'true'
         run: vp install --lockfile-only --ignore-scripts
 
       - name: Deploy and alias channel
+        if: steps.vercel.outputs.configured == 'true'
         shell: bash
         run: |
           set -euo pipefail
-
-          if [[ -z "${VERCEL_TOKEN:-}" || -z "${VERCEL_ORG_ID:-}" || -z "${VERCEL_PROJECT_ID:-}" ]]; then
-            echo "Missing one or more required Vercel secrets: VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID." >&2
-            exit 1
-          fi
 
           router_url="${T3CODE_WEB_ROUTER_URL:-https://app.t3.codes}"
           latest_domain="${T3CODE_WEB_LATEST_DOMAIN:-latest.app.t3.codes}"
@@ -989,11 +1062,30 @@ jobs:
     name: Finalize release
     if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.release.result == 'success' && needs.preflight.outputs.release_channel == 'stable' }}
     needs: [preflight, release]
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
+      # `secrets` is not available in job-level `if`, so the release-app probe
+      # runs first and gates the rest. Without the app credentials there is no
+      # token that may push to a protected main, so the version bump is skipped
+      # rather than failed.
+      - id: release_app
+        name: Detect release app credentials
+        shell: bash
+        env:
+          RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}
+          RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+        run: |
+          if [[ -n "${RELEASE_APP_ID:-}" && -n "${RELEASE_APP_PRIVATE_KEY:-}" ]]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "Release app credentials are not configured; skipping the post-release version bump." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - id: app_token
         name: Mint release app token
+        if: steps.release_app.outputs.configured == 'true'
         uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ secrets.RELEASE_APP_ID }}
@@ -1001,6 +1093,7 @@ jobs:
           owner: ${{ github.repository_owner }}
 
       - name: Checkout
+        if: steps.release_app.outputs.configured == 'true'
         uses: actions/checkout@v6
         with:
           ref: main
@@ -1014,6 +1107,7 @@ jobs:
 
       - id: app_bot
         name: Resolve GitHub App bot identity
+        if: steps.release_app.outputs.configured == 'true'
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           APP_SLUG: ${{ steps.app_token.outputs.app-slug }}
@@ -1023,6 +1117,7 @@ jobs:
           echo "email=${user_id}+${APP_SLUG}[bot]@users.noreply.github.com" >> "$GITHUB_OUTPUT"
 
       - name: Setup Vite+
+        if: steps.release_app.outputs.configured == 'true'
         uses: voidzero-dev/setup-vp@v1
         with:
           node-version-file: package.json
@@ -1034,6 +1129,7 @@ jobs:
 
       - id: update_versions
         name: Update version strings
+        if: steps.release_app.outputs.configured == 'true'
         env:
           RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
         run: node scripts/update-release-package-versions.ts "$RELEASE_VERSION" --github-output
@@ -1074,10 +1170,26 @@ jobs:
       needs.deploy_web.result == 'success' &&
       (needs.finalize.result == 'success' || needs.finalize.result == 'skipped')
     needs: [preflight, relay_public_config, release, deploy_web, finalize]
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
+      # `secrets` is not available in job-level `if`, so the webhook probe runs
+      # first and gates the rest. Forks have no Discord webhook and just skip.
+      - id: discord
+        name: Detect Discord webhook
+        shell: bash
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+        run: |
+          if [[ -n "${DISCORD_WEBHOOK_URL:-}" ]]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "Discord webhook is not configured; skipping the release announcement." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Checkout
+        if: steps.discord.outputs.configured == 'true'
         uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.ref }}
@@ -1087,6 +1199,7 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - name: Setup Vite+
+        if: steps.discord.outputs.configured == 'true'
         uses: voidzero-dev/setup-vp@v1
         with:
           node-version-file: package.json
@@ -1096,7 +1209,7 @@ jobs:
               - --filter=@t3tools/scripts...
 
       - name: Announce prerelease on Discord
-        if: needs.preflight.outputs.is_prerelease == 'true'
+        if: steps.discord.outputs.configured == 'true' && needs.preflight.outputs.is_prerelease == 'true'
         continue-on-error: true
         env:
           DISCORD_MENTION_ROLE_ID: ${{ secrets.DISCORD_RELEASE_NIGHTLY_ROLE_ID }}
@@ -1110,7 +1223,7 @@ jobs:
             --release-url "https://github.com/${{ github.repository }}/releases/tag/${{ needs.preflight.outputs.tag }}"
 
       - name: Announce latest release on Discord
-        if: needs.preflight.outputs.make_latest == 'true'
+        if: steps.discord.outputs.configured == 'true' && needs.preflight.outputs.make_latest == 'true'
         continue-on-error: true
         env:
           DISCORD_MENTION_ROLE_ID: ${{ secrets.DISCORD_RELEASE_LATEST_ROLE_ID }}

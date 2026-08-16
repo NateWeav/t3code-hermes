@@ -298,7 +298,10 @@ describe("ProviderSessionReaper", () => {
   it("keeps recently active turns alive", async () => {
     const threadId = ThreadId.make("thread-reaper-active-turn");
     const turnId = TurnId.make("turn-reaper-active");
-    const now = "2099-01-01T00:00:00.000Z";
+    // Idle long enough to clear the plain inactivity threshold (1s) but well
+    // inside the active-turn recovery threshold (10s), so this exercises the
+    // active-turn guard rather than short-circuiting before it.
+    const now = new Date(Date.now() - 4_000).toISOString();
     const harness = await createHarness({
       readModel: makeReadModel([
         {

@@ -1633,8 +1633,16 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             // Poll until the injected process boundary observes the new
             // executable. This verifies the public settings-to-probe behavior
             // without depending on timestamps assigned by TestClock.
+            //
+            // The budget is deliberately large. What this waits on is a real
+            // spawn of a missing binary, so the ENOENT that flips the instance
+            // back to `error` only arrives once the event loop gets a turn,
+            // and each iteration here yields for well under a millisecond. At
+            // 60 iterations the loop gave up after ~50ms of wall clock, which
+            // a 4-vCPU CI runner does not reliably beat; the loop still exits
+            // on the first successful poll, so a fast machine pays nothing.
             const refreshed = yield* Effect.gen(function* () {
-              for (let attempts = 0; attempts < 60; attempts += 1) {
+              for (let attempts = 0; attempts < 2000; attempts += 1) {
                 const providers = yield* registry.getProviders;
                 const codex = providers.find((provider) => provider.instanceId === "codex");
                 if (

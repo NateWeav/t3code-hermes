@@ -137,6 +137,7 @@ export function UsagePage() {
             <QuotaLimitsView
               accounts={quota.accounts}
               environmentCount={quota.environments.length}
+              error={quota.error}
               isPending={quota.isPending}
               onRefresh={quota.refresh}
             />
@@ -492,11 +493,13 @@ function formatResetTime(resetsAt: string | null): string {
 function QuotaLimitsView({
   accounts,
   environmentCount,
+  error,
   isPending,
   onRefresh,
 }: {
   readonly accounts: readonly PresentedQuotaAccount[];
   readonly environmentCount: number;
+  readonly error: string | null;
   readonly isPending: boolean;
   readonly onRefresh: () => void;
 }) {
@@ -528,9 +531,13 @@ function QuotaLimitsView({
         </div>
       ) : accounts.length === 0 ? (
         <div className="flex min-h-52 flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-border px-6 text-center">
-          <span className="text-sm text-foreground">No supported provider instances found.</span>
+          <span className="text-sm text-foreground">
+            {error ?? "No supported provider instances found."}
+          </span>
           <span className="text-xs text-muted-foreground">
-            Configure Codex, Claude, or OpenCode in Settings → Providers.
+            {error === null
+              ? "Configure Codex, Claude, or OpenCode in Settings → Providers."
+              : "Try refreshing or check the environment connection."}
           </span>
         </div>
       ) : (

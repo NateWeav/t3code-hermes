@@ -49,7 +49,7 @@ export const ProviderQuotaAccount = Schema.Struct({
 export type ProviderQuotaAccount = typeof ProviderQuotaAccount.Type;
 
 export const ProviderQuotaSummary = Schema.Struct({
-  contractVersion: Schema.Number,
+  contractVersion: Schema.Literal(PROVIDER_QUOTA_CONTRACT_VERSION),
   readAt: Schema.String,
   accounts: Schema.Array(ProviderQuotaAccount),
 });

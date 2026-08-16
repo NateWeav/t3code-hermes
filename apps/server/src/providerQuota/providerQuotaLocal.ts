@@ -64,7 +64,14 @@ interface OpenCodeCostRow {
   readonly cost: number;
 }
 
-function openCodeCostRows(database: NodeSqlite.DatabaseSync): readonly OpenCodeCostRow[] {
+const OPEN_CODE_GO_FIVE_HOUR_BUDGET_USD = 12;
+const OPEN_CODE_GO_WEEKLY_BUDGET_USD = 30;
+const OPEN_CODE_GO_MONTHLY_BUDGET_USD = 60;
+
+function openCodeCostRows(
+  database: NodeSqlite.DatabaseSync,
+  sinceMs: number,
+): readonly OpenCodeCostRow[] {
   const hasPart =
     database
       .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'part' LIMIT 1")
@@ -81,6 +88,7 @@ function openCodeCostRows(database: NodeSqlite.DatabaseSync): readonly OpenCodeC
           WHERE json_valid(data)
             AND json_extract(data, '$.providerID') = 'opencode-go'
             AND json_extract(data, '$.role') = 'assistant'
+            AND time_created >= ?
         )
         SELECT
           CAST(COALESCE(json_extract(p.data, '$.time.created'), p.time_created, m.createdMs) AS INTEGER)
@@ -111,9 +119,10 @@ function openCodeCostRows(database: NodeSqlite.DatabaseSync): readonly OpenCodeC
         WHERE json_valid(data)
           AND json_extract(data, '$.providerID') = 'opencode-go'
           AND json_extract(data, '$.role') = 'assistant'
+          AND time_created >= ?
           AND json_type(data, '$.cost') IN ('integer', 'real')
       `;
-  return (database.prepare(sql).all() as unknown as readonly OpenCodeCostRow[]).filter(
+  return (database.prepare(sql).all(sinceMs) as unknown as readonly OpenCodeCostRow[]).filter(
     (row) =>
       Number.isFinite(row.createdMs) &&
       row.createdMs > 0 &&
@@ -153,8 +162,6 @@ export function readOpenCodeGoLocalQuota(input: {
   }
 
   try {
-    const rows = openCodeCostRows(database);
-    if (rows.length === 0) return { authenticated: true, windows: [] };
     const now = DateTime.makeUnsafe(input.nowMs);
     const fiveHoursMs = 5 * 60 * 60 * 1000;
     const weekMs = 7 * 24 * 60 * 60 * 1000;
@@ -163,6 +170,8 @@ export function readOpenCodeGoLocalQuota(input: {
     const monthStartDateTime = DateTime.startOf(now, "month");
     const monthStart = monthStartDateTime.epochMilliseconds;
     const monthEnd = DateTime.add(monthStartDateTime, { months: 1 }).epochMilliseconds;
+    const rows = openCodeCostRows(database, Math.min(rollingStart, weekStart, monthStart));
+    if (rows.length === 0) return { authenticated: true, windows: [] };
     let rollingCost = 0;
     let weeklyCost = 0;
     let monthlyCost = 0;
@@ -182,21 +191,21 @@ export function readOpenCodeGoLocalQuota(input: {
         {
           id: "five-hour",
           label: "5 hour · estimated",
-          usedPercent: percent(rollingCost, 12),
+          usedPercent: percent(rollingCost, OPEN_CODE_GO_FIVE_HOUR_BUDGET_USD),
           resetsAt: iso((oldestRollingMs ?? input.nowMs) + fiveHoursMs),
           durationMinutes: 5 * 60,
         },
         {
           id: "weekly",
           label: "Weekly · estimated",
-          usedPercent: percent(weeklyCost, 30),
+          usedPercent: percent(weeklyCost, OPEN_CODE_GO_WEEKLY_BUDGET_USD),
           resetsAt: iso(weekStart + weekMs),
           durationMinutes: 7 * 24 * 60,
         },
         {
           id: "monthly",
           label: "Monthly · estimated",
-          usedPercent: percent(monthlyCost, 60),
+          usedPercent: percent(monthlyCost, OPEN_CODE_GO_MONTHLY_BUDGET_USD),
           resetsAt: iso(monthEnd),
           durationMinutes: Math.round((monthEnd - monthStart) / 60_000),
         },

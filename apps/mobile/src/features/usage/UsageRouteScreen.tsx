@@ -125,6 +125,7 @@ export function UsageRouteScreen() {
         <MobileQuotaLimits
           accounts={quota.accounts}
           environmentCount={quota.environments.length}
+          error={quota.error}
           isPending={quota.isPending}
         />
 
@@ -201,6 +202,7 @@ function mobileFormatReset(resetsAt: string | null): string {
 function MobileQuotaLimits(props: {
   readonly accounts: readonly PresentedQuotaAccount[];
   readonly environmentCount: number;
+  readonly error: string | null;
   readonly isPending: boolean;
 }) {
   if (props.isPending) {
@@ -213,7 +215,7 @@ function MobileQuotaLimits(props: {
   if (props.accounts.length === 0) {
     return (
       <Text className="py-16 text-center text-base text-foreground-muted">
-        Configure Codex, Claude, or OpenCode to see plan limits.
+        {props.error ?? "Configure Codex, Claude, or OpenCode to see plan limits."}
       </Text>
     );
   }

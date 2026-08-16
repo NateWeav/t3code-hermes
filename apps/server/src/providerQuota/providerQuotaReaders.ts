@@ -15,6 +15,10 @@ const boundedPercent = (value: unknown): number | null => {
   return number === null ? null : Math.max(0, Math.min(100, number));
 };
 
+const plural = (count: number, unit: string): string => `${count} ${unit}${count === 1 ? "" : "s"}`;
+const OPEN_CODE_DOCUMENT_SCAN_CHAR_LIMIT = 256 * 1024;
+const OPEN_CODE_DOCUMENT_CANDIDATE_LIMIT = 64;
+
 const isoFromEpochSeconds = (value: unknown): string | null => {
   const seconds = finiteNumber(value);
   if (seconds === null) return null;
@@ -23,14 +27,14 @@ const isoFromEpochSeconds = (value: unknown): string | null => {
 
 function windowLabel(durationMinutes: number | null, fallback: string): string {
   if (durationMinutes === null) return fallback;
-  if (durationMinutes < 60) return `${durationMinutes} minute`;
+  if (durationMinutes < 60) return plural(durationMinutes, "minute");
   if (durationMinutes < 24 * 60 && durationMinutes % 60 === 0)
-    return `${durationMinutes / 60} hour`;
+    return plural(durationMinutes / 60, "hour");
   if (durationMinutes % (7 * 24 * 60) === 0) {
     const weeks = durationMinutes / (7 * 24 * 60);
-    return weeks === 1 ? "Weekly" : `${weeks} week`;
+    return weeks === 1 ? "Weekly" : plural(weeks, "week");
   }
-  if (durationMinutes % (24 * 60) === 0) return `${durationMinutes / (24 * 60)} day`;
+  if (durationMinutes % (24 * 60) === 0) return plural(durationMinutes / (24 * 60), "day");
   return fallback;
 }
 
@@ -42,13 +46,15 @@ function parseCodexWindow(
   if (!isRecord(value)) return null;
   const usedPercent = boundedPercent(value.usedPercent);
   if (usedPercent === null) return null;
-  const durationMinutes = finiteNumber(value.windowDurationMins);
+  const rawDurationMinutes = finiteNumber(value.windowDurationMins);
+  const durationMinutes =
+    rawDurationMinutes !== null && rawDurationMinutes > 0 ? rawDurationMinutes : null;
   return {
     id,
     label: windowLabel(durationMinutes, fallbackLabel),
     usedPercent,
     resetsAt: isoFromEpochSeconds(value.resetsAt),
-    durationMinutes: durationMinutes !== null && durationMinutes > 0 ? durationMinutes : null,
+    durationMinutes,
   };
 }
 
@@ -135,7 +141,7 @@ function parseOpenCodeWindow(
 ): ProviderQuotaWindow | null {
   const apiPercent = boundedPercent(record.percent);
   let usedPercent = apiPercent ?? boundedPercent(valueForKeys(record, PERCENT_KEYS));
-  if (apiPercent === null && usedPercent !== null && usedPercent <= 1) usedPercent *= 100;
+  if (apiPercent === null && usedPercent !== null && usedPercent < 1) usedPercent *= 100;
   if (usedPercent === null) {
     const used = finiteNumber(valueForKeys(record, ["used", "consumed", "count", "usedTokens"]));
     const limit = finiteNumber(valueForKeys(record, ["limit", "total", "quota", "max", "cap"]));
@@ -156,7 +162,15 @@ function parseOpenCodeWindow(
 }
 
 function findNamedRecord(value: unknown, pattern: RegExp, depth = 0): JsonRecord | null {
-  if (depth > 4 || !isRecord(value)) return null;
+  if (depth > 4) return null;
+  if (Array.isArray(value)) {
+    for (const nested of value) {
+      const found = findNamedRecord(nested, pattern, depth + 1);
+      if (found !== null) return found;
+    }
+    return null;
+  }
+  if (!isRecord(value)) return null;
   for (const [key, nested] of Object.entries(value)) {
     if (pattern.test(key) && isRecord(nested)) return nested;
   }
@@ -188,8 +202,11 @@ export function parseOpenCodeGoDocument(text: string, nowMs: number): unknown {
   try {
     return JSON.parse(text);
   } catch {
-    const candidates = [...text.matchAll(/\{[^<>]{20,4000}\}/g)];
-    for (const candidate of candidates) {
+    const documentPrefix = text.slice(0, OPEN_CODE_DOCUMENT_SCAN_CHAR_LIMIT);
+    let candidateCount = 0;
+    for (const candidate of documentPrefix.matchAll(/\{[^<>]{20,4000}\}/g)) {
+      candidateCount += 1;
+      if (candidateCount > OPEN_CODE_DOCUMENT_CANDIDATE_LIMIT) break;
       try {
         const parsed: unknown = JSON.parse(candidate[0]);
         if (parseOpenCodeGoUsage(parsed, nowMs).length > 0) return parsed;

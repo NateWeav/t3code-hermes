@@ -52,6 +52,7 @@ export function useProviderQuota() {
   return {
     accounts,
     environments,
+    error: environments.find((environment) => environment.error !== null)?.error ?? null,
     isPending:
       environments.length > 0 && environments.every((environment) => environment.isPending),
     refresh,

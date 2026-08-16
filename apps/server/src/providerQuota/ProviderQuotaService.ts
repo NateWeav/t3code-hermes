@@ -21,6 +21,7 @@ import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 
+import * as ServerConfig from "../config.ts";
 import { expandHomePath } from "../pathExpansion.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import { readCodexAccountQuota } from "../provider/Layers/CodexProvider.ts";
@@ -41,6 +42,8 @@ import {
 } from "./providerQuotaLocal.ts";
 
 const REQUEST_TIMEOUT_MS = 10_000;
+const SUCCESS_CACHE_TTL = "30 seconds";
+const LAST_GOOD_MAX_AGE_MS = 60 * 60_000;
 
 export class ProviderQuotaService extends Context.Service<
   ProviderQuotaService,
@@ -106,7 +109,23 @@ const configuredValue = (
 ): string | undefined =>
   instanceEnvironment[name]?.trim() || process.env[name]?.trim() || undefined;
 
+function cachedAccountFor(
+  lastGood: Map<ProviderInstanceId, ProviderQuotaAccount>,
+  instanceId: ProviderInstanceId,
+  nowMs: number,
+): ProviderQuotaAccount | undefined {
+  const cached = lastGood.get(instanceId);
+  if (cached === undefined) return undefined;
+  const observedMs = Date.parse(cached.observedAt);
+  if (!Number.isFinite(observedMs) || nowMs - observedMs > LAST_GOOD_MAX_AGE_MS) {
+    lastGood.delete(instanceId);
+    return undefined;
+  }
+  return cached;
+}
+
 export const make = Effect.gen(function* () {
+  const serverConfig = yield* ServerConfig.ServerConfig;
   const settingsService = yield* ServerSettings.ServerSettingsService;
   const httpClient = yield* HttpClient.HttpClient;
   const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -193,7 +212,7 @@ export const make = Effect.gen(function* () {
         binaryPath: decoded.value.binaryPath,
         homePath: decoded.value.homePath,
         launchArgs: decoded.value.launchArgs,
-        cwd: process.cwd(),
+        cwd: serverConfig.cwd,
         environment: environmentFor(instance),
       }).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),
@@ -202,7 +221,7 @@ export const make = Effect.gen(function* () {
       ),
     );
     if (Result.isFailure(result)) {
-      const cached = lastGood.get(instanceId);
+      const cached = cachedAccountFor(lastGood, instanceId, Date.parse(observedAt));
       return {
         ...(cached ?? {
           providerInstanceId: instanceId,
@@ -319,7 +338,7 @@ export const make = Effect.gen(function* () {
     }
     const result = yield* Effect.result(readClaudeDocument(credentials.accessToken));
     if (Result.isFailure(result)) {
-      const cached = lastGood.get(instanceId);
+      const cached = cachedAccountFor(lastGood, instanceId, Date.parse(observedAt));
       return {
         ...(cached ?? {
           providerInstanceId: instanceId,
@@ -424,7 +443,7 @@ export const make = Effect.gen(function* () {
           if (account.status === "ok") lastGood.set(instanceId, account);
           return account;
         }
-        const cached = lastGood.get(instanceId);
+        const cached = cachedAccountFor(lastGood, instanceId, nowMs);
         if (cached !== undefined) {
           return {
             ...cached,
@@ -472,7 +491,7 @@ export const make = Effect.gen(function* () {
     }
     const result = yield* Effect.result(readOpenCodeDocument(workspaceId, cookie, nowMs));
     if (Result.isFailure(result)) {
-      const cached = lastGood.get(instanceId);
+      const cached = cachedAccountFor(lastGood, instanceId, nowMs);
       return {
         ...(cached ?? {
           providerInstanceId: instanceId,
@@ -544,7 +563,13 @@ export const make = Effect.gen(function* () {
     } satisfies ProviderQuotaSummary;
   });
 
-  return ProviderQuotaService.of({ read: read() });
+  const [cachedRead, invalidateCachedRead] = yield* Effect.cachedInvalidateWithTTL(
+    read(),
+    SUCCESS_CACHE_TTL,
+  );
+  const readCoalesced = cachedRead.pipe(Effect.tapError(() => invalidateCachedRead));
+
+  return ProviderQuotaService.of({ read: readCoalesced });
 });
 
 export const layer = Layer.effect(ProviderQuotaService, make);

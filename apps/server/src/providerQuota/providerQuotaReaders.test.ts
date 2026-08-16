@@ -3,6 +3,7 @@ import { describe, expect, it } from "@effect/vitest";
 import {
   parseClaudeUsage,
   parseCodexRateLimits,
+  parseOpenCodeGoDocument,
   parseOpenCodeGoUsage,
 } from "./providerQuotaReaders.ts";
 
@@ -20,7 +21,7 @@ describe("provider quota readers", () => {
     expect(parsed.windows).toEqual([
       {
         id: "primary",
-        label: "5 hour",
+        label: "5 hours",
         usedPercent: 72,
         resetsAt: "2027-01-15T08:00:00.000Z",
         durationMinutes: 300,
@@ -84,6 +85,38 @@ describe("provider quota readers", () => {
       { id: "weekly", usedPercent: 21 },
       { id: "monthly", usedPercent: 42 },
     ]);
+  });
+
+  it("keeps a fallback usagePercent value of one as one percent", () => {
+    expect(parseOpenCodeGoUsage({ usage: { rolling: { usagePercent: 1 } } }, 0)).toMatchObject([
+      { id: "five-hour", usedPercent: 1 },
+    ]);
+  });
+
+  it("finds named quota windows nested inside arrays", () => {
+    expect(
+      parseOpenCodeGoUsage({ payloads: [{ weeklyWindow: { used: 1, limit: 4 } }] }, 0),
+    ).toMatchObject([{ id: "weekly", usedPercent: 25 }]);
+  });
+
+  it("parses plain and embedded OpenCode Go quota documents", () => {
+    const document = { usage: { rolling: { percent: 12 } } };
+    expect(parseOpenCodeGoDocument(JSON.stringify(document), 0)).toEqual(document);
+    expect(
+      parseOpenCodeGoDocument(
+        `<html><script>${JSON.stringify({ weeklyWindow: { percent: 34 } })}</script></html>`,
+        0,
+      ),
+    ).toEqual({ weeklyWindow: { percent: 34 } });
+    expect(parseOpenCodeGoDocument("<html>No quota data</html>", 0)).toBeNull();
+  });
+
+  it("rejects non-positive Codex window durations", () => {
+    expect(
+      parseCodexRateLimits({
+        primary: { usedPercent: 10, windowDurationMins: 0, resetsAt: 1_800_000_000 },
+      }).windows,
+    ).toMatchObject([{ id: "primary", label: "Primary", durationMinutes: null }]);
   });
 
   it("does not turn malformed provider payloads into zero usage", () => {

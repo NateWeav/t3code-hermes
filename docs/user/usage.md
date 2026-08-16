@@ -10,8 +10,10 @@ credential is reused; on other platforms T3 Code reads Claude Code's native cred
 OpenCode Go detects `~/.local/share/opencode/auth.json` and uses that API key to read authoritative
 rolling, weekly, and monthly limits. If the usage API is temporarily unavailable, finalized
 OpenCode Go costs in the local `opencode.db` provide an estimated fallback. The card labels these
-local estimates. Optional `OPENCODE_GO_WORKSPACE_ID` and `OPENCODE_GO_AUTH_COOKIE` overrides enable
-the web-dashboard source.
+local estimates in their window names. Optional `OPENCODE_GO_WORKSPACE_ID` and
+`OPENCODE_GO_AUTH_COOKIE` overrides enable the web-dashboard source. The cookie contains sensitive
+dashboard session credentials; avoid exposing it in environment diagnostics and rotate it if it is
+exposed.
 Cards with a detected sign-in but no readable usage explain that state instead of reporting a
 misleading zero.
 

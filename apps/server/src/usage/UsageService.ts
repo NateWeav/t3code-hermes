@@ -329,10 +329,11 @@ export const make = Effect.gen(function* () {
     const walkedRoots: string[] = [];
 
     for (const { provider, dir } of dirs) {
+      // Hermes reports a single canonical database rather than a transcript
+      // tree, so the scanned source is a file inside `dir` while the volume
+      // is still probed from the directory itself.
       const sourcePath = provider === "hermes" ? path.join(dir, "state.db") : dir;
-      const volumeId = yield* Effect.promise(() =>
-        readDirectoryVolumeId(provider === "hermes" ? dir : sourcePath),
-      );
+      const volumeId = yield* Effect.promise(() => readDirectoryVolumeId(dir));
       const exists = yield* fileSystem
         .exists(sourcePath)
         .pipe(Effect.catchCause(() => Effect.succeed(false)));
@@ -345,7 +346,10 @@ export const make = Effect.gen(function* () {
           skippedFiles: 0,
           malformedRecords: 0,
           distinctSessions: 0,
-          message: "No transcript directory on this environment.",
+          message:
+            provider === "hermes"
+              ? "No Hermes state database on this environment."
+              : "No transcript directory on this environment.",
         });
         continue;
       }

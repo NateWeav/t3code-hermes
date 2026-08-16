@@ -177,7 +177,7 @@ export function ProjectSettingsPage({ projectKey }: { projectKey: string }) {
         {!isElectron && (
           <header
             className={cn(
-              "workspace-topbar px-3 transition-[padding-left] duration-200 ease-linear motion-reduce:transition-none sm:px-5",
+              "flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-center px-3 transition-[padding-left] duration-200 ease-linear motion-reduce:transition-none sm:px-5",
               COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
             )}
           >
@@ -700,6 +700,7 @@ function ProjectDetail({ group }: { group: SidebarProjectSnapshot }) {
               : "Other entries in this grouped project are unaffected.",
             "This action cannot be undone.",
           ].join("\n"),
+          { variant: "destructive" },
         ),
       );
       if (confirmed._tag === "Failure" || !confirmed.value) return;

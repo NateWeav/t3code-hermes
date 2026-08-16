@@ -1,0 +1,168 @@
+name: Mobile IPA
+
+# Builds an UNSIGNED, sideloadable iOS .ipa of the production variant.
+#
+# There are no certificates or provisioning profiles here on purpose: AltStore
+# and Sideloadly re-sign the payload with the installing Apple ID, so a signed
+# build would only be stripped again. `app.config.ts` pins `appleTeamId`, but
+# CODE_SIGNING_ALLOWED=NO makes xcodebuild ignore it.
+#
+# Runs on the self-hosted Apple Silicon runner (a laptop), which needs Xcode
+# installed. No cron trigger: the machine is not always online, and GitHub's
+# hosted macOS minutes bill at 10x on a private repo.
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published, prereleased]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mobile-ipa-${{ github.event.release.tag_name || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ipa:
+    name: Build unsigned IPA
+    runs-on: [self-hosted, macOS, ARM64, t3code-mac-arm64]
+    timeout-minutes: 90
+    env:
+      APP_VARIANT: production
+      EXPO_NO_GIT_STATUS: "1"
+      NODE_OPTIONS: --max-old-space-size=8192
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref }}
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: |
+            args:
+              - --filter=@t3tools/mobile...
+              - --filter=@t3tools/scripts...
+
+      - name: Expose pnpm
+        run: |
+          pnpm_version="$(node --print "require('./package.json').packageManager.split('@').pop()")"
+          vp_pnpm_bin="$HOME/.vite-plus/package_manager/pnpm/$pnpm_version/pnpm/bin"
+          echo "$vp_pnpm_bin" >> "$GITHUB_PATH"
+          "$vp_pnpm_bin/pnpm" --version
+
+      - name: Show toolchain
+        run: xcodebuild -version
+
+      - id: version
+        name: Resolve app version
+        working-directory: apps/mobile
+        shell: bash
+        run: |
+          set -uo pipefail
+          tag="${{ github.event.release.tag_name }}"
+          if [[ -n "$tag" ]]; then
+            version="${tag#v}"
+          else
+            version="$(pnpm exec expo config --type public --json | jq -r '.version // empty')"
+          fi
+          if [[ -z "$version" ]]; then
+            version="0.0.0-$(git rev-parse --short HEAD)"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Building T3Code-$version.ipa"
+
+      - name: Prebuild iOS project
+        working-directory: apps/mobile
+        # Managed Expo app: there is no checked-in ios/ directory, so the Xcode
+        # project (and its Podfile install) is generated here. Pods install as
+        # part of prebuild.
+        run: pnpm exec expo prebuild --clean --platform ios
+
+      - id: xcode
+        name: Resolve workspace and scheme
+        working-directory: apps/mobile
+        shell: bash
+        run: |
+          set -euo pipefail
+          workspace="$(find ios -maxdepth 1 -name '*.xcworkspace' | head -n 1)"
+          # The scheme name comes from prebuild (the sanitized Expo app name —
+          # "T3Code" for APP_VARIANT=production), so read it back from the
+          # generated workspace rather than hardcoding it.
+          scheme="$(
+            xcodebuild -list -json -workspace "$workspace" \
+              | jq -r '.workspace.schemes[]' \
+              | grep -v '^Pods' \
+              | head -n 1
+          )"
+          echo "workspace=apps/mobile/$workspace" >> "$GITHUB_OUTPUT"
+          echo "scheme=$scheme" >> "$GITHUB_OUTPUT"
+          echo "Workspace: $workspace, scheme: $scheme"
+
+      - name: Build unsigned Release app
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -workspace "${{ steps.xcode.outputs.workspace }}" \
+            -scheme "${{ steps.xcode.outputs.scheme }}" \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/ipa-build" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - id: package
+        name: Package Payload into an IPA
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          products="$RUNNER_TEMP/ipa-build/Build/Products/Release-iphoneos"
+          app="$(find "$products" -maxdepth 1 -name '*.app' | head -n 1)"
+          echo "Packaging $app"
+
+          staging="$RUNNER_TEMP/ipa-stage"
+          rm -rf "$staging"
+          mkdir -p "$staging/Payload"
+          cp -R "$app" "$staging/Payload/"
+
+          ipa_name="T3Code-$VERSION.ipa"
+          ipa_path="$RUNNER_TEMP/$ipa_name"
+          rm -f "$ipa_path"
+          (cd "$staging" && zip -qry "$ipa_path" Payload)
+
+          echo "ipa_name=$ipa_name" >> "$GITHUB_OUTPUT"
+          echo "ipa_path=$ipa_path" >> "$GITHUB_OUTPUT"
+          ls -lh "$ipa_path"
+          {
+            echo "## Unsigned IPA"
+            echo
+            echo "- \`$ipa_name\` ($(du -h "$ipa_path" | cut -f1))"
+            echo "- Sideload with AltStore or Sideloadly; both re-sign on install."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload IPA artifact
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.package.outputs.ipa_name }}
+          path: ${{ steps.package.outputs.ipa_path }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Attach IPA to release
+        if: github.event_name == 'release'
+        run: gh release upload "${{ github.event.release.tag_name }}" "${{ steps.package.outputs.ipa_path }}" --clobber

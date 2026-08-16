@@ -1,0 +1,254 @@
+name: Sync Upstream
+
+# Nightly merge of pingdotgg/t3code into this fork's main.
+#
+# Merge, not rebase: the fork's history is public and rebasing would rewrite
+# commits that are already pushed. A merge also keeps the Hermes commits intact
+# and makes the next sync's conflict set smaller.
+#
+# This workflow only ever runs on a fork (see the job guard). It is inert if it
+# is ever merged back upstream.
+
+on:
+  schedule:
+    - cron: "30 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  # Required for `gh workflow run`: pushes made with the default GITHUB_TOKEN
+  # do not trigger other workflows, so CI has to be dispatched explicitly.
+  actions: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Merge upstream/main
+    if: github.repository != 'pingdotgg/t3code'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      UPSTREAM_URL: https://github.com/pingdotgg/t3code
+      CONFLICT_LABEL: upstream-sync-conflict
+      PARITY_LABEL: hermes-parity-review
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          # Full history: a shallow clone has no merge base with upstream.
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Configure bot identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream "$UPSTREAM_URL" 2>/dev/null \
+            || git remote set-url upstream "$UPSTREAM_URL"
+          git fetch --no-tags upstream main
+
+      - id: merge
+        name: Merge upstream/main
+        shell: bash
+        run: |
+          set -uo pipefail
+
+          before="$(git rev-parse HEAD)"
+          upstream_sha="$(git rev-parse upstream/main)"
+          {
+            echo "before=$before"
+            echo "upstream_sha=$upstream_sha"
+          } >> "$GITHUB_OUTPUT"
+
+          if git merge-base --is-ancestor "$upstream_sha" HEAD; then
+            echo "status=up-to-date" >> "$GITHUB_OUTPUT"
+            echo "Already up to date with upstream/main ($upstream_sha)."
+            exit 0
+          fi
+
+          if git merge --no-edit upstream/main; then
+            echo "status=merged" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Capture the conflicted paths BEFORE aborting — `git merge --abort`
+          # clears the index, and with it the only reliable record of them.
+          #
+          # `git ls-files -u` (not grep for conflict markers): apps/web/src/
+          # components/chat/ChatComposer.tsx contains NUL bytes, so grep and rg
+          # classify it as binary and silently skip it. Anything that has to
+          # sweep for conflicts must read the index, or use `grep -a`.
+          git ls-files -u | cut -f2 | sort -u > "$RUNNER_TEMP/conflicts.txt"
+          git merge --abort || true
+          echo "status=conflict" >> "$GITHUB_OUTPUT"
+
+      - name: Report merge conflict
+        if: steps.merge.outputs.status == 'conflict'
+        shell: bash
+        env:
+          UPSTREAM_SHA: ${{ steps.merge.outputs.upstream_sha }}
+        run: |
+          set -euo pipefail
+
+          today="$(date -u +%Y-%m-%d)"
+          conflicts="$(cat "$RUNNER_TEMP/conflicts.txt")"
+
+          {
+            echo "## Upstream sync conflict"
+            echo
+            echo "Merging \`upstream/main\` (\`$UPSTREAM_SHA\`) into \`main\` conflicted."
+            echo "The merge was aborted; \`main\` is unchanged."
+            echo
+            echo "Conflicted files:"
+            echo
+            if [[ -n "$conflicts" ]]; then
+              printf '%s\n' "$conflicts" | sed 's/^/- `/; s/$/`/'
+            else
+              echo "- (none recorded — the merge failed for some other reason; see the run log)"
+            fi
+          } > "$RUNNER_TEMP/conflict-issue.md"
+
+          cat "$RUNNER_TEMP/conflict-issue.md" >> "$GITHUB_STEP_SUMMARY"
+
+          gh label create "$CONFLICT_LABEL" \
+            --color b60205 \
+            --description "Nightly upstream merge stopped on a conflict." \
+            2>/dev/null || true
+
+          open_issues="$(gh issue list --state open --label "$CONFLICT_LABEL" --json number --jq 'length' || echo 0)"
+          if [[ "$open_issues" -gt 0 ]]; then
+            echo "An open $CONFLICT_LABEL issue already exists; not filing another." >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo
+              echo "Resolve by hand:"
+              echo
+              echo '```bash'
+              echo "git fetch upstream && git merge upstream/main"
+              echo '```'
+              echo
+              echo "\`ChatComposer.tsx\`, \`ChatView.tsx\`, and \`usageProviders.ts\` carry Hermes"
+              echo "branding and provider lists — resolve those by reading both sides, not by"
+              echo "taking one wholesale. Close this issue once \`main\` is synced."
+            } >> "$RUNNER_TEMP/conflict-issue.md"
+
+            gh issue create \
+              --title "Upstream sync conflict ($today)" \
+              --label "$CONFLICT_LABEL" \
+              --body-file "$RUNNER_TEMP/conflict-issue.md"
+          fi
+
+          exit 1
+
+      - id: drift
+        name: Check sibling adapter drift
+        if: steps.merge.outputs.status == 'merged'
+        shell: bash
+        env:
+          BEFORE_SHA: ${{ steps.merge.outputs.before }}
+        run: |
+          set -uo pipefail
+
+          # ORIG_HEAD is the pre-merge main, so this diff is exactly what the
+          # incoming upstream commits changed. Fall back to the recorded sha.
+          base="$(git rev-parse --verify --quiet ORIG_HEAD || echo "$BEFORE_SHA")"
+          git diff --name-only "$base..HEAD" > "$RUNNER_TEMP/incoming.txt"
+
+          # grep -a throughout: some tracked sources contain NUL bytes and grep
+          # would otherwise treat the stream as binary and print nothing useful.
+          adapters="$(
+            grep -aE '^apps/server/src/provider/Drivers/(Claude|Codex|Cursor|Grok|OpenCode)' "$RUNNER_TEMP/incoming.txt" \
+              | sed -E 's#^apps/server/src/provider/Drivers/(Claude|Codex|Cursor|Grok|OpenCode).*#\1#' \
+              | sort -u
+          )"
+          adapter_count="$(printf '%s' "$adapters" | grep -ac . || true)"
+
+          acp_files="$(grep -aE '^apps/server/src/provider/acp/' "$RUNNER_TEMP/incoming.txt" | grep -av '/Hermes' || true)"
+
+          if [[ "$adapter_count" -ge 2 || -n "$acp_files" ]]; then
+            echo "review=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "review=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          {
+            echo "### Hermes parity heuristic"
+            echo
+            echo "- sibling adapters touched: ${adapter_count} (${adapters//$'\n'/, })"
+            echo "- ACP runtime files touched: $(printf '%s' "$acp_files" | grep -ac . || true)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          {
+            echo "Upstream commits \`${base}..$(git rev-parse HEAD)\` touched the shared provider layer."
+            echo
+            echo "Sibling adapters touched: **${adapter_count}**"
+            echo
+            if [[ -n "$adapters" ]]; then
+              printf '%s\n' "$adapters" | sed 's/^/- /'
+            else
+              echo "- (none)"
+            fi
+            echo
+            echo "ACP runtime files touched:"
+            echo
+            if [[ -n "$acp_files" ]]; then
+              printf '%s\n' "$acp_files" | sed 's/^/- `/; s/$/`/'
+            else
+              echo "- (none)"
+            fi
+            echo
+            echo "Check whether the same change is needed in the Hermes adapter"
+            echo "(\`HermesDriver.ts\`, \`HermesAcpSupport.ts\`, \`HermesTextGeneration.ts\`)."
+            echo "Upstream has previously fixed a bug across every sibling adapter in a"
+            echo "commit that merged cleanly while leaving the Hermes copy broken — git"
+            echo "cannot see that kind of drift. The merge already landed; this is advisory."
+          } > "$RUNNER_TEMP/parity-issue.md"
+
+      - name: Push main
+        if: steps.merge.outputs.status == 'merged'
+        run: git push origin HEAD:main
+
+      - name: Trigger CI
+        if: steps.merge.outputs.status == 'merged'
+        # Pushes authenticated with the default GITHUB_TOKEN do not start other
+        # workflows, so CI is dispatched by hand. (The nightly release workflow
+        # is cron-driven and needs no push trigger.)
+        run: gh workflow run ci.yml --ref main
+
+      - name: Open Hermes parity review issue
+        if: steps.merge.outputs.status == 'merged' && steps.drift.outputs.review == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          gh label create "$PARITY_LABEL" \
+            --color fbca04 \
+            --description "Upstream changed sibling provider adapters; check the Hermes copy." \
+            2>/dev/null || true
+
+          gh issue create \
+            --title "Hermes parity review ($(date -u +%Y-%m-%d))" \
+            --label "$PARITY_LABEL" \
+            --body-file "$RUNNER_TEMP/parity-issue.md"
+
+      - name: Summarize
+        if: always() && (steps.merge.outputs.status == 'merged' || steps.merge.outputs.status == 'up-to-date')
+        shell: bash
+        env:
+          STATUS: ${{ steps.merge.outputs.status }}
+          UPSTREAM_SHA: ${{ steps.merge.outputs.upstream_sha }}
+        run: |
+          if [[ "$STATUS" == "up-to-date" ]]; then
+            echo "Already up to date with upstream/main (\`$UPSTREAM_SHA\`)." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Merged upstream/main (\`$UPSTREAM_SHA\`) into main and dispatched CI." >> "$GITHUB_STEP_SUMMARY"
+          fi

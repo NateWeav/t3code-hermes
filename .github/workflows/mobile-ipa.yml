@@ -33,6 +33,10 @@ jobs:
       EXPO_NO_GIT_STATUS: "1"
       NODE_OPTIONS: --max-old-space-size=8192
       GH_TOKEN: ${{ github.token }}
+      # The runner's xcode-select points at the Command Line Tools, which have
+      # no xcodebuild. Xcode also has to be license-accepted once by hand on
+      # that machine: sudo xcodebuild -license accept
+      DEVELOPER_DIR: /Applications/Xcode.app/Contents/Developer
     steps:
       - name: Checkout
         uses: actions/checkout@v6

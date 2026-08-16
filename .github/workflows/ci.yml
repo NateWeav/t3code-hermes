@@ -140,6 +140,13 @@ jobs:
           echo "$HOMEBREW_PREFIX/bin" >> "$GITHUB_PATH"
           echo "$HOMEBREW_PREFIX/sbin" >> "$GITHUB_PATH"
 
+      # swiftlint loads SourceKit out of the active developer directory, and the
+      # runner's xcode-select points at the Command Line Tools, which do not
+      # ship it. Xcode itself also has to be license-accepted once by hand on
+      # that machine: sudo xcodebuild -license accept
+      - name: Select Xcode
+        run: echo "DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer" >> "$GITHUB_ENV"
+
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
         with:

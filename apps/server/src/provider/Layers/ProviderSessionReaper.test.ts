@@ -301,7 +301,7 @@ describe("ProviderSessionReaper", () => {
     // Idle long enough to clear the plain inactivity threshold (1s) but well
     // inside the active-turn recovery threshold (10s), so this exercises the
     // active-turn guard rather than short-circuiting before it.
-    const now = new Date(Date.now() - 4_000).toISOString();
+    const now = DateTime.formatIso(DateTime.subtract(DateTime.nowUnsafe(), { seconds: 4 }));
     const harness = await createHarness({
       readModel: makeReadModel([
         {

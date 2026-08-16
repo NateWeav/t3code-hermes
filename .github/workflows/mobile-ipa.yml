@@ -56,22 +56,29 @@ jobs:
           echo "$HOMEBREW_PREFIX/bin" >> "$GITHUB_PATH"
           echo "$HOMEBREW_PREFIX/sbin" >> "$GITHUB_PATH"
 
-      - name: Setup Vite+
-        uses: voidzero-dev/setup-vp@v1
+      # Vite+'s downloaded CLI is ad-hoc signed, which macOS can reject for a
+      # non-interactive self-hosted runner before the CLI gets a chance to
+      # install Node or dependencies. This workflow only needs Node and pnpm,
+      # so use their upstream bootstrap path directly.
+      - name: Setup Node
+        uses: actions/setup-node@v6
         with:
           node-version-file: package.json
-          cache: true
-          run-install: |
-            args:
-              - --filter=@t3tools/mobile...
-              - --filter=@t3tools/scripts...
 
-      - name: Expose pnpm
+      - name: Setup pnpm
+        shell: bash
         run: |
+          set -euo pipefail
           pnpm_version="$(node --print "require('./package.json').packageManager.split('@').pop()")"
-          vp_pnpm_bin="$HOME/.vite-plus/package_manager/pnpm/$pnpm_version/pnpm/bin"
-          echo "$vp_pnpm_bin" >> "$GITHUB_PATH"
-          "$vp_pnpm_bin/pnpm" --version
+          corepack enable
+          corepack prepare "pnpm@$pnpm_version" --activate
+          pnpm --version
+
+      - name: Install dependencies
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts \
+            --filter=@t3tools/mobile... \
+            --filter=@t3tools/scripts...
 
       - name: Show toolchain
         run: xcodebuild -version

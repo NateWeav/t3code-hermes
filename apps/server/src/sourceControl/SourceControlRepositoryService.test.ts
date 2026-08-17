@@ -165,7 +165,6 @@ it.effect("clones a looked-up repository into the requested destination", () =>
         provider: "github",
         repository: "octocat/t3code",
         destinationPath,
-        protocol: "https",
       });
 
       assert.deepStrictEqual(result, {

@@ -1378,7 +1378,7 @@ type MarkdownWorkspaceImageProps = Omit<ComponentPropsWithoutRef<"img">, "src"> 
   readonly threadRef: ScopedThreadRef;
 };
 
-function MarkdownWorkspaceImage({
+export function MarkdownWorkspaceImage({
   originalSrc,
   workspacePath,
   threadRef,

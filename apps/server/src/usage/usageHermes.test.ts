@@ -106,6 +106,24 @@ describe("readHermesUsageRecords", () => {
     });
   });
 
+  it("treats Hermes' zero unknown-cost sentinel as unreported", () => {
+    withDatabase((dbPath, database) => {
+      database
+        .prepare(`
+          INSERT INTO sessions (
+            id, model, started_at, input_tokens, output_tokens,
+            estimated_cost_usd, actual_cost_usd
+          ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        `)
+        .run("unknown-cost", "gpt-5.6-sol", 500, 100, 20, 0, null);
+
+      const records = readHermesUsageRecords(dbPath, 0);
+
+      expect(records).not.toBeNull();
+      expect(records?.[0]?.reportedCostUsd).toBeNull();
+    });
+  });
+
   it("skips empty and model-less session rows", () => {
     withDatabase((dbPath, database) => {
       const insert = database.prepare(`

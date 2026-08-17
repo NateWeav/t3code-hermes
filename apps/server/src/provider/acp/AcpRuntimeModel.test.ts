@@ -291,56 +291,6 @@ describe("AcpRuntimeModel", () => {
     });
   });
 
-  it("projects ACP context usage and Hermes cumulative totals into runtime events", () => {
-    const result = parseSessionUpdateEvent({
-      sessionId: "session-1",
-      update: {
-        sessionUpdate: "usage_update",
-        used: 82_000,
-        size: 258_000,
-        _meta: {
-          hermes: {
-            totalProcessedTokens: 184_000,
-            inputTokens: 100_000,
-            cachedInputTokens: 75_000,
-            outputTokens: 9_000,
-            reasoningOutputTokens: 3_000,
-          },
-        },
-      },
-    } satisfies EffectAcpSchema.SessionNotification);
-
-    expect(result.events).toEqual([
-      {
-        _tag: "UsageUpdated",
-        usedTokens: 82_000,
-        maxTokens: 258_000,
-        totalProcessedTokens: 184_000,
-        inputTokens: 100_000,
-        cachedInputTokens: 75_000,
-        outputTokens: 9_000,
-        reasoningOutputTokens: 3_000,
-        rawPayload: {
-          sessionId: "session-1",
-          update: {
-            sessionUpdate: "usage_update",
-            used: 82_000,
-            size: 258_000,
-            _meta: {
-              hermes: {
-                totalProcessedTokens: 184_000,
-                inputTokens: 100_000,
-                cachedInputTokens: 75_000,
-                outputTokens: 9_000,
-                reasoningOutputTokens: 3_000,
-              },
-            },
-          },
-        },
-      },
-    ]);
-  });
-
   it("trims padded current mode updates before emitting a mode change", () => {
     const result = parseSessionUpdateEvent({
       sessionId: "session-1",

@@ -108,17 +108,6 @@ export type AcpParsedSessionEvent =
       readonly itemId?: string;
       readonly text: string;
       readonly rawPayload: unknown;
-    }
-  | {
-      readonly _tag: "UsageUpdated";
-      readonly usedTokens: number;
-      readonly maxTokens: number;
-      readonly totalProcessedTokens?: number;
-      readonly inputTokens?: number;
-      readonly cachedInputTokens?: number;
-      readonly outputTokens?: number;
-      readonly reasoningOutputTokens?: number;
-      readonly rawPayload: unknown;
     };
 
 type AcpSessionSetupResponse =
@@ -595,30 +584,6 @@ export function parseSessionUpdateEvent(params: EffectAcpSchema.SessionNotificat
           rawPayload: params,
         });
       }
-      break;
-    }
-    case "usage_update": {
-      const hermes = isRecord(upd._meta) && isRecord(upd._meta.hermes) ? upd._meta.hermes : null;
-      const finiteNonNegative = (value: unknown): number | undefined =>
-        typeof value === "number" && Number.isFinite(value) && value >= 0
-          ? Math.trunc(value)
-          : undefined;
-      const totalProcessedTokens = finiteNonNegative(hermes?.totalProcessedTokens);
-      const inputTokens = finiteNonNegative(hermes?.inputTokens);
-      const cachedInputTokens = finiteNonNegative(hermes?.cachedInputTokens);
-      const outputTokens = finiteNonNegative(hermes?.outputTokens);
-      const reasoningOutputTokens = finiteNonNegative(hermes?.reasoningOutputTokens);
-      events.push({
-        _tag: "UsageUpdated",
-        usedTokens: upd.used,
-        maxTokens: upd.size,
-        ...(totalProcessedTokens !== undefined ? { totalProcessedTokens } : {}),
-        ...(inputTokens !== undefined ? { inputTokens } : {}),
-        ...(cachedInputTokens !== undefined ? { cachedInputTokens } : {}),
-        ...(outputTokens !== undefined ? { outputTokens } : {}),
-        ...(reasoningOutputTokens !== undefined ? { reasoningOutputTokens } : {}),
-        rawPayload: params,
-      });
       break;
     }
     default:

@@ -26,12 +26,16 @@ jobs:
             !/.repos/
           sparse-checkout-cone-mode: false
 
-      - name: Setup Vite+
-        uses: voidzero-dev/setup-vp@v1
-        with:
-          node-version-file: package.json
-          cache: true
-          run-install: true
+      # Vite+ 0.2.2's macOS arm64 binary is only linker-signed. macOS 26.6
+      # rejects a fresh copy with Taskgated Invalid Signature, so this
+      # persistent runner uses the locally ad-hoc re-signed installation.
+      - name: Setup Vite+ from the runner toolchain
+        shell: bash
+        run: |
+          bun --version
+          vp --version
+          vp env use '^24.13.1'
+          vp install
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable

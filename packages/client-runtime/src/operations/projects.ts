@@ -209,6 +209,15 @@ export function getCloneDirectoryName(repositoryOrRemoteUrl: string | null | und
 }
 
 /**
+ * Provider-backed clone flows should use the HTTPS URL by default. Provider
+ * CLIs commonly configure Git's HTTPS credential helper when they authenticate,
+ * while an SSH URL additionally requires a separately configured SSH key.
+ */
+export function getProviderRepositoryCloneUrl(repository: SourceControlRepositoryInfo): string {
+  return repository.url;
+}
+
+/**
  * Clone destination proposed for a directory: the directory the user picked
  * plus the repository folder inside it. Without a name the directory is the
  * destination, which is what the raw clone URL flow keeps doing.

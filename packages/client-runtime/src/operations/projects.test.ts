@@ -16,6 +16,7 @@ import {
   getCloneDestinationBrowsePath,
   getCloneDestinationPath,
   getCloneDirectoryName,
+  getProviderRepositoryCloneUrl,
   resolveAddProjectPath,
   sortAddProjectProviderSources,
 } from "./projects.ts";
@@ -59,6 +60,17 @@ describe("add project shared logic", () => {
     expect(getCloneDirectoryName("C:\\src\\repo.git")).toBe("repo");
     expect(getCloneDirectoryName("git@github.com:repo.git")).toBe("repo");
     expect(getCloneDirectoryName("  https://github.com/owner/repo.git  ")).toBe("repo");
+  });
+
+  it("uses the provider HTTPS URL for authenticated repository clones", () => {
+    expect(
+      getProviderRepositoryCloneUrl({
+        provider: "github",
+        nameWithOwner: "owner/repo",
+        url: "https://github.com/owner/repo",
+        sshUrl: "git@github.com:owner/repo.git",
+      }),
+    ).toBe("https://github.com/owner/repo");
   });
 
   it("keeps a numeric repository name that sits on a path", () => {

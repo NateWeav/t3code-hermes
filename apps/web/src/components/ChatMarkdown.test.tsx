@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { orderedListGutterStyle } from "./ChatMarkdown";
+import {
+  orderedListGutterStyle,
+  resolveMarkdownWorkspaceImagePath,
+  transformChatMarkdownUrl,
+} from "./ChatMarkdown";
 
 describe("orderedListGutterStyle", () => {
   it("leaves the default gutter alone for single-digit lists", () => {
@@ -32,5 +36,37 @@ describe("orderedListGutterStyle", () => {
 
   it("treats a missing/zero item count as a single item", () => {
     expect(orderedListGutterStyle(0, undefined)).toBeUndefined();
+  });
+});
+
+describe("Hermes markdown images", () => {
+  it("resolves local image destinations against the thread workspace", () => {
+    expect(resolveMarkdownWorkspaceImagePath("artifacts/qr.png", "/workspace/project")).toBe(
+      "/workspace/project/artifacts/qr.png",
+    );
+    expect(resolveMarkdownWorkspaceImagePath("file:///tmp/pairing%20qr.png", undefined)).toBe(
+      "/tmp/pairing qr.png",
+    );
+    expect(
+      resolveMarkdownWorkspaceImagePath("https://example.com/qr.png", "/workspace"),
+    ).toBeNull();
+  });
+
+  it("allows inline raster images only for image sources", () => {
+    const png = "data:image/png;base64,AQID";
+    expect(transformChatMarkdownUrl(png, "src")).toBe(png);
+    expect(transformChatMarkdownUrl(png, "href")).toBe("");
+    expect(
+      transformChatMarkdownUrl(
+        "data:image/svg+xml;base64,PHN2ZyBvbmxvYWQ9YWxlcnQoMSk+PC9zdmc+",
+        "src",
+      ),
+    ).toBe("");
+  });
+
+  it("rewrites file URLs before the browser tries to load them", () => {
+    expect(transformChatMarkdownUrl("file:///tmp/pairing%20qr.png", "src")).toBe(
+      "/tmp/pairing%20qr.png",
+    );
   });
 });

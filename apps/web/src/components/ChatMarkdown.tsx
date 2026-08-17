@@ -24,6 +24,7 @@ import { AsyncResult } from "effect/unstable/reactivity";
 import React, {
   Children,
   Suspense,
+  type ComponentPropsWithoutRef,
   type ClipboardEvent as ReactClipboardEvent,
   type MouseEvent as ReactMouseEvent,
   isValidElement,
@@ -98,6 +99,7 @@ import {
   WORKSPACE_BASENAME_LOOKUP_LIMIT,
 } from "../workspaceBasenameLookup";
 import { useOpenChangeRequestLink } from "~/lib/openPullRequestLink";
+import { useAssetUrlState } from "../assets/assetUrls";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { isPreviewSupportedInRuntime } from "../previewStateStore";
 import {
@@ -126,6 +128,8 @@ const EMPTY_MARKDOWN_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "d
 const CODE_FENCE_LANGUAGE_REGEX = /(?:^|\s)language-([^\s]+)/;
 const MAX_HIGHLIGHT_CACHE_ENTRIES = 500;
 const MAX_HIGHLIGHT_CACHE_MEMORY_BYTES = 50 * 1024 * 1024;
+const INLINE_RASTER_IMAGE_DATA_URL_PATTERN =
+  /^data:image\/(?:gif|jpeg|png|webp);base64,[a-z0-9+/]+={0,2}$/i;
 
 interface MarkdownActionFailureContext {
   readonly operation: string;
@@ -175,6 +179,13 @@ export function orderedListGutterStyle(
   return { "--list-gutter": `${digits + 1}ch` };
 }
 
+export function transformChatMarkdownUrl(url: string, key: string): string {
+  const fileHref = rewriteMarkdownFileUriHref(url);
+  if (fileHref !== null) return fileHref;
+  if (key === "src" && INLINE_RASTER_IMAGE_DATA_URL_PATTERN.test(url)) return url;
+  return defaultUrlTransform(url);
+}
+
 const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
   ...defaultSchema,
   attributes: {
@@ -186,6 +197,7 @@ const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
   protocols: {
     ...defaultSchema.protocols,
     href: [...(defaultSchema.protocols?.href ?? []), "file"],
+    src: [...(defaultSchema.protocols?.src ?? []), "data", "file"],
   },
 } satisfies Parameters<typeof rehypeSanitize>[0];
 
@@ -1353,6 +1365,45 @@ function areMarkdownFileLinkPropsEqual(
   );
 }
 
+export function resolveMarkdownWorkspaceImagePath(
+  src: string | undefined,
+  cwd: string | undefined,
+): string | null {
+  return resolveMarkdownFileLinkMeta(src, cwd)?.filePath ?? null;
+}
+
+type MarkdownWorkspaceImageProps = Omit<ComponentPropsWithoutRef<"img">, "src"> & {
+  readonly originalSrc: string;
+  readonly workspacePath: string;
+  readonly threadRef: ScopedThreadRef;
+};
+
+function MarkdownWorkspaceImage({
+  originalSrc,
+  workspacePath,
+  threadRef,
+  alt,
+  ...props
+}: MarkdownWorkspaceImageProps) {
+  const assetUrl = useAssetUrlState(threadRef.environmentId, {
+    _tag: "workspace-file",
+    threadId: threadRef.threadId,
+    path: workspacePath,
+  });
+
+  if (assetUrl._tag === "Success") {
+    return <img {...props} src={assetUrl.url} alt={alt} />;
+  }
+  if (assetUrl._tag === "Failure") {
+    return <img {...props} src={originalSrc} alt={alt} />;
+  }
+  return (
+    <span className="text-xs text-muted-foreground" role="img" aria-label={alt || "Loading image"}>
+      {alt || "Loading image…"}
+    </span>
+  );
+}
+
 function ChatMarkdown({
   text,
   cwd,
@@ -1415,9 +1466,7 @@ function ChatMarkdown({
     ];
     return buildFileLinkParentSuffixByPath(filePaths);
   }, [inlineCodeFileLinkMetaByText, markdownFileLinkMetaByHref]);
-  const markdownUrlTransform = useCallback((href: string) => {
-    return rewriteMarkdownFileUriHref(href) ?? defaultUrlTransform(href);
-  }, []);
+  const markdownUrlTransform = useCallback(transformChatMarkdownUrl, []);
   // Re-emit highlighted content as markdown so copying out of the rendered
   // view keeps links, emphasis, lists, and code fences intact.
   const handleCopy = useCallback((event: ReactClipboardEvent<HTMLDivElement>) => {
@@ -1710,8 +1759,19 @@ function ChatMarkdown({
           props.className,
         );
       },
-      img({ node: _node, title: _title, ...props }) {
-        return <img {...props} />;
+      img({ node: _node, title: _title, src, ...props }) {
+        const workspacePath = resolveMarkdownWorkspaceImagePath(src, cwd);
+        if (src && workspacePath && threadRef) {
+          return (
+            <MarkdownWorkspaceImage
+              {...props}
+              originalSrc={src}
+              workspacePath={workspacePath}
+              threadRef={threadRef}
+            />
+          );
+        }
+        return <img {...props} src={src} />;
       },
       code({ node, children, className, ...props }) {
         if (node?.properties?.dataInlineCode != null) {

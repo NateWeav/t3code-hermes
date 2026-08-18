@@ -149,7 +149,7 @@ jobs:
         # Pushes authenticated with the default GITHUB_TOKEN do not start other
         # workflows, so CI is dispatched by hand. (The nightly release workflow
         # is cron-driven and needs no push trigger.)
-        run: gh workflow run ci.yml --ref main
+        run: gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref main
 
       # Advisory, and deliberately after the push: the merge is already correct
       # by the time this runs, so a heuristic must never be what keeps it from

@@ -450,7 +450,10 @@ jobs:
           bun --version
           vp --version
           vp env use '^24.13.1'
-          vp install
+          vp install \
+            --filter=@t3tools/desktop... \
+            --filter=t3... \
+            --filter=@t3tools/scripts...
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable

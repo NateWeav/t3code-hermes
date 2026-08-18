@@ -19,6 +19,7 @@ import {
   resolveSidebarStageBadgeLabel,
   resolveThreadRowClassName,
   resolveSidebarThreadStatus,
+  resolveThreadStatusRing,
   resolveThreadStatusPill,
   resolveWorkingStartedAt,
   searchSidebarThreadsByTitle,
@@ -732,6 +733,67 @@ describe("resolveSidebarThreadStatus", () => {
 
   it("defaults to ready with no session", () => {
     expect(resolveSidebarThreadStatus({ ...idle, session: null })).toBe("ready");
+  });
+});
+
+describe("resolveThreadStatusRing", () => {
+  it("travels a dashed outline only while a thread works", () => {
+    expect(resolveThreadStatusRing({ status: "working", isUnread: false })).toMatchObject({
+      kind: "working",
+      dashed: true,
+      motion: "travel",
+    });
+    expect(resolveThreadStatusRing({ status: "monitoring", isUnread: false })).toMatchObject({
+      kind: "monitoring",
+      motion: "none",
+    });
+  });
+
+  it("breathes for the states waiting on a human, faster for failure", () => {
+    expect(resolveThreadStatusRing({ status: "approval", isUnread: false })).toMatchObject({
+      motion: "breathe",
+      colorClass: "text-amber-500 dark:text-amber-300",
+    });
+    expect(resolveThreadStatusRing({ status: "input", isUnread: false })).toMatchObject({
+      motion: "breathe",
+      colorClass: "text-indigo-500 dark:text-indigo-300",
+    });
+    expect(resolveThreadStatusRing({ status: "failed", isUnread: false })).toMatchObject({
+      motion: "alarm",
+      colorClass: "text-red-500 dark:text-red-400",
+    });
+  });
+
+  // The ring must go quiet exactly when the "Done" label does, or a read row
+  // keeps a green halo forever.
+  it("rings a ready thread green only while its completion is unread", () => {
+    expect(resolveThreadStatusRing({ status: "ready", isUnread: true })).toMatchObject({
+      kind: "done",
+      motion: "none",
+      colorClass: "text-emerald-500 dark:text-emerald-400",
+    });
+    expect(resolveThreadStatusRing({ status: "ready", isUnread: false })).toBeNull();
+  });
+
+  // The Appearance toggle stills the rings; it must not hide the state they
+  // carry, which is what reduced motion does too.
+  it("keeps every ring and hue when motion is turned off", () => {
+    expect(resolveThreadStatusRing({ status: "working", isUnread: false, motion: false })).toEqual({
+      kind: "working",
+      colorClass: "text-sky-500 dark:text-sky-400",
+      dashed: true,
+      motion: "none",
+    });
+    expect(
+      resolveThreadStatusRing({ status: "failed", isUnread: false, motion: false }),
+    ).toMatchObject({ kind: "failed", motion: "none" });
+    expect(resolveThreadStatusRing({ status: "ready", isUnread: false, motion: false })).toBeNull();
+  });
+
+  it("never animates a ring the label does not also explain", () => {
+    for (const status of ["working", "monitoring", "approval", "input", "failed"] as const) {
+      expect(resolveThreadStatusRing({ status, isUnread: false })).not.toBeNull();
+    }
   });
 });
 

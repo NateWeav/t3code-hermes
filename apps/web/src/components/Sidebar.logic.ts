@@ -498,6 +498,93 @@ export function resolveSidebarThreadStatus(thread: SidebarThreadStatusInput): Si
   return "ready";
 }
 
+// ── Thread status ring ──────────────────────────────────────────────
+// The outline around a card row. It carries the same state the status label
+// spells out, in the same hue, for people scanning the column rather than
+// reading it. Only card rows get one: settled history renders as slim rows,
+// which stay quiet.
+
+export interface ThreadStatusRing {
+  kind: SidebarThreadStatus | "done";
+  /** Text color class; the ring strokes with currentColor. */
+  colorClass: string;
+  dashed: boolean;
+  motion: "travel" | "breathe" | "alarm" | "none";
+}
+
+/** Ring for a card row, or null when the row rests. Mirrors the label's
+    hues exactly (amber approval, indigo input, sky working, emerald done),
+    so ring and label can never disagree about what a thread is doing.
+
+    `motion: false` (the Appearance setting, off) keeps every ring and hue
+    and only stills them — the same thing `prefers-reduced-motion` does in
+    CSS, so the two controls cannot contradict each other. */
+export function resolveThreadStatusRing(input: {
+  status: SidebarThreadStatus;
+  isUnread: boolean;
+  motion?: boolean;
+}): ThreadStatusRing | null {
+  const ring = resolveRing(input);
+  if (ring === null || input.motion !== false) return ring;
+  return { ...ring, motion: "none" };
+}
+
+function resolveRing(input: {
+  status: SidebarThreadStatus;
+  isUnread: boolean;
+}): ThreadStatusRing | null {
+  switch (input.status) {
+    case "working":
+      return {
+        kind: "working",
+        colorClass: "text-sky-500 dark:text-sky-400",
+        dashed: true,
+        motion: "travel",
+      };
+    // Monitoring is calm background presence, not active progress, so it
+    // holds still — same treatment its label gets.
+    case "monitoring":
+      return {
+        kind: "monitoring",
+        colorClass: "text-sky-600/60 dark:text-sky-400/60",
+        dashed: true,
+        motion: "none",
+      };
+    case "approval":
+      return {
+        kind: "approval",
+        colorClass: "text-amber-500 dark:text-amber-300",
+        dashed: false,
+        motion: "breathe",
+      };
+    case "input":
+      return {
+        kind: "input",
+        colorClass: "text-indigo-500 dark:text-indigo-300",
+        dashed: false,
+        motion: "breathe",
+      };
+    case "failed":
+      return {
+        kind: "failed",
+        colorClass: "text-red-500 dark:text-red-400",
+        dashed: false,
+        motion: "alarm",
+      };
+    // A ready thread only earns a ring while its completion is unread —
+    // that is the "Done" the label shows. Once read, the row goes quiet.
+    case "ready":
+      return input.isUnread
+        ? {
+            kind: "done",
+            colorClass: "text-emerald-500 dark:text-emerald-400",
+            dashed: false,
+            motion: "none",
+          }
+        : null;
+  }
+}
+
 /** NaN-safe Date.parse for sort comparators: a malformed timestamp must not
     poison the whole ordering, so it sinks to the epoch instead. */
 export function parseTimestampMs(isoDate: string): number {

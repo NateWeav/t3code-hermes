@@ -379,6 +379,7 @@ jobs:
       T3CODE_RELAY_URL: ${{ needs.relay_public_config.outputs.relay_url }}
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         include:
           # Both mac entries run on the self-hosted Apple Silicon runner: x64

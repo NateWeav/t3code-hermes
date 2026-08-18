@@ -315,6 +315,7 @@ export const make = (
     const pendingSessionUpdatesRef = yield* Ref.make<
       ReadonlyArray<EffectAcpSchema.SessionNotification>
     >([]);
+    const sessionUpdateSerialization = yield* Semaphore.make(1);
     const promptSerializationSemaphore = yield* Semaphore.make(1);
     const activePromptFiberRef = yield* Ref.make<
       Option.Option<Fiber.Fiber<EffectAcpSchema.PromptResponse, EffectAcpErrors.AcpError>>
@@ -391,49 +392,51 @@ export const make = (
     const acp = yield* Effect.service(EffectAcpClient.AcpClient).pipe(Effect.provide(acpContext));
 
     yield* acp.handleSessionUpdate((notification) =>
-      Effect.gen(function* () {
-        const gate = yield* Ref.get(sessionLoadGateRef);
-        if (Option.isSome(gate) && gate.value.active) {
-          const lastActivityAtMillis = yield* Clock.currentTimeMillis;
-          yield* Ref.set(
-            sessionLoadGateRef,
-            Option.some({
-              ...gate.value,
-              lastActivityAtMillis,
-            }),
-          );
-          return;
-        }
-        if (sessionUpdateIsReplay(notification)) {
-          return;
-        }
-        const startState = yield* Ref.get(startStateRef);
-        // Agents may push updates between writing the session/new response and
-        // this fiber recording the Started state — Hermes advertises its slash
-        // commands in exactly that window. Buffer them instead of dropping
-        // them; `start` flushes the buffer once the root session id is known.
-        if (startState._tag !== "Started") {
-          yield* Ref.update(pendingSessionUpdatesRef, (pending) =>
-            pending.length >= maxPendingSessionUpdates ? pending : [...pending, notification],
-          );
-          return;
-        }
-        // One runtime projects one root ACP session. Child-session updates need
-        // explicit lineage routing and must never be flattened into this stream.
-        if (notification.sessionId !== startState.result.sessionId) {
-          return;
-        }
-        yield* handleSessionUpdate({
-          queue: eventQueue,
-          modeStateRef,
-          slashCommandsRef,
-          slashCommandsDeferred,
-          toolCallsRef,
-          assistantSegmentRef,
-          assistantItemRuntimeId,
-          params: notification,
-        });
-      }),
+      sessionUpdateSerialization.withPermit(
+        Effect.gen(function* () {
+          const gate = yield* Ref.get(sessionLoadGateRef);
+          if (Option.isSome(gate) && gate.value.active) {
+            const lastActivityAtMillis = yield* Clock.currentTimeMillis;
+            yield* Ref.set(
+              sessionLoadGateRef,
+              Option.some({
+                ...gate.value,
+                lastActivityAtMillis,
+              }),
+            );
+            return;
+          }
+          if (sessionUpdateIsReplay(notification)) {
+            return;
+          }
+          const startState = yield* Ref.get(startStateRef);
+          // Agents may push updates between writing the session/new response and
+          // this fiber recording the Started state — Hermes advertises its slash
+          // commands in exactly that window. Buffer them instead of dropping
+          // them; `start` flushes the buffer once the root session id is known.
+          if (startState._tag !== "Started") {
+            yield* Ref.update(pendingSessionUpdatesRef, (pending) =>
+              pending.length >= maxPendingSessionUpdates ? pending : [...pending, notification],
+            );
+            return;
+          }
+          // One runtime projects one root ACP session. Child-session updates need
+          // explicit lineage routing and must never be flattened into this stream.
+          if (notification.sessionId !== startState.result.sessionId) {
+            return;
+          }
+          yield* handleSessionUpdate({
+            queue: eventQueue,
+            modeStateRef,
+            slashCommandsRef,
+            slashCommandsDeferred,
+            toolCallsRef,
+            assistantSegmentRef,
+            assistantItemRuntimeId,
+            params: notification,
+          });
+        }),
+      ),
     );
     const initializeClientCapabilities = {
       fs: {
@@ -727,9 +730,11 @@ export const make = (
             return [
               startOnce.pipe(
                 Effect.tap((result) =>
-                  Ref.set(startStateRef, { _tag: "Started", result }).pipe(
-                    Effect.andThen(flushPendingSessionUpdates(result.sessionId)),
-                    Effect.andThen(Deferred.succeed(deferred, result)),
+                  sessionUpdateSerialization.withPermit(
+                    Ref.set(startStateRef, { _tag: "Started", result }).pipe(
+                      Effect.andThen(flushPendingSessionUpdates(result.sessionId)),
+                      Effect.andThen(Deferred.succeed(deferred, result)),
+                    ),
                   ),
                 ),
                 Effect.onError((cause) =>

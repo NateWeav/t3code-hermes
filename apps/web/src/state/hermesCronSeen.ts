@@ -10,6 +10,7 @@ import {
   subscribeHermesTasksSeen,
 } from "@t3tools/client-runtime/state/hermes-cron-seen";
 import { useSyncExternalStore } from "react";
+import { useHermesEnvironmentId } from "./hermesCron";
 
 export {
   markHermesTasksSeen,
@@ -17,5 +18,10 @@ export {
 } from "@t3tools/client-runtime/state/hermes-cron-seen";
 
 export function useHermesTasksUnread(): boolean {
-  return useSyncExternalStore(subscribeHermesTasksSeen, hasUnseenHermesCompletions, () => false);
+  const environmentId = useHermesEnvironmentId();
+  return useSyncExternalStore(
+    subscribeHermesTasksSeen,
+    () => environmentId !== null && hasUnseenHermesCompletions(environmentId),
+    () => false,
+  );
 }

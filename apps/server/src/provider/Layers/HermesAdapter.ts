@@ -274,6 +274,7 @@ export function makeHermesAdapter(
 
     const sessions = new Map<ThreadId, HermesSessionContext>();
     const threadLocksRef = yield* SynchronizedRef.make(new Map<string, Semaphore.Semaphore>());
+    const reasoningConfigMutex = yield* Semaphore.make(1);
     const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
 
     const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
@@ -718,6 +719,12 @@ export function makeHermesAdapter(
           // the composer's level has to be on disk before the spawn below.
           // That is also why the descriptor bills it as a next-session
           // setting rather than pretending it lands mid-conversation.
+          let reasoningConfigPermitHeld = false;
+          yield* reasoningConfigMutex.take(1);
+          reasoningConfigPermitHeld = true;
+          yield* Effect.addFinalizer(() =>
+            reasoningConfigPermitHeld ? reasoningConfigMutex.release(1) : Effect.void,
+          );
           const startReasoningLevel = yield* applyHermesReasoningSelection({
             model: hermesModelSelection?.model,
             selections: hermesModelSelection?.options,
@@ -845,6 +852,8 @@ export function makeHermesAdapter(
               mapAcpToAdapterError(PROVIDER, input.threadId, "session/start", error),
             ),
           );
+          reasoningConfigPermitHeld = false;
+          yield* reasoningConfigMutex.release(1);
 
           // Hermes exposes its edit-approval policy as ACP session modes, so
           // the thread's runtime mode picks the matching one. A build that
@@ -1122,27 +1131,31 @@ export function makeHermesAdapter(
               // Hermes reads `config.yaml` while it builds the agent, so the
               // write has to be on disk first to be picked up by the rebuild
               // that `session/set_model` triggers.
-              const turnReasoningLevel = yield* applyHermesReasoningSelection({
-                model: turnModelSelection?.model,
-                selections: turnModelSelection?.options,
-                ...(options?.environment ? { environment: options.environment } : {}),
-              }).pipe(
-                Effect.provideService(FileSystem.FileSystem, fileSystem),
-                Effect.provideService(Path.Path, path),
+              const { turnReasoningLevel, currentModelId } = yield* reasoningConfigMutex.withPermit(
+                Effect.gen(function* () {
+                  const turnReasoningLevel = yield* applyHermesReasoningSelection({
+                    model: turnModelSelection?.model,
+                    selections: turnModelSelection?.options,
+                    ...(options?.environment ? { environment: options.environment } : {}),
+                  }).pipe(
+                    Effect.provideService(FileSystem.FileSystem, fileSystem),
+                    Effect.provideService(Path.Path, path),
+                  );
+                  // A model switch rebuilds the agent by itself; only a level that
+                  // moved on its own needs the no-op switch to force one.
+                  const reasoningNeedsRebuild =
+                    turnReasoningLevel !== undefined && turnReasoningLevel !== ctx.reasoningLevel;
+                  const currentModelId = yield* applyHermesAcpModelSelection({
+                    runtime: ctx.acp,
+                    currentModelId: ctx.currentModelId,
+                    requestedModelId: requestedTurnModelId,
+                    ...(reasoningNeedsRebuild ? { forceReapply: true } : {}),
+                    mapError: (cause) =>
+                      mapAcpToAdapterError(PROVIDER, input.threadId, "session/set_model", cause),
+                  });
+                  return { turnReasoningLevel, currentModelId };
+                }),
               );
-              // A model switch rebuilds the agent by itself; only a level that
-              // moved on its own needs the no-op switch to force one.
-              const reasoningNeedsRebuild =
-                turnReasoningLevel !== undefined && turnReasoningLevel !== ctx.reasoningLevel;
-
-              const currentModelId = yield* applyHermesAcpModelSelection({
-                runtime: ctx.acp,
-                currentModelId: ctx.currentModelId,
-                requestedModelId: requestedTurnModelId,
-                ...(reasoningNeedsRebuild ? { forceReapply: true } : {}),
-                mapError: (cause) =>
-                  mapAcpToAdapterError(PROVIDER, input.threadId, "session/set_model", cause),
-              });
               if (turnReasoningLevel !== undefined) {
                 ctx.reasoningLevel = turnReasoningLevel;
               }

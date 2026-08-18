@@ -417,6 +417,12 @@ export const make = Effect.gen(function* () {
           detail: "That scheduled task no longer exists.",
         });
       }
+      if (/[\r\n]/.test(input.jobId)) {
+        return yield* new HermesCronError({
+          reason: "unknownJob",
+          detail: "The scheduled task id must not contain carriage returns or line feeds.",
+        });
+      }
 
       const binary = settings.binaryPath || "hermes";
       const args = ["cron", input.enabled ? "resume" : "pause", input.jobId];

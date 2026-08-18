@@ -11,25 +11,36 @@
  * @module state/hermesCronSeen
  */
 
-let lastSeenSeq = 0;
-let latestSeq = 0;
+type EnvironmentKey = string;
+const seenByEnvironment = new Map<EnvironmentKey, { lastSeenSeq: number; latestSeq: number }>();
 const listeners = new Set<() => void>();
+
+function state(environmentId: EnvironmentKey) {
+  let value = seenByEnvironment.get(environmentId);
+  if (value === undefined) {
+    value = { lastSeenSeq: 0, latestSeq: 0 };
+    seenByEnvironment.set(environmentId, value);
+  }
+  return value;
+}
 
 function emit(): void {
   for (const listener of listeners) listener();
 }
 
 /** Called with the subscription's completion counter as runs land. */
-export function reportHermesCompletionSeq(seq: number): void {
-  if (seq === latestSeq) return;
-  latestSeq = seq;
+export function reportHermesCompletionSeq(environmentId: EnvironmentKey, seq: number): void {
+  const current = state(environmentId);
+  if (seq === current.latestSeq) return;
+  current.latestSeq = seq;
   emit();
 }
 
 /** Opening the panel acknowledges everything seen so far. */
-export function markHermesTasksSeen(): void {
-  if (lastSeenSeq === latestSeq) return;
-  lastSeenSeq = latestSeq;
+export function markHermesTasksSeen(environmentId: EnvironmentKey): void {
+  const current = state(environmentId);
+  if (current.lastSeenSeq === current.latestSeq) return;
+  current.lastSeenSeq = current.latestSeq;
   emit();
 }
 
@@ -40,13 +51,13 @@ export function subscribeHermesTasksSeen(listener: () => void): () => void {
   };
 }
 
-export function hasUnseenHermesCompletions(): boolean {
-  return latestSeq > lastSeenSeq;
+export function hasUnseenHermesCompletions(environmentId: EnvironmentKey): boolean {
+  const current = state(environmentId);
+  return current.latestSeq > current.lastSeenSeq;
 }
 
 /** Test-only: the counters outlive a single test otherwise. */
 export function resetHermesTasksSeenForTests(): void {
-  lastSeenSeq = 0;
-  latestSeq = 0;
+  seenByEnvironment.clear();
   listeners.clear();
 }

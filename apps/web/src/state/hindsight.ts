@@ -30,7 +30,7 @@ import {
   HINDSIGHT_DEFAULT_REFLECT_QUERY,
 } from "@t3tools/client-runtime/state/hindsight";
 import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 
 import { toastManager } from "../components/ui/toast";
 import { useHermesEnvironmentId } from "./hermesCron";
@@ -81,6 +81,7 @@ export function useHindsightMemory(): HindsightMemoryState & HindsightMemoryActi
   const environmentId = useHermesEnvironmentId();
 
   const [selectedBank, setSelectedBank] = useState<HindsightBankId | null>(null);
+  const selectedBankRef = useRef<HindsightBankId | null>(null);
   const [pathway, setPathway] = useState<HindsightPathwayFilter>("all");
   const [submittedQuery, setSubmittedQuery] = useState("");
   const [reflection, setReflection] = useState<string | null>(null);
@@ -99,6 +100,7 @@ export function useHindsightMemory(): HindsightMemoryState & HindsightMemoryActi
     selectedBank !== null && banks.some((candidate) => candidate.id === selectedBank)
       ? selectedBank
       : (banksQuery.data?.defaultBank ?? banks[0]?.id ?? null);
+  selectedBankRef.current = bank;
 
   const isRecalling = submittedQuery.length > 0;
 
@@ -196,10 +198,12 @@ export function useHindsightMemory(): HindsightMemoryState & HindsightMemoryActi
   const reflect = useCallback(() => {
     if (environmentId === null || bank === null || isReflecting) return;
     setIsReflecting(true);
+    const reflectBank = bank;
     const query = submittedQuery.length > 0 ? submittedQuery : HINDSIGHT_DEFAULT_REFLECT_QUERY;
     void reflectCommand({ environmentId, input: { bank, query } })
       .then((result) => {
         if (result._tag !== "Success") {
+          if (selectedBankRef.current !== reflectBank) return;
           if (!isAtomCommandInterrupted(result)) {
             toastManager.add({
               type: "error",
@@ -209,6 +213,7 @@ export function useHindsightMemory(): HindsightMemoryState & HindsightMemoryActi
           }
           return;
         }
+        if (selectedBankRef.current !== reflectBank) return;
         setReflection(result.value.text);
         toastManager.add({ type: "success", title: "Reflection ready" });
         // A reflection writes mental models and can consolidate, so the counts

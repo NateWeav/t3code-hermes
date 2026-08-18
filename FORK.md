@@ -40,7 +40,8 @@ model switching. See [docs/internals/providers.md](./docs/internals/providers.md
 
 - **Node `^24.13.1`** — the server runs directly from TypeScript source via Node's type stripping.
 - **pnpm 11.10.0** — `corepack enable && corepack prepare pnpm@11.10.0 --activate`.
-- **Hermes Agent with the ACP adapter.** Verified against **v0.20.0 (2026.8.3)**. The adapter lives
+- **Hermes Agent with the ACP adapter.** The ACP adapter was verified against **v0.20.0 (2026.8.3)**;
+  cron files and execution ledgers were verified against **v0.20.2**. The adapter lives
   in the `acp_adapter` package of the Hermes checkout and needs the `acp` Python dependency.
 - A C toolchain (`build-essential` or equivalent) — some dependencies build native modules.
 

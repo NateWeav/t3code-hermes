@@ -85,9 +85,11 @@ export function formatHermesRunDuration(durationMs: number | null): string | nul
   if (durationMs === null) return null;
   if (durationMs < 1_000) return `${durationMs}ms`;
   const seconds = durationMs / 1_000;
-  if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
-  const minutes = Math.floor(seconds / 60);
-  return `${minutes}m ${Math.round(seconds % 60)}s`;
+  if (seconds < 10) return `${seconds.toFixed(1)}s`;
+  const totalSeconds = Math.round(seconds);
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  return `${minutes}m ${totalSeconds % 60}s`;
 }
 
 /** `null` for both "never happened" and "Hermes wrote something unparseable". */

@@ -8,7 +8,7 @@ import type {
   HindsightPathwayFilter,
   HindsightStatus,
 } from "@t3tools/contracts";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 
 import { useEnvironmentQuery } from "./query";
 import { serverEnvironment } from "./server";
@@ -38,6 +38,7 @@ export interface HindsightRetainSuccess {
 
 export function useHindsightMemory(environmentId: EnvironmentId | null) {
   const [selectedBank, setSelectedBank] = useState<HindsightBankId | null>(null);
+  const selectedBankRef = useRef<HindsightBankId | null>(null);
   const [pathway, setPathway] = useState<HindsightPathwayFilter>("all");
   const [submittedQuery, setSubmittedQuery] = useState("");
   const [reflection, setReflection] = useState<string | null>(null);
@@ -52,6 +53,7 @@ export function useHindsightMemory(environmentId: EnvironmentId | null) {
     selectedBank !== null && banks.some((candidate) => candidate.id === selectedBank)
       ? selectedBank
       : (banksQuery.data?.defaultBank ?? banks[0]?.id ?? null);
+  selectedBankRef.current = bank;
   const isRecalling = submittedQuery.length > 0;
 
   const browseQuery = useEnvironmentQuery(
@@ -114,13 +116,14 @@ export function useHindsightMemory(environmentId: EnvironmentId | null) {
   const reflect = useCallback(async (): Promise<string | null> => {
     if (environmentId === null || bank === null || isReflecting) return null;
     setIsReflecting(true);
+    const reflectBank = bank;
     try {
       const query = submittedQuery.length > 0 ? submittedQuery : HINDSIGHT_DEFAULT_REFLECT_QUERY;
       const result = await reflectCommand({ environmentId, input: { bank, query } });
-      if (result._tag !== "Success") return null;
+      if (result._tag !== "Success" || selectedBankRef.current !== reflectBank) return null;
       setReflection(result.value.text);
       // Reflecting writes mental models and can consolidate, so the counts move.
-      statsQuery.refresh();
+      if (selectedBankRef.current === reflectBank) statsQuery.refresh();
       return result.value.text;
     } finally {
       setIsReflecting(false);

@@ -14,16 +14,16 @@ import { reportHermesCompletionSeq } from "../../state/hermesCronSeen";
 import { toastManager } from "../ui/toast";
 
 export function useHermesCronNotifications(): void {
-  const { view } = useHermesCron();
+  const { view, environmentId } = useHermesCron();
   const lastToastedSeq = useRef(0);
 
   useEffect(() => {
     const { completionSeq, lastCompletion } = view;
-    if (completionSeq === 0 || lastCompletion === null) return;
+    if (environmentId === null || completionSeq === 0 || lastCompletion === null) return;
     if (completionSeq === lastToastedSeq.current) return;
     lastToastedSeq.current = completionSeq;
 
-    reportHermesCompletionSeq(completionSeq);
+    reportHermesCompletionSeq(environmentId, completionSeq);
     toastManager.add(
       lastCompletion.status === "failed"
         ? {
@@ -37,5 +37,5 @@ export function useHermesCronNotifications(): void {
             description: "Scheduled run completed.",
           },
     );
-  }, [view]);
+  }, [environmentId, view]);
 }

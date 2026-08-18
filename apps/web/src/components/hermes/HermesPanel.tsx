@@ -17,6 +17,7 @@ import { useCallback, useEffect, useState } from "react";
 import { requestComposerTemplate } from "../../composerTemplateBus";
 import { cn } from "../../lib/utils";
 import { markHermesTasksSeen } from "../../state/hermesCronSeen";
+import { useHermesEnvironmentId } from "../../state/hermesCron";
 import { ScrollArea } from "../ui/scroll-area";
 import { SidebarInset } from "../ui/sidebar";
 import { WorkspaceBreadcrumb, WorkspaceBreadcrumbItem } from "../WorkspaceBreadcrumb";
@@ -33,11 +34,12 @@ const TABS: ReadonlyArray<{ readonly value: HermesTab; readonly label: string }>
 export function HermesPanel() {
   const navigate = useNavigate();
   const [tab, setTab] = useState<HermesTab>("tasks");
+  const environmentId = useHermesEnvironmentId();
 
   // Opening the panel is what clears the sidebar's unread dot.
   useEffect(() => {
-    markHermesTasksSeen();
-  }, []);
+    if (environmentId !== null) markHermesTasksSeen(environmentId);
+  }, [environmentId]);
 
   const handleNewTask = useCallback(() => {
     requestComposerTemplate(HERMES_NEW_TASK_TEMPLATE);

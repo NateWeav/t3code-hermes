@@ -88,7 +88,11 @@ import {
   resolveProjectPathForDispatch,
 } from "../lib/projectPaths";
 import { onOpenCommandPalette } from "../commandPaletteBus";
-import { claimComposerTemplate, onComposerTemplateRequested } from "../composerTemplateBus";
+import {
+  claimComposerTemplate,
+  onComposerTemplateRequested,
+  peekComposerTemplate,
+} from "../composerTemplateBus";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
@@ -416,22 +420,16 @@ export function CommandPalette({ children }: { children: ReactNode }) {
   // later request.
   useEffect(() => {
     let frame = 0;
-    // The request is made from a route where no composer exists, so the
-    // composer typically mounts a frame or two after the navigation. Retry
-    // across a short, bounded window rather than dropping the template — and
-    // give up rather than spin forever if the destination has no composer.
-    const MAX_FRAMES = 30;
     const applyPendingTemplate = (attempt = 0) => {
+      const template = peekComposerTemplate();
+      if (template === null) return;
       const composer = composerHandleRef.current;
       if (composer === null) {
-        if (attempt < MAX_FRAMES) {
-          frame = requestAnimationFrame(() => applyPendingTemplate(attempt + 1));
-        }
+        frame = requestAnimationFrame(() => applyPendingTemplate(attempt + 1));
         return;
       }
-      const template = claimComposerTemplate();
-      if (template === null) return;
       if (composer.insertTextAtEnd(template, { ensureLeadingBoundary: true })) {
+        claimComposerTemplate();
         composer.focusAtEnd();
       }
     };

@@ -30,6 +30,10 @@ export function claimComposerTemplate(): string | null {
   return template;
 }
 
+export function peekComposerTemplate(): string | null {
+  return pendingTemplate;
+}
+
 export function onComposerTemplateRequested(listener: () => void): () => void {
   window.addEventListener(TEMPLATE_READY_EVENT, listener);
   return () => window.removeEventListener(TEMPLATE_READY_EVENT, listener);

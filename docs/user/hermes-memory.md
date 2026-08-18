@@ -94,3 +94,7 @@ fix:
   recognise. This means one of the two needs updating, and it is reported once at the top of the tab
   rather than as a failure on everything you click.
 - **Empty bank** — Hindsight is working and this bank genuinely holds nothing yet.
+
+If a request fails after the panel has loaded, the affected action reports **Request failed**. If a
+response cannot be decoded, it reports **Could not be read**. Retry the action; the rest of the panel
+remains available.

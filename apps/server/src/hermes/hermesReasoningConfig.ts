@@ -93,6 +93,20 @@ function plainRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+function existingOverrideKey(overrides: unknown, slug: string): string | null {
+  if (!isMap(overrides)) return null;
+  const keys = overrides.items.map((item) => {
+    const key = item.key as { readonly value?: unknown };
+    return String(key.value ?? item.key);
+  });
+  const lowered = new Map(keys.map((key) => [key.trim().toLowerCase(), key] as const));
+  for (const variant of modelOverrideVariants(slug)) {
+    const key = lowered.get(variant.toLowerCase());
+    if (key !== undefined) return key;
+  }
+  return null;
+}
+
 /**
  * Port of `resolve_reasoning_config`, narrowed to the levels T3 Code offers.
  *
@@ -192,11 +206,17 @@ export const writeHermesReasoningOverride = (input: {
       } as const;
     }
 
-    const currentLevel = normalizeLevel(document.getIn([AGENT_KEY, OVERRIDES_KEY, key]));
+    const overrides = document.getIn([AGENT_KEY, OVERRIDES_KEY]);
+    const existingKey = existingOverrideKey(overrides, input.slug);
+    const resolvedKey = existingKey ?? key;
+    const currentLevel = normalizeLevel(
+      existingKey === null ? undefined : document.getIn([AGENT_KEY, OVERRIDES_KEY, existingKey]),
+    );
     if (currentLevel === input.level) return { _tag: "unchanged" } as const;
 
     if (input.level === null) {
-      document.deleteIn([AGENT_KEY, OVERRIDES_KEY, key]);
+      if (existingKey === null) return { _tag: "unchanged" } as const;
+      document.deleteIn([AGENT_KEY, OVERRIDES_KEY, existingKey]);
       const overrides = document.getIn([AGENT_KEY, OVERRIDES_KEY]);
       if (isMap(overrides) && overrides.items.length === 0) {
         document.deleteIn([AGENT_KEY, OVERRIDES_KEY]);
@@ -206,7 +226,7 @@ export const writeHermesReasoningOverride = (input: {
     } else {
       // `setIn` builds the `agent:` / `reasoning_overrides:` containers itself,
       // including on a document parsed from an empty file.
-      document.setIn([AGENT_KEY, OVERRIDES_KEY, key], input.level);
+      document.setIn([AGENT_KEY, OVERRIDES_KEY, resolvedKey], input.level);
     }
 
     const written = yield* writeFileStringAtomically({

@@ -14,6 +14,10 @@ Tasks tab.
 
 ## Tasks
 
+The Tasks tab lists every scheduled task with its schedule, when it last ran, how long that run took,
+and a status chip — OK, Failed, Paused, Scheduled, Completed, or Error. Expanding a row shows the
+recent run history and the reason for the most recent failure.
+
 The Tasks tab lists every scheduled task with its schedule, when it last ran, how long that run
 took, and a status chip — OK, Failed, or Paused. Expanding a row shows the recent run history and
 the reason for the most recent failure, so you can tell a task that is quietly broken from one that
@@ -30,6 +34,8 @@ When a task finishes or fails, T3 Code raises a notification and marks the sideb
 failure overnight is waiting for you rather than lost.
 
 ## Creating a task
+
+Mute is scoped to the environment and shared by all clients connected to it.
 
 There is no form. Tasks are written by Hermes itself, so you create one by asking for it in chat —
 "every morning at 9, summarise my open PRs and message me" — and Hermes schedules it. The **New

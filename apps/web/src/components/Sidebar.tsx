@@ -132,6 +132,7 @@ import {
   resolveAdjacentThreadId,
   resolveSettledTimestamp,
   resolveSidebarThreadStatus,
+  resolveThreadStatusRing,
   searchSidebarThreadsByTitle,
   shouldCreateNewThreadInCurrentProject,
   resolveWorkingStartedAt,
@@ -161,6 +162,7 @@ import {
   type SnoozePreset,
 } from "./Sidebar.snooze";
 import { ProjectFavicon } from "./ProjectFavicon";
+import { ThreadStatusRing } from "./ThreadStatusRing";
 import { ProviderInstanceIcon } from "./chat/ProviderInstanceIcon";
 import { getTriggerDisplayModelLabel } from "./chat/providerIconUtils";
 import {
@@ -724,6 +726,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   projectFaviconPath: string | null;
   projectTitle: string | null;
   providerEntryByInstanceId: ReadonlyMap<string, ProviderInstanceEntry>;
+  // Appearance setting: when false the status ring around the project
+  // icon still shows its state, it just holds still.
+  statusRingMotion: boolean;
   timestampFormat: TimestampFormat;
   onThreadClick: (event: ReactMouseEvent, threadRef: ScopedThreadRef) => void;
   onThreadActivate: (threadRef: ScopedThreadRef) => void;
@@ -839,11 +844,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       ? {
           label: "Working",
           icon: "working" as const,
-          // No shimmer: a label that animates forever is noise in a sidebar
-          // full of them (and repaints every vsync on high-refresh displays).
-          // Working is a background state, so it rests at the dim end of what
-          // the old pulse cycled through; only the thread you have open gets
-          // the label at full strength.
+          // No shimmer on the text: animating a label repaints it, and a
+          // sidebar full of shimmering words is noise. Motion for this state
+          // lives on the favicon's status ring instead, where it is a
+          // composited transform rather than a repaint. Working is a
+          // background state, so the label rests at the dim end of what the
+          // old pulse cycled through; only the thread you have open gets it
+          // at full strength.
           className: cn("text-sky-600 dark:text-sky-400", !props.isActive && "opacity-75"),
         }
       : status === "monitoring"
@@ -886,6 +893,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                     }
                   : null;
   const isWokeStatus = topStatus?.icon === "woke";
+  // Card rows only: the outline restates the label's hue on the row's whole
+  // perimeter so a column of threads reads at a glance. Slim (settled) rows
+  // stay quiet.
+  const statusRing = resolveThreadStatusRing({
+    status,
+    isUnread,
+    motion: props.statusRingMotion,
+  });
 
   const branchMismatch = resolveLocalCheckoutBranchMismatch({
     effectiveEnvMode: thread.worktreePath === null ? "local" : "worktree",
@@ -1362,6 +1377,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             />
           }
         >
+          <ThreadStatusRing ring={statusRing} />
           <div className="relative z-10 h-[4.875rem] px-[var(--sidebar-row-content-inset)] py-[var(--sidebar-content-inset)]">
             <div className="flex h-5 min-w-0 items-center gap-1.5">
               <ProjectFavicon
@@ -1707,6 +1723,7 @@ export default function Sidebar() {
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
   const sidebarProjectSortOrder = useClientSettings((s) => s.sidebarProjectSortOrder);
   const timestampFormat = useClientSettings((s) => s.timestampFormat);
+  const statusRingMotion = useClientSettings((s) => s.sidebarStatusRingMotion);
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const {
     settleThread,
@@ -3704,6 +3721,7 @@ export default function Sidebar() {
                           ) ?? null
                         }
                         providerEntryByInstanceId={providerEntryByInstanceId}
+                        statusRingMotion={statusRingMotion}
                         timestampFormat={timestampFormat}
                         onThreadClick={handleThreadClick}
                         onThreadActivate={navigateToThread}

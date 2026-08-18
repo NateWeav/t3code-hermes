@@ -12,6 +12,26 @@ If reordering is unavailable for one environment, update the T3 Code server runn
 environment. Older servers can still pin and unpin threads, but do not understand synced ordering;
 their pinned threads keep the default newest-first order below the ones you have arranged.
 
+## Status at a glance
+
+Active threads outline their whole card in the same color as the status label inside it, so you can
+read a column of threads without reading the labels:
+
+| Outline                | State                                                            |
+| ---------------------- | ---------------------------------------------------------------- |
+| Blue, dashed, marching | Working — the agent is running                                   |
+| Blue, dashed, still    | Monitoring — a watch loop is running with no other live work     |
+| Amber, breathing       | Approval — a tool call is waiting on your decision               |
+| Indigo, breathing      | Input — the agent asked you a question                           |
+| Red, fast pulse        | Failed — the session hit an error                                |
+| Green, still           | Done — the agent finished and you have not opened the thread yet |
+
+Settled threads and threads you have already caught up on carry no outline.
+
+To stop the outlines moving, turn off **Thread status animations** in Settings under Appearance.
+The outlines and their colors stay; they just hold still. Your system's reduce-motion setting does
+the same thing on its own, without changing the setting.
+
 ## Environment artwork
 
 Dev and Nightly environments can identify themselves with artwork at the top of the sidebar and in

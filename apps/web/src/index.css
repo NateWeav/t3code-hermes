@@ -141,6 +141,9 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --animate-status-pulse: status-pulse 2s infinite;
   --animate-ghost-pulse: ghost-pulse 2.4s infinite;
   --animate-status-ping: status-ping 2s infinite;
+  --animate-thread-ring-travel: thread-ring-travel 1.2s steps(12) infinite;
+  --animate-thread-ring-breathe: thread-ring-breathe 2.6s infinite;
+  --animate-thread-ring-alarm: thread-ring-alarm 1.1s infinite;
   --color-warning-foreground: var(--warning-foreground);
   --color-warning: var(--warning);
   --color-warning-surface: var(--warning-surface);
@@ -254,6 +257,50 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     100% {
       opacity: 0;
       scale: 2;
+    }
+  }
+  @keyframes thread-ring-travel {
+    /* Marching ants around a working row. A dash offset cannot ride the
+       compositor the way a transform can, so it is stepped hard: one dash
+       pitch per cycle in 12 jumps (10/s) rather than one per vsync. That is
+       also how marching ants have always looked, so the stepping reads as
+       the effect rather than as a dropped frame. */
+    to {
+      stroke-dashoffset: -12;
+    }
+  }
+  @keyframes thread-ring-breathe {
+    /* Waiting-on-you states. Same stepped ramp as status-pulse, slower and
+       deeper, so a row asking for input is visible without being urgent. */
+    0%,
+    35% {
+      opacity: 1;
+      animation-timing-function: steps(6);
+    }
+    50%,
+    85% {
+      opacity: 0.35;
+      animation-timing-function: steps(6);
+    }
+    100% {
+      opacity: 1;
+    }
+  }
+  @keyframes thread-ring-alarm {
+    /* Failure. Shorter cycle and a deeper trough than the breathe ramp, which
+       is what makes it read as urgent rather than merely alive. */
+    0%,
+    30% {
+      opacity: 1;
+      animation-timing-function: steps(4);
+    }
+    50%,
+    80% {
+      opacity: 0.2;
+      animation-timing-function: steps(4);
+    }
+    100% {
+      opacity: 1;
     }
   }
 }

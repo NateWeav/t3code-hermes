@@ -5,6 +5,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Schedule from "effect/Schedule";
 
 import { ServerConfig } from "../config.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
@@ -49,16 +50,29 @@ const runGit = (cwd: string, args: ReadonlyArray<string>) =>
 const runWithTempDirectory = <A, E, R>(
   test: (cwd: string) => Effect.Effect<A, E, R | FileSystem.FileSystem | Path.Path>,
 ) =>
-  Effect.scoped(
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem;
-      const cwd = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-pr-template-" });
-      yield* runGit(cwd, ["init", "--initial-branch=main"]);
-      yield* runGit(cwd, ["config", "user.email", "test@example.com"]);
-      yield* runGit(cwd, ["config", "user.name", "Test User"]);
-      return yield* test(cwd);
-    }),
-  ).pipe(Effect.provide(PrTemplateDetectionTestLayer));
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const cwd = yield* fileSystem.makeTempDirectory({ prefix: "t3-pr-template-" });
+    return yield* Effect.acquireUseRelease(
+      Effect.succeed(cwd),
+      (directory) =>
+        Effect.gen(function* () {
+          yield* runGit(directory, ["init", "--initial-branch=main"]);
+          yield* runGit(directory, ["config", "user.email", "test@example.com"]);
+          yield* runGit(directory, ["config", "user.name", "Test User"]);
+          return yield* test(directory);
+        }),
+      (directory) =>
+        // Git can finish filesystem work just after its exit code is available. Retry the
+        // recursive removal instead of letting a transient ENOTEMPTY fail the whole suite.
+        fileSystem
+          .remove(directory, { recursive: true, force: true })
+          .pipe(
+            Effect.retry(Schedule.spaced("25 millis").pipe(Schedule.upTo({ times: 8 }))),
+            Effect.orDie,
+          ),
+    );
+  }).pipe(Effect.provide(PrTemplateDetectionTestLayer));
 
 const writeTemplate = (cwd: string, relativePath: string, contents: string) =>
   Effect.gen(function* () {

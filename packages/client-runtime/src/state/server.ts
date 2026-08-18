@@ -40,6 +40,7 @@ import {
   subscribe,
   type EnvironmentRpcInput,
 } from "../rpc/client.ts";
+import { emptyHermesCronView, foldHermesCronView } from "./hermesCron.ts";
 import { followStreamInEnvironment } from "./runtime.ts";
 
 export type ServerUpdateStage = "downloading" | "installing" | "resuming";
@@ -718,6 +719,57 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:provider-quota",
       tag: WS_METHODS.serverGetProviderQuota,
       staleTimeMs: 60_000,
+    }),
+    /**
+     * Hermes scheduled tasks. A subscription rather than a query because the
+     * environment polls Hermes only while someone is watching, and pushes a
+     * snapshot only when it changed.
+     */
+    hermesCron: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:server:hermes-cron",
+      tag: WS_METHODS.subscribeHermesCron,
+      idleTtlMs: 0,
+      transform: (stream) =>
+        stream.pipe(Stream.mapAccum(() => emptyHermesCronView, foldHermesCronView)),
+    }),
+    hermesCronSetEnabled: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:hermes-cron-set-enabled",
+      tag: WS_METHODS.hermesCronSetEnabled,
+    }),
+    hermesCronSetMuted: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:hermes-cron-set-muted",
+      tag: WS_METHODS.hermesCronSetMuted,
+    }),
+    /**
+     * Hindsight memory. Queries rather than a subscription: Hindsight has no
+     * change feed, and the panel only wants an answer when the user asks a
+     * question. Banks are cached briefly because the picker re-reads them on
+     * every mount; memories are not, because a stale memory list is a lie.
+     */
+    hindsightBanks: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:hindsight-banks",
+      tag: WS_METHODS.hindsightListBanks,
+      staleTimeMs: 30_000,
+    }),
+    hindsightBrowse: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:hindsight-browse",
+      tag: WS_METHODS.hindsightBrowse,
+    }),
+    hindsightRecall: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:hindsight-recall",
+      tag: WS_METHODS.hindsightRecall,
+    }),
+    hindsightStats: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:hindsight-stats",
+      tag: WS_METHODS.hindsightStats,
+    }),
+    hindsightRetain: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:hindsight-retain",
+      tag: WS_METHODS.hindsightRetain,
+    }),
+    hindsightReflect: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:hindsight-reflect",
+      tag: WS_METHODS.hindsightReflect,
     }),
     configProjection,
     welcome: createEnvironmentRpcSubscriptionAtomFamily(runtime, {

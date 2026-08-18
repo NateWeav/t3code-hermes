@@ -88,6 +88,7 @@ import {
   resolveProjectPathForDispatch,
 } from "../lib/projectPaths";
 import { onOpenCommandPalette } from "../commandPaletteBus";
+import { claimComposerTemplate, onComposerTemplateRequested } from "../composerTemplateBus";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
@@ -409,6 +410,38 @@ export function CommandPalette({ children }: { children: ReactNode }) {
     select: (params) => resolveThreadRouteTarget(params),
   });
   const routeThreadRef = routeTarget?.kind === "server" ? routeTarget.threadRef : null;
+
+  // A full-page view (Hermes Tasks) can queue a prompt template while no
+  // composer is mounted. Claim it once one exists, on this mount and on any
+  // later request.
+  useEffect(() => {
+    let frame = 0;
+    // The request is made from a route where no composer exists, so the
+    // composer typically mounts a frame or two after the navigation. Retry
+    // across a short, bounded window rather than dropping the template — and
+    // give up rather than spin forever if the destination has no composer.
+    const MAX_FRAMES = 30;
+    const applyPendingTemplate = (attempt = 0) => {
+      const composer = composerHandleRef.current;
+      if (composer === null) {
+        if (attempt < MAX_FRAMES) {
+          frame = requestAnimationFrame(() => applyPendingTemplate(attempt + 1));
+        }
+        return;
+      }
+      const template = claimComposerTemplate();
+      if (template === null) return;
+      if (composer.insertTextAtEnd(template, { ensureLeadingBoundary: true })) {
+        composer.focusAtEnd();
+      }
+    };
+    const unsubscribe = onComposerTemplateRequested(() => applyPendingTemplate());
+    applyPendingTemplate();
+    return () => {
+      cancelAnimationFrame(frame);
+      unsubscribe();
+    };
+  }, []);
   const terminalOpen = useTerminalUiStateStore((state) =>
     routeThreadRef
       ? selectThreadTerminalUiState(state.terminalUiStateByThreadKey, routeThreadRef).terminalOpen

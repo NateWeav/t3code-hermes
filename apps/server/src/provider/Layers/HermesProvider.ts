@@ -3,6 +3,7 @@ import {
   type ModelCapabilities,
   type ServerProvider,
   type ServerProviderModel,
+  type ServerProviderSlashCommand,
 } from "@t3tools/contracts";
 import type * as EffectAcpSchema from "effect-acp/schema";
 import { causeErrorTag } from "@t3tools/shared/observability";
@@ -30,10 +31,17 @@ import {
   type ProviderMaintenanceCapabilities,
 } from "../providerMaintenance.ts";
 import {
+  HERMES_BUILT_IN_SLASH_COMMANDS,
   HERMES_FALLBACK_MODEL_ID,
   makeHermesAcpRuntime,
   resolveHermesAcpBaseModelId,
 } from "../acp/HermesAcpSupport.ts";
+import { dedupeSlashCommands } from "../slashCommands.ts";
+import {
+  buildHermesModelCapabilities,
+  readHermesReasoningContext,
+  type HermesReasoningContext,
+} from "../../hermes/hermesReasoningOptions.ts";
 
 const HERMES_PRESENTATION = {
   displayName: "Hermes",
@@ -65,7 +73,10 @@ export function buildInitialHermesProviderSnapshot(
 ): Effect.Effect<ServerProviderDraft> {
   return Effect.gen(function* () {
     const checkedAt = yield* Effect.map(DateTime.now, DateTime.formatIso);
-    const models = hermesModelsFromSettings(hermesSettings.customModels);
+    const models = hermesModelsFromSettings(
+      hermesSettings.customModels,
+      readHermesReasoningContext(),
+    );
 
     if (!hermesSettings.enabled) {
       return buildServerProvider({
@@ -88,6 +99,7 @@ export function buildInitialHermesProviderSnapshot(
       enabled: true,
       checkedAt,
       models,
+      slashCommands: HERMES_BUILT_IN_SLASH_COMMANDS,
       probe: {
         installed: true,
         version: null,
@@ -99,11 +111,32 @@ export function buildInitialHermesProviderSnapshot(
   });
 }
 
+/**
+ * Attaches the reasoning-effort selector to every model that has one.
+ *
+ * Applied in one place so discovered, built-in, and user-configured custom
+ * models are treated identically — a custom slug is still a Hermes model and
+ * still resolves through Hermes's models.dev cache.
+ */
+function withHermesReasoningCapabilities(
+  models: ReadonlyArray<ServerProviderModel>,
+  context: HermesReasoningContext,
+): ReadonlyArray<ServerProviderModel> {
+  return models.map((model) => ({
+    ...model,
+    capabilities: buildHermesModelCapabilities({ slug: model.slug, context }),
+  }));
+}
+
 function hermesModelsFromSettings(
   customModels: ReadonlyArray<string> | undefined,
+  context: HermesReasoningContext,
   builtInModels: ReadonlyArray<ServerProviderModel> = HERMES_BUILT_IN_MODELS,
 ): ReadonlyArray<ServerProviderModel> {
-  return providerModelsFromSettings(builtInModels, customModels ?? [], EMPTY_CAPABILITIES);
+  return withHermesReasoningCapabilities(
+    providerModelsFromSettings(builtInModels, customModels ?? [], EMPTY_CAPABILITIES),
+    context,
+  );
 }
 
 function buildHermesDiscoveredModelsFromSessionModelState(
@@ -130,9 +163,72 @@ function buildHermesDiscoveredModelsFromSessionModelState(
     .filter((model): model is ServerProviderModel => model !== undefined);
 }
 
+/**
+ * Upstream slugs are `provider/model`; the prefix is the upstream Hermes is
+ * configured to talk to. Surfacing the distinct prefixes tells the user which
+ * credentials Hermes actually resolved without reading `~/.hermes/.env`.
+ */
+function deriveConfiguredUpstreams(
+  modelState: EffectAcpSchema.SessionModelState | null | undefined,
+): ReadonlyArray<string> {
+  const upstreams = new Set<string>();
+  for (const model of modelState?.availableModels ?? []) {
+    const slash = model.modelId.indexOf("/");
+    if (slash <= 0) {
+      continue;
+    }
+    const prefix = model.modelId.slice(0, slash).trim().toLowerCase();
+    if (prefix) {
+      upstreams.add(prefix);
+    }
+  }
+  return [...upstreams].sort();
+}
+
+const UPSTREAM_DISPLAY_NAMES: Readonly<Record<string, string>> = {
+  anthropic: "Anthropic",
+  openai: "OpenAI",
+  openrouter: "OpenRouter",
+  google: "Google",
+  gemini: "Gemini",
+  deepseek: "DeepSeek",
+  groq: "Groq",
+  mistral: "Mistral",
+  nousresearch: "Nous Research",
+  ollama: "Ollama",
+  together: "Together",
+  xai: "xAI",
+};
+
+/** Render the upstreams Hermes reported as an auth card subtitle. */
+export function formatUpstreamLabel(upstreams: ReadonlyArray<string>): string {
+  return upstreams
+    .map(
+      (upstream) =>
+        UPSTREAM_DISPLAY_NAMES[upstream] ?? upstream.charAt(0).toUpperCase() + upstream.slice(1),
+    )
+    .join(", ");
+}
+
+interface HermesAcpDiscovery {
+  readonly models: ReadonlyArray<ServerProviderModel>;
+  readonly slashCommands: ReadonlyArray<ServerProviderSlashCommand>;
+  readonly upstreams: ReadonlyArray<string>;
+}
+
+/**
+ * How long the probe waits for Hermes's `available_commands_update`. Hermes
+ * schedules it on the event loop immediately after `session/new` responds, so
+ * this only has to cover a round trip; on timeout we keep the static seed.
+ * Deliberately short — it is wall-clock time added to every Hermes health
+ * check, and missing it costs nothing but a slightly stale menu.
+ */
+const HERMES_ACP_COMMAND_ADVERTISEMENT_TIMEOUT_MS = 1_000;
+
 const discoverHermesModelsViaAcp = (
   hermesSettings: HermesSettings,
   environment: NodeJS.ProcessEnv = process.env,
+  commandAdvertisementTimeoutMs: number = HERMES_ACP_COMMAND_ADVERTISEMENT_TIMEOUT_MS,
 ) =>
   Effect.gen(function* () {
     const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -144,7 +240,18 @@ const discoverHermesModelsViaAcp = (
       clientInfo: { name: "t3-code-provider-probe", version: "0.0.0" },
     });
     const started = yield* acp.start();
-    return buildHermesDiscoveredModelsFromSessionModelState(started.sessionSetupResult.models);
+    const advertised = yield* acp.awaitSlashCommands.pipe(
+      Effect.timeoutOption(commandAdvertisementTimeoutMs),
+    );
+    const slashCommands = Option.getOrElse(
+      Option.filter(advertised, (commands) => commands.length > 0),
+      () => HERMES_BUILT_IN_SLASH_COMMANDS,
+    );
+    return {
+      models: buildHermesDiscoveredModelsFromSessionModelState(started.sessionSetupResult.models),
+      slashCommands: dedupeSlashCommands(slashCommands),
+      upstreams: deriveConfiguredUpstreams(started.sessionSetupResult.models),
+    } satisfies HermesAcpDiscovery;
   }).pipe(Effect.scoped);
 
 const runHermesVersionCommand = (
@@ -168,13 +275,26 @@ const runHermesVersionCommand = (
 export const checkHermesProviderStatus = Effect.fn("checkHermesProviderStatus")(function* (
   hermesSettings: HermesSettings,
   environment: NodeJS.ProcessEnv = process.env,
+  options?: {
+    /**
+     * Overrides how long the probe waits for `available_commands_update`.
+     * Tests raise this so they wait on the advertisement receipt instead of
+     * racing the production deadline under parallel load.
+     */
+    readonly commandAdvertisementTimeoutMs?: number;
+  },
 ): Effect.fn.Return<
   ServerProviderDraft,
   never,
   ChildProcessSpawner.ChildProcessSpawner | Crypto.Crypto
 > {
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
-  const fallbackModels = hermesModelsFromSettings(hermesSettings.customModels);
+  // Read Hermes's models.dev cache and `config.yaml` once per probe: every
+  // model in this snapshot resolves its reasoning ladder against the same two
+  // files, and re-reading them per model would be the only I/O that scales
+  // with the model count.
+  const reasoningContext = readHermesReasoningContext(environment);
+  const fallbackModels = hermesModelsFromSettings(hermesSettings.customModels, reasoningContext);
 
   if (!hermesSettings.enabled) {
     return buildServerProvider({
@@ -207,6 +327,7 @@ export const checkHermesProviderStatus = Effect.fn("checkHermesProviderStatus")(
       enabled: hermesSettings.enabled,
       checkedAt,
       models: fallbackModels,
+      slashCommands: HERMES_BUILT_IN_SLASH_COMMANDS,
       probe: {
         installed: !isCommandMissingCause(error),
         version: null,
@@ -225,6 +346,7 @@ export const checkHermesProviderStatus = Effect.fn("checkHermesProviderStatus")(
       enabled: hermesSettings.enabled,
       checkedAt,
       models: fallbackModels,
+      slashCommands: HERMES_BUILT_IN_SLASH_COMMANDS,
       probe: {
         installed: true,
         version: null,
@@ -248,6 +370,7 @@ export const checkHermesProviderStatus = Effect.fn("checkHermesProviderStatus")(
       enabled: hermesSettings.enabled,
       checkedAt,
       models: fallbackModels,
+      slashCommands: HERMES_BUILT_IN_SLASH_COMMANDS,
       probe: {
         installed: true,
         version,
@@ -258,10 +381,11 @@ export const checkHermesProviderStatus = Effect.fn("checkHermesProviderStatus")(
     });
   }
 
-  const discoveryExit = yield* discoverHermesModelsViaAcp(hermesSettings, environment).pipe(
-    Effect.timeoutOption(HERMES_ACP_MODEL_DISCOVERY_TIMEOUT_MS),
-    Effect.exit,
-  );
+  const discoveryExit = yield* discoverHermesModelsViaAcp(
+    hermesSettings,
+    environment,
+    options?.commandAdvertisementTimeoutMs,
+  ).pipe(Effect.timeoutOption(HERMES_ACP_MODEL_DISCOVERY_TIMEOUT_MS), Effect.exit);
   if (Exit.isFailure(discoveryExit)) {
     yield* Effect.logWarning("Hermes ACP model discovery failed", {
       errorTag: causeErrorTag(discoveryExit.cause),
@@ -271,6 +395,7 @@ export const checkHermesProviderStatus = Effect.fn("checkHermesProviderStatus")(
       enabled: hermesSettings.enabled,
       checkedAt,
       models: fallbackModels,
+      slashCommands: HERMES_BUILT_IN_SLASH_COMMANDS,
       probe: {
         installed: true,
         version,
@@ -289,6 +414,7 @@ export const checkHermesProviderStatus = Effect.fn("checkHermesProviderStatus")(
       enabled: hermesSettings.enabled,
       checkedAt,
       models: fallbackModels,
+      slashCommands: HERMES_BUILT_IN_SLASH_COMMANDS,
       probe: {
         installed: true,
         version,
@@ -298,22 +424,46 @@ export const checkHermesProviderStatus = Effect.fn("checkHermesProviderStatus")(
       },
     });
   }
-  const discoveredModels = discoveryExit.value.value;
+  const discovery = discoveryExit.value.value;
+  const discoveredModels = discovery.models;
   const models =
     discoveredModels.length > 0
-      ? hermesModelsFromSettings(hermesSettings.customModels, discoveredModels)
+      ? hermesModelsFromSettings(hermesSettings.customModels, reasoningContext, discoveredModels)
       : fallbackModels;
+
+  // Hermes authenticates from its own `~/.hermes/.env`, which T3 Code must not
+  // read. A completed ACP handshake that returned real models is the strongest
+  // signal available that those credentials resolved: Hermes only lists models
+  // whose upstream it has usable credentials for. An empty list means the
+  // handshake worked but nothing is configured, which is exactly "not
+  // authenticated" from the user's point of view.
+  const auth =
+    discoveredModels.length > 0
+      ? ({
+          status: "authenticated",
+          ...(discovery.upstreams.length > 0
+            ? { label: formatUpstreamLabel(discovery.upstreams) }
+            : {}),
+        } as const)
+      : ({ status: "unauthenticated" } as const);
 
   return buildServerProvider({
     presentation: HERMES_PRESENTATION,
     enabled: hermesSettings.enabled,
     checkedAt,
     models,
+    slashCommands: discovery.slashCommands,
     probe: {
       installed: true,
       version,
       status: "ready",
-      auth: { status: "unknown" },
+      auth,
+      ...(discoveredModels.length === 0
+        ? {
+            message:
+              "Hermes is running but reported no models. Configure provider credentials in Hermes.",
+          }
+        : {}),
     },
   });
 });

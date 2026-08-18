@@ -1,6 +1,7 @@
 import {
   ArrowLeftIcon,
   ChartNoAxesColumnIcon,
+  ClockIcon,
   GitPullRequestIcon,
   SettingsIcon,
 } from "lucide-react";
@@ -10,6 +11,9 @@ import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
 import { useEnvironments } from "../../state/environments";
+import { useHermesProviderPresent } from "../../state/hermesCron";
+import { useHermesTasksUnread } from "../../state/hermesCronSeen";
+import { HermesCronWatcher } from "../hermes/HermesCronWatcher";
 import {
   resolveEnvironmentIdentificationPillLabel,
   resolveSidebarStageBackdropVariant,
@@ -124,11 +128,15 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
     select: (location) =>
       location.pathname === "/usage"
         ? "usage"
-        : location.pathname === "/pull-requests"
-          ? "pull-requests"
-          : null,
+        : location.pathname === "/hermes"
+          ? "hermes"
+          : location.pathname === "/pull-requests"
+            ? "pull-requests"
+            : null,
   });
   const { environments } = useEnvironments();
+  const hermesPresent = useHermesProviderPresent();
+  const hermesUnread = useHermesTasksUnread();
   // The page reads every connected server, so one of them offering pull requests is enough for
   // the link to lead somewhere.
   const pullRequestsSupported = environments.some(
@@ -155,6 +163,11 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
     void navigate({ to: "/usage" });
   }, [isMobile, navigate, setOpenMobile]);
 
+  const handleHermesClick = useCallback(() => {
+    closeMobileSidebar();
+    void navigate({ to: "/hermes" });
+  }, [closeMobileSidebar, navigate]);
+
   const handleBackClick = useCallback(() => {
     closeMobileSidebar();
     void navigate({ to: "/" });
@@ -162,6 +175,7 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
 
   return (
     <SidebarFooter className="p-[var(--sidebar-content-inset)]">
+      {hermesPresent ? <HermesCronWatcher /> : null}
       <SidebarProviderUpdatePill />
       <SidebarUpdateArchitectureWarning />
       <SidebarMenu className="flex-row items-center">
@@ -220,6 +234,33 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
                 <TooltipPopup side="top">Usage</TooltipPopup>
               </Tooltip>
             </SidebarMenuItem>
+            {hermesPresent ? (
+              <SidebarMenuItem className="shrink-0">
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <SidebarMenuButton
+                        aria-label="Hermes"
+                        onClick={handleHermesClick}
+                        size="icon"
+                        className="relative"
+                      >
+                        <ClockIcon />
+                        {hermesUnread ? (
+                          <span
+                            aria-hidden
+                            className="absolute top-1 right-1 size-1.5 rounded-full bg-primary"
+                          />
+                        ) : null}
+                      </SidebarMenuButton>
+                    }
+                  />
+                  <TooltipPopup side="top">
+                    {hermesUnread ? "Hermes — a task finished" : "Hermes"}
+                  </TooltipPopup>
+                </Tooltip>
+              </SidebarMenuItem>
+            ) : null}
           </>
         )}
         <SidebarUpdatePill />

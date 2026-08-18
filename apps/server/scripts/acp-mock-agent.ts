@@ -14,6 +14,15 @@ import type * as AcpSchema from "effect-acp/schema";
 const requestLogPath = process.env.T3_ACP_REQUEST_LOG_PATH;
 const exitLogPath = process.env.T3_ACP_EXIT_LOG_PATH;
 const emitToolCalls = process.env.T3_ACP_EMIT_TOOL_CALLS === "1";
+/** `T3_ACP_EMIT_USAGE_UPDATE=used/size` sends an ACP `usage_update` per prompt. */
+const usageUpdate = process.env.T3_ACP_EMIT_USAGE_UPDATE;
+/**
+ * `T3_ACP_EMIT_PROMPT_USAGE=input/output/total[/cachedRead/thought]` attaches
+ * end-of-turn totals to the `session/prompt` response.
+ */
+const promptUsage = process.env.T3_ACP_EMIT_PROMPT_USAGE;
+/** Emits a Hermes-shaped compaction `session_info_update` before finishing the prompt. */
+const emitCompactionInfo = process.env.T3_ACP_EMIT_COMPACTION_INFO === "1";
 const emitInterleavedAssistantToolCalls =
   process.env.T3_ACP_EMIT_INTERLEAVED_ASSISTANT_TOOL_CALLS === "1";
 const emitGenericToolPlaceholders = process.env.T3_ACP_EMIT_GENERIC_TOOL_PLACEHOLDERS === "1";
@@ -887,6 +896,49 @@ const program = Effect.gen(function* () {
           content: { type: "text", text: promptResponseText ?? "hello from mock" },
         },
       });
+
+      if (emitCompactionInfo) {
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "session_info_update",
+            title: "Compacted thread",
+            _meta: {
+              hermes: {
+                sessionProvenance: { compressionDepth: 1, reason: "compression" },
+              },
+            },
+          },
+        });
+      }
+
+      if (usageUpdate) {
+        const [used, size] = usageUpdate.split("/").map((part) => Number(part));
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: { sessionUpdate: "usage_update", used: used ?? 0, size: size ?? 0 },
+        });
+      }
+
+      if (promptUsage) {
+        const [input, output, total, cachedRead, thought] = promptUsage
+          .split("/")
+          .map((part) => Number(part));
+        return {
+          stopReason: "end_turn" as const,
+          usage: {
+            inputTokens: input ?? 0,
+            outputTokens: output ?? 0,
+            totalTokens: total ?? 0,
+            ...(cachedRead !== undefined && Number.isFinite(cachedRead)
+              ? { cachedReadTokens: cachedRead }
+              : {}),
+            ...(thought !== undefined && Number.isFinite(thought)
+              ? { thoughtTokens: thought }
+              : {}),
+          },
+        };
+      }
 
       return { stopReason: "end_turn" };
     }),

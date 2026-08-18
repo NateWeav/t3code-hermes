@@ -177,6 +177,28 @@ import {
   ResourceTelemetryRetryResult,
   ResourceTelemetrySnapshot,
 } from "./resourceTelemetry.ts";
+import {
+  HermesCronError,
+  HermesCronListInput,
+  HermesCronSetEnabledInput,
+  HermesCronSetMutedInput,
+  HermesCronSnapshot,
+  HermesCronStreamEvent,
+} from "./hermesCron.ts";
+import {
+  HindsightBanksResult,
+  HindsightBrowseInput,
+  HindsightError,
+  HindsightListBanksInput,
+  HindsightMemoryResult,
+  HindsightRecallInput,
+  HindsightReflectInput,
+  HindsightReflectResult,
+  HindsightRetainInput,
+  HindsightRetainResult,
+  HindsightStatsInput,
+  HindsightStatsResult,
+} from "./hindsight.ts";
 import { UsageReadError, UsageSummary, UsageSummaryInput } from "./usage.ts";
 import { ProviderQuotaReadError, ProviderQuotaSummary } from "./providerQuota.ts";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
@@ -273,6 +295,15 @@ export const WS_METHODS = {
   serverGetBackgroundPolicy: "server.getBackgroundPolicy",
   serverGetUsageSummary: "server.getUsageSummary",
   serverGetProviderQuota: "server.getProviderQuota",
+  hermesCronList: "hermes.cronList",
+  hermesCronSetEnabled: "hermes.cronSetEnabled",
+  hermesCronSetMuted: "hermes.cronSetMuted",
+  hindsightListBanks: "hindsight.listBanks",
+  hindsightBrowse: "hindsight.browse",
+  hindsightRecall: "hindsight.recall",
+  hindsightStats: "hindsight.stats",
+  hindsightRetain: "hindsight.retain",
+  hindsightReflect: "hindsight.reflect",
 
   // Cloud environment methods
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
@@ -312,6 +343,7 @@ export const WS_METHODS = {
   subscribeAuthAccess: "subscribeAuthAccess",
   subscribeBackgroundPolicy: "subscribeBackgroundPolicy",
   subscribeResourceTelemetry: "subscribeResourceTelemetry",
+  subscribeHermesCron: "subscribeHermesCron",
 } as const;
 
 export const WsServerUpsertKeybindingRpc = Rpc.make(WS_METHODS.serverUpsertKeybinding, {
@@ -432,6 +464,60 @@ export const WsServerGetUsageSummaryRpc = Rpc.make(WS_METHODS.serverGetUsageSumm
   payload: UsageSummaryInput,
   success: UsageSummary,
   error: Schema.Union([EnvironmentAuthorizationError, UsageReadError]),
+});
+
+export const WsHermesCronListRpc = Rpc.make(WS_METHODS.hermesCronList, {
+  payload: HermesCronListInput,
+  success: HermesCronSnapshot,
+  error: Schema.Union([EnvironmentAuthorizationError, HermesCronError]),
+});
+
+export const WsHermesCronSetEnabledRpc = Rpc.make(WS_METHODS.hermesCronSetEnabled, {
+  payload: HermesCronSetEnabledInput,
+  success: HermesCronSnapshot,
+  error: Schema.Union([EnvironmentAuthorizationError, HermesCronError]),
+});
+
+export const WsHermesCronSetMutedRpc = Rpc.make(WS_METHODS.hermesCronSetMuted, {
+  payload: HermesCronSetMutedInput,
+  success: HermesCronSnapshot,
+  error: Schema.Union([EnvironmentAuthorizationError, HermesCronError]),
+});
+
+export const WsHindsightListBanksRpc = Rpc.make(WS_METHODS.hindsightListBanks, {
+  payload: HindsightListBanksInput,
+  success: HindsightBanksResult,
+  error: Schema.Union([EnvironmentAuthorizationError, HindsightError]),
+});
+
+export const WsHindsightBrowseRpc = Rpc.make(WS_METHODS.hindsightBrowse, {
+  payload: HindsightBrowseInput,
+  success: HindsightMemoryResult,
+  error: Schema.Union([EnvironmentAuthorizationError, HindsightError]),
+});
+
+export const WsHindsightRecallRpc = Rpc.make(WS_METHODS.hindsightRecall, {
+  payload: HindsightRecallInput,
+  success: HindsightMemoryResult,
+  error: Schema.Union([EnvironmentAuthorizationError, HindsightError]),
+});
+
+export const WsHindsightStatsRpc = Rpc.make(WS_METHODS.hindsightStats, {
+  payload: HindsightStatsInput,
+  success: HindsightStatsResult,
+  error: Schema.Union([EnvironmentAuthorizationError, HindsightError]),
+});
+
+export const WsHindsightRetainRpc = Rpc.make(WS_METHODS.hindsightRetain, {
+  payload: HindsightRetainInput,
+  success: HindsightRetainResult,
+  error: Schema.Union([EnvironmentAuthorizationError, HindsightError]),
+});
+
+export const WsHindsightReflectRpc = Rpc.make(WS_METHODS.hindsightReflect, {
+  payload: HindsightReflectInput,
+  success: HindsightReflectResult,
+  error: Schema.Union([EnvironmentAuthorizationError, HindsightError]),
 });
 
 export const WsServerGetProviderQuotaRpc = Rpc.make(WS_METHODS.serverGetProviderQuota, {
@@ -981,6 +1067,13 @@ export const WsSubscribeResourceTelemetryRpc = Rpc.make(WS_METHODS.subscribeReso
   stream: true,
 });
 
+export const WsSubscribeHermesCronRpc = Rpc.make(WS_METHODS.subscribeHermesCron, {
+  payload: Schema.Struct({}),
+  success: HermesCronStreamEvent,
+  error: Schema.Union([EnvironmentAuthorizationError, HermesCronError]),
+  stream: true,
+});
+
 export const WsRpcGroup = RpcGroup.make(
   WsServerProbeRpc,
   WsServerGetConfigRpc,
@@ -1000,6 +1093,15 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerRetryResourceTelemetryRpc,
   WsServerGetUsageSummaryRpc,
   WsServerGetProviderQuotaRpc,
+  WsHermesCronListRpc,
+  WsHermesCronSetEnabledRpc,
+  WsHermesCronSetMutedRpc,
+  WsHindsightListBanksRpc,
+  WsHindsightBrowseRpc,
+  WsHindsightRecallRpc,
+  WsHindsightStatsRpc,
+  WsHindsightRetainRpc,
+  WsHindsightReflectRpc,
   WsServerSignalProcessRpc,
   WsServerReportClientActivityRpc,
   WsServerReportHostPowerStateRpc,
@@ -1073,6 +1175,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeAuthAccessRpc,
   WsSubscribeBackgroundPolicyRpc,
   WsSubscribeResourceTelemetryRpc,
+  WsSubscribeHermesCronRpc,
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationGetWorkflowScriptRpc,
   WsOrchestrationGetTurnDiffRpc,

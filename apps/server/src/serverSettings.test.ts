@@ -691,4 +691,26 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       );
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
+  it("strips the Hindsight API key before settings reach a client", () => {
+    const settings = Schema.decodeUnknownSync(ServerSettings)({
+      integrations: {
+        hindsight: {
+          enabled: true,
+          baseUrl: "http://127.0.0.1:8888",
+          apiKey: "hs-secret",
+          defaultBank: "hermes",
+        },
+      },
+    });
+
+    assert.equal(settings.integrations.hindsight.apiKey, "hs-secret");
+
+    const redacted = ServerSettingsModule.redactServerSettingsForClient(settings);
+    // Dropped outright, not blanked: no client has any use for it.
+    assert.equal("apiKey" in redacted.integrations.hindsight, false);
+    // Everything a client does need survives.
+    assert.equal(redacted.integrations.hindsight.baseUrl, "http://127.0.0.1:8888");
+    assert.equal(redacted.integrations.hindsight.defaultBank, "hermes");
+    assert.equal(redacted.integrations.hindsight.enabled, true);
+  });
 });

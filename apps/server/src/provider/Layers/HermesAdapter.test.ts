@@ -226,6 +226,187 @@ it.layer(hermesAdapterTestLayer)("HermesAdapterLive", (it) => {
     }),
   );
 
+  it.effect("maps ACP usage_update and Hermes compaction onto thread runtime events", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("hermes-usage-thread");
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockHermesWrapper({
+          T3_ACP_EMIT_USAGE_UPDATE: "48120/200000",
+          T3_ACP_EMIT_COMPACTION_INFO: "1",
+        }),
+      );
+      const adapter = yield* makeTestAdapter(wrapperPath);
+
+      const runtimeEvents: ProviderRuntimeEvent[] = [];
+      const usageSeen = yield* Deferred.make<void>();
+      const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
+        Effect.sync(() => {
+          runtimeEvents.push(event);
+        }).pipe(
+          Effect.andThen(
+            event.type === "thread.token-usage.updated"
+              ? Deferred.succeed(usageSeen, undefined)
+              : Effect.void,
+          ),
+        ),
+      ).pipe(Effect.forkChild);
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("hermes"),
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+        modelSelection: { instanceId: ProviderInstanceId.make("hermes"), model: "openai/gpt-5" },
+      });
+      yield* adapter.sendTurn({ threadId, input: "hello hermes", attachments: [] });
+
+      // Wait on the usage receipt itself rather than the turn, since Hermes
+      // sends usage_update after the assistant message.
+      yield* Deferred.await(usageSeen);
+      yield* Fiber.interrupt(runtimeEventsFiber);
+
+      const usage = runtimeEvents.find((event) => event.type === "thread.token-usage.updated");
+      assert.isDefined(usage);
+      if (usage?.type === "thread.token-usage.updated") {
+        assert.equal(usage.payload.usage.usedTokens, 48_120);
+        assert.equal(usage.payload.usage.maxTokens, 200_000);
+        assert.equal(usage.payload.usage.compactsAutomatically, true);
+      }
+
+      const compacted = runtimeEvents.find(
+        (event) => event.type === "thread.state.changed" && event.payload.state === "compacted",
+      );
+      assert.isDefined(compacted, "expected a compacted thread.state.changed event");
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("folds session/prompt usage totals into the context-window snapshot", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("hermes-prompt-usage-thread");
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockHermesWrapper({
+          T3_ACP_EMIT_USAGE_UPDATE: "48120/200000",
+          // input/output/total/cachedRead/thought, shaped like Hermes's
+          // PromptResponse.usage.
+          T3_ACP_EMIT_PROMPT_USAGE: "48120/900/51000/12000/300",
+        }),
+      );
+      const adapter = yield* makeTestAdapter(wrapperPath);
+
+      const runtimeEvents: ProviderRuntimeEvent[] = [];
+      const firstTurnCompleted = yield* Deferred.make<void>();
+      const secondTurnCompleted = yield* Deferred.make<void>();
+      let completedTurns = 0;
+      const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
+        Effect.sync(() => {
+          runtimeEvents.push(event);
+          if (event.type === "turn.completed") {
+            completedTurns += 1;
+          }
+          return completedTurns;
+        }).pipe(
+          Effect.flatMap((seen) =>
+            event.type !== "turn.completed"
+              ? Effect.void
+              : seen === 1
+                ? Deferred.succeed(firstTurnCompleted, undefined)
+                : Deferred.succeed(secondTurnCompleted, undefined),
+          ),
+        ),
+      ).pipe(Effect.forkChild);
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("hermes"),
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+        modelSelection: { instanceId: ProviderInstanceId.make("hermes"), model: "openai/gpt-5" },
+      });
+
+      yield* adapter.sendTurn({ threadId, input: "hello hermes", attachments: [] });
+      yield* Deferred.await(firstTurnCompleted);
+      yield* adapter.sendTurn({ threadId, input: "again", attachments: [] });
+      yield* Deferred.await(secondTurnCompleted);
+      yield* Fiber.interrupt(runtimeEventsFiber);
+
+      const usages = runtimeEvents.filter((event) => event.type === "thread.token-usage.updated");
+      assert.isAtLeast(usages.length, 3);
+
+      // usage_update alone knows nothing about totals.
+      assert.equal(usages[0]?.payload.usage.usedTokens, 48_120);
+      assert.isUndefined(usages[0]?.payload.usage.totalProcessedTokens);
+
+      // The prompt response contributes the totals and the breakdown while the
+      // window reading from usage_update survives.
+      const afterPrompt = usages[1]?.payload.usage;
+      assert.deepStrictEqual(afterPrompt, {
+        usedTokens: 48_120,
+        totalProcessedTokens: 51_000,
+        maxTokens: 200_000,
+        inputTokens: 48_120,
+        cachedInputTokens: 12_000,
+        outputTokens: 900,
+        reasoningOutputTokens: 300,
+        compactsAutomatically: true,
+      });
+
+      // The next turn's usage_update carries no total, and must not erase one.
+      assert.equal(usages[2]?.payload.usage.totalProcessedTokens, 51_000);
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("omits totalProcessedTokens when the turn total does not exceed the window", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("hermes-prompt-usage-small-thread");
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockHermesWrapper({
+          T3_ACP_EMIT_USAGE_UPDATE: "48120/200000",
+          T3_ACP_EMIT_PROMPT_USAGE: "30000/900/40000",
+        }),
+      );
+      const adapter = yield* makeTestAdapter(wrapperPath);
+
+      const runtimeEvents: ProviderRuntimeEvent[] = [];
+      const turnCompleted = yield* Deferred.make<void>();
+      const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
+        Effect.sync(() => {
+          runtimeEvents.push(event);
+        }).pipe(
+          Effect.andThen(
+            event.type === "turn.completed"
+              ? Deferred.succeed(turnCompleted, undefined)
+              : Effect.void,
+          ),
+        ),
+      ).pipe(Effect.forkChild);
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("hermes"),
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+        modelSelection: { instanceId: ProviderInstanceId.make("hermes"), model: "openai/gpt-5" },
+      });
+      yield* adapter.sendTurn({ threadId, input: "hello hermes", attachments: [] });
+      yield* Deferred.await(turnCompleted);
+      yield* Fiber.interrupt(runtimeEventsFiber);
+
+      const usages = runtimeEvents.filter((event) => event.type === "thread.token-usage.updated");
+      assert.isAtLeast(usages.length, 2);
+      for (const usage of usages) {
+        assert.isUndefined(usage.payload.usage.totalProcessedTokens);
+      }
+      // The breakdown still lands even when the total is not worth showing.
+      assert.equal(usages.at(-1)?.payload.usage.outputTokens, 900);
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
   it.effect("opens an approval request and answers with the agent-supplied option id", () =>
     Effect.gen(function* () {
       const threadId = ThreadId.make("hermes-approval-option-id");

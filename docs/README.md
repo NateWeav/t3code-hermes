@@ -7,6 +7,8 @@
 - [Keyboard shortcuts](./user/keybindings.md)
 - [Organizing threads](./user/thread-sidebar.md)
 - [Review usage](./user/usage.md)
+- [Watch Hermes scheduled tasks](./user/hermes-tasks.md)
+- [Browse what the agent remembers](./user/hermes-memory.md)
 - [Customize a project icon](./user/project-settings.md)
 - [Mobile appearance](./user/mobile-appearance.md)
 - [Remote access](./user/remote-access.md)

@@ -47,6 +47,18 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.serverRetryResourceTelemetry]: AuthOrchestrationOperateScope,
   [WS_METHODS.serverGetUsageSummary]: AuthOrchestrationReadScope,
   [WS_METHODS.serverGetProviderQuota]: AuthOrchestrationReadScope,
+  [WS_METHODS.hermesCronList]: AuthOrchestrationReadScope,
+  // Pausing a scheduled task changes what the host will do on its own.
+  [WS_METHODS.hermesCronSetEnabled]: AuthOrchestrationOperateScope,
+  [WS_METHODS.hermesCronSetMuted]: AuthOrchestrationOperateScope,
+  [WS_METHODS.hindsightListBanks]: AuthOrchestrationReadScope,
+  [WS_METHODS.hindsightBrowse]: AuthOrchestrationReadScope,
+  [WS_METHODS.hindsightRecall]: AuthOrchestrationReadScope,
+  [WS_METHODS.hindsightStats]: AuthOrchestrationReadScope,
+  // Retaining a note and forcing a reflection both write to the agent's
+  // long-term memory, which changes how it behaves in later turns.
+  [WS_METHODS.hindsightRetain]: AuthOrchestrationOperateScope,
+  [WS_METHODS.hindsightReflect]: AuthOrchestrationOperateScope,
   [WS_METHODS.serverSignalProcess]: AuthOrchestrationOperateScope,
   [WS_METHODS.serverReportClientActivity]: AuthOrchestrationReadScope,
   [WS_METHODS.serverReportHostPowerState]: AuthOrchestrationOperateScope,
@@ -87,6 +99,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.assetsCreateUrl]: AuthOrchestrationReadScope,
   [WS_METHODS.subscribeVcsStatus]: AuthOrchestrationReadScope,
   [WS_METHODS.subscribeResourceTelemetry]: AuthOrchestrationReadScope,
+  [WS_METHODS.subscribeHermesCron]: AuthOrchestrationReadScope,
   [WS_METHODS.vcsRefreshStatus]: AuthOrchestrationReadScope,
   [WS_METHODS.vcsPull]: AuthOrchestrationOperateScope,
   [WS_METHODS.gitRunStackedAction]: AuthOrchestrationOperateScope,

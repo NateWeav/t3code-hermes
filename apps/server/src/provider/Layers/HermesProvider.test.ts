@@ -6,9 +6,89 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { HermesSettings } from "@t3tools/contracts";
 
+import { HERMES_BUILT_IN_SLASH_COMMANDS } from "../acp/HermesAcpSupport.ts";
 import { buildInitialHermesProviderSnapshot, checkHermesProviderStatus } from "./HermesProvider.ts";
 
 const decodeHermesSettings = Schema.decodeSync(HermesSettings);
+const encodeJsonString = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
+
+/**
+ * A stand-in for `hermes` that answers `--version` and speaks just enough ACP
+ * on `acp` to complete the probe handshake: `initialize`, `authenticate`,
+ * `session/new`, and then the `available_commands_update` notification Hermes
+ * schedules right after the session response (see `acp_adapter/server.py`).
+ */
+const writeFakeHermesAcpBinary = Effect.fn("writeFakeHermesAcpBinary")(function* (options: {
+  readonly prefix: string;
+  readonly availableModels: ReadonlyArray<{ readonly modelId: string; readonly name: string }>;
+  readonly availableCommands?: ReadonlyArray<{
+    readonly name: string;
+    readonly description: string;
+    readonly input?: { readonly hint: string };
+  }>;
+}) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const dir = yield* fs.makeTempDirectoryScoped({ prefix: options.prefix });
+  const hermesPath = path.join(dir, "hermes");
+  const script = `#!/usr/bin/env node
+const models = ${encodeJsonString(options.availableModels)};
+const commands = ${encodeJsonString(options.availableCommands ?? null)};
+if (process.argv[2] !== "acp") {
+  process.stdout.write("hermes 0.20.0\\n");
+  process.exit(0);
+}
+const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
+let buffer = "";
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  let newline;
+  while ((newline = buffer.indexOf("\\n")) >= 0) {
+    const line = buffer.slice(0, newline).trim();
+    buffer = buffer.slice(newline + 1);
+    if (!line) continue;
+    const request = JSON.parse(line);
+    if (request.id === undefined) continue;
+    if (request.method === "initialize") {
+      send({
+        jsonrpc: "2.0",
+        id: request.id,
+        result: { protocolVersion: 1, agentCapabilities: { loadSession: true } },
+      });
+    } else if (request.method === "authenticate") {
+      send({ jsonrpc: "2.0", id: request.id, result: {} });
+    } else if (request.method === "session/new") {
+      send({
+        jsonrpc: "2.0",
+        id: request.id,
+        result: {
+          sessionId: "fake-session",
+          models:
+            models.length > 0
+              ? { currentModelId: models[0].modelId, availableModels: models }
+              : undefined,
+        },
+      });
+      if (commands) {
+        send({
+          jsonrpc: "2.0",
+          method: "session/update",
+          params: {
+            sessionId: "fake-session",
+            update: { sessionUpdate: "available_commands_update", availableCommands: commands },
+          },
+        });
+      }
+    } else {
+      send({ jsonrpc: "2.0", id: request.id, result: {} });
+    }
+  }
+});
+`;
+  yield* fs.writeFileString(hermesPath, script);
+  yield* fs.chmod(hermesPath, 0o755);
+  return hermesPath;
+});
 
 describe("buildInitialHermesProviderSnapshot", () => {
   it.effect("returns a disabled snapshot by default", () =>
@@ -106,3 +186,106 @@ it.layer(NodeServices.layer)("checkHermesProviderStatus", (it) => {
     }),
   );
 });
+
+// it.live: these spawn a real child process and the probe's bounded wait for
+// Hermes's command advertisement uses the clock. Under it.effect's TestClock
+// that timer freezes and the probe never returns.
+it.live("reports authenticated with derived upstreams once ACP returns models", () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Effect.scoped(
+      Effect.gen(function* () {
+        const hermesPath = yield* writeFakeHermesAcpBinary({
+          prefix: "t3code-hermes-auth-",
+          availableModels: [
+            { modelId: "anthropic/claude-opus-4", name: "Claude Opus 4" },
+            { modelId: "openai/gpt-5", name: "GPT-5" },
+            { modelId: "anthropic/claude-sonnet-4", name: "Claude Sonnet 4" },
+          ],
+        });
+        return yield* checkHermesProviderStatus(
+          decodeHermesSettings({ enabled: true, binaryPath: hermesPath }),
+        );
+      }),
+    );
+
+    expect(snapshot.status).toBe("ready");
+    expect(snapshot.auth.status).toBe("authenticated");
+    // Derived from model slug prefixes, never from ~/.hermes/.env.
+    expect(snapshot.auth.label).toBe("Anthropic, OpenAI");
+    expect(snapshot.models.map((model) => model.slug)).toEqual([
+      "anthropic/claude-opus-4",
+      "openai/gpt-5",
+      "anthropic/claude-sonnet-4",
+    ]);
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live("reports unauthenticated when the handshake works but no models are configured", () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Effect.scoped(
+      Effect.gen(function* () {
+        const hermesPath = yield* writeFakeHermesAcpBinary({
+          prefix: "t3code-hermes-noauth-",
+          availableModels: [],
+        });
+        return yield* checkHermesProviderStatus(
+          decodeHermesSettings({ enabled: true, binaryPath: hermesPath }),
+        );
+      }),
+    );
+
+    expect(snapshot.status).toBe("ready");
+    expect(snapshot.auth.status).toBe("unauthenticated");
+    expect(snapshot.message).toContain("no models");
+    expect(snapshot.models.map((model) => model.slug)).toEqual(["hermes-4"]);
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live("seeds the built-in slash commands when Hermes advertises none", () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Effect.scoped(
+      Effect.gen(function* () {
+        const hermesPath = yield* writeFakeHermesAcpBinary({
+          prefix: "t3code-hermes-seed-",
+          availableModels: [{ modelId: "anthropic/claude-opus-4", name: "Claude Opus 4" }],
+        });
+        return yield* checkHermesProviderStatus(
+          decodeHermesSettings({ enabled: true, binaryPath: hermesPath }),
+        );
+      }),
+    );
+
+    expect(snapshot.slashCommands.map((command) => command.name)).toEqual(
+      HERMES_BUILT_IN_SLASH_COMMANDS.map((command) => command.name),
+    );
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live("replaces the seed with the commands Hermes advertises", () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Effect.scoped(
+      Effect.gen(function* () {
+        const hermesPath = yield* writeFakeHermesAcpBinary({
+          prefix: "t3code-hermes-dynamic-",
+          availableModels: [{ modelId: "anthropic/claude-opus-4", name: "Claude Opus 4" }],
+          availableCommands: [
+            { name: "compress", description: "Compress conversation context" },
+            { name: "brand-new", description: "A command the seed does not know about" },
+          ],
+        });
+        return yield* checkHermesProviderStatus(
+          decodeHermesSettings({ enabled: true, binaryPath: hermesPath }),
+          process.env,
+          // Generous so this asserts on the advertisement arriving, not on
+          // beating the production deadline under parallel test load.
+          { commandAdvertisementTimeoutMs: 30_000 },
+        );
+      }),
+    );
+
+    expect(snapshot.slashCommands.map((command) => command.name)).toEqual([
+      "compress",
+      "brand-new",
+    ]);
+  }).pipe(Effect.provide(NodeServices.layer)),
+);

@@ -5,7 +5,9 @@ import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import type * as EffectAcpSchema from "effect-acp/schema";
 import { deriveToolActivityPresentation } from "@t3tools/shared/toolActivity";
-import type { ToolLifecycleItemType } from "@t3tools/contracts";
+import type { ServerProviderSlashCommand, ToolLifecycleItemType } from "@t3tools/contracts";
+
+import { dedupeSlashCommands } from "../slashCommands.ts";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -80,10 +82,55 @@ export interface AcpPermissionRequest {
   readonly toolCall?: AcpToolCallState;
 }
 
+/**
+ * Context pressure reported by an ACP agent's `usage_update` notification.
+ * `maxTokens` is omitted when the agent reports a non-positive window, which
+ * ACP allows but the context meter cannot render.
+ */
+export interface AcpUsageUpdate {
+  readonly usedTokens: number;
+  readonly maxTokens?: number;
+}
+
+/**
+ * End-of-turn token totals from an ACP `session/prompt` response. This is the
+ * complement of {@link AcpUsageUpdate}: `usage_update` reports live context
+ * pressure (how full the window is), while the prompt response reports what the
+ * turn actually cost. Field names follow the context-window snapshot contract,
+ * not ACP's, so adapters can spread it straight onto a snapshot.
+ */
+export interface AcpPromptUsage {
+  readonly totalTokens: number;
+  readonly inputTokens?: number;
+  readonly outputTokens?: number;
+  readonly cachedInputTokens?: number;
+  readonly reasoningOutputTokens?: number;
+}
+
 export type AcpParsedSessionEvent =
   | {
       readonly _tag: "ModeChanged";
       readonly modeId: string;
+    }
+  | {
+      readonly _tag: "CommandsUpdated";
+      readonly commands: ReadonlyArray<ServerProviderSlashCommand>;
+      readonly rawPayload: unknown;
+    }
+  | {
+      readonly _tag: "UsageUpdated";
+      readonly usage: AcpUsageUpdate;
+      readonly rawPayload: unknown;
+    }
+  | {
+      /**
+       * Agent-reported session metadata. Carries `rawPayload` because agents
+       * hang vendor extensions off `_meta` here (Hermes reports compaction
+       * this way) and only the owning adapter knows how to read them.
+       */
+      readonly _tag: "SessionInfoUpdated";
+      readonly title?: string;
+      readonly rawPayload: unknown;
     }
   | {
       readonly _tag: "AssistantItemStarted";
@@ -517,6 +564,73 @@ export function syntheticLoadSessionResponseFromInitialize(
   };
 }
 
+/**
+ * Map ACP `AvailableCommand` entries onto the provider snapshot's slash command
+ * shape. ACP names are advertised without the leading slash, which is also how
+ * the composer menu stores them, so no prefix handling is needed here.
+ */
+export function parseAcpAvailableCommands(
+  commands: ReadonlyArray<EffectAcpSchema.AvailableCommand> | null | undefined,
+): ReadonlyArray<ServerProviderSlashCommand> {
+  return dedupeSlashCommands(
+    (commands ?? []).flatMap((command) => {
+      const name = command.name.trim().replace(/^\/+/, "");
+      if (!name) {
+        return [];
+      }
+      const description = command.description?.trim() || undefined;
+      const hint = command.input?.hint?.trim() || undefined;
+      return [
+        {
+          name,
+          ...(description ? { description } : {}),
+          ...(hint ? { input: { hint } } : {}),
+        } satisfies ServerProviderSlashCommand,
+      ];
+    }),
+  );
+}
+
+function normalizeUsageTokenCount(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.floor(value)
+    : undefined;
+}
+
+/**
+ * Read the optional `usage` block off a `session/prompt` response. Agents that
+ * omit it (or report an all-zero turn) yield `undefined` so callers can leave a
+ * previously known total in place instead of overwriting it with nothing.
+ */
+export function parsePromptResponseUsage(
+  response: EffectAcpSchema.PromptResponse,
+): AcpPromptUsage | undefined {
+  const usage = response.usage;
+  if (!usage) {
+    return undefined;
+  }
+  const inputTokens = normalizeUsageTokenCount(usage.inputTokens);
+  const outputTokens = normalizeUsageTokenCount(usage.outputTokens);
+  const cachedInputTokens = normalizeUsageTokenCount(usage.cachedReadTokens);
+  const reasoningOutputTokens = normalizeUsageTokenCount(usage.thoughtTokens);
+  const reportedTotal = normalizeUsageTokenCount(usage.totalTokens);
+  // Agents that only fill the breakdown still know their total.
+  const totalTokens =
+    reportedTotal !== undefined && reportedTotal > 0
+      ? reportedTotal
+      : (inputTokens ?? 0) + (outputTokens ?? 0);
+  if (totalTokens <= 0) {
+    return undefined;
+  }
+  return {
+    totalTokens,
+    ...(inputTokens !== undefined ? { inputTokens } : {}),
+    ...(outputTokens !== undefined ? { outputTokens } : {}),
+    ...(cachedInputTokens !== undefined ? { cachedInputTokens } : {}),
+    ...(reasoningOutputTokens !== undefined ? { reasoningOutputTokens } : {}),
+  };
+}
+
 export function parseSessionUpdateEvent(params: EffectAcpSchema.SessionNotification): {
   readonly modeId?: string;
   readonly events: ReadonlyArray<AcpParsedSessionEvent>;
@@ -534,6 +648,42 @@ export function parseSessionUpdateEvent(params: EffectAcpSchema.SessionNotificat
           modeId,
         });
       }
+      break;
+    }
+    case "available_commands_update": {
+      const commands = parseAcpAvailableCommands(upd.availableCommands);
+      // An empty advertisement is meaningful: it clears a stale menu.
+      events.push({
+        _tag: "CommandsUpdated",
+        commands,
+        rawPayload: params,
+      });
+      break;
+    }
+    case "usage_update": {
+      const usedTokens = normalizeUsageTokenCount(upd.used);
+      if (usedTokens === undefined) {
+        break;
+      }
+      const size = normalizeUsageTokenCount(upd.size);
+      const maxTokens = size !== undefined && size > 0 ? size : undefined;
+      events.push({
+        _tag: "UsageUpdated",
+        usage: {
+          usedTokens,
+          ...(maxTokens !== undefined ? { maxTokens } : {}),
+        },
+        rawPayload: params,
+      });
+      break;
+    }
+    case "session_info_update": {
+      const title = upd.title?.trim() || undefined;
+      events.push({
+        _tag: "SessionInfoUpdated",
+        ...(title ? { title } : {}),
+        rawPayload: params,
+      });
       break;
     }
     case "plan": {

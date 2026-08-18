@@ -39,6 +39,7 @@ import {
   spawnAndCollect,
   type ServerProviderDraft,
 } from "../providerSnapshot.ts";
+import { dedupeSlashCommands } from "../slashCommands.ts";
 import { resolveClaudeSdkExecutablePath } from "../Drivers/ClaudeExecutable.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
 import { discoverClaudeSkills } from "../Drivers/ClaudeSkills.ts";
@@ -666,45 +667,6 @@ function parseClaudeInitializationCommands(
       ];
     }),
   );
-}
-
-function dedupeSlashCommands(
-  commands: ReadonlyArray<ServerProviderSlashCommand>,
-): ReadonlyArray<ServerProviderSlashCommand> {
-  const commandsByName = new Map<string, ServerProviderSlashCommand>();
-
-  for (const command of commands) {
-    const name = nonEmptyProbeString(command.name);
-    if (!name) {
-      continue;
-    }
-
-    const key = name.toLowerCase();
-    const existing = commandsByName.get(key);
-    if (!existing) {
-      commandsByName.set(key, {
-        ...command,
-        name,
-      });
-      continue;
-    }
-
-    commandsByName.set(key, {
-      ...existing,
-      ...(existing.description
-        ? {}
-        : command.description
-          ? { description: command.description }
-          : {}),
-      ...(existing.input?.hint
-        ? {}
-        : command.input?.hint
-          ? { input: { hint: command.input.hint } }
-          : {}),
-    });
-  }
-
-  return [...commandsByName.values()];
 }
 
 function waitForAbortSignal(signal: AbortSignal): Promise<void> {

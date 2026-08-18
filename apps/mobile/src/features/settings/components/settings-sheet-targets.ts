@@ -4,6 +4,7 @@ export type SettingsSheetTarget =
   | "SettingsAppearance"
   | "SettingsProjectGrouping"
   | "SettingsClientStorage"
-  | "SettingsUsage";
+  | "SettingsUsage"
+  | "SettingsHermes";
 
 export type SettingsLegalDocumentTarget = "SettingsLegal";

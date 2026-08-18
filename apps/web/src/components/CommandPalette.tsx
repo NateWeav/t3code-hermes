@@ -89,6 +89,11 @@ import {
   resolveProjectPathForDispatch,
 } from "../lib/projectPaths";
 import { onOpenCommandPalette } from "../commandPaletteBus";
+import {
+  claimComposerTemplate,
+  onComposerTemplateRequested,
+  peekComposerTemplate,
+} from "../composerTemplateBus";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
@@ -410,6 +415,32 @@ export function CommandPalette({ children }: { children: ReactNode }) {
     select: (params) => resolveThreadRouteTarget(params),
   });
   const routeThreadRef = routeTarget?.kind === "server" ? routeTarget.threadRef : null;
+
+  // A full-page view (Hermes Tasks) can queue a prompt template while no
+  // composer is mounted. Claim it once one exists, on this mount and on any
+  // later request.
+  useEffect(() => {
+    let frame = 0;
+    const applyPendingTemplate = (attempt = 0) => {
+      const template = peekComposerTemplate();
+      if (template === null) return;
+      const composer = composerHandleRef.current;
+      if (composer === null) {
+        frame = requestAnimationFrame(() => applyPendingTemplate(attempt + 1));
+        return;
+      }
+      if (composer.insertTextAtEnd(template, { ensureLeadingBoundary: true })) {
+        claimComposerTemplate();
+        composer.focusAtEnd();
+      }
+    };
+    const unsubscribe = onComposerTemplateRequested(() => applyPendingTemplate());
+    applyPendingTemplate();
+    return () => {
+      cancelAnimationFrame(frame);
+      unsubscribe();
+    };
+  }, []);
   const terminalOpen = useTerminalUiStateStore((state) =>
     routeThreadRef
       ? selectThreadTerminalUiState(state.terminalUiStateByThreadKey, routeThreadRef).terminalOpen

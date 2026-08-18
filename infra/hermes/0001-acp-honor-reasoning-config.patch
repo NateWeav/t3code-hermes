@@ -1,0 +1,43 @@
+From: T3 Code (Hermes fork)
+Subject: [PATCH] acp: honor the configured reasoning effort when building an agent
+
+The ACP adapter is the only Hermes surface that does not route reasoning
+effort through hermes_constants.resolve_reasoning_config. Every other
+entry point (CLI startup, messaging gateway, Desktop/TUI, cron, /model
+switch, fallback activation) resolves per-model
+agent.reasoning_overrides over the global agent.reasoning_effort, but
+_make_agent never passes reasoning_config to AIAgent, so agent_init
+leaves it None and the provider default is used regardless of config.
+
+config is already loaded in this function, so resolving there is enough.
+Because set_session_model rebuilds the agent through _make_agent, a level
+changed in config.yaml also takes effect on the next agent build rather
+than only on process restart.
+
+Verified against hermes-agent 3c108589fbcaa7284ac9b4b31c0f1c75ac76cd47.
+---
+--- a/acp_adapter/session.py
++++ b/acp_adapter/session.py
+@@ -633,7 +633,22 @@
+             "model": model or default_model,
+         }
+
++        # Reasoning effort: route through the shared chokepoint every other
++        # surface uses (per-model ``agent.reasoning_overrides`` > global
++        # ``agent.reasoning_effort``). Without this the ACP surface is the
++        # only one that ignores the configured level and silently takes the
++        # provider default. Rebuilt agents (``set_session_model``) re-read it
++        # here, so a level change lands on the next agent build.
+         try:
++            from hermes_constants import resolve_reasoning_config
++
++            kwargs["reasoning_config"] = resolve_reasoning_config(
++                config, kwargs["model"]
++            )
++        except Exception:
++            logger.debug("ACP: could not resolve reasoning config", exc_info=True)
++
++        try:
+             runtime = resolve_runtime_provider(requested=requested_provider or config_provider)
+             kwargs.update(
+                 {

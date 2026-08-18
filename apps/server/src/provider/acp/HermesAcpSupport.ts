@@ -8,7 +8,12 @@
  *
  * @module provider/acp/HermesAcpSupport
  */
-import { type HermesSettings, ProviderDriverKind, type RuntimeMode } from "@t3tools/contracts";
+import {
+  type HermesSettings,
+  ProviderDriverKind,
+  type RuntimeMode,
+  type ServerProviderSlashCommand,
+} from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -40,6 +45,75 @@ const HERMES_AUTONOMOUS_MODE_ALIASES = [
   "bypass",
 ];
 const HERMES_APPROVAL_MODE_ALIASES = ["ask", "approve", "manual", "confirm", "default"];
+
+/**
+ * Slash commands the Hermes ACP adapter handles locally, mirroring its
+ * `_ADVERTISED_COMMANDS` table (`acp_adapter/server.py`). Hermes advertises the
+ * same list over `available_commands_update` shortly after `session/new`; this
+ * seed keeps the composer menu populated on a cold snapshot and whenever the
+ * probe's session closes before that notification lands.
+ *
+ * Note these are the *ACP adapter's* commands, which are a different set from
+ * the interactive `hermes` TUI's commands — the adapter only implements the
+ * nine below, and anything else is forwarded to the model as ordinary prose.
+ */
+export const HERMES_BUILT_IN_SLASH_COMMANDS: ReadonlyArray<ServerProviderSlashCommand> = [
+  { name: "help", description: "List available commands" },
+  {
+    name: "model",
+    description: "Show current model and provider, or switch models",
+    input: { hint: "model name to switch to" },
+  },
+  { name: "tools", description: "List available tools with descriptions" },
+  { name: "context", description: "Show conversation message counts by role" },
+  { name: "reset", description: "Clear conversation history" },
+  { name: "compress", description: "Compress conversation context" },
+  {
+    name: "steer",
+    description: "Inject guidance into the currently running agent turn",
+    input: { hint: "guidance for the active turn" },
+  },
+  {
+    name: "queue",
+    description: "Queue a prompt to run after the current turn finishes",
+    input: { hint: "prompt to run next" },
+  },
+  { name: "version", description: "Show Hermes version" },
+];
+
+/**
+ * Hermes reports context compaction through its own `_meta` extension rather
+ * than an ACP-native update: `session_info_update` carries
+ * `_meta.hermes.sessionProvenance` and sets `reason: "compression"` when the
+ * notification was triggered by a compression-driven session split.
+ *
+ * @see acp_adapter/provenance.py in NousResearch/hermes-agent
+ */
+export function hermesSessionInfoIndicatesCompaction(rawPayload: unknown): boolean {
+  if (typeof rawPayload !== "object" || rawPayload === null) {
+    return false;
+  }
+  const meta = (rawPayload as { readonly _meta?: unknown })._meta;
+  const update = (rawPayload as { readonly update?: { readonly _meta?: unknown } }).update;
+  for (const candidate of [update?._meta, meta]) {
+    if (typeof candidate !== "object" || candidate === null) {
+      continue;
+    }
+    const hermes = (candidate as { readonly hermes?: unknown }).hermes;
+    if (typeof hermes !== "object" || hermes === null) {
+      continue;
+    }
+    const provenance = (hermes as { readonly sessionProvenance?: unknown }).sessionProvenance;
+    if (typeof provenance !== "object" || provenance === null) {
+      continue;
+    }
+    const reason = (provenance as { readonly reason?: unknown }).reason;
+    if (reason === "compression") {
+      return true;
+    }
+  }
+  return false;
+}
 
 type HermesAcpRuntimeHermesSettings = Pick<HermesSettings, "binaryPath">;
 
@@ -109,15 +183,27 @@ export function applyHermesAcpModelSelection<E>(input: {
   readonly currentModelId: string | undefined;
   readonly requestedModelId: string | undefined;
   readonly mapError: (cause: EffectAcpErrors.AcpError) => E;
+  /**
+   * Re-send `session/set_model` even when the model is unchanged.
+   *
+   * Hermes rebuilds the session's agent from `config.yaml` on every
+   * `set_session_model`, so this is how a setting that only lives in that file
+   * — reasoning effort — reaches a session that is already running. The session
+   * id and its history survive the rebuild, exactly as they do for a real model
+   * switch.
+   */
+  readonly forceReapply?: boolean;
 }): Effect.Effect<string | undefined, E> {
+  const targetModelId = input.requestedModelId ?? input.currentModelId;
   const shouldSwitchModel =
-    input.requestedModelId !== undefined && input.requestedModelId !== input.currentModelId;
+    targetModelId !== undefined &&
+    (targetModelId !== input.currentModelId || input.forceReapply === true);
   if (!shouldSwitchModel) {
     return Effect.succeed(input.currentModelId);
   }
   return input.runtime
-    .setSessionModel(input.requestedModelId)
-    .pipe(Effect.mapError(input.mapError), Effect.as(input.requestedModelId));
+    .setSessionModel(targetModelId)
+    .pipe(Effect.mapError(input.mapError), Effect.as(targetModelId));
 }
 
 function findModeIdByAliases(

@@ -52,11 +52,18 @@ import {
   makeAcpRequestResolvedEvent,
   makeAcpToolCallEvent,
 } from "../acp/AcpCoreRuntimeEvents.ts";
-import { parsePermissionRequest } from "../acp/AcpRuntimeModel.ts";
+import {
+  parsePermissionRequest,
+  parsePromptResponseUsage,
+  type AcpUsageUpdate,
+} from "../acp/AcpRuntimeModel.ts";
 import { makeAcpNativeLoggerFactory } from "../acp/AcpNativeLogging.ts";
+import { applyHermesReasoningSelection } from "../../hermes/hermesReasoningOptions.ts";
+import type { HermesReasoningLevel } from "../../hermes/hermesReasoning.ts";
 import {
   applyHermesAcpModelSelection,
   currentHermesModelIdFromSessionSetup,
+  hermesSessionInfoIndicatesCompaction,
   makeHermesAcpRuntime,
   resolveHermesAcpBaseModelId,
   resolveHermesSessionModeId,
@@ -135,7 +142,33 @@ interface HermesSessionContext {
    * continues it, and only the last remaining prompt settles the turn. */
   promptsInFlight: number;
   currentModelId: string | undefined;
+  /**
+   * Reasoning level Hermes's live agent was built with, as far as we know.
+   * Hermes only reads the level when it builds an agent, so a turn whose
+   * selection differs from this has to force a rebuild to make it land.
+   */
+  reasoningLevel: HermesReasoningLevel | null | undefined;
+  /** Last known reading from each token-usage source, merged on every emit. */
+  tokenUsage: HermesTokenUsageState;
   stopped: boolean;
+}
+
+/**
+ * Hermes reports token usage from two complementary places: streaming
+ * `usage_update` notifications carry context pressure (`used`/`size`) but no
+ * totals, and the end-of-turn `session/prompt` response carries the turn's
+ * actual token counts but no window size. Neither is a superset of the other,
+ * so readings accumulate here and each emit publishes the merge — a later
+ * `usage_update` must not erase a known total, and vice versa.
+ */
+interface HermesTokenUsageState {
+  usedTokens?: number;
+  maxTokens?: number;
+  totalProcessedTokens?: number;
+  inputTokens?: number;
+  cachedInputTokens?: number;
+  outputTokens?: number;
+  reasoningOutputTokens?: number;
 }
 
 function settlePendingApprovalsAsCancelled(
@@ -241,6 +274,7 @@ export function makeHermesAdapter(
 
     const sessions = new Map<ThreadId, HermesSessionContext>();
     const threadLocksRef = yield* SynchronizedRef.make(new Map<string, Semaphore.Semaphore>());
+    const reasoningConfigMutex = yield* Semaphore.make(1);
     const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
 
     const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
@@ -493,6 +527,128 @@ export function makeHermesAdapter(
         );
       });
 
+    /**
+     * Publish the merge of every token-usage reading seen so far as the shared
+     * context-window snapshot, so ProviderRuntimeIngestion produces
+     * `context-window.updated` activities exactly like Claude and Codex do.
+     *
+     * Hermes's `used` is a whole-request estimate (system prompt + history +
+     * tool schemas), not a per-turn delta, so the `last*` fields stay absent
+     * rather than carry a number that would be wrong.
+     */
+    const emitMergedTokenUsage = (
+      ctx: HermesSessionContext,
+      turnId: TurnId | undefined,
+      raw: { readonly method: string; readonly payload: unknown },
+    ) =>
+      Effect.gen(function* () {
+        const state = ctx.tokenUsage;
+        const usedTokens = state.usedTokens;
+        if (usedTokens === undefined) {
+          return;
+        }
+        const { totalProcessedTokens } = state;
+        yield* offerRuntimeEvent({
+          type: "thread.token-usage.updated",
+          ...(yield* makeEventStamp()),
+          provider: PROVIDER,
+          threadId: ctx.threadId,
+          ...(turnId !== undefined ? { turnId } : {}),
+          payload: {
+            usage: {
+              usedTokens,
+              // Matches Claude and Codex: a total that is not larger than the
+              // live window reading tells the reader nothing, so it is omitted.
+              ...(totalProcessedTokens !== undefined && totalProcessedTokens > usedTokens
+                ? { totalProcessedTokens }
+                : {}),
+              ...(state.maxTokens !== undefined ? { maxTokens: state.maxTokens } : {}),
+              ...(state.inputTokens !== undefined ? { inputTokens: state.inputTokens } : {}),
+              ...(state.cachedInputTokens !== undefined
+                ? { cachedInputTokens: state.cachedInputTokens }
+                : {}),
+              ...(state.outputTokens !== undefined ? { outputTokens: state.outputTokens } : {}),
+              ...(state.reasoningOutputTokens !== undefined
+                ? { reasoningOutputTokens: state.reasoningOutputTokens }
+                : {}),
+              // Hermes compresses on its own once the window fills.
+              compactsAutomatically: true,
+            },
+          },
+          raw: {
+            source: "acp.jsonrpc",
+            method: raw.method,
+            payload: raw.payload,
+          },
+        });
+      });
+
+    const emitTokenUsage = (
+      ctx: HermesSessionContext,
+      usage: AcpUsageUpdate,
+      rawPayload: unknown,
+    ) =>
+      Effect.gen(function* () {
+        // Hermes `used` is a whole-request estimate, so `0` is a real reading
+        // (e.g. right after a reset) rather than an absent one. Emitting it
+        // clears the meter; dropping it would leave stale context pressure.
+        const usedTokens =
+          usage.usedTokens !== null && usage.usedTokens !== undefined
+            ? Math.max(0, usage.usedTokens)
+            : null;
+        if (usedTokens === null) {
+          return;
+        }
+        ctx.tokenUsage = {
+          ...ctx.tokenUsage,
+          usedTokens,
+          ...(usage.maxTokens !== undefined ? { maxTokens: usage.maxTokens } : {}),
+        };
+        yield* emitMergedTokenUsage(ctx, resolveNotificationTurnId(ctx), {
+          method: "session/update",
+          payload: rawPayload,
+        });
+      });
+
+    /**
+     * Fold the end-of-turn `session/prompt` usage totals into the snapshot.
+     * Hermes never reports a window size here, and only reports the turn's
+     * totals, so this contributes `totalProcessedTokens` plus the breakdown and
+     * leaves `usedTokens`/`maxTokens` to `usage_update`. When no `usage_update`
+     * has landed yet, the prompt token count is the same quantity Hermes would
+     * have reported as `used`, so it seeds the meter rather than dropping it.
+     */
+    const emitPromptResponseTokenUsage = (
+      ctx: HermesSessionContext,
+      turnId: TurnId,
+      result: EffectAcpSchema.PromptResponse,
+    ) =>
+      Effect.gen(function* () {
+        const usage = parsePromptResponseUsage(result);
+        if (!usage) {
+          return;
+        }
+        ctx.tokenUsage = {
+          ...ctx.tokenUsage,
+          ...(ctx.tokenUsage.usedTokens === undefined && usage.inputTokens !== undefined
+            ? { usedTokens: usage.inputTokens }
+            : {}),
+          totalProcessedTokens: usage.totalTokens,
+          ...(usage.inputTokens !== undefined ? { inputTokens: usage.inputTokens } : {}),
+          ...(usage.cachedInputTokens !== undefined
+            ? { cachedInputTokens: usage.cachedInputTokens }
+            : {}),
+          ...(usage.outputTokens !== undefined ? { outputTokens: usage.outputTokens } : {}),
+          ...(usage.reasoningOutputTokens !== undefined
+            ? { reasoningOutputTokens: usage.reasoningOutputTokens }
+            : {}),
+        };
+        yield* emitMergedTokenUsage(ctx, turnId, {
+          method: "session/prompt",
+          payload: result,
+        });
+      });
+
     const requireSession = (
       threadId: ThreadId,
     ): Effect.Effect<HermesSessionContext, ProviderAdapterSessionNotFoundError> => {
@@ -556,6 +712,26 @@ export function makeHermesAdapter(
           let sessionScopeTransferred = false;
           yield* Effect.addFinalizer(() =>
             sessionScopeTransferred ? Effect.void : Scope.close(sessionScope, Exit.void),
+          );
+
+          // Hermes resolves reasoning effort from `config.yaml` when its
+          // process starts, and never re-reads it for a running session, so
+          // the composer's level has to be on disk before the spawn below.
+          // That is also why the descriptor bills it as a next-session
+          // setting rather than pretending it lands mid-conversation.
+          let reasoningConfigPermitHeld = false;
+          yield* reasoningConfigMutex.take(1);
+          reasoningConfigPermitHeld = true;
+          yield* Effect.addFinalizer(() =>
+            reasoningConfigPermitHeld ? reasoningConfigMutex.release(1) : Effect.void,
+          );
+          const startReasoningLevel = yield* applyHermesReasoningSelection({
+            model: hermesModelSelection?.model,
+            selections: hermesModelSelection?.options,
+            ...(options?.environment ? { environment: options.environment } : {}),
+          }).pipe(
+            Effect.provideService(FileSystem.FileSystem, fileSystem),
+            Effect.provideService(Path.Path, path),
           );
 
           const resumeSessionId = parseHermesResume(input.resumeCursor)?.sessionId;
@@ -676,6 +852,8 @@ export function makeHermesAdapter(
               mapAcpToAdapterError(PROVIDER, input.threadId, "session/start", error),
             ),
           );
+          reasoningConfigPermitHeld = false;
+          yield* reasoningConfigMutex.release(1);
 
           // Hermes exposes its edit-approval policy as ACP session modes, so
           // the thread's runtime mode picks the matching one. A build that
@@ -745,6 +923,8 @@ export function makeHermesAdapter(
             interruptedTurnIds: new Set(),
             promptsInFlight: 0,
             currentModelId: boundModelId,
+            reasoningLevel: startReasoningLevel,
+            tokenUsage: {},
             stopped: false,
           };
 
@@ -764,6 +944,37 @@ export function makeHermesAdapter(
                 }
 
                 if (event._tag === "ModeChanged") {
+                  return;
+                }
+
+                // Hermes advertises commands right after `session/new` and
+                // sends usage/session-info updates outside a turn too, so
+                // these are handled ahead of the turn gate below. The provider
+                // snapshot's `slashCommands` is filled by the provider probe
+                // (HermesProvider), which owns that snapshot; here the
+                // advertisement is only logged so a mismatch is diagnosable.
+                if (event._tag === "CommandsUpdated") {
+                  yield* logNative(ctx.threadId, "session/update", event.rawPayload);
+                  return;
+                }
+
+                if (event._tag === "UsageUpdated") {
+                  yield* logNative(ctx.threadId, "session/update", event.rawPayload);
+                  yield* emitTokenUsage(ctx, event.usage, event.rawPayload);
+                  return;
+                }
+
+                if (event._tag === "SessionInfoUpdated") {
+                  yield* logNative(ctx.threadId, "session/update", event.rawPayload);
+                  if (hermesSessionInfoIndicatesCompaction(event.rawPayload)) {
+                    yield* offerRuntimeEvent({
+                      type: "thread.state.changed",
+                      ...(yield* makeEventStamp()),
+                      provider: PROVIDER,
+                      threadId: ctx.threadId,
+                      payload: { state: "compacted" },
+                    });
+                  }
                   return;
                 }
 
@@ -915,13 +1126,39 @@ export function makeHermesAdapter(
               const requestedTurnModelId = turnModelSelection?.model
                 ? resolveHermesAcpBaseModelId(turnModelSelection.model)
                 : undefined;
-              const currentModelId = yield* applyHermesAcpModelSelection({
-                runtime: ctx.acp,
-                currentModelId: ctx.currentModelId,
-                requestedModelId: requestedTurnModelId,
-                mapError: (cause) =>
-                  mapAcpToAdapterError(PROVIDER, input.threadId, "session/set_model", cause),
-              });
+
+              // Record the turn's reasoning level before the model call below:
+              // Hermes reads `config.yaml` while it builds the agent, so the
+              // write has to be on disk first to be picked up by the rebuild
+              // that `session/set_model` triggers.
+              const { turnReasoningLevel, currentModelId } = yield* reasoningConfigMutex.withPermit(
+                Effect.gen(function* () {
+                  const turnReasoningLevel = yield* applyHermesReasoningSelection({
+                    model: turnModelSelection?.model,
+                    selections: turnModelSelection?.options,
+                    ...(options?.environment ? { environment: options.environment } : {}),
+                  }).pipe(
+                    Effect.provideService(FileSystem.FileSystem, fileSystem),
+                    Effect.provideService(Path.Path, path),
+                  );
+                  // A model switch rebuilds the agent by itself; only a level that
+                  // moved on its own needs the no-op switch to force one.
+                  const reasoningNeedsRebuild =
+                    turnReasoningLevel !== undefined && turnReasoningLevel !== ctx.reasoningLevel;
+                  const currentModelId = yield* applyHermesAcpModelSelection({
+                    runtime: ctx.acp,
+                    currentModelId: ctx.currentModelId,
+                    requestedModelId: requestedTurnModelId,
+                    ...(reasoningNeedsRebuild ? { forceReapply: true } : {}),
+                    mapError: (cause) =>
+                      mapAcpToAdapterError(PROVIDER, input.threadId, "session/set_model", cause),
+                  });
+                  return { turnReasoningLevel, currentModelId };
+                }),
+              );
+              if (turnReasoningLevel !== undefined) {
+                ctx.reasoningLevel = turnReasoningLevel;
+              }
 
               const text = input.input?.trim();
               const attachmentPromptParts = yield* Effect.forEach(
@@ -1119,6 +1356,7 @@ export function makeHermesAdapter(
               }
 
               appendPromptResultToTurn(ctx, prepared.turnId, prepared.promptParts, result);
+              yield* emitPromptResponseTokenUsage(ctx, prepared.turnId, result);
               ctx.session = {
                 ...ctx.session,
                 status: "running",
@@ -1222,6 +1460,7 @@ export function makeHermesAdapter(
                       prepared.promptParts,
                       promptResult,
                     );
+                    yield* emitPromptResponseTokenUsage(ctx, prepared.turnId, promptResult);
                     yield* settlePromptInFlight(
                       input.threadId,
                       prepared.turnId,

@@ -540,6 +540,47 @@ export const ObservabilitySettings = Schema.Struct({
 });
 export type ObservabilitySettings = typeof ObservabilitySettings.Type;
 
+/** Where a co-located Hindsight instance listens when nobody says otherwise. */
+export const DEFAULT_HINDSIGHT_BASE_URL = "http://127.0.0.1:8888";
+
+/**
+ * Connection to a [Hindsight](https://github.com/vectorize-io/hindsight) agent
+ * memory service, which backs the Memory tab of the Hermes panel.
+ *
+ * Hindsight is expected to run on the same host as this server. Only the
+ * server ever talks to it, so binding Hindsight to loopback keeps working for
+ * clients on a phone or behind a tunnel.
+ *
+ * The integration is inert until `enabled` is set: an unset block means the
+ * environment never opens a socket and the Memory tab never appears.
+ *
+ * `apiKey` is stripped before settings are sent to any client — see
+ * `redactServerSettingsForClient`.
+ */
+export const HindsightSettings = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  baseUrl: TrimmedString.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_HINDSIGHT_BASE_URL)),
+  ),
+  /** Sent as `Authorization: Bearer <apiKey>`. Omit it for an open instance. */
+  apiKey: Schema.optionalKey(TrimmedString),
+  /** Preselected in the bank picker. Falls back to the first bank Hindsight lists. */
+  defaultBank: Schema.optionalKey(TrimmedString),
+});
+export type HindsightSettings = typeof HindsightSettings.Type;
+
+/**
+ * Third-party services this environment can reach on the user's behalf.
+ *
+ * Distinct from `providers`, which are agent runtimes T3 Code drives. An
+ * integration is a service an agent's work leans on and that T3 Code surfaces
+ * directly.
+ */
+export const IntegrationSettings = Schema.Struct({
+  hindsight: HindsightSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+}).pipe(Schema.withDecodingDefault(Effect.succeed({})));
+export type IntegrationSettings = typeof IntegrationSettings.Type;
+
 export const SourceControlWritingStyleMode = Schema.Literals([
   "repo_conventions",
   "conventional_commits",
@@ -675,6 +716,7 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  integrations: IntegrationSettings,
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -805,6 +847,18 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Struct({
       otlpTracesUrl: Schema.optionalKey(TrimmedString),
       otlpMetricsUrl: Schema.optionalKey(TrimmedString),
+    }),
+  ),
+  integrations: Schema.optionalKey(
+    Schema.Struct({
+      hindsight: Schema.optionalKey(
+        Schema.Struct({
+          enabled: Schema.optionalKey(Schema.Boolean),
+          baseUrl: Schema.optionalKey(TrimmedString),
+          apiKey: Schema.optionalKey(TrimmedString),
+          defaultBank: Schema.optionalKey(TrimmedString),
+        }),
+      ),
     }),
   ),
   providers: Schema.optionalKey(

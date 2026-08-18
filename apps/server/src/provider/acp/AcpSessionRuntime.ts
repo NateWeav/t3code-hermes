@@ -35,6 +35,7 @@ import {
   type AcpSessionModeState,
   type AcpToolCallState,
 } from "./AcpRuntimeModel.ts";
+import type { ServerProviderSlashCommand } from "@t3tools/contracts";
 
 function formatConfigOptionValue(value: string | boolean): string {
   return JSON.stringify(value);
@@ -46,6 +47,9 @@ export interface AcpSessionEventStreamBarrier {
 }
 
 export type AcpSessionRuntimeEvent = AcpParsedSessionEvent | AcpSessionEventStreamBarrier;
+
+/** Bounds the pre-Started session update buffer; agents send only a handful. */
+const maxPendingSessionUpdates = 100;
 
 const defaultSessionLoadTimeout = Duration.seconds(90);
 const defaultSessionLoadReplayIdleGap = Duration.seconds(2);
@@ -188,6 +192,18 @@ export class AcpSessionRuntime extends Context.Service<
     /** Latest configuration options observed from session setup and configuration writes. */
     readonly getConfigOptions: Effect.Effect<ReadonlyArray<EffectAcpSchema.SessionConfigOption>>;
     /**
+     * Slash commands advertised via `available_commands_update`, or `undefined`
+     * when the agent has not advertised any yet.
+     */
+    readonly getSlashCommands: Effect.Effect<ReadonlyArray<ServerProviderSlashCommand> | undefined>;
+    /**
+     * Resolves with the first `available_commands_update` the agent sends.
+     * Agents typically schedule it immediately after `session/new`, so a probe
+     * can await this receipt instead of guessing at a delay; callers that
+     * cannot block forever should wrap it in `Effect.timeoutOption`.
+     */
+    readonly awaitSlashCommands: Effect.Effect<ReadonlyArray<ServerProviderSlashCommand>>;
+    /**
      * Sends a prompt turn to the active session.
      * @see https://agentclientprotocol.com/protocol/schema#session/prompt
      */
@@ -291,7 +307,15 @@ export const make = (
     );
     const assistantSegmentRef = yield* Ref.make<AcpAssistantSegmentState>({ nextSegmentIndex: 0 });
     const configOptionsRef = yield* Ref.make(sessionConfigOptionsFromSetup(undefined));
+    const slashCommandsRef = yield* Ref.make<ReadonlyArray<ServerProviderSlashCommand> | undefined>(
+      undefined,
+    );
+    const slashCommandsDeferred = yield* Deferred.make<ReadonlyArray<ServerProviderSlashCommand>>();
     const startStateRef = yield* Ref.make<AcpStartState>({ _tag: "NotStarted" });
+    const pendingSessionUpdatesRef = yield* Ref.make<
+      ReadonlyArray<EffectAcpSchema.SessionNotification>
+    >([]);
+    const sessionUpdateSerialization = yield* Semaphore.make(1);
     const promptSerializationSemaphore = yield* Semaphore.make(1);
     const activePromptFiberRef = yield* Ref.make<
       Option.Option<Fiber.Fiber<EffectAcpSchema.PromptResponse, EffectAcpErrors.AcpError>>
@@ -368,40 +392,51 @@ export const make = (
     const acp = yield* Effect.service(EffectAcpClient.AcpClient).pipe(Effect.provide(acpContext));
 
     yield* acp.handleSessionUpdate((notification) =>
-      Effect.gen(function* () {
-        const gate = yield* Ref.get(sessionLoadGateRef);
-        if (Option.isSome(gate) && gate.value.active) {
-          const lastActivityAtMillis = yield* Clock.currentTimeMillis;
-          yield* Ref.set(
-            sessionLoadGateRef,
-            Option.some({
-              ...gate.value,
-              lastActivityAtMillis,
-            }),
-          );
-          return;
-        }
-        if (sessionUpdateIsReplay(notification)) {
-          return;
-        }
-        const startState = yield* Ref.get(startStateRef);
-        // One runtime projects one root ACP session. Child-session updates need
-        // explicit lineage routing and must never be flattened into this stream.
-        if (
-          startState._tag !== "Started" ||
-          notification.sessionId !== startState.result.sessionId
-        ) {
-          return;
-        }
-        yield* handleSessionUpdate({
-          queue: eventQueue,
-          modeStateRef,
-          toolCallsRef,
-          assistantSegmentRef,
-          assistantItemRuntimeId,
-          params: notification,
-        });
-      }),
+      sessionUpdateSerialization.withPermit(
+        Effect.gen(function* () {
+          const gate = yield* Ref.get(sessionLoadGateRef);
+          if (Option.isSome(gate) && gate.value.active) {
+            const lastActivityAtMillis = yield* Clock.currentTimeMillis;
+            yield* Ref.set(
+              sessionLoadGateRef,
+              Option.some({
+                ...gate.value,
+                lastActivityAtMillis,
+              }),
+            );
+            return;
+          }
+          if (sessionUpdateIsReplay(notification)) {
+            return;
+          }
+          const startState = yield* Ref.get(startStateRef);
+          // Agents may push updates between writing the session/new response and
+          // this fiber recording the Started state — Hermes advertises its slash
+          // commands in exactly that window. Buffer them instead of dropping
+          // them; `start` flushes the buffer once the root session id is known.
+          if (startState._tag !== "Started") {
+            yield* Ref.update(pendingSessionUpdatesRef, (pending) =>
+              pending.length >= maxPendingSessionUpdates ? pending : [...pending, notification],
+            );
+            return;
+          }
+          // One runtime projects one root ACP session. Child-session updates need
+          // explicit lineage routing and must never be flattened into this stream.
+          if (notification.sessionId !== startState.result.sessionId) {
+            return;
+          }
+          yield* handleSessionUpdate({
+            queue: eventQueue,
+            modeStateRef,
+            slashCommandsRef,
+            slashCommandsDeferred,
+            toolCallsRef,
+            assistantSegmentRef,
+            assistantItemRuntimeId,
+            params: notification,
+          });
+        }),
+      ),
     );
     const initializeClientCapabilities = {
       fs: {
@@ -656,6 +691,30 @@ export const make = (
       return nextState;
     });
 
+    /**
+     * Replays updates that arrived before the root session id was known,
+     * discarding any that turned out to belong to a different session.
+     */
+    const flushPendingSessionUpdates = (rootSessionId: string) =>
+      Effect.gen(function* () {
+        const pending = yield* Ref.getAndSet(pendingSessionUpdatesRef, []);
+        for (const notification of pending) {
+          if (notification.sessionId !== rootSessionId) {
+            continue;
+          }
+          yield* handleSessionUpdate({
+            queue: eventQueue,
+            modeStateRef,
+            slashCommandsRef,
+            slashCommandsDeferred,
+            toolCallsRef,
+            assistantSegmentRef,
+            assistantItemRuntimeId,
+            params: notification,
+          });
+        }
+      });
+
     const start = Effect.gen(function* () {
       const deferred = yield* Deferred.make<
         AcpSessionRuntimeStartResult,
@@ -671,8 +730,11 @@ export const make = (
             return [
               startOnce.pipe(
                 Effect.tap((result) =>
-                  Ref.set(startStateRef, { _tag: "Started", result }).pipe(
-                    Effect.andThen(Deferred.succeed(deferred, result)),
+                  sessionUpdateSerialization.withPermit(
+                    Ref.set(startStateRef, { _tag: "Started", result }).pipe(
+                      Effect.andThen(flushPendingSessionUpdates(result.sessionId)),
+                      Effect.andThen(Deferred.succeed(deferred, result)),
+                    ),
                   ),
                 ),
                 Effect.onError((cause) =>
@@ -716,6 +778,8 @@ export const make = (
       }),
       getModeState: Ref.get(modeStateRef),
       getConfigOptions: Ref.get(configOptionsRef),
+      getSlashCommands: Ref.get(slashCommandsRef),
+      awaitSlashCommands: Deferred.await(slashCommandsDeferred),
       prompt: (payload) =>
         promptSerializationSemaphore.withPermit(
           Effect.gen(function* () {
@@ -844,6 +908,8 @@ function configOptionCurrentValueMatches(
 const handleSessionUpdate = ({
   queue,
   modeStateRef,
+  slashCommandsRef,
+  slashCommandsDeferred,
   toolCallsRef,
   assistantSegmentRef,
   assistantItemRuntimeId,
@@ -851,6 +917,8 @@ const handleSessionUpdate = ({
 }: {
   readonly queue: Queue.Queue<AcpSessionRuntimeEvent>;
   readonly modeStateRef: Ref.Ref<AcpSessionModeState | undefined>;
+  readonly slashCommandsRef: Ref.Ref<ReadonlyArray<ServerProviderSlashCommand> | undefined>;
+  readonly slashCommandsDeferred: Deferred.Deferred<ReadonlyArray<ServerProviderSlashCommand>>;
   readonly toolCallsRef: Ref.Ref<Map<string, AcpToolCallState>>;
   readonly assistantSegmentRef: Ref.Ref<AcpAssistantSegmentState>;
   readonly assistantItemRuntimeId: string;
@@ -864,6 +932,14 @@ const handleSessionUpdate = ({
       );
     }
     for (const event of parsed.events) {
+      if (event._tag === "CommandsUpdated") {
+        yield* Ref.set(slashCommandsRef, event.commands);
+        // Only the first advertisement completes the deferred; later ones just
+        // update the ref, which is what late readers see.
+        yield* Deferred.succeed(slashCommandsDeferred, event.commands);
+        yield* Queue.offer(queue, event);
+        continue;
+      }
       if (event._tag === "ToolCallUpdated") {
         yield* closeActiveAssistantSegment({
           queue,

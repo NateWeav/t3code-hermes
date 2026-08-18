@@ -6,7 +6,9 @@ import {
   extractModelConfigId,
   mergeToolCallState,
   parsePermissionRequest,
+  parsePromptResponseUsage,
   parseSessionModeState,
+  parseAcpAvailableCommands,
   parseSessionUpdateEvent,
   sessionUpdateIsReplay,
   syntheticLoadSessionResponseFromInitialize,
@@ -409,5 +411,166 @@ describe("AcpRuntimeModel", () => {
         command: "cat package.json",
       },
     });
+  });
+
+  // Fixtures below mirror what NousResearch/hermes-agent's `acp_adapter`
+  // actually puts on the wire (see its `_ADVERTISED_COMMANDS` table and
+  // `_build_usage_update`), so a Hermes-side rename shows up as a test failure.
+  describe("available_commands_update", () => {
+    it("maps ACP command entries onto provider slash commands", () => {
+      const parsed = parseSessionUpdateEvent({
+        sessionId: "session-1",
+        update: {
+          sessionUpdate: "available_commands_update",
+          availableCommands: [
+            { name: "help", description: "List available commands" },
+            {
+              name: "model",
+              description: "Show current model and provider, or switch models",
+              input: { hint: "model name to switch to" },
+            },
+            { name: "compress", description: "Compress conversation context" },
+          ],
+        },
+      } satisfies EffectAcpSchema.SessionNotification);
+
+      expect(parsed.events).toEqual([
+        {
+          _tag: "CommandsUpdated",
+          commands: [
+            { name: "help", description: "List available commands" },
+            {
+              name: "model",
+              description: "Show current model and provider, or switch models",
+              input: { hint: "model name to switch to" },
+            },
+            { name: "compress", description: "Compress conversation context" },
+          ],
+          rawPayload: expect.anything(),
+        },
+      ]);
+    });
+
+    it("emits an empty list so a stale menu is cleared", () => {
+      const parsed = parseSessionUpdateEvent({
+        sessionId: "session-1",
+        update: { sessionUpdate: "available_commands_update", availableCommands: [] },
+      } satisfies EffectAcpSchema.SessionNotification);
+
+      expect(parsed.events).toEqual([
+        { _tag: "CommandsUpdated", commands: [], rawPayload: expect.anything() },
+      ]);
+    });
+
+    it("strips a leading slash, drops nameless entries, and dedupes by name", () => {
+      expect(
+        parseAcpAvailableCommands([
+          { name: "  /compress ", description: " Compress conversation context " },
+          { name: "   ", description: "nameless" },
+          { name: "COMPRESS", description: "duplicate", input: { hint: "backfilled" } },
+        ]),
+      ).toEqual([
+        {
+          name: "compress",
+          description: "Compress conversation context",
+          input: { hint: "backfilled" },
+        },
+      ]);
+    });
+  });
+
+  describe("usage_update", () => {
+    it("maps size/used onto the context window snapshot", () => {
+      const parsed = parseSessionUpdateEvent({
+        sessionId: "session-1",
+        update: { sessionUpdate: "usage_update", size: 200_000, used: 48_120 },
+      } satisfies EffectAcpSchema.SessionNotification);
+
+      expect(parsed.events).toEqual([
+        {
+          _tag: "UsageUpdated",
+          usage: { usedTokens: 48_120, maxTokens: 200_000 },
+          rawPayload: expect.anything(),
+        },
+      ]);
+    });
+
+    it("omits maxTokens when the agent reports no usable context window", () => {
+      const parsed = parseSessionUpdateEvent({
+        sessionId: "session-1",
+        update: { sessionUpdate: "usage_update", size: 0, used: 1_200 },
+      } satisfies EffectAcpSchema.SessionNotification);
+
+      expect(parsed.events).toEqual([
+        { _tag: "UsageUpdated", usage: { usedTokens: 1_200 }, rawPayload: expect.anything() },
+      ]);
+    });
+  });
+
+  describe("prompt response usage", () => {
+    it("maps the end-of-turn totals onto context-window snapshot field names", () => {
+      // Shaped like Hermes's PromptResponse.usage.
+      expect(
+        parsePromptResponseUsage({
+          stopReason: "end_turn",
+          usage: {
+            inputTokens: 48_120,
+            outputTokens: 900,
+            totalTokens: 51_000,
+            cachedReadTokens: 12_000,
+            thoughtTokens: 300,
+          },
+        } satisfies EffectAcpSchema.PromptResponse),
+      ).toEqual({
+        totalTokens: 51_000,
+        inputTokens: 48_120,
+        outputTokens: 900,
+        cachedInputTokens: 12_000,
+        reasoningOutputTokens: 300,
+      });
+    });
+
+    it("derives the total from the breakdown when the agent leaves it at zero", () => {
+      expect(
+        parsePromptResponseUsage({
+          stopReason: "end_turn",
+          usage: { inputTokens: 1_200, outputTokens: 300, totalTokens: 0 },
+        } satisfies EffectAcpSchema.PromptResponse),
+      ).toEqual({ totalTokens: 1_500, inputTokens: 1_200, outputTokens: 300 });
+    });
+
+    it("returns nothing when the agent omits usage or reports an empty turn", () => {
+      expect(
+        parsePromptResponseUsage({
+          stopReason: "end_turn",
+        } satisfies EffectAcpSchema.PromptResponse),
+      ).toBeUndefined();
+      expect(
+        parsePromptResponseUsage({
+          stopReason: "end_turn",
+          usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+        } satisfies EffectAcpSchema.PromptResponse),
+      ).toBeUndefined();
+    });
+  });
+
+  it("surfaces session_info_update with its raw payload for vendor _meta", () => {
+    const parsed = parseSessionUpdateEvent({
+      sessionId: "session-1",
+      update: {
+        sessionUpdate: "session_info_update",
+        title: "  Refactor the parser  ",
+        updatedAt: "2026-08-16T00:00:00Z",
+        _meta: { hermes: { sessionProvenance: { reason: "compression" } } },
+      },
+    } satisfies EffectAcpSchema.SessionNotification);
+
+    expect(parsed.events).toEqual([
+      {
+        _tag: "SessionInfoUpdated",
+        title: "Refactor the parser",
+        rawPayload: expect.anything(),
+      },
+    ]);
   });
 });

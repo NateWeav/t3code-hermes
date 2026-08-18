@@ -106,6 +106,8 @@ import { requiredScopeForRpcMethod } from "./auth/RpcAuthorization.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
+import * as HermesCronService from "./hermes/HermesCronService.ts";
+import * as HindsightService from "./integrations/hindsight/HindsightService.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as ProviderQuotaService from "./providerQuota/ProviderQuotaService.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
@@ -419,6 +421,8 @@ const makeWsRpcLayer = (
       const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor;
       const resourceTelemetry = yield* ResourceTelemetry.ResourceTelemetry;
       const usage = yield* UsageService.UsageService;
+      const hermesCron = yield* HermesCronService.HermesCronService;
+      const hindsight = yield* HindsightService.HindsightService;
       const providerQuota = yield* ProviderQuotaService.ProviderQuotaService;
       const relayClient = yield* RelayClient.RelayClient;
       const authorizationError = (requiredScope: AuthEnvironmentScope) =>
@@ -1580,6 +1584,42 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.serverGetProviderQuota, providerQuota.read, {
             "rpc.aggregate": "server",
           }),
+        [WS_METHODS.hermesCronList]: (input) =>
+          observeRpcEffect(WS_METHODS.hermesCronList, hermesCron.list(input), {
+            "rpc.aggregate": "server",
+          }),
+        [WS_METHODS.hermesCronSetEnabled]: (input) =>
+          observeRpcEffect(WS_METHODS.hermesCronSetEnabled, hermesCron.setEnabled(input), {
+            "rpc.aggregate": "server",
+          }),
+        [WS_METHODS.hermesCronSetMuted]: (input) =>
+          observeRpcEffect(WS_METHODS.hermesCronSetMuted, hermesCron.setMuted(input), {
+            "rpc.aggregate": "server",
+          }),
+        [WS_METHODS.hindsightListBanks]: (input) =>
+          observeRpcEffect(WS_METHODS.hindsightListBanks, hindsight.listBanks(input), {
+            "rpc.aggregate": "server",
+          }),
+        [WS_METHODS.hindsightBrowse]: (input) =>
+          observeRpcEffect(WS_METHODS.hindsightBrowse, hindsight.browse(input), {
+            "rpc.aggregate": "server",
+          }),
+        [WS_METHODS.hindsightRecall]: (input) =>
+          observeRpcEffect(WS_METHODS.hindsightRecall, hindsight.recall(input), {
+            "rpc.aggregate": "server",
+          }),
+        [WS_METHODS.hindsightStats]: (input) =>
+          observeRpcEffect(WS_METHODS.hindsightStats, hindsight.stats(input), {
+            "rpc.aggregate": "server",
+          }),
+        [WS_METHODS.hindsightRetain]: (input) =>
+          observeRpcEffect(WS_METHODS.hindsightRetain, hindsight.retain(input), {
+            "rpc.aggregate": "server",
+          }),
+        [WS_METHODS.hindsightReflect]: (input) =>
+          observeRpcEffect(WS_METHODS.hindsightReflect, hindsight.reflect(input), {
+            "rpc.aggregate": "server",
+          }),
         [WS_METHODS.serverRetryResourceTelemetry]: (_input) =>
           observeRpcEffect(WS_METHODS.serverRetryResourceTelemetry, resourceTelemetry.retry, {
             "rpc.aggregate": "server",
@@ -2300,6 +2340,10 @@ const makeWsRpcLayer = (
             ),
             { "rpc.aggregate": "server" },
           ),
+        [WS_METHODS.subscribeHermesCron]: (_input) =>
+          observeRpcStream(WS_METHODS.subscribeHermesCron, Stream.unwrap(hermesCron.subscribe), {
+            "rpc.aggregate": "server",
+          }),
       });
     }),
   );

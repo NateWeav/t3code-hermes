@@ -109,7 +109,14 @@ export function redactServerSettingsForClient(settings: ServerSettings): ServerS
         : instance,
     ]),
   );
-  return { ...settings, providerInstances };
+  // The Hindsight key is dropped outright rather than blanked: no client has
+  // any use for it, and only the server ever talks to Hindsight.
+  const { apiKey: _hindsightApiKey, ...hindsight } = settings.integrations.hindsight;
+  return {
+    ...settings,
+    providerInstances,
+    integrations: { ...settings.integrations, hindsight },
+  };
 }
 
 export class ServerSettingsService extends Context.Service<

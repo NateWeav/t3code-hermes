@@ -59,6 +59,18 @@
       "types": "./src/state/filesystem.ts",
       "default": "./src/state/filesystem.ts"
     },
+    "./state/hermes-cron": {
+      "types": "./src/state/hermesCron.ts",
+      "default": "./src/state/hermesCron.ts"
+    },
+    "./state/hermes-cron-seen": {
+      "types": "./src/state/hermesCronSeen.ts",
+      "default": "./src/state/hermesCronSeen.ts"
+    },
+    "./state/hindsight": {
+      "types": "./src/state/hindsight.ts",
+      "default": "./src/state/hindsight.ts"
+    },
     "./state/git": {
       "types": "./src/state/git.ts",
       "default": "./src/state/git.ts"

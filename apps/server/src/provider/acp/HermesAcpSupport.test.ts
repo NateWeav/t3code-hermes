@@ -5,6 +5,8 @@ import * as EffectAcpErrors from "effect-acp/errors";
 import {
   applyHermesAcpModelSelection,
   buildHermesAcpSpawnInput,
+  hermesSessionInfoIndicatesCompaction,
+  HERMES_BUILT_IN_SLASH_COMMANDS,
   resolveHermesAcpBaseModelId,
   resolveHermesSessionModeId,
 } from "./HermesAcpSupport.ts";
@@ -136,6 +138,51 @@ describe("applyHermesAcpModelSelection", () => {
     }),
   );
 
+  it.effect("re-sends the current model when forceReapply asks for an agent rebuild", () =>
+    Effect.gen(function* () {
+      const { runtime, modelCalls } = makeRecordingRuntime();
+      // Hermes rebuilds the session's agent from config.yaml on every
+      // set_session_model, which is the only way a reasoning level reaches a
+      // session that is already running.
+      expect(
+        yield* applyHermesAcpModelSelection({
+          runtime,
+          currentModelId: "openai/gpt-5",
+          requestedModelId: "openai/gpt-5",
+          forceReapply: true,
+          mapError: (cause) => cause.message,
+        }),
+      ).toBe("openai/gpt-5");
+      // No requested model still rebuilds, using whatever the session is on.
+      expect(
+        yield* applyHermesAcpModelSelection({
+          runtime,
+          currentModelId: "openai/gpt-5",
+          requestedModelId: undefined,
+          forceReapply: true,
+          mapError: (cause) => cause.message,
+        }),
+      ).toBe("openai/gpt-5");
+      expect(modelCalls).toEqual(["openai/gpt-5", "openai/gpt-5"]);
+    }),
+  );
+
+  it.effect("has nothing to re-send when forceReapply hits a session with no model", () =>
+    Effect.gen(function* () {
+      const { runtime, modelCalls } = makeRecordingRuntime();
+      expect(
+        yield* applyHermesAcpModelSelection({
+          runtime,
+          currentModelId: undefined,
+          requestedModelId: undefined,
+          forceReapply: true,
+          mapError: (cause) => cause.message,
+        }),
+      ).toBeUndefined();
+      expect(modelCalls).toEqual([]);
+    }),
+  );
+
   it.effect("propagates session/set_model failures via mapError", () =>
     Effect.gen(function* () {
       const failure = EffectAcpErrors.AcpRequestError.invalidParams("unknown model id");
@@ -151,4 +198,75 @@ describe("applyHermesAcpModelSelection", () => {
       expect(error).toBe(failure.message);
     }),
   );
+});
+
+describe("HERMES_BUILT_IN_SLASH_COMMANDS", () => {
+  it("mirrors the ACP adapter's advertised command names", () => {
+    // Source of truth: `_ADVERTISED_COMMANDS` in hermes-agent's
+    // `acp_adapter/server.py`. These are the adapter's commands, not the
+    // interactive `hermes` TUI's.
+    expect(HERMES_BUILT_IN_SLASH_COMMANDS.map((command) => command.name)).toEqual([
+      "help",
+      "model",
+      "tools",
+      "context",
+      "reset",
+      "compress",
+      "steer",
+      "queue",
+      "version",
+    ]);
+  });
+
+  it("gives every seeded command a description and only hints the ones that take input", () => {
+    for (const command of HERMES_BUILT_IN_SLASH_COMMANDS) {
+      expect(command.description).toBeTruthy();
+    }
+    expect(
+      HERMES_BUILT_IN_SLASH_COMMANDS.filter((command) => command.input !== undefined).map(
+        (command) => command.name,
+      ),
+    ).toEqual(["model", "steer", "queue"]);
+  });
+});
+
+describe("hermesSessionInfoIndicatesCompaction", () => {
+  it("detects a compression-driven session rotation", () => {
+    expect(
+      hermesSessionInfoIndicatesCompaction({
+        sessionId: "session-1",
+        update: {
+          sessionUpdate: "session_info_update",
+          title: "Long thread",
+          _meta: {
+            hermes: {
+              sessionProvenance: {
+                compressionDepth: 2,
+                reason: "compression",
+                creatorKind: "compression",
+              },
+            },
+          },
+        },
+      }),
+    ).toBe(true);
+  });
+
+  it("ignores provenance without a compression reason", () => {
+    expect(
+      hermesSessionInfoIndicatesCompaction({
+        sessionId: "session-1",
+        update: {
+          sessionUpdate: "session_info_update",
+          _meta: { hermes: { sessionProvenance: { compressionDepth: 0 } } },
+        },
+      }),
+    ).toBe(false);
+  });
+
+  it("ignores payloads with no Hermes provenance at all", () => {
+    expect(hermesSessionInfoIndicatesCompaction(undefined)).toBe(false);
+    expect(hermesSessionInfoIndicatesCompaction({ update: { title: "x" } })).toBe(false);
+    expect(hermesSessionInfoIndicatesCompaction({ _meta: { hermes: {} } })).toBe(false);
+  });
 });

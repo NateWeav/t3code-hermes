@@ -5,8 +5,9 @@ import {
   GitPullRequestIcon,
   SettingsIcon,
 } from "lucide-react";
+import type { ReactNode } from "react";
 import { memo, useCallback } from "react";
-import { Link, useLocation, useNavigate } from "@tanstack/react-router";
+import { Link, useCanGoBack, useLocation, useNavigate } from "@tanstack/react-router";
 
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
@@ -121,18 +122,53 @@ function T3Wordmark() {
   );
 }
 
-export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
+function SidebarUtilityItem({
+  icon,
+  label,
+  onClick,
+  buttonClassName,
+}: {
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+  buttonClassName?: string;
+}) {
+  return (
+    <SidebarMenuItem className="shrink-0">
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <SidebarMenuButton
+              aria-label={label}
+              className={buttonClassName}
+              onClick={onClick}
+              size="icon"
+            >
+              {icon}
+            </SidebarMenuButton>
+          }
+        />
+        <TooltipPopup side="top">{label}</TooltipPopup>
+      </Tooltip>
+    </SidebarMenuItem>
+  );
+}
+
+export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   const navigate = useNavigate();
+  const canGoBack = useCanGoBack();
   const { isMobile, setOpenMobile } = useSidebar();
   const currentFooterPage = useLocation({
     select: (location) =>
-      location.pathname === "/usage"
-        ? "usage"
-        : location.pathname === "/hermes"
-          ? "hermes"
-          : location.pathname === "/pull-requests"
-            ? "pull-requests"
-            : null,
+      /^\/settings(?:\/|$)/.test(location.pathname)
+        ? "settings"
+        : location.pathname === "/usage"
+          ? "usage"
+          : location.pathname === "/hermes"
+            ? "hermes"
+            : location.pathname === "/pull-requests"
+              ? "pull-requests"
+              : null,
   });
   const { environments } = useEnvironments();
   const hermesPresent = useHermesProviderPresent();
@@ -170,101 +206,75 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
 
   const handleBackClick = useCallback(() => {
     closeMobileSidebar();
+    if (canGoBack) {
+      window.history.back();
+      return;
+    }
     void navigate({ to: "/" });
-  }, [closeMobileSidebar, navigate]);
+  }, [canGoBack, closeMobileSidebar, navigate]);
+
+  return (
+    <SidebarMenu className="flex-row items-center">
+      {currentFooterPage ? (
+        <SidebarMenuItem className="min-w-0 flex-1">
+          <SidebarMenuButton onClick={handleBackClick}>
+            <ArrowLeftIcon />
+            <span>Back</span>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+      ) : (
+        <>
+          <SidebarUtilityItem
+            icon={<SettingsIcon />}
+            label="Settings"
+            onClick={handleSettingsClick}
+          />
+          {pullRequestsSupported ? (
+            <SidebarUtilityItem
+              icon={<GitPullRequestIcon />}
+              label="Pull Requests"
+              onClick={handlePullRequestsClick}
+            />
+          ) : null}
+          <SidebarUtilityItem
+            icon={<ChartNoAxesColumnIcon />}
+            label="Usage"
+            onClick={handleUsageClick}
+          />
+          {hermesPresent ? (
+            <SidebarUtilityItem
+              buttonClassName="relative"
+              icon={
+                <>
+                  <ClockIcon />
+                  {hermesUnread ? (
+                    <span
+                      aria-hidden
+                      className="absolute top-1 right-1 size-1.5 rounded-full bg-primary"
+                    />
+                  ) : null}
+                </>
+              }
+              label={hermesUnread ? "Hermes — a task finished" : "Hermes"}
+              onClick={handleHermesClick}
+            />
+          ) : null}
+        </>
+      )}
+      <SidebarUpdatePill />
+    </SidebarMenu>
+  );
+});
+
+export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
+  const hermesPresent = useHermesProviderPresent();
 
   return (
     <SidebarFooter className="p-[var(--sidebar-content-inset)]">
       {hermesPresent ? <HermesCronWatcher /> : null}
       <SidebarProviderUpdatePill />
       <SidebarUpdateArchitectureWarning />
-      <SidebarMenu className="flex-row items-center">
-        {currentFooterPage ? (
-          <SidebarMenuItem className="min-w-0 flex-1">
-            <SidebarMenuButton onClick={handleBackClick}>
-              <ArrowLeftIcon />
-              <span>Back</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        ) : (
-          <>
-            <SidebarMenuItem className="shrink-0">
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <SidebarMenuButton
-                      aria-label="Settings"
-                      onClick={handleSettingsClick}
-                      size="icon"
-                    >
-                      <SettingsIcon />
-                    </SidebarMenuButton>
-                  }
-                />
-                <TooltipPopup side="top">Settings</TooltipPopup>
-              </Tooltip>
-            </SidebarMenuItem>
-            {pullRequestsSupported ? (
-              <SidebarMenuItem className="shrink-0">
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <SidebarMenuButton
-                        aria-label="Pull Requests"
-                        onClick={handlePullRequestsClick}
-                        size="icon"
-                      >
-                        <GitPullRequestIcon />
-                      </SidebarMenuButton>
-                    }
-                  />
-                  <TooltipPopup side="top">Pull Requests</TooltipPopup>
-                </Tooltip>
-              </SidebarMenuItem>
-            ) : null}
-            <SidebarMenuItem className="shrink-0">
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <SidebarMenuButton aria-label="Usage" onClick={handleUsageClick} size="icon">
-                      <ChartNoAxesColumnIcon />
-                    </SidebarMenuButton>
-                  }
-                />
-                <TooltipPopup side="top">Usage</TooltipPopup>
-              </Tooltip>
-            </SidebarMenuItem>
-            {hermesPresent ? (
-              <SidebarMenuItem className="shrink-0">
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <SidebarMenuButton
-                        aria-label="Hermes"
-                        onClick={handleHermesClick}
-                        size="icon"
-                        className="relative"
-                      >
-                        <ClockIcon />
-                        {hermesUnread ? (
-                          <span
-                            aria-hidden
-                            className="absolute top-1 right-1 size-1.5 rounded-full bg-primary"
-                          />
-                        ) : null}
-                      </SidebarMenuButton>
-                    }
-                  />
-                  <TooltipPopup side="top">
-                    {hermesUnread ? "Hermes — a task finished" : "Hermes"}
-                  </TooltipPopup>
-                </Tooltip>
-              </SidebarMenuItem>
-            ) : null}
-          </>
-        )}
-        <SidebarUpdatePill />
-      </SidebarMenu>
+      <SidebarUtilityMenu />
     </SidebarFooter>
   );
 });

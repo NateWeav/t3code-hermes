@@ -2,9 +2,29 @@ import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+vi.mock("@effect/atom-react", () => ({ useAtomValue: () => null }));
+vi.mock("../hooks/useTheme", () => ({ useTheme: () => ({ resolvedTheme: "dark" }) }));
+vi.mock("../state/use-atom-query-runner", () => ({ useAtomQueryRunner: () => vi.fn() }));
+vi.mock("../state/use-atom-command", () => ({ useAtomCommand: () => vi.fn() }));
+vi.mock("../state/session", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../state/session")>()),
+  usePreparedConnection: () => ({ _tag: "Loading" }),
+}));
+vi.mock("../state/entities", () => ({
+  readThreadShell: () => null,
+  useActiveEnvironmentId: () => EnvironmentId.make("env-windows"),
+  useProjects: () => [],
+}));
+vi.mock("../editorPreferences", () => ({ useOpenInPreferredEditor: () => vi.fn() }));
+vi.mock("~/lib/openPullRequestLink", () => ({
+  findProjectForChangeRequest: () => undefined,
+  matchesLinkedPullRequestUrl: () => false,
+  parseChangeRequestUrl: () => null,
+  useOpenChangeRequestLink: () => vi.fn(),
+}));
 import { useAssetUrlState } from "../assets/assetUrls";
 
-import {
+import ChatMarkdown, {
   MarkdownWorkspaceImage,
   orderedListGutterStyle,
   resolveMarkdownWorkspaceImagePath,
@@ -147,5 +167,99 @@ describe("Hermes markdown images", () => {
     expect(markup).toContain('role="img"');
     expect(markup).toContain('aria-label="Pairing QR"');
     expect(markup).toContain("Pairing QR");
+  });
+});
+
+describe("ChatMarkdown Windows file links", () => {
+  it.each([true, false])("preserves drive paths with parseRawHtml=%s", (parseRawHtml) => {
+    const html = renderToStaticMarkup(
+      <ChatMarkdown
+        cwd="C:/Users/shawn/project"
+        text="[Open](C:/Users/shawn/project/src/main.ts)"
+        lineBreaks={!parseRawHtml}
+        parseRawHtml={parseRawHtml}
+      />,
+    );
+
+    expect(html).toContain('href="C:/Users/shawn/project/src/main.ts"');
+    expect(html).toContain("chat-markdown-file-link");
+  });
+
+  it.each([true, false])("normalizes backslashes with parseRawHtml=%s", (parseRawHtml) => {
+    const html = renderToStaticMarkup(
+      <ChatMarkdown
+        cwd="C:/Users/shawn/project"
+        text={String.raw`[Open](C:\Users\shawn\project\src\main.ts)`}
+        lineBreaks={!parseRawHtml}
+        parseRawHtml={parseRawHtml}
+      />,
+    );
+
+    expect(html).toContain('href="C:/Users/shawn/project/src/main.ts"');
+    expect(html).toContain("chat-markdown-file-link");
+  });
+
+  it.each([true, false])(
+    "distinguishes same-named backslash paths with parseRawHtml=%s",
+    (parseRawHtml) => {
+      const html = renderToStaticMarkup(
+        <ChatMarkdown
+          cwd="C:/Users/shawn/project"
+          text={String.raw`[Source](C:\Users\shawn\project\src\index.ts) and [Test](C:\Users\shawn\project\test\index.ts)`}
+          lineBreaks={!parseRawHtml}
+          parseRawHtml={parseRawHtml}
+        />,
+      );
+
+      expect(html).toContain("index.ts · project/src");
+      expect(html).toContain("index.ts · project/test");
+    },
+  );
+
+  it.each([true, false])(
+    "does not disambiguate the same file in links and inline code with parseRawHtml=%s",
+    (parseRawHtml) => {
+      const path = String.raw`C:\Users\shawn\project\src\main.ts`;
+      const html = renderToStaticMarkup(
+        <ChatMarkdown
+          cwd="C:/Users/shawn/project"
+          text={`[Source](${path}) and \`${path}\``}
+          lineBreaks={!parseRawHtml}
+          parseRawHtml={parseRawHtml}
+        />,
+      );
+
+      expect(html.match(/chat-markdown-file-link/g)).toHaveLength(2);
+      expect(html).not.toContain("main.ts ·");
+    },
+  );
+
+  it.each([true, false])("preserves reference links with parseRawHtml=%s", (parseRawHtml) => {
+    const html = renderToStaticMarkup(
+      <ChatMarkdown
+        cwd="C:/Users/shawn/project"
+        text={"[Open][source]\n\n[source]: C:/Users/shawn/project/src/main.ts"}
+        lineBreaks={!parseRawHtml}
+        parseRawHtml={parseRawHtml}
+      />,
+    );
+
+    expect(html).toContain('href="C:/Users/shawn/project/src/main.ts"');
+    expect(html).toContain("chat-markdown-file-link");
+  });
+
+  it.each([true, false])("still rejects unsafe schemes with parseRawHtml=%s", (parseRawHtml) => {
+    const html = renderToStaticMarkup(
+      <ChatMarkdown
+        cwd="C:/Users/shawn/project"
+        text="[unsafe](javascript:alert(1)) and [unknown](d:alert(1))"
+        lineBreaks={!parseRawHtml}
+        parseRawHtml={parseRawHtml}
+      />,
+    );
+
+    expect(html).not.toContain("javascript:");
+    expect(html).not.toContain("d:alert");
+    expect(html).not.toContain("chat-markdown-file-link");
   });
 });

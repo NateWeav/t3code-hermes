@@ -22,6 +22,7 @@ Upstream is MIT licensed; that license is retained verbatim in [LICENSE](./LICEN
 | Hermes Tasks panel (cron jobs)                      | `apps/server/src/hermes/`, `packages/contracts/src/hermesCron.ts`, `apps/web/src/components/hermes/`                                                        |
 | Hermes Memory panel (Hindsight)                     | `apps/server/src/integrations/hindsight/`, `packages/contracts/src/hindsight.ts`, `apps/web/src/{state/hindsight.ts,components/hermes/HermesMemoryTab.tsx}` |
 | Reasoning-effort selector (Hermes `config.yaml`)    | `apps/server/src/hermes/hermesReasoning*.ts`, `infra/hermes/`                                                                                               |
+| Central Hermes execution on shell-only SSH targets  | `infra/hermes/0002-acp-central-ssh-execution.patch`                                                                                                         |
 
 The auto-bootstrap and model-picker rows are not Hermes-specific but matter on Hermes-only hosts.
 The ACP session-update and slash-command-dedupe rows are not Hermes-specific at all — they are
@@ -183,6 +184,13 @@ Project Settings → default model.
 - **Session modes are best-effort.** The adapter sends `session/set_mode` through the generic ACP
   request escape hatch and only logs a warning if Hermes rejects it. Approval enforcement is done
   by the adapter's own permission gate, so behaviour is correct either way.
+- **Central SSH execution needs the carried Hermes patch.** Stock Hermes's SSH backend copies
+  credential, skill, and cache files into the target's `~/.hermes`, and ACP replaces a configured
+  remote cwd with T3's local project path. Apply
+  [`infra/hermes/0002-acp-central-ssh-execution.patch`](./infra/hermes) and set
+  `TERMINAL_SSH_SYNC_FILES=false` on the remote provider instance. The target then runs only shell
+  and file operations; T3, Hermes, provider credentials, memories, and conversation state stay on
+  the central host.
 - **`auth.status` is inferred, not introspected.** Hermes authenticates from its own
   `~/.hermes/.env`, which T3 Code never reads. Instead a completed ACP handshake that returned a
   non-empty model list is reported as `authenticated` — Hermes only lists models whose upstream it

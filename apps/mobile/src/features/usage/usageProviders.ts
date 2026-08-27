@@ -10,6 +10,7 @@ export const PROVIDER_ORDER: readonly UsageProviderKind[] = [
   "hermes",
   "codex",
   "claude",
+  "grok",
 ];
 
 export const PROVIDER_LABEL: Record<UsageProviderKind, string> = {
@@ -17,11 +18,12 @@ export const PROVIDER_LABEL: Record<UsageProviderKind, string> = {
   codex: "Codex",
   hermes: "Hermes",
   opencode: "OpenCode",
+  grok: "Grok Build",
 };
 
 /**
- * Claude's brand orange holds in both themes; Codex is neutral and must flip
- * with the theme or its bars vanish against the matching background.
+ * Claude's brand orange holds in both themes; Codex and Grok are neutrals and
+ * must flip with the theme or their bars vanish against the matching background.
  */
 export function useProviderColors(): Record<UsageProviderKind, string> {
   const { themeAppearance: scheme } = useAppearancePreferences();
@@ -30,5 +32,6 @@ export function useProviderColors(): Record<UsageProviderKind, string> {
     codex: scheme === "dark" ? "#e6e6e6" : "#3c3c43",
     hermes: "#0284c7",
     opencode: "#7c3aed",
+    grok: scheme === "dark" ? "#a1a1aa" : "#52525b",
   };
 }

@@ -8,7 +8,7 @@ on:
   schedule:
     # Once nightly, off minute zero because GitHub delays scheduled runs most
     # at the top of the hour. The fork avoids upstream's three-hour cadence.
-    - cron: "7 7 * * *"
+    - cron: "38 7 * * *"
   workflow_dispatch:
     inputs:
       channel:

@@ -7,7 +7,7 @@ import {
   type IsoDateTime,
   type OrchestrationCommand,
   OrchestrationDispatchCommandError,
-  PROVIDER_SEND_TURN_MAX_FILE_BYTES,
+  PROVIDER_SEND_TURN_MAX_INLINE_FILE_BYTES,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
 } from "@t3tools/contracts";
 
@@ -220,7 +220,7 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
           const maxBytes =
             attachment.type === "image"
               ? PROVIDER_SEND_TURN_MAX_IMAGE_BYTES
-              : PROVIDER_SEND_TURN_MAX_FILE_BYTES;
+              : PROVIDER_SEND_TURN_MAX_INLINE_FILE_BYTES;
           const bytes = Buffer.from(parsed.base64, "base64");
           if (
             (attachment.type === "image" && bytes.byteLength === 0) ||

@@ -15,6 +15,7 @@ const THEME_INTEROP_ALLOWLIST = new Set([
   "features/files/ThreadFilesRouteScreen.tsx",
   "features/files/thread-file-navigator-pane.tsx",
   "features/home/HomeHeader.tsx",
+  "features/hermes/HermesRouteScreen.tsx",
   "features/review/ReviewSheet.tsx",
   "features/review/useNativeReviewDiffBridge.ts",
   "features/settings/SettingsEnvironmentsRouteScreen.tsx",

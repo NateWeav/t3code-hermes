@@ -31,7 +31,7 @@ import {
   ThreadTurnDiff,
   ThreadTurnStartRequestedPayload,
   isProviderSendTurnSupportedImageMimeType,
-  PROVIDER_SEND_TURN_MAX_FILE_BYTES,
+  PROVIDER_SEND_TURN_MAX_INLINE_FILE_BYTES,
 } from "./orchestration.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 
@@ -125,7 +125,7 @@ it.effect("rejects generic file uploads above the bounded data-url transport lim
               type: "file",
               name: "too-large.bin",
               mimeType: "application/octet-stream",
-              sizeBytes: PROVIDER_SEND_TURN_MAX_FILE_BYTES + 1,
+              sizeBytes: PROVIDER_SEND_TURN_MAX_INLINE_FILE_BYTES + 1,
               dataUrl: "data:application/octet-stream;base64,AA==",
             },
           ],

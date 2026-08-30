@@ -1,4 +1,4 @@
-import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId } from "@t3tools/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -27,14 +27,10 @@ vi.mock("~/lib/openPullRequestLink", () => ({
   parseChangeRequestUrl: () => null,
   useOpenChangeRequestLink: () => vi.fn(),
 }));
-import { useAssetUrlState } from "../assets/assetUrls";
-
 import ChatMarkdown, {
   canUseMarkdownFileShellActions,
   hasMarkdownFilePrimaryAction,
-  MarkdownWorkspaceImage,
   orderedListGutterStyle,
-  resolveMarkdownWorkspaceImagePath,
   shouldUseMarkdownFileBrowserPrimaryAction,
   transformChatMarkdownUrl,
 } from "./ChatMarkdown";
@@ -42,12 +38,6 @@ import ChatMarkdown, {
 vi.mock("../assets/assetUrls", () => ({
   useAssetUrlState: vi.fn(),
 }));
-
-const mockUseAssetUrlState = vi.mocked(useAssetUrlState);
-const threadRef = {
-  environmentId: EnvironmentId.make("environment-1"),
-  threadId: ThreadId.make("thread-1"),
-};
 
 describe("canUseMarkdownFileShellActions", () => {
   const environmentId = EnvironmentId.make("environment-1");
@@ -203,18 +193,6 @@ describe("orderedListGutterStyle", () => {
 });
 
 describe("Hermes markdown images", () => {
-  it("resolves local image destinations against the thread workspace", () => {
-    expect(resolveMarkdownWorkspaceImagePath("artifacts/qr.png", "/workspace/project")).toBe(
-      "/workspace/project/artifacts/qr.png",
-    );
-    expect(resolveMarkdownWorkspaceImagePath("file:///tmp/pairing%20qr.png", undefined)).toBe(
-      "/tmp/pairing qr.png",
-    );
-    expect(
-      resolveMarkdownWorkspaceImagePath("https://example.com/qr.png", "/workspace"),
-    ).toBeNull();
-  });
-
   it("allows inline raster images only for image sources", () => {
     const png = "data:image/png;base64,AQID";
     expect(transformChatMarkdownUrl(png, "src")).toBe(png);
@@ -231,62 +209,6 @@ describe("Hermes markdown images", () => {
     expect(transformChatMarkdownUrl("file:///tmp/pairing%20qr.png", "src")).toBe(
       "/tmp/pairing%20qr.png",
     );
-  });
-
-  it("renders a signed workspace image URL scoped to the current thread", () => {
-    mockUseAssetUrlState.mockReturnValue({
-      _tag: "Success",
-      url: "https://environment.example/api/assets/signed/qr.png",
-    });
-
-    const markup = renderToStaticMarkup(
-      <MarkdownWorkspaceImage
-        originalSrc="artifacts/qr.png"
-        workspacePath="/workspace/artifacts/qr.png"
-        threadRef={threadRef}
-        alt="Pairing QR"
-      />,
-    );
-
-    expect(mockUseAssetUrlState).toHaveBeenCalledWith(threadRef.environmentId, {
-      _tag: "workspace-file",
-      threadId: threadRef.threadId,
-      path: "/workspace/artifacts/qr.png",
-    });
-    expect(markup).toContain('src="https://environment.example/api/assets/signed/qr.png"');
-    expect(markup).toContain('alt="Pairing QR"');
-  });
-
-  it("falls back to the original source when the asset lookup fails", () => {
-    mockUseAssetUrlState.mockReturnValue({ _tag: "Failure" });
-
-    const markup = renderToStaticMarkup(
-      <MarkdownWorkspaceImage
-        originalSrc="artifacts/qr.png"
-        workspacePath="/workspace/artifacts/qr.png"
-        threadRef={threadRef}
-        alt="Pairing QR"
-      />,
-    );
-
-    expect(markup).toContain('src="artifacts/qr.png"');
-  });
-
-  it("shows accessible image text while the signed URL loads", () => {
-    mockUseAssetUrlState.mockReturnValue({ _tag: "Loading" });
-
-    const markup = renderToStaticMarkup(
-      <MarkdownWorkspaceImage
-        originalSrc="artifacts/qr.png"
-        workspacePath="/workspace/artifacts/qr.png"
-        threadRef={threadRef}
-        alt="Pairing QR"
-      />,
-    );
-
-    expect(markup).toContain('role="img"');
-    expect(markup).toContain('aria-label="Pairing QR"');
-    expect(markup).toContain("Pairing QR");
   });
 });
 

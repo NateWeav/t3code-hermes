@@ -33,7 +33,6 @@ import { AsyncResult } from "effect/unstable/reactivity";
 import React, {
   Children,
   Suspense,
-  type ComponentPropsWithoutRef,
   type CSSProperties,
   type ClipboardEvent as ReactClipboardEvent,
   type MouseEvent as ReactMouseEvent,
@@ -1690,45 +1689,6 @@ function areMarkdownFileLinkPropsEqual(
     previous.onReveal === next.onReveal &&
     previous.revealLabel === next.revealLabel &&
     previous.className === next.className
-  );
-}
-
-export function resolveMarkdownWorkspaceImagePath(
-  src: string | undefined,
-  cwd: string | undefined,
-): string | null {
-  return resolveMarkdownFileLinkMeta(src, cwd)?.filePath ?? null;
-}
-
-type MarkdownWorkspaceImageProps = Omit<ComponentPropsWithoutRef<"img">, "src"> & {
-  readonly originalSrc: string;
-  readonly workspacePath: string;
-  readonly threadRef: ScopedThreadRef;
-};
-
-export function MarkdownWorkspaceImage({
-  originalSrc,
-  workspacePath,
-  threadRef,
-  alt,
-  ...props
-}: MarkdownWorkspaceImageProps) {
-  const assetUrl = useAssetUrlState(threadRef.environmentId, {
-    _tag: "workspace-file",
-    threadId: threadRef.threadId,
-    path: workspacePath,
-  });
-
-  if (assetUrl._tag === "Success") {
-    return <img {...props} src={assetUrl.url} alt={alt} />;
-  }
-  if (assetUrl._tag === "Failure") {
-    return <img {...props} src={originalSrc} alt={alt} />;
-  }
-  return (
-    <span className="text-xs text-muted-foreground" role="img" aria-label={alt || "Loading image"}>
-      {alt || "Loading image…"}
-    </span>
   );
 }
 

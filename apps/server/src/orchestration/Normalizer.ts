@@ -7,7 +7,7 @@ import {
   type IsoDateTime,
   type OrchestrationCommand,
   OrchestrationDispatchCommandError,
-  PROVIDER_SEND_TURN_MAX_FILE_BYTES,
+  PROVIDER_SEND_TURN_MAX_INLINE_FILE_BYTES,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
 } from "@t3tools/contracts";
 
@@ -177,12 +177,14 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
             });
             if (expectedPath !== claim.finalPath) {
               return yield* new OrchestrationDispatchCommandError({
-                message: `Attachment '${attachment.name}' cannot be sent: image type does not match the upload.`,
+                message: `Attachment '${attachment.name}' cannot be sent: attachment type does not match the upload.`,
               });
             }
 
             // Keep the pending copy until the turn succeeds. A failed thread
-            // bootstrap can then retry with a fresh thread id.
+            // bootstrap can then retry with a fresh thread id. A copy, not a
+            // hard link: an agent editing the delivered file in place must not
+            // mutate the retry source.
             yield* fileSystem.copyFile(claim.currentPath, claim.finalPath).pipe(
               Effect.mapError(
                 (cause) =>
@@ -218,7 +220,7 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
           const maxBytes =
             attachment.type === "image"
               ? PROVIDER_SEND_TURN_MAX_IMAGE_BYTES
-              : PROVIDER_SEND_TURN_MAX_FILE_BYTES;
+              : PROVIDER_SEND_TURN_MAX_INLINE_FILE_BYTES;
           const bytes = Buffer.from(parsed.base64, "base64");
           if (
             (attachment.type === "image" && bytes.byteLength === 0) ||

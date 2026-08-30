@@ -21,11 +21,14 @@ Activity appears below the account cards and contains token and API-equivalent c
 scans provider transcripts stored on each environment; raw transcript contents remain on that
 machine.
 
-Activity combines Codex, Claude Code, Hermes, and OpenCode usage from your connected
+Activity combines Codex, Claude Code, Grok Build, Hermes, and OpenCode usage from your connected
 environments. It reads the providers' local session history and shows API-equivalent token cost,
 processed tokens, cache savings, provider shares, and model breakdowns. Subscription billing is
 separate from the raw token cost shown here. For OpenCode, the page uses the provider-aware cost
 stored with each completed response, including OpenCode Go models such as Kimi.
+
+Grok Build totals come from persisted session updates. Interactive turns that never wrote a
+completed-turn record will not appear.
 
 Use **Past 24h** for an hourly chart covering the exact rolling 24-hour period. The **7 days**,
 **30 days**, and **90 days** ranges use daily resolution. Cost and token toggles update both the

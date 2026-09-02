@@ -87,7 +87,7 @@ describe("canonicalizeClientCommandTimestamps", () => {
 });
 
 describe("normalizeDispatchCommand attachments", () => {
-  it.effect("persists binary generic files as opaque .bin attachments", () =>
+  it.effect("persists binary generic files with a safe original extension", () =>
     Effect.gen(function* () {
       const command: ClientOrchestrationCommand = {
         type: "thread.turn.start",
@@ -120,7 +120,7 @@ describe("normalizeDispatchCommand attachments", () => {
       if (!attachment) throw new Error("Expected persisted attachment");
 
       const config = yield* ServerConfig.ServerConfig;
-      const persistedPath = `${config.attachmentsDir}/${attachment.id}.bin`;
+      const persistedPath = `${config.attachmentsDir}/${attachment.id}.dat`;
       expect([...NodeFS.readFileSync(persistedPath)]).toEqual([0, 255, 128, 64]);
       expect(NodeFS.existsSync(`${config.attachmentsDir}/${attachment.name}`)).toBe(false);
     }).pipe(Effect.provide(makeNormalizerLayer()), Effect.scoped),
@@ -188,7 +188,7 @@ describe("normalizeDispatchCommand attachments", () => {
       if (!attachment) throw new Error("Expected persisted attachment");
 
       const config = yield* ServerConfig.ServerConfig;
-      const persistedPath = `${config.attachmentsDir}/${attachment.id}.bin`;
+      const persistedPath = `${config.attachmentsDir}/${attachment.id}.txt`;
       expect(NodeFS.statSync(persistedPath).size).toBe(0);
     }).pipe(Effect.provide(makeNormalizerLayer()), Effect.scoped),
   );

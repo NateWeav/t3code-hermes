@@ -48,7 +48,7 @@ import { AndroidScreenHeader } from "../../components/AndroidScreenHeader";
 import { AppText as Text } from "../../components/AppText";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import { copyTextWithHaptic } from "../../lib/copyTextWithHaptic";
-import { useThemeColor } from "../../lib/useThemeColor";
+import { useUniwindTheme } from "../../lib/useUniwindTheme";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { useServerConfigs } from "../../state/entities";
 import { useHermesCron } from "../../state/hermesCron";
@@ -191,7 +191,7 @@ function HermesHeader(props: {
 
 function HermesTasksScreen({ environmentId }: { readonly environmentId: EnvironmentId }) {
   const insets = useSafeAreaInsets();
-  const iconColor = useThemeColor("--color-icon");
+  const iconColor = useUniwindTheme()["--color-icon"];
   const cron = useHermesCron(environmentId);
   const [expandedJobIds, setExpandedJobIds] = useState<ReadonlySet<HermesCronJobId>>(
     () => new Set(),
@@ -300,8 +300,8 @@ function TaskRow(props: {
   readonly onSetEnabled: (enabled: boolean) => void;
   readonly onSetMuted: (muted: boolean) => void;
 }) {
-  const iconColor = useThemeColor("--color-icon");
-  const mutedColor = useThemeColor("--color-icon-muted");
+  const iconColor = useUniwindTheme()["--color-icon"];
+  const mutedColor = useUniwindTheme()["--color-icon-muted"];
   const status = describeHermesJobStatus(props.job);
   return (
     <View className="mb-3 overflow-hidden rounded-[20px] border border-border bg-card">
@@ -406,9 +406,9 @@ function RunRow({ run }: { readonly run: HermesCronRun }) {
 
 function StatusChip(props: { readonly tone: HermesCronStatusTone; readonly label: string }) {
   const className: Record<HermesCronStatusTone, string> = {
-    ok: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+    ok: "bg-emerald-500/10 text-emerald-500",
     failed: "bg-destructive/10 text-destructive",
-    paused: "bg-amber-500/10 text-amber-700 dark:text-amber-300",
+    paused: "bg-amber-500/10 text-amber-500",
     idle: "bg-subtle text-foreground-muted",
   };
   return (
@@ -557,8 +557,8 @@ function MemoryHeader(props: {
   readonly stats: HindsightBankStats | null;
   readonly isStatsPending: boolean;
 }) {
-  const iconColor = useThemeColor("--color-icon");
-  const placeholderColor = useThemeColor("--color-foreground-muted");
+  const iconColor = useUniwindTheme()["--color-icon"];
+  const placeholderColor = useUniwindTheme()["--color-foreground-muted"];
   return (
     <View className="mb-3 gap-3">
       <MemoryStatsStrip isPending={props.isStatsPending} stats={props.stats} />
@@ -667,9 +667,7 @@ function MemoryStatsStrip(props: {
         <Text className="text-xs text-foreground-muted">{summary.breakdown.join(" · ")}</Text>
       )}
       {summary.operations.length === 0 ? null : (
-        <Text className="text-xs text-amber-700 dark:text-amber-300">
-          {summary.operations.join(" · ")}
-        </Text>
+        <Text className="text-xs text-amber-500">{summary.operations.join(" · ")}</Text>
       )}
     </View>
   );
@@ -724,8 +722,8 @@ function MemoryFooter(props: {
   readonly onRetain: () => void;
   readonly onReflect: () => void;
 }) {
-  const iconColor = useThemeColor("--color-icon");
-  const placeholderColor = useThemeColor("--color-foreground-muted");
+  const iconColor = useUniwindTheme()["--color-icon"];
+  const placeholderColor = useUniwindTheme()["--color-foreground-muted"];
   return (
     <View className="gap-3 border-t border-border py-4">
       {props.hasMore ? (
@@ -865,7 +863,7 @@ function CenteredState(props: {
   readonly actionLabel?: string;
   readonly onAction?: () => void;
 }) {
-  const iconColor = useThemeColor("--color-icon");
+  const iconColor = useUniwindTheme()["--color-icon"];
   return (
     <View className="flex-1 items-center justify-center gap-3 px-8 py-16">
       <Text className="text-center text-lg font-t3-semibold text-foreground">{props.title}</Text>

@@ -1,6 +1,7 @@
 import {
   type ChatAttachment,
   CommandId,
+  DEFAULT_EXECUTION_ENDPOINT_ID,
   EventId,
   type ModelSelection,
   type OrchestrationEvent,
@@ -594,6 +595,7 @@ const make = Effect.gen(function* () {
       });
     }
     const preferredProvider: ProviderDriverKind = desiredDriverKind;
+    const executionEndpointId = thread.executionEndpointId ?? DEFAULT_EXECUTION_ENDPOINT_ID;
     if (options?.pendingTurnStart === true && thread.session?.status !== "running") {
       yield* setThreadSession({
         threadId,
@@ -661,6 +663,7 @@ const make = Effect.gen(function* () {
         threadId,
         ...(preferredProvider ? { provider: preferredProvider } : {}),
         providerInstanceId: desiredInstanceId,
+        executionEndpointId,
         ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
         ...(thread.title ? { title: thread.title } : {}),
         modelSelection: desiredModelSelection,

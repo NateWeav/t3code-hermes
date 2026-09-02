@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   MessageId,
   CommandId,
+  DEFAULT_EXECUTION_ENDPOINT_ID,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   ProjectId,
   ThreadId,
@@ -56,6 +57,7 @@ const readModel: OrchestrationReadModel = {
       id: ThreadId.make("thread-1"),
       projectId: ProjectId.make("project-a"),
       title: "Thread A",
+      executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
       modelSelection: {
         instanceId: ProviderInstanceId.make("codex"),
         model: "gpt-5-codex",
@@ -81,6 +83,7 @@ const readModel: OrchestrationReadModel = {
       id: ThreadId.make("thread-2"),
       projectId: ProjectId.make("project-b"),
       title: "Thread B",
+      executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
       modelSelection: {
         instanceId: ProviderInstanceId.make("codex"),
         model: "gpt-5-codex",
@@ -160,6 +163,7 @@ describe("commandInvariants", () => {
           threadId: ThreadId.make("thread-3"),
           projectId: ProjectId.make("project-a"),
           title: "new",
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           modelSelection: {
             instanceId: ProviderInstanceId.make("codex"),
             model: "gpt-5-codex",
@@ -184,6 +188,7 @@ describe("commandInvariants", () => {
             threadId: ThreadId.make("thread-1"),
             projectId: ProjectId.make("project-a"),
             title: "dup",
+            executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
             modelSelection: {
               instanceId: ProviderInstanceId.make("codex"),
               model: "gpt-5-codex",

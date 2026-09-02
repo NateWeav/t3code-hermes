@@ -39,6 +39,7 @@ import {
   THREAD_JUMP_HINT_SHOW_DELAY_MS,
 } from "./Sidebar.logic";
 import {
+  DEFAULT_EXECUTION_ENDPOINT_ID,
   EnvironmentId,
   OrchestrationLatestTurn,
   ProjectId,
@@ -1331,6 +1332,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
       model: "gpt-5.4",
       ...overrides?.modelSelection,
     },
+    executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
     runtimeMode: DEFAULT_RUNTIME_MODE,
     interactionMode: DEFAULT_INTERACTION_MODE,
     session: null,

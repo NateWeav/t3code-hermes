@@ -2,6 +2,7 @@ import type {
   ProviderInstanceId,
   ProviderDriverKind,
   ProviderSessionRuntimeStatus,
+  ExecutionEndpointId,
   RuntimeMode,
   ThreadId,
 } from "@t3tools/contracts";
@@ -23,6 +24,7 @@ export interface ProviderRuntimeBinding {
    * exposing bindings; runtime callers must not infer this from `provider`.
    */
   readonly providerInstanceId?: ProviderInstanceId;
+  readonly executionEndpointId?: ExecutionEndpointId;
   readonly adapterKey?: string;
   readonly status?: ProviderSessionRuntimeStatus;
   readonly resumeCursor?: unknown | null;

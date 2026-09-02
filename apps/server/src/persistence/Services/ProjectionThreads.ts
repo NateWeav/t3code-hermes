@@ -8,6 +8,8 @@
  */
 import {
   CommandId,
+  DEFAULT_EXECUTION_ENDPOINT_ID,
+  ExecutionEndpointId,
   IsoDateTime,
   ModelSelection,
   NonNegativeInt,
@@ -21,7 +23,7 @@ import {
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Context from "effect/Context";
-import type * as Effect from "effect/Effect";
+import * as Effect from "effect/Effect";
 
 import type { ProjectionRepositoryError } from "../Errors.ts";
 
@@ -30,6 +32,9 @@ export const ProjectionThread = Schema.Struct({
   projectId: ProjectId,
   title: Schema.String,
   modelSelection: ModelSelection,
+  executionEndpointId: ExecutionEndpointId.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_EXECUTION_ENDPOINT_ID)),
+  ),
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
   branch: Schema.NullOr(Schema.String),

@@ -1,4 +1,5 @@
 import {
+  DEFAULT_EXECUTION_ENDPOINT_ID,
   EnvironmentId,
   MessageId,
   ProjectId,
@@ -232,6 +233,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
       instanceId: ProviderInstanceId.make("codex"),
       model: "gpt-5.4",
     },
+    executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
     runtimeMode: "full-access",
     interactionMode: "default",
     session: null,
@@ -283,6 +285,7 @@ describe("buildLoadingThreadFromShell", () => {
         instanceId: ProviderInstanceId.make("codex"),
         model: "gpt-5.4",
       },
+      executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
       runtimeMode: "full-access",
       interactionMode: "default",
       branch: "main",

@@ -23,6 +23,7 @@ import {
   TurnId,
 } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
+import { DEFAULT_EXECUTION_ENDPOINT_ID, ExecutionEndpointId } from "./executionEndpoint.ts";
 
 export const ORCHESTRATION_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
@@ -432,6 +433,9 @@ export const OrchestrationThread = Schema.Struct({
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
   modelSelection: ModelSelection,
+  executionEndpointId: ExecutionEndpointId.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_EXECUTION_ENDPOINT_ID)),
+  ),
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
@@ -503,6 +507,9 @@ export const OrchestrationThreadShell = Schema.Struct({
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
   modelSelection: ModelSelection,
+  executionEndpointId: ExecutionEndpointId.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_EXECUTION_ENDPOINT_ID)),
+  ),
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
@@ -725,6 +732,7 @@ const ThreadCreateCommand = Schema.Struct({
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
   modelSelection: ModelSelection,
+  executionEndpointId: Schema.optional(ExecutionEndpointId),
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
@@ -855,6 +863,7 @@ const ThreadTurnStartBootstrapCreateThread = Schema.Struct({
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
   modelSelection: ModelSelection,
+  executionEndpointId: Schema.optional(ExecutionEndpointId),
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
   branch: Schema.NullOr(TrimmedNonEmptyString),
@@ -1186,6 +1195,9 @@ export const ThreadCreatedPayload = Schema.Struct({
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
   modelSelection: ModelSelection,
+  executionEndpointId: ExecutionEndpointId.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_EXECUTION_ENDPOINT_ID)),
+  ),
   runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE))),
   interactionMode: ProviderInteractionMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),

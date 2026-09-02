@@ -14,6 +14,7 @@ import type {
 } from "@t3tools/contracts";
 import {
   ApprovalRequestId,
+  DEFAULT_EXECUTION_ENDPOINT_ID,
   EnvironmentId,
   EventId,
   ProviderDriverKind,
@@ -437,6 +438,7 @@ it.effect("ProviderServiceLive rejects new sessions for disabled providers", () 
           provider: ProviderDriverKind.make("claudeAgent"),
           providerInstanceId: claudeAgentInstanceId,
           threadId: asThreadId("thread-disabled"),
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           runtimeMode: "full-access",
         });
       }).pipe(Effect.provide(providerLayer)),
@@ -521,6 +523,7 @@ it.effect(
           provider: driverKind,
           providerInstanceId: instanceId,
           threadId: asThreadId("thread-enabled-custom"),
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           runtimeMode: "full-access",
         });
       }).pipe(Effect.provide(providerLayer));
@@ -593,6 +596,7 @@ it.effect("ProviderServiceLive rejects new sessions for disabled custom instance
           provider: ProviderDriverKind.make("codex"),
           providerInstanceId: instanceId,
           threadId: asThreadId("thread-disabled-instance"),
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           runtimeMode: "full-access",
         });
       }).pipe(Effect.provide(providerLayer)),
@@ -652,6 +656,7 @@ it.effect(
           provider: CODEX_DRIVER,
           providerInstanceId: codexInstanceId,
           threadId,
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           runtimeMode: "full-access",
         });
         yield* original.stopSession(threadId);
@@ -847,6 +852,7 @@ it.effect(
           cwd: "/tmp/project",
           runtimeMode: "full-access",
           threadId,
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         });
         firstCodex.updateSession(threadId, (existing) => ({
           ...existing,
@@ -936,6 +942,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
         provider: ProviderDriverKind.make("codex"),
         providerInstanceId: codexInstanceId,
         threadId: asThreadId("thread-1"),
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         cwd: "/tmp/project",
         runtimeMode: "full-access",
       });
@@ -1022,6 +1029,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
         provider: CODEX_DRIVER,
         providerInstanceId: codexInstanceId,
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         runtimeMode: "full-access",
       });
       routing.codex.uploadFeedback.mockClear();
@@ -1046,6 +1054,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
         provider: CODEX_DRIVER,
         providerInstanceId: codexInstanceId,
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         cwd: "/tmp/feedback-project",
         runtimeMode: "full-access",
       });
@@ -1069,6 +1078,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
         provider: CLAUDE_AGENT_DRIVER,
         providerInstanceId: claudeAgentInstanceId,
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         runtimeMode: "full-access",
       });
 
@@ -1088,6 +1098,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
         provider: CLAUDE_AGENT_DRIVER,
         providerInstanceId: claudeAgentInstanceId,
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         runtimeMode: "full-access",
       });
       yield* routing.claude.stopSession(threadId);
@@ -1109,6 +1120,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
         provider: ProviderDriverKind.make("codex"),
         providerInstanceId: codexInstanceId,
         threadId: asThreadId("thread-attach"),
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         cwd: "/tmp/project",
         runtimeMode: "full-access",
       });
@@ -1157,6 +1169,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
         provider: ProviderDriverKind.make("codex"),
         providerInstanceId: codexInstanceId,
         threadId: asThreadId("thread-1"),
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         cwd: "/tmp/project",
         runtimeMode: "full-access",
       });
@@ -1199,6 +1212,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
         provider: ProviderDriverKind.make("codex"),
         providerInstanceId: codexInstanceId,
         threadId: asThreadId("thread-reap-preserve"),
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         cwd: "/tmp/project-reap-preserve",
         runtimeMode: "full-access",
       });
@@ -1250,6 +1264,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
         provider: ProviderDriverKind.make("claudeAgent"),
         providerInstanceId: claudeAgentInstanceId,
         threadId: asThreadId("thread-claude"),
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         cwd: "/tmp/project-claude",
         runtimeMode: "full-access",
       });
@@ -1281,6 +1296,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
         provider: ProviderDriverKind.make("codex"),
         providerInstanceId: codexInstanceId,
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         cwd: "/tmp/project-binding-mismatch",
         runtimeMode: "full-access",
       });
@@ -1311,6 +1327,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
         provider: ProviderDriverKind.make("codex"),
         providerInstanceId: codexInstanceId,
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         cwd: "/tmp/project-provider-replacement",
         runtimeMode: "full-access",
       });
@@ -1322,6 +1339,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
         provider: ProviderDriverKind.make("claudeAgent"),
         providerInstanceId: claudeAgentInstanceId,
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         cwd: "/tmp/project-provider-replacement",
         runtimeMode: "full-access",
       });
@@ -1349,6 +1367,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
         provider: ProviderDriverKind.make("codex"),
         providerInstanceId: codexInstanceId,
         threadId: asThreadId("thread-1"),
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         cwd: "/tmp/project-send-turn",
         runtimeMode: "full-access",
       });
@@ -1390,6 +1409,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
         provider: ProviderDriverKind.make("claudeAgent"),
         providerInstanceId: claudeAgentInstanceId,
         threadId: asThreadId("thread-claude-send-turn"),
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         cwd: "/tmp/project-claude-send-turn",
         modelSelection: createModelSelection(
           ProviderInstanceId.make("claudeAgent"),
@@ -1443,12 +1463,14 @@ routing.layer("ProviderServiceLive routing", (it) => {
         provider: ProviderDriverKind.make("codex"),
         providerInstanceId: codexInstanceId,
         threadId: asThreadId("thread-1"),
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         runtimeMode: "full-access",
       });
       yield* provider.startSession(asThreadId("thread-2"), {
         provider: ProviderDriverKind.make("codex"),
         providerInstanceId: codexInstanceId,
         threadId: asThreadId("thread-2"),
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         runtimeMode: "full-access",
       });
 
@@ -1470,6 +1492,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
         provider: ProviderDriverKind.make("codex"),
         providerInstanceId: codexInstanceId,
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         runtimeMode: "full-access",
       });
       yield* provider.sendTurn({
@@ -1545,6 +1568,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
           provider: ProviderDriverKind.make("claudeAgent"),
           providerInstanceId: claudeAgentInstanceId,
           threadId: asThreadId("thread-claude-start"),
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           cwd: "/tmp/project-claude-start",
           runtimeMode: "full-access",
         });
@@ -1586,6 +1610,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
           provider: ProviderDriverKind.make("claudeAgent"),
           providerInstanceId: claudeAgentInstanceId,
           threadId: initial.threadId,
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           cwd: "/tmp/project-claude-start",
           runtimeMode: "full-access",
         });
@@ -1653,6 +1678,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
             provider: ProviderDriverKind.make("claudeAgent"),
             providerInstanceId: claudeAgentInstanceId,
             threadId: asThreadId("thread-claude-cwd"),
+            executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
             cwd: "/tmp/project-claude-cwd",
             runtimeMode: "full-access",
           });
@@ -1689,6 +1715,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
             provider: ProviderDriverKind.make("claudeAgent"),
             providerInstanceId: claudeAgentInstanceId,
             threadId: initial.threadId,
+            executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
             runtimeMode: "full-access",
           });
         }).pipe(Effect.provide(secondProviderLayer));
@@ -1723,6 +1750,7 @@ fanout.layer("ProviderServiceLive fanout", (it) => {
         provider: ProviderDriverKind.make("codex"),
         providerInstanceId: codexInstanceId,
         threadId: asThreadId("thread-1"),
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         runtimeMode: "full-access",
       });
 
@@ -1769,6 +1797,7 @@ fanout.layer("ProviderServiceLive fanout", (it) => {
         provider: ProviderDriverKind.make("codex"),
         providerInstanceId: codexInstanceId,
         threadId: asThreadId("thread-seq"),
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         runtimeMode: "full-access",
       });
 
@@ -1825,6 +1854,7 @@ fanout.layer("ProviderServiceLive fanout", (it) => {
         provider: ProviderDriverKind.make("codex"),
         providerInstanceId: codexInstanceId,
         threadId: asThreadId("thread-1"),
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         runtimeMode: "full-access",
       });
 
@@ -1898,6 +1928,7 @@ fanout.layer("ProviderServiceLive fanout", (it) => {
         provider: ProviderDriverKind.make("claudeAgent"),
         providerInstanceId: claudeAgentInstanceId,
         threadId: asThreadId("thread-metrics"),
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         cwd: "/tmp/project",
         runtimeMode: "full-access",
       });
@@ -1976,6 +2007,7 @@ fanout.layer("ProviderServiceLive fanout", (it) => {
           provider: ProviderDriverKind.make("claudeAgent"),
           providerInstanceId: claudeAgentInstanceId,
           threadId: asThreadId("thread-send-metrics"),
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           cwd: "/tmp/project-send-metrics",
           runtimeMode: "full-access",
         });
@@ -2018,6 +2050,7 @@ validation.layer("ProviderServiceLive validation", (it) => {
         provider.startSession(asThreadId("thread-missing-instance-id"), {
           provider: ProviderDriverKind.make("codex"),
           threadId: asThreadId("thread-missing-instance-id"),
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           runtimeMode: "full-access",
         }),
       );
@@ -2039,6 +2072,7 @@ validation.layer("ProviderServiceLive validation", (it) => {
           provider: ProviderDriverKind.make("codex"),
           providerInstanceId: claudeAgentInstanceId,
           threadId: asThreadId("thread-instance-mismatch"),
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           runtimeMode: "full-access",
         }),
       );
@@ -2102,6 +2136,7 @@ validation.layer("ProviderServiceLive validation", (it) => {
         provider: ProviderDriverKind.make("codex"),
         providerInstanceId: codexInstanceId,
         threadId: asThreadId("thread-missing"),
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         cwd: "/tmp/project",
         runtimeMode: "full-access",
       });
@@ -2163,6 +2198,7 @@ describe("agent browser access", () => {
           provider: CODEX_DRIVER,
           providerInstanceId: codexInstanceId,
           threadId,
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           runtimeMode: "full-access",
         });
       }).pipe(Effect.provide(providerLayer));

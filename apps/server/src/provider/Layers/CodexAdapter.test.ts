@@ -4,6 +4,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import {
+  DEFAULT_EXECUTION_ENDPOINT_ID,
   ApprovalRequestId,
   CodexSettings,
   EventId,
@@ -255,6 +256,7 @@ validationLayer("CodexAdapterLive validation", (it) => {
         .startSession({
           provider: ProviderDriverKind.make("claudeAgent"),
           threadId: asThreadId("thread-1"),
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           runtimeMode: "full-access",
         })
         .pipe(Effect.result);
@@ -279,6 +281,7 @@ validationLayer("CodexAdapterLive validation", (it) => {
       yield* adapter.startSession({
         provider: ProviderDriverKind.make("codex"),
         threadId: asThreadId("thread-1"),
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.3-codex", [
           { id: "serviceTier", value: "priority" },
         ]),
@@ -343,6 +346,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
       yield* adapter.startSession({
         provider: ProviderDriverKind.make("codex"),
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         runtimeMode: "full-access",
       });
       const runtime = sessionRuntimeFactory.lastRuntime;
@@ -378,6 +382,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
       yield* adapter.startSession({
         provider: ProviderDriverKind.make("codex"),
         threadId: asThreadId("sess-missing"),
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         runtimeMode: "full-access",
       });
       const runtime = sessionRuntimeFactory.lastRuntime;
@@ -427,6 +432,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
       yield* adapter.startSession({
         provider: ProviderDriverKind.make("codex"),
         threadId: asThreadId("sess-launch-args"),
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         runtimeMode: "full-access",
       });
 
@@ -459,6 +465,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
       yield* adapter.startSession({
         provider: ProviderDriverKind.make("codex"),
         threadId: asThreadId("sess-launch-args-env"),
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         runtimeMode: "full-access",
       });
 
@@ -492,6 +499,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
       yield* adapter.startSession({
         provider: ProviderDriverKind.make("codex"),
         threadId: asThreadId("sess-custom-instance"),
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         runtimeMode: "full-access",
       });
       const runtime = customRuntimeFactory.lastRuntime;
@@ -548,6 +556,7 @@ function startLifecycleRuntime() {
     yield* adapter.startSession({
       provider: ProviderDriverKind.make("codex"),
       threadId: asThreadId("thread-1"),
+      executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
       runtimeMode: "full-access",
     });
     const runtime = lifecycleRuntimeFactory.lastRuntime;
@@ -1405,6 +1414,7 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
         .startSession({
           provider: ProviderDriverKind.make("codex"),
           threadId: asThreadId("thread-outlives-start"),
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           runtimeMode: "full-access",
         })
         .pipe(Effect.forkChild);
@@ -1475,6 +1485,7 @@ scopedLifecycleLayer("CodexAdapterLive scoped lifecycle", (it) => {
       yield* adapter.startSession({
         provider: ProviderDriverKind.make("codex"),
         threadId: asThreadId("thread-stop"),
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         runtimeMode: "full-access",
       });
 
@@ -1520,6 +1531,7 @@ scopedFailureLayer("CodexAdapterLive scoped startup failure", (it) => {
         .startSession({
           provider: ProviderDriverKind.make("codex"),
           threadId: asThreadId("thread-fail"),
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           runtimeMode: "full-access",
         })
         .pipe(Effect.result);
@@ -1566,6 +1578,7 @@ it.effect("flushes managed native logs when the adapter layer shuts down", () =>
       yield* adapter.startSession({
         provider: ProviderDriverKind.make("codex"),
         threadId: asThreadId("thread-logger"),
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         runtimeMode: "full-access",
       });
 

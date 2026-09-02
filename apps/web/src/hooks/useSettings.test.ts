@@ -1,4 +1,5 @@
 import {
+  DEFAULT_CLIENT_SERVER_SETTINGS,
   DEFAULT_SERVER_SETTINGS,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -53,7 +54,7 @@ describe("resolveEnvironmentIdentificationMode", () => {
 describe("mergeEnvironmentSettings", () => {
   it("combines the selected environment's server settings with client preferences", () => {
     const serverSettings = {
-      ...DEFAULT_SERVER_SETTINGS,
+      ...DEFAULT_CLIENT_SERVER_SETTINGS,
       providerInstances: {
         [ProviderInstanceId.make("codex_remote")]: {
           driver: ProviderDriverKind.make("codex"),

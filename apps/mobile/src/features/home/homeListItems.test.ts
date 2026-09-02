@@ -2,7 +2,13 @@ import type {
   EnvironmentProject,
   EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/shell";
-import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import {
+  DEFAULT_EXECUTION_ENDPOINT_ID,
+  EnvironmentId,
+  ProjectId,
+  ProviderInstanceId,
+  ThreadId,
+} from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -39,6 +45,7 @@ function makeThread(id: string, projectId: ProjectId): EnvironmentThreadShell {
     projectId,
     title: `Thread ${id}`,
     modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+    executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
     runtimeMode: "full-access",
     interactionMode: "default",
     branch: null,

@@ -1,4 +1,10 @@
-import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import {
+  DEFAULT_EXECUTION_ENDPOINT_ID,
+  EnvironmentId,
+  ProjectId,
+  ProviderInstanceId,
+  ThreadId,
+} from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { DEFAULT_INTERACTION_MODE, DEFAULT_RUNTIME_MODE, type Thread } from "./types";
@@ -16,6 +22,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
       instanceId: ProviderInstanceId.make("codex"),
       model: "gpt-5.3-codex",
     },
+    executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
     runtimeMode: DEFAULT_RUNTIME_MODE,
     interactionMode: DEFAULT_INTERACTION_MODE,
     session: null,

@@ -1,4 +1,5 @@
 import {
+  DEFAULT_EXECUTION_ENDPOINT_ID,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
@@ -134,6 +135,7 @@ function makeShell(input: {
     projectId: ProjectId.make("project-1"),
     title: "Thread",
     modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+    executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
     runtimeMode: "full-access",
     interactionMode: "default",
     branch: null,

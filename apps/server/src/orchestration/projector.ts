@@ -293,6 +293,7 @@ export function projectEvent(
             projectId: payload.projectId,
             title: payload.title,
             modelSelection: payload.modelSelection,
+            executionEndpointId: payload.executionEndpointId,
             runtimeMode: payload.runtimeMode,
             interactionMode: payload.interactionMode,
             branch: payload.branch,

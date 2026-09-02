@@ -2,6 +2,7 @@ import type { AdvertisedEndpoint, DesktopWslState } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 import {
   applyWslEnableSelection,
+  buildSshExecutionEndpointInput,
   isQrShareableEndpoint,
   selectQrEndpointOption,
 } from "./ConnectionsSettings.logic";
@@ -14,6 +15,125 @@ const baseWslState: DesktopWslState = {
   distros: [],
   preflightError: null,
 };
+
+describe("buildSshExecutionEndpointInput", () => {
+  it("builds a trimmed create payload without retaining raw coordinates in presentation state", () => {
+    expect(
+      buildSshExecutionEndpointInput({
+        endpointId: " build-host ",
+        displayName: " Build host ",
+        host: " meridian.internal ",
+        user: " deploy ",
+        port: "2222",
+        identityFile: " ~/.ssh/meridian ",
+        cwd: " /srv/meridian ",
+      }),
+    ).toEqual({
+      endpointId: "build-host",
+      endpoint: {
+        displayName: "Build host",
+        enabled: true,
+        host: "meridian.internal",
+        user: "deploy",
+        port: 2222,
+        identityFile: "~/.ssh/meridian",
+        cwd: "/srv/meridian",
+      },
+    });
+  });
+
+  it("defaults the SSH port and omits a blank identity file", () => {
+    expect(
+      buildSshExecutionEndpointInput({
+        endpointId: "build-host",
+        displayName: "Build host",
+        host: "meridian.internal",
+        user: "deploy",
+        port: "",
+        identityFile: "  ",
+        cwd: "/srv/meridian",
+      }),
+    ).toEqual({
+      endpointId: "build-host",
+      endpoint: {
+        displayName: "Build host",
+        enabled: true,
+        host: "meridian.internal",
+        user: "deploy",
+        port: 22,
+        cwd: "/srv/meridian",
+      },
+    });
+  });
+
+  it.each([
+    [
+      { endpointId: "", displayName: "Build", host: "host", user: "user", port: "22", cwd: "/srv" },
+      "Endpoint ID is required.",
+    ],
+    [
+      { endpointId: "build", displayName: "", host: "host", user: "user", port: "22", cwd: "/srv" },
+      "Display name is required.",
+    ],
+    [
+      {
+        endpointId: "build",
+        displayName: "Build",
+        host: "",
+        user: "user",
+        port: "22",
+        cwd: "/srv",
+      },
+      "SSH host is required.",
+    ],
+    [
+      {
+        endpointId: "build",
+        displayName: "Build",
+        host: "host",
+        user: "",
+        port: "22",
+        cwd: "/srv",
+      },
+      "SSH user is required.",
+    ],
+    [
+      {
+        endpointId: "build",
+        displayName: "Build",
+        host: "host",
+        user: "user",
+        port: "0",
+        cwd: "/srv",
+      },
+      "SSH port must be between 1 and 65535.",
+    ],
+    [
+      {
+        endpointId: "build",
+        displayName: "Build",
+        host: "host",
+        user: "user",
+        port: "abc",
+        cwd: "/srv",
+      },
+      "SSH port must be between 1 and 65535.",
+    ],
+    [
+      {
+        endpointId: "build",
+        displayName: "Build",
+        host: "host",
+        user: "user",
+        port: "22",
+        cwd: "",
+      },
+      "Working directory is required.",
+    ],
+  ])("rejects invalid create fields", (input, message) => {
+    expect(() => buildSshExecutionEndpointInput({ ...input, identityFile: "" })).toThrow(message);
+  });
+});
 
 describe("applyWslEnableSelection", () => {
   it("clears WSL-only and updates the distro before enabling both backends", async () => {

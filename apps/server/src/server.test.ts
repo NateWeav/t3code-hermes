@@ -9,6 +9,8 @@ import {
   AuthEnvironmentBootstrapTokenType,
   AuthTokenExchangeGrantType,
   CommandId,
+  DEFAULT_CLIENT_SERVER_SETTINGS,
+  DEFAULT_EXECUTION_ENDPOINT_ID,
   DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
   EventId,
@@ -213,6 +215,7 @@ const makeDefaultOrchestrationReadModel = () => {
       {
         id: defaultProjectId,
         title: "Default Project",
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         workspaceRoot: "/tmp/default-project",
         defaultModelSelection,
         scripts: [],
@@ -226,6 +229,7 @@ const makeDefaultOrchestrationReadModel = () => {
         id: defaultThreadId,
         projectId: defaultProjectId,
         title: "Default Thread",
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         modelSelection: defaultModelSelection,
         interactionMode: "default" as const,
         runtimeMode: "full-access" as const,
@@ -256,6 +260,7 @@ const makeDefaultOrchestrationThreadShell = (
     id: defaultThreadId,
     projectId: defaultProjectId,
     title: "Default Thread",
+    executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
     modelSelection: defaultModelSelection,
     runtimeMode: "full-access",
     interactionMode: "default",
@@ -4711,7 +4716,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assert.equal(first.config.observability.otlpTracesEnabled, true);
         assert.equal(first.config.observability.otlpMetricsUrl, "http://localhost:4318/v1/metrics");
         assert.equal(first.config.observability.otlpMetricsEnabled, true);
-        assert.deepEqual(first.config.settings, DEFAULT_SERVER_SETTINGS);
+        assert.deepEqual(first.config.settings, DEFAULT_CLIENT_SERVER_SETTINGS);
       }
       assert.deepEqual(second, {
         version: 1,
@@ -5207,6 +5212,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           threadId,
           projectId: defaultProjectId,
           title: "Analytics test",
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           modelSelection: defaultModelSelection,
           runtimeMode: "full-access",
           interactionMode: "default",
@@ -6049,6 +6055,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           {
             id: ProjectId.make("project-a"),
             title: "Project A",
+            executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
             workspaceRoot: "/tmp/project-a",
             defaultModelSelection,
             scripts: [],
@@ -6062,6 +6069,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             id: ThreadId.make("thread-1"),
             projectId: ProjectId.make("project-a"),
             title: "Thread A",
+            executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
             modelSelection: defaultModelSelection,
             interactionMode: "default" as const,
             runtimeMode: "full-access" as const,

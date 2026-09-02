@@ -1,5 +1,6 @@
 import {
   CommandId,
+  DEFAULT_EXECUTION_ENDPOINT_ID,
   MessageId,
   ThreadId,
   type ModelSelection,
@@ -66,6 +67,7 @@ export function buildProjectThreadStartTurnInput(spec: ProjectThreadStartTurnSpe
         projectId: spec.projectId,
         title,
         modelSelection: spec.modelSelection,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         runtimeMode: spec.runtimeMode,
         interactionMode: spec.interactionMode,
         branch: spec.branch,

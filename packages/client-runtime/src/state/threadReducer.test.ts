@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   CheckpointRef,
   CommandId,
+  DEFAULT_EXECUTION_ENDPOINT_ID,
   EventId,
   MessageId,
   ProjectId,
@@ -27,6 +28,7 @@ const baseThread: OrchestrationThread = {
   projectId: ProjectId.make("project-1"),
   title: "Test Thread",
   modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+  executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
   runtimeMode: "full-access",
   interactionMode: "default",
   branch: null,
@@ -85,6 +87,7 @@ describe("applyThreadDetailEvent", () => {
           projectId: ProjectId.make("project-1"),
           title: "New Thread",
           modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           runtimeMode: "full-access",
           interactionMode: "default",
           branch: "main",
@@ -98,6 +101,7 @@ describe("applyThreadDetailEvent", () => {
       if (result.kind === "updated") {
         expect(result.thread.id).toBe("thread-2");
         expect(result.thread.title).toBe("New Thread");
+        expect(result.thread.executionEndpointId).toBe(DEFAULT_EXECUTION_ENDPOINT_ID);
         expect(result.thread.branch).toBe("main");
         expect(result.thread.messages).toEqual([]);
         expect(result.thread.session).toBeNull();

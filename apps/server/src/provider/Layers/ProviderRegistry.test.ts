@@ -324,6 +324,8 @@ function makeMutableServerSettingsService(
           yield* PubSub.publish(changes, next);
           return next;
         }),
+      upsertExecutionEndpoint: () => Ref.get(settingsRef),
+      removeExecutionEndpoint: () => Ref.get(settingsRef),
       get streamChanges() {
         return Stream.fromPubSub(changes);
       },

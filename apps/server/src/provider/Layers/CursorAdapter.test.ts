@@ -17,6 +17,7 @@ import * as TestClock from "effect/testing/TestClock";
 import { createModelSelection } from "@t3tools/shared/model";
 
 import {
+  DEFAULT_EXECUTION_ENDPOINT_ID,
   ApprovalRequestId,
   CursorSettings,
   ProviderDriverKind,
@@ -184,6 +185,7 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
 
       const session = yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("cursor"),
         cwd: process.cwd(),
         runtimeMode: "full-access",
@@ -271,6 +273,7 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
 
       yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("cursor"),
         cwd: process.cwd(),
         runtimeMode: "full-access",
@@ -345,6 +348,7 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
 
       yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("cursor"),
         cwd: process.cwd(),
         runtimeMode: "full-access",
@@ -384,6 +388,7 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
           [
             adapter.startSession({
               threadId,
+              executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
               provider: ProviderDriverKind.make("cursor"),
               cwd: process.cwd(),
               runtimeMode: "full-access",
@@ -391,6 +396,7 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
             }),
             adapter.startSession({
               threadId,
+              executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
               provider: ProviderDriverKind.make("cursor"),
               cwd: process.cwd(),
               runtimeMode: "full-access",
@@ -416,6 +422,7 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
       const result = yield* adapter
         .startSession({
           threadId: ThreadId.make("bad-provider"),
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           provider: ProviderDriverKind.make("codex"),
           cwd: process.cwd(),
           runtimeMode: "full-access",
@@ -444,6 +451,7 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
 
       yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("cursor"),
         cwd: process.cwd(),
         runtimeMode: "full-access",
@@ -510,6 +518,7 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
 
         yield* adapter.startSession({
           threadId,
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           provider: ProviderDriverKind.make("cursor"),
           cwd: process.cwd(),
           runtimeMode: "full-access",
@@ -604,6 +613,7 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
         const program = Effect.gen(function* () {
           yield* adapter.startSession({
             threadId,
+            executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
             provider: ProviderDriverKind.make("cursor"),
             cwd: process.cwd(),
             runtimeMode: "approval-required",
@@ -771,6 +781,7 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
 
         yield* adapter.startSession({
           threadId,
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           provider: ProviderDriverKind.make("cursor"),
           cwd: process.cwd(),
           runtimeMode: "full-access",
@@ -870,6 +881,7 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
 
       yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("cursor"),
         cwd: process.cwd(),
         runtimeMode: "full-access",
@@ -999,6 +1011,7 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
 
       yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("cursor"),
         cwd: process.cwd(),
         runtimeMode: "approval-required",
@@ -1068,6 +1081,7 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
 
       yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("cursor"),
         cwd: process.cwd(),
         runtimeMode: "approval-required",
@@ -1111,6 +1125,7 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
 
       yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("cursor"),
         cwd: process.cwd(),
         runtimeMode: "full-access",
@@ -1154,6 +1169,7 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
 
       yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("cursor"),
         cwd: process.cwd(),
         runtimeMode: "full-access",
@@ -1197,6 +1213,7 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
 
       yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("cursor"),
         cwd: process.cwd(),
         runtimeMode: "full-access",
@@ -1237,6 +1254,7 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
 
       yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("cursor"),
         cwd: process.cwd(),
         runtimeMode: "full-access",
@@ -1302,6 +1320,7 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
 
       yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("cursor"),
         cwd: process.cwd(),
         runtimeMode: "full-access",
@@ -1390,6 +1409,7 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
 
         yield* adapter.startSession({
           threadId,
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           provider: ProviderDriverKind.make("cursor"),
           cwd: process.cwd(),
           runtimeMode: "full-access",
@@ -1465,6 +1485,7 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
       const startSessionFiber = yield* adapter
         .startSession({
           threadId,
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           provider: ProviderDriverKind.make("cursor"),
           cwd: process.cwd(),
           runtimeMode: "full-access",

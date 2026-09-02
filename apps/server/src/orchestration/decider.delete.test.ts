@@ -1,4 +1,5 @@
 import {
+  DEFAULT_EXECUTION_ENDPOINT_ID,
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   EventId,
@@ -60,6 +61,7 @@ const seedReadModel = Effect.gen(function* () {
       threadId: asThreadId("thread-delete-1"),
       projectId: asProjectId("project-delete"),
       title: "Thread Delete 1",
+      executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
       modelSelection: {
         instanceId: ProviderInstanceId.make("codex"),
         model: "gpt-5-codex",
@@ -88,6 +90,7 @@ const seedReadModel = Effect.gen(function* () {
       threadId: asThreadId("thread-delete-2"),
       projectId: asProjectId("project-delete"),
       title: "Thread Delete 2",
+      executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
       modelSelection: {
         instanceId: ProviderInstanceId.make("codex"),
         model: "gpt-5-codex",

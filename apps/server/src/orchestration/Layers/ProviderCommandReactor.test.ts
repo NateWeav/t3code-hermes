@@ -16,6 +16,7 @@ import {
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   EventId,
+  ExecutionEndpointId,
   MessageId,
   ProjectId,
   ThreadId,
@@ -146,6 +147,8 @@ describe("ProviderCommandReactor", () => {
   async function createHarness(input?: {
     readonly baseDir?: string;
     readonly threadModelSelection?: ModelSelection;
+    readonly executionEndpointId?: ExecutionEndpointId;
+    readonly executionEndpoints?: Record<string, unknown>;
     readonly sessionModelSwitch?: "unsupported" | "in-session";
     readonly requiresNewThreadForModelChange?: boolean;
     readonly titleRegenerationCompletionDispatchFailures?: number;
@@ -426,7 +429,13 @@ describe("ProviderCommandReactor", () => {
           generateThreadTitle,
         }),
       ),
-      Layer.provideMerge(ServerSettingsService.layerTest()),
+      Layer.provideMerge(
+        ServerSettingsService.layerTest(
+          input?.executionEndpoints
+            ? { executionEndpoints: input.executionEndpoints as never }
+            : {},
+        ),
+      ),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), baseDir)),
       Layer.provideMerge(NodeServices.layer),
     );
@@ -456,6 +465,7 @@ describe("ProviderCommandReactor", () => {
         projectId: asProjectId("project-1"),
         title: "Thread",
         modelSelection: modelSelection,
+        executionEndpointId: input?.executionEndpointId ?? ExecutionEndpointId.make("local"),
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "approval-required",
         branch: null,
@@ -472,6 +482,7 @@ describe("ProviderCommandReactor", () => {
           projectId: asProjectId("project-1"),
           title: "Thread 2",
           modelSelection: modelSelection,
+          executionEndpointId: input?.executionEndpointId ?? ExecutionEndpointId.make("local"),
           interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
           runtimeMode: "approval-required",
           branch: null,

@@ -1,4 +1,10 @@
-import { ProjectId, ThreadId, ProviderInstanceId } from "@t3tools/contracts";
+import {
+  DEFAULT_EXECUTION_ENDPOINT_ID,
+  ExecutionEndpointId,
+  ProjectId,
+  ThreadId,
+  ProviderInstanceId,
+} from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -80,6 +86,7 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
         threadId: ThreadId.make("thread-null-options"),
         projectId: ProjectId.make("project-null-options"),
         title: "Null options thread",
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         modelSelection: {
           instanceId: ProviderInstanceId.make("claudeAgent"),
           model: "claude-opus-4-6",
@@ -135,6 +142,47 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
     }),
   );
 
+  it.effect("round-trips the execution endpoint through the thread row", () =>
+    Effect.gen(function* () {
+      const threads = yield* ProjectionThreadRepository;
+      const executionEndpointId = ExecutionEndpointId.make("build-host");
+
+      yield* threads.upsert({
+        threadId: ThreadId.make("thread-execution-endpoint"),
+        projectId: ProjectId.make("project-execution-endpoint"),
+        title: "Remote execution thread",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("hermes"),
+          model: "hermes-4",
+        },
+        executionEndpointId,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        latestTurnId: null,
+        createdAt: "2026-03-24T00:00:00.000Z",
+        updatedAt: "2026-03-24T00:00:00.000Z",
+        archivedAt: null,
+        settledOverride: null,
+        settledAt: null,
+        snoozedUntil: null,
+        snoozedAt: null,
+        pinnedAt: null,
+        latestUserMessageAt: null,
+        pendingApprovalCount: 0,
+        pendingUserInputCount: 0,
+        hasActionableProposedPlan: 0,
+        deletedAt: null,
+      });
+
+      const persisted = yield* threads.getById({
+        threadId: ThreadId.make("thread-execution-endpoint"),
+      });
+      assert.strictEqual(Option.getOrNull(persisted)?.executionEndpointId, executionEndpointId);
+    }),
+  );
+
   it.effect("round-trips non-null settlement values through the thread row", () =>
     Effect.gen(function* () {
       const threads = yield* ProjectionThreadRepository;
@@ -143,6 +191,7 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
         threadId: ThreadId.make("thread-settled"),
         projectId: ProjectId.make("project-1"),
         title: "Settled thread",
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         modelSelection: {
           instanceId: ProviderInstanceId.make("codex"),
           model: "gpt-5.4",
@@ -216,6 +265,7 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
         threadId: ThreadId.make("thread-linked-pr"),
         projectId: ProjectId.make("project-linked-pr"),
         title: "Linked pull request",
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         modelSelection: {
           instanceId: ProviderInstanceId.make("codex"),
           model: "gpt-5.4",

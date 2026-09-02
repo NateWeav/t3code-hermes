@@ -12,6 +12,7 @@ import type {
   SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import {
+  DEFAULT_EXECUTION_ENDPOINT_ID,
   ApprovalRequestId,
   ClaudeSettings,
   ProviderDriverKind,
@@ -274,6 +275,7 @@ describe("ClaudeAdapterLive", () => {
       const result = yield* adapter
         .startSession({
           threadId: THREAD_ID,
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           provider: ProviderDriverKind.make("codex"),
           runtimeMode: "full-access",
         })
@@ -320,6 +322,7 @@ describe("ClaudeAdapterLive", () => {
       const error = yield* adapter
         .startSession({
           threadId: THREAD_ID,
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           provider: ProviderDriverKind.make("claudeAgent"),
           runtimeMode: "full-access",
         })
@@ -341,6 +344,7 @@ describe("ClaudeAdapterLive", () => {
       const adapter = yield* ClaudeAdapter;
       yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
@@ -361,6 +365,7 @@ describe("ClaudeAdapterLive", () => {
       const adapter = yield* ClaudeAdapter;
       yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "auto",
       });
@@ -380,6 +385,7 @@ describe("ClaudeAdapterLive", () => {
       const adapter = yield* ClaudeAdapter;
       yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "approval-required",
       });
@@ -400,6 +406,7 @@ describe("ClaudeAdapterLive", () => {
       const adapter = yield* ClaudeAdapter;
       yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
@@ -419,6 +426,7 @@ describe("ClaudeAdapterLive", () => {
       const adapter = yield* ClaudeAdapter;
       yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         modelSelection: createModelSelection(
           ProviderInstanceId.make("claudeAgent"),
@@ -442,6 +450,7 @@ describe("ClaudeAdapterLive", () => {
       const adapter = yield* ClaudeAdapter;
       yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         modelSelection: createModelSelection(
           ProviderInstanceId.make("claudeAgent"),
@@ -467,6 +476,7 @@ describe("ClaudeAdapterLive", () => {
       const adapter = yield* ClaudeAdapter;
       yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         modelSelection: {
           instanceId: ProviderInstanceId.make("claudeAgent"),
@@ -489,6 +499,7 @@ describe("ClaudeAdapterLive", () => {
       const adapter = yield* ClaudeAdapter;
       yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         modelSelection: createModelSelection(
           ProviderInstanceId.make("claudeAgent"),
@@ -512,6 +523,7 @@ describe("ClaudeAdapterLive", () => {
       const adapter = yield* ClaudeAdapter;
       yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         modelSelection: createModelSelection(
           ProviderInstanceId.make("claudeAgent"),
@@ -535,6 +547,7 @@ describe("ClaudeAdapterLive", () => {
       const adapter = yield* ClaudeAdapter;
       yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         modelSelection: createModelSelection(
           ProviderInstanceId.make("claudeAgent"),
@@ -558,6 +571,7 @@ describe("ClaudeAdapterLive", () => {
       const adapter = yield* ClaudeAdapter;
       yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         modelSelection: createModelSelection(
           ProviderInstanceId.make("claudeAgent"),
@@ -581,6 +595,7 @@ describe("ClaudeAdapterLive", () => {
       const adapter = yield* ClaudeAdapter;
       yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         modelSelection: createModelSelection(
           ProviderInstanceId.make("claudeAgent"),
@@ -604,6 +619,7 @@ describe("ClaudeAdapterLive", () => {
       const adapter = yield* ClaudeAdapter;
       yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         modelSelection: createModelSelection(
           ProviderInstanceId.make("claudeAgent"),
@@ -629,6 +645,7 @@ describe("ClaudeAdapterLive", () => {
       const adapter = yield* ClaudeAdapter;
       yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         modelSelection: createModelSelection(
           ProviderInstanceId.make("claudeAgent"),
@@ -652,6 +669,7 @@ describe("ClaudeAdapterLive", () => {
       const adapter = yield* ClaudeAdapter;
       yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         modelSelection: createModelSelection(
           ProviderInstanceId.make("claudeAgent"),
@@ -677,6 +695,7 @@ describe("ClaudeAdapterLive", () => {
       const adapter = yield* ClaudeAdapter;
       yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         modelSelection: createModelSelection(
           ProviderInstanceId.make("claudeAgent"),
@@ -700,6 +719,7 @@ describe("ClaudeAdapterLive", () => {
       const adapter = yield* ClaudeAdapter;
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         modelSelection: createModelSelection(
           ProviderInstanceId.make("claudeAgent"),
@@ -762,6 +782,7 @@ describe("ClaudeAdapterLive", () => {
 
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
@@ -807,6 +828,7 @@ describe("ClaudeAdapterLive", () => {
 
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         modelSelection: {
           instanceId: ProviderInstanceId.make("claudeAgent"),
@@ -988,6 +1010,7 @@ describe("ClaudeAdapterLive", () => {
 
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
@@ -1053,6 +1076,7 @@ describe("ClaudeAdapterLive", () => {
 
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
@@ -1120,6 +1144,7 @@ describe("ClaudeAdapterLive", () => {
 
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
@@ -1299,6 +1324,7 @@ describe("ClaudeAdapterLive", () => {
 
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
@@ -1390,6 +1416,7 @@ describe("ClaudeAdapterLive", () => {
 
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
@@ -1466,6 +1493,7 @@ describe("ClaudeAdapterLive", () => {
 
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
@@ -1525,6 +1553,7 @@ describe("ClaudeAdapterLive", () => {
 
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
@@ -1591,6 +1620,7 @@ describe("ClaudeAdapterLive", () => {
 
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
@@ -1668,6 +1698,7 @@ describe("ClaudeAdapterLive", () => {
       const adapter = yield* ClaudeAdapter;
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
@@ -1712,11 +1743,13 @@ describe("ClaudeAdapterLive", () => {
       const adapter = yield* ClaudeAdapter;
       yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
       yield* adapter.startSession({
         threadId: RESUME_THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
@@ -1779,6 +1812,7 @@ describe("ClaudeAdapterLive", () => {
       );
       const firstSession = yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
@@ -1796,6 +1830,7 @@ describe("ClaudeAdapterLive", () => {
 
       const replacement = yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
         resumeCursor: firstSession.resumeCursor,
@@ -1851,6 +1886,7 @@ describe("ClaudeAdapterLive", () => {
 
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
@@ -1930,6 +1966,7 @@ describe("ClaudeAdapterLive", () => {
 
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         modelSelection: createModelSelection(
           ProviderInstanceId.make("claudeAgent"),
@@ -2011,6 +2048,7 @@ describe("ClaudeAdapterLive", () => {
 
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         modelSelection: createModelSelection(
           ProviderInstanceId.make("claudeAgent"),
@@ -2089,6 +2127,7 @@ describe("ClaudeAdapterLive", () => {
 
       yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
@@ -2151,6 +2190,7 @@ describe("ClaudeAdapterLive", () => {
 
       yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
@@ -2219,12 +2259,14 @@ describe("ClaudeAdapterLive", () => {
 
       const firstSession = yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
 
       const secondSession = yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
         resumeCursor: firstSession.resumeCursor,
@@ -2310,6 +2352,7 @@ describe("ClaudeAdapterLive", () => {
 
       yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
@@ -2348,6 +2391,7 @@ describe("ClaudeAdapterLive", () => {
 
       yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
@@ -2394,6 +2438,7 @@ describe("ClaudeAdapterLive", () => {
 
       yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
@@ -2536,6 +2581,7 @@ describe("ClaudeAdapterLive", () => {
 
       yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
@@ -2611,6 +2657,7 @@ describe("ClaudeAdapterLive", () => {
 
       yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
@@ -2665,6 +2712,7 @@ describe("ClaudeAdapterLive", () => {
 
       yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
@@ -2732,6 +2780,7 @@ describe("ClaudeAdapterLive", () => {
 
       yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
@@ -2797,6 +2846,7 @@ describe("ClaudeAdapterLive", () => {
 
         yield* adapter.startSession({
           threadId: THREAD_ID,
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           provider: ProviderDriverKind.make("claudeAgent"),
           runtimeMode: "full-access",
         });
@@ -2878,6 +2928,7 @@ describe("ClaudeAdapterLive", () => {
 
         const session = yield* adapter.startSession({
           threadId: THREAD_ID,
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           provider: ProviderDriverKind.make("claudeAgent"),
           runtimeMode: "full-access",
         });
@@ -2969,6 +3020,7 @@ describe("ClaudeAdapterLive", () => {
 
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
@@ -3135,6 +3187,7 @@ describe("ClaudeAdapterLive", () => {
 
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
@@ -3204,6 +3257,7 @@ describe("ClaudeAdapterLive", () => {
 
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
@@ -3426,6 +3480,7 @@ describe("ClaudeAdapterLive", () => {
 
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
@@ -3499,6 +3554,7 @@ describe("ClaudeAdapterLive", () => {
 
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "approval-required",
       });
@@ -3608,6 +3664,7 @@ describe("ClaudeAdapterLive", () => {
 
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "approval-required",
       });
@@ -3720,6 +3777,7 @@ describe("ClaudeAdapterLive", () => {
 
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "approval-required",
       });
@@ -3793,6 +3851,7 @@ describe("ClaudeAdapterLive", () => {
 
       const session = yield* adapter.startSession({
         threadId: RESUME_THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         resumeCursor: {
           threadId: "resume-thread-1",
@@ -3835,6 +3894,7 @@ describe("ClaudeAdapterLive", () => {
 
       yield* adapter.startSession({
         threadId: RESUME_THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         resumeCursor: {
           threadId: RESUME_THREAD_ID,
@@ -3918,6 +3978,7 @@ describe("ClaudeAdapterLive", () => {
 
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
@@ -3952,6 +4013,7 @@ describe("ClaudeAdapterLive", () => {
 
         const session = yield* adapter.startSession({
           threadId: THREAD_ID,
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           provider: ProviderDriverKind.make("claudeAgent"),
           runtimeMode: "full-access",
         });
@@ -4032,6 +4094,7 @@ describe("ClaudeAdapterLive", () => {
 
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
@@ -4060,6 +4123,7 @@ describe("ClaudeAdapterLive", () => {
 
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
@@ -4093,6 +4157,7 @@ describe("ClaudeAdapterLive", () => {
 
         const session = yield* adapter.startSession({
           threadId: THREAD_ID,
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           provider: ProviderDriverKind.make("claudeAgent"),
           modelSelection,
           runtimeMode: "full-access",
@@ -4126,6 +4191,7 @@ describe("ClaudeAdapterLive", () => {
 
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
@@ -4165,6 +4231,7 @@ describe("ClaudeAdapterLive", () => {
 
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
@@ -4195,6 +4262,7 @@ describe("ClaudeAdapterLive", () => {
 
         const session = yield* adapter.startSession({
           threadId: THREAD_ID,
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           provider: ProviderDriverKind.make("claudeAgent"),
           runtimeMode,
         });
@@ -4247,6 +4315,7 @@ describe("ClaudeAdapterLive", () => {
 
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
@@ -4270,6 +4339,7 @@ describe("ClaudeAdapterLive", () => {
 
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
@@ -4336,6 +4406,7 @@ describe("ClaudeAdapterLive", () => {
 
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
@@ -4408,6 +4479,7 @@ describe("ClaudeAdapterLive", () => {
       // Start session in approval-required mode so canUseTool fires.
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "approval-required",
       });
@@ -4562,6 +4634,7 @@ describe("ClaudeAdapterLive", () => {
       // AskUserQuestion should still go through the user-input flow.
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });
@@ -4628,6 +4701,7 @@ describe("ClaudeAdapterLive", () => {
 
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "approval-required",
       });
@@ -4696,6 +4770,7 @@ describe("ClaudeAdapterLive", () => {
 
       yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "approval-required",
       });
@@ -4776,6 +4851,7 @@ describe("ClaudeAdapterLive", () => {
 
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("claudeAgent"),
         runtimeMode: "full-access",
       });

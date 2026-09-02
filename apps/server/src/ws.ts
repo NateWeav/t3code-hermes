@@ -11,6 +11,7 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import {
   DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL,
+  DEFAULT_EXECUTION_ENDPOINT_ID,
   AuthAccessStreamError,
   type AuthAccessStreamEvent,
   type AuthEnvironmentScope,
@@ -977,6 +978,8 @@ const makeWsRpcLayer = (
                 projectId: bootstrap.createThread.projectId,
                 title: bootstrap.createThread.title,
                 modelSelection: bootstrap.createThread.modelSelection,
+                executionEndpointId:
+                  bootstrap.createThread.executionEndpointId ?? DEFAULT_EXECUTION_ENDPOINT_ID,
                 runtimeMode: bootstrap.createThread.runtimeMode,
                 interactionMode: bootstrap.createThread.interactionMode,
                 branch: bootstrap.createThread.branch,
@@ -1639,6 +1642,22 @@ const makeWsRpcLayer = (
             {
               "rpc.aggregate": "server",
             },
+          ),
+        [WS_METHODS.serverUpsertExecutionEndpoint]: ({ endpointId, endpoint }) =>
+          observeRpcEffect(
+            WS_METHODS.serverUpsertExecutionEndpoint,
+            serverSettings
+              .upsertExecutionEndpoint(endpointId, endpoint)
+              .pipe(Effect.map(ServerSettings.redactServerSettingsForClient)),
+            { "rpc.aggregate": "server" },
+          ),
+        [WS_METHODS.serverRemoveExecutionEndpoint]: ({ endpointId }) =>
+          observeRpcEffect(
+            WS_METHODS.serverRemoveExecutionEndpoint,
+            serverSettings
+              .removeExecutionEndpoint(endpointId)
+              .pipe(Effect.map(ServerSettings.redactServerSettingsForClient)),
+            { "rpc.aggregate": "server" },
           ),
         [WS_METHODS.serverDiscoverSourceControl]: (_input) =>
           observeRpcEffect(

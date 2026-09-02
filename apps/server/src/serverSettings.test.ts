@@ -1,6 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   DEFAULT_SERVER_SETTINGS,
+  ExecutionEndpointId,
   ProviderDriverKind,
   ProviderInstanceId,
   ServerSettings,
@@ -772,5 +773,32 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     assert.equal(redacted.integrations.hindsight.baseUrl, "http://127.0.0.1:8888");
     assert.equal(redacted.integrations.hindsight.defaultBank, "hermes");
     assert.equal(redacted.integrations.hindsight.enabled, true);
+  });
+
+  it("redacts SSH identity files while preserving useful endpoint presentation", () => {
+    const settings = Schema.decodeUnknownSync(ServerSettings)({
+      executionEndpoints: {
+        build_host: {
+          kind: "ssh",
+          displayName: "Build host",
+          enabled: true,
+          host: "builder.internal",
+          user: "aeris",
+          identityFile: "/home/aeris/.ssh/id_ed25519",
+          cwd: "/srv/work",
+        },
+      },
+    });
+    const redacted = ServerSettingsModule.redactServerSettingsForClient(settings);
+    const buildHost = redacted.executionEndpoints[ExecutionEndpointId.make("build_host")];
+    assert.equal("identityFile" in buildHost!, false);
+    assert.deepInclude(buildHost!, {
+      kind: "ssh",
+      displayName: "Build host",
+      enabled: true,
+      available: true,
+      targetLabel: "SSH endpoint",
+      cwd: "/srv/work",
+    });
   });
 });

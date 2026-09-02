@@ -1,8 +1,10 @@
 import {
   type ApprovalRequestId,
+  DEFAULT_EXECUTION_ENDPOINT_ID,
   DEFAULT_MODEL,
   defaultInstanceIdForDriver,
   type EnvironmentId,
+  type ExecutionEndpointId,
   type MessageId,
   type ModelSelection,
   type ProjectScript,
@@ -271,6 +273,7 @@ import {
 } from "../state/entities";
 import { environmentShell } from "../state/shell";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
+import { resolveExecutionEndpointSelection } from "./chat/executionEndpointPicker.logic";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
@@ -1347,6 +1350,10 @@ function ChatViewContent(props: ChatViewProps) {
   }, [routeKind, routeThreadRef, routeThreadState]);
   const markThreadVisited = useUiStateStore((store) => store.markThreadVisited);
   const settings = useEnvironmentSettings(environmentId);
+  const executionEndpoints = useEnvironmentSettings(
+    environmentId,
+    (environmentSettings) => environmentSettings.executionEndpoints,
+  );
   // New-thread defaults live in the primary environment's settings.json (the
   // settings UI never writes to remote environments), so read them from the
   // primary server rather than the thread's environment.
@@ -1363,6 +1370,11 @@ function ChatViewContent(props: ChatViewProps) {
   );
   const composerInteractionMode = useComposerDraftStore(
     (store) => store.getComposerDraft(composerDraftTarget)?.interactionMode ?? null,
+  );
+  const composerExecutionEndpointId = useComposerDraftStore(
+    (store) =>
+      store.getComposerDraft(composerDraftTarget)?.executionEndpointId ??
+      DEFAULT_EXECUTION_ENDPOINT_ID,
   );
   const composerActiveProvider = useComposerDraftStore(
     (store) => store.getComposerDraft(composerDraftTarget)?.activeProvider ?? null,
@@ -1383,6 +1395,9 @@ function ChatViewContent(props: ChatViewProps) {
   const setComposerDraftRuntimeMode = useComposerDraftStore((store) => store.setRuntimeMode);
   const setComposerDraftInteractionMode = useComposerDraftStore(
     (store) => store.setInteractionMode,
+  );
+  const setComposerDraftExecutionEndpointId = useComposerDraftStore(
+    (store) => store.setExecutionEndpointId,
   );
   const clearComposerDraftContent = useComposerDraftStore((store) => store.clearComposerContent);
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
@@ -1615,6 +1630,14 @@ function ChatViewContent(props: ChatViewProps) {
   // the branch mismatch banner.
   const [, setThreadErrorBannerDismissTick] = useState(0);
   const runtimeMode = composerRuntimeMode ?? activeThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE;
+  const executionEndpointLocked = isServerThread;
+  const executionEndpointId = resolveExecutionEndpointSelection(
+    isServerThread
+      ? (activeThread?.executionEndpointId ?? DEFAULT_EXECUTION_ENDPOINT_ID)
+      : composerExecutionEndpointId,
+    executionEndpoints,
+    executionEndpointLocked,
+  );
   // Plan mode is legacy (Settings → Beta). With the flag off the effective
   // mode is forced to "default" — even for threads with a stored plan mode —
   // so nobody is trapped in plan mode while its toggle is hidden. The next
@@ -3381,6 +3404,25 @@ function ChatViewContent(props: ChatViewProps) {
       scheduleComposerFocus,
       composerDraftTarget,
       setComposerDraftInteractionMode,
+      setDraftThreadContext,
+    ],
+  );
+  const handleExecutionEndpointChange = useCallback(
+    (endpointId: ExecutionEndpointId) => {
+      if (executionEndpointLocked || endpointId === executionEndpointId) return;
+      setComposerDraftExecutionEndpointId(composerDraftTarget, endpointId);
+      if (isLocalDraftThread) {
+        setDraftThreadContext(composerDraftTarget, { executionEndpointId: endpointId });
+      }
+      scheduleComposerFocus();
+    },
+    [
+      composerDraftTarget,
+      executionEndpointId,
+      executionEndpointLocked,
+      isLocalDraftThread,
+      scheduleComposerFocus,
+      setComposerDraftExecutionEndpointId,
       setDraftThreadContext,
     ],
   );
@@ -5681,6 +5723,7 @@ function ChatViewContent(props: ChatViewProps) {
                       projectId: activeProject.id,
                       title,
                       modelSelection: threadCreateModelSelection,
+                      executionEndpointId,
                       runtimeMode,
                       interactionMode,
                       branch: activeThreadBranch,
@@ -6244,6 +6287,7 @@ function ChatViewContent(props: ChatViewProps) {
         projectId: activeProject.id,
         title: nextThreadTitle,
         modelSelection: nextThreadModelSelection,
+        executionEndpointId,
         runtimeMode,
         interactionMode: "default",
         branch: activeThreadBranch,
@@ -6920,6 +6964,9 @@ function ChatViewContent(props: ChatViewProps) {
                             activeTaskSteps={activeComposerTaskSteps}
                             runtimeMode={runtimeMode}
                             interactionMode={interactionMode}
+                            executionEndpointId={executionEndpointId}
+                            executionEndpoints={executionEndpoints}
+                            executionEndpointLocked={executionEndpointLocked}
                             lockedProvider={lockedProvider}
                             providerStatuses={providerStatuses as ServerProvider[]}
                             activeProjectDefaultModelSelection={
@@ -6955,6 +7002,7 @@ function ChatViewContent(props: ChatViewProps) {
                             toggleInteractionMode={toggleInteractionMode}
                             handleRuntimeModeChange={handleRuntimeModeChange}
                             handleInteractionModeChange={handleInteractionModeChange}
+                            handleExecutionEndpointChange={handleExecutionEndpointChange}
                             focusComposer={focusComposer}
                             scheduleComposerFocus={scheduleComposerFocus}
                             setThreadError={setThreadError}

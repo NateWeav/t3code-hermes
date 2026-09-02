@@ -1,5 +1,10 @@
 import type { ProviderRuntimeEvent } from "@t3tools/contracts";
-import { ProviderDriverKind, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import {
+  DEFAULT_EXECUTION_ENDPOINT_ID,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  ThreadId,
+} from "@t3tools/contracts";
 import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts/settings";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it, assert } from "@effect/vitest";
@@ -158,6 +163,7 @@ it.live("replays typed runtime fixture events", () =>
       const provider = yield* ProviderService;
       const session = yield* provider.startSession(ThreadId.make("thread-integration-typed"), {
         threadId: ThreadId.make("thread-integration-typed"),
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("codex"),
         providerInstanceId: codexInstanceId,
         cwd: fixture.cwd,
@@ -195,6 +201,7 @@ it.live("replays file-changing fixture turn events", () =>
       const provider = yield* ProviderService;
       const session = yield* provider.startSession(ThreadId.make("thread-integration-tools"), {
         threadId: ThreadId.make("thread-integration-tools"),
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("codex"),
         providerInstanceId: codexInstanceId,
         cwd: fixture.cwd,
@@ -232,6 +239,7 @@ it.live("runs multi-turn tool/approval flow", () =>
       const provider = yield* ProviderService;
       const session = yield* provider.startSession(ThreadId.make("thread-integration-multi"), {
         threadId: ThreadId.make("thread-integration-multi"),
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("codex"),
         providerInstanceId: codexInstanceId,
         cwd: fixture.cwd,
@@ -284,6 +292,7 @@ it.live("rolls back provider conversation state only", () =>
       const provider = yield* ProviderService;
       const session = yield* provider.startSession(ThreadId.make("thread-integration-rollback"), {
         threadId: ThreadId.make("thread-integration-rollback"),
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("codex"),
         providerInstanceId: codexInstanceId,
         cwd: fixture.cwd,
@@ -340,6 +349,7 @@ it.live("reports runtime mode per turn and on mode transitions", () =>
       const startSession = (runtimeMode: "approval-required" | "full-access") =>
         provider.startSession(threadId, {
           threadId,
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           provider: ProviderDriverKind.make("codex"),
           providerInstanceId: codexInstanceId,
           cwd: fixture.cwd,

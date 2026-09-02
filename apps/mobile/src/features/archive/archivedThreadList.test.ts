@@ -1,6 +1,12 @@
 import type { ArchivedSnapshotEntry } from "@t3tools/client-runtime/state/threads";
 import type { OrchestrationProjectShell, OrchestrationThreadShell } from "@t3tools/contracts";
-import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import {
+  DEFAULT_EXECUTION_ENDPOINT_ID,
+  EnvironmentId,
+  ProjectId,
+  ProviderInstanceId,
+  ThreadId,
+} from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { buildArchivedThreadGroups } from "./archivedThreadList";
@@ -27,6 +33,7 @@ function makeThread(
 ): OrchestrationThreadShell {
   return {
     modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+    executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
     runtimeMode: "full-access",
     interactionMode: "default",
     branch: null,

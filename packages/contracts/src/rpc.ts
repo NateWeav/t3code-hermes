@@ -80,6 +80,7 @@ import {
   ProviderUploadFeedbackResult,
 } from "./provider.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
+import { ExecutionEndpointRemoveInput, ExecutionEndpointUpsertInput } from "./executionEndpoint.ts";
 import {
   PullRequestActionInput,
   PullRequestActivity,
@@ -216,7 +217,7 @@ import {
 } from "./hindsight.ts";
 import { UsageReadError, UsageSummary, UsageSummaryInput } from "./usage.ts";
 import { ProviderQuotaReadError, ProviderQuotaSummary } from "./providerQuota.ts";
-import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
+import { ClientServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
 import {
   SourceControlCloneRepositoryInput,
   SourceControlCloneRepositoryResult,
@@ -303,6 +304,8 @@ export const WS_METHODS = {
   serverRemoveKeybinding: "server.removeKeybinding",
   serverGetSettings: "server.getSettings",
   serverUpdateSettings: "server.updateSettings",
+  serverUpsertExecutionEndpoint: "server.upsertExecutionEndpoint",
+  serverRemoveExecutionEndpoint: "server.removeExecutionEndpoint",
   serverDiscoverSourceControl: "server.discoverSourceControl",
   serverGetTraceDiagnostics: "server.getTraceDiagnostics",
   serverGetProcessDiagnostics: "server.getProcessDiagnostics",
@@ -429,15 +432,33 @@ export const WsServerUpdateServerWithProgressRpc = Rpc.make(
 
 export const WsServerGetSettingsRpc = Rpc.make(WS_METHODS.serverGetSettings, {
   payload: Schema.Struct({}),
-  success: ServerSettings,
+  success: ClientServerSettings,
   error: Schema.Union([ServerSettingsError, EnvironmentAuthorizationError]),
 });
 
 export const WsServerUpdateSettingsRpc = Rpc.make(WS_METHODS.serverUpdateSettings, {
   payload: Schema.Struct({ patch: ServerSettingsPatch }),
-  success: ServerSettings,
+  success: ClientServerSettings,
   error: Schema.Union([ServerSettingsError, EnvironmentAuthorizationError]),
 });
+
+export const WsServerUpsertExecutionEndpointRpc = Rpc.make(
+  WS_METHODS.serverUpsertExecutionEndpoint,
+  {
+    payload: ExecutionEndpointUpsertInput,
+    success: ClientServerSettings,
+    error: Schema.Union([ServerSettingsError, EnvironmentAuthorizationError]),
+  },
+);
+
+export const WsServerRemoveExecutionEndpointRpc = Rpc.make(
+  WS_METHODS.serverRemoveExecutionEndpoint,
+  {
+    payload: ExecutionEndpointRemoveInput,
+    success: ClientServerSettings,
+    error: Schema.Union([ServerSettingsError, EnvironmentAuthorizationError]),
+  },
+);
 
 export const WsServerDiscoverSourceControlRpc = Rpc.make(WS_METHODS.serverDiscoverSourceControl, {
   payload: Schema.Struct({}),
@@ -1129,6 +1150,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerRemoveKeybindingRpc,
   WsServerGetSettingsRpc,
   WsServerUpdateSettingsRpc,
+  WsServerUpsertExecutionEndpointRpc,
+  WsServerRemoveExecutionEndpointRpc,
   WsServerDiscoverSourceControlRpc,
   WsServerGetTraceDiagnosticsRpc,
   WsServerGetProcessDiagnosticsRpc,

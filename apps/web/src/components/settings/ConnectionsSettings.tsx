@@ -4,6 +4,7 @@ import {
   QrCodeIcon,
   RefreshCwIcon,
   TerminalIcon,
+  Trash2Icon,
 } from "lucide-react";
 import { useAtomValue } from "@effect/atom-react";
 import { type ReactNode, memo, useCallback, useId, useMemo, useState } from "react";
@@ -27,6 +28,7 @@ import {
   type DesktopServerExposureState,
   type DesktopWslState,
   type EnvironmentId,
+  ExecutionEndpointId,
 } from "@t3tools/contracts";
 import { connectionStatusText } from "@t3tools/client-runtime/connection";
 import {
@@ -42,6 +44,7 @@ import { formatElapsedDurationLabel, formatExpiresInLabel } from "../../timestam
 import { resolveDesktopPairingUrl, resolveHostedPairingUrl } from "./pairingUrls";
 import {
   applyWslEnableSelection,
+  buildSshExecutionEndpointInput,
   isQrShareableEndpoint,
   selectQrEndpointOption,
 } from "./ConnectionsSettings.logic";
@@ -1753,6 +1756,12 @@ export function ConnectionsSettings() {
   });
   const removeEnvironment = useAtomCommand(environmentCatalog.remove, { reportFailure: false });
   const retryEnvironment = useAtomCommand(environmentCatalog.retryNow, { reportFailure: false });
+  const upsertExecutionEndpoint = useAtomCommand(serverEnvironment.upsertExecutionEndpoint, {
+    reportFailure: false,
+  });
+  const removeExecutionEndpoint = useAtomCommand(serverEnvironment.removeExecutionEndpoint, {
+    reportFailure: false,
+  });
   const primaryEnvironmentId = primaryEnvironment?.environmentId ?? null;
   const primarySessionState = usePrimarySessionState();
   const currentSessionScopes = desktopBridge
@@ -1828,6 +1837,21 @@ export function ConnectionsSettings() {
   const [savedBackendSshPort, setSavedBackendSshPort] = useState("");
   const [savedBackendError, setSavedBackendError] = useState<string | null>(null);
   const [isAddingSavedBackend, setIsAddingSavedBackend] = useState(false);
+  const [addExecutionEndpointDialogOpen, setAddExecutionEndpointDialogOpen] = useState(false);
+  const [executionEndpointId, setExecutionEndpointId] = useState("");
+  const [executionEndpointDisplayName, setExecutionEndpointDisplayName] = useState("");
+  const [executionEndpointHost, setExecutionEndpointHost] = useState("");
+  const [executionEndpointUser, setExecutionEndpointUser] = useState("");
+  const [executionEndpointPort, setExecutionEndpointPort] = useState("22");
+  const [executionEndpointIdentityFile, setExecutionEndpointIdentityFile] = useState("");
+  const [executionEndpointCwd, setExecutionEndpointCwd] = useState("");
+  const [executionEndpointMutationError, setExecutionEndpointMutationError] = useState<
+    string | null
+  >(null);
+  const [isAddingExecutionEndpoint, setIsAddingExecutionEndpoint] = useState(false);
+  const [removingExecutionEndpointId, setRemovingExecutionEndpointId] = useState<string | null>(
+    null,
+  );
   const [removingSavedEnvironmentId, setRemovingSavedEnvironmentId] =
     useState<EnvironmentId | null>(null);
   const [isUpdatingDesktopServerExposure, setIsUpdatingDesktopServerExposure] = useState(false);
@@ -1867,6 +1891,16 @@ export function ConnectionsSettings() {
     DesktopServerExposureState["mode"] | null
   >(null);
   const primaryServerConfig = primaryEnvironment?.serverConfig ?? null;
+  const executionEndpoints = useMemo(
+    () =>
+      Object.entries(primaryServerConfig?.settings.executionEndpoints ?? {}).toSorted(
+        ([leftId, left], [rightId, right]) => {
+          if (left.kind !== right.kind) return left.kind === "local" ? -1 : 1;
+          return left.displayName.localeCompare(right.displayName) || leftId.localeCompare(rightId);
+        },
+      ),
+    [primaryServerConfig?.settings.executionEndpoints],
+  );
   const primaryVersionMismatch = resolveServerConfigVersionMismatch(primaryServerConfig);
   const primaryServerUpdateState = useAtomValue(
     serverEnvironment.updateStateAtom(primaryEnvironmentId),
@@ -1879,6 +1913,8 @@ export function ConnectionsSettings() {
     (state) => state.setDefaultAdvertisedEndpointKey,
   );
   const canManageLocalBackend = currentSessionScopes?.includes(AuthAccessWriteScope) ?? false;
+  const canManageExecutionEndpoints =
+    currentSessionScopes?.includes(AuthOrchestrationOperateScope) ?? false;
   const canManageRelay = currentSessionScopes?.includes(AuthRelayWriteScope) ?? false;
   const authAccessChanges = useEnvironmentQuery(
     canManageLocalBackend && primaryEnvironmentId !== null
@@ -1970,6 +2006,87 @@ export function ConnectionsSettings() {
       return pendingTailscaleServeEndpoint.httpBaseUrl;
     }
   }, [isTailscaleServePortValid, parsedTailscaleServePort, pendingTailscaleServeEndpoint]);
+
+  const resetExecutionEndpointForm = useCallback(() => {
+    setExecutionEndpointId("");
+    setExecutionEndpointDisplayName("");
+    setExecutionEndpointHost("");
+    setExecutionEndpointUser("");
+    setExecutionEndpointPort("22");
+    setExecutionEndpointIdentityFile("");
+    setExecutionEndpointCwd("");
+    setExecutionEndpointMutationError(null);
+  }, []);
+
+  const handleAddExecutionEndpoint = useCallback(async () => {
+    if (primaryEnvironmentId === null) return;
+
+    let input;
+    try {
+      input = buildSshExecutionEndpointInput({
+        endpointId: executionEndpointId,
+        displayName: executionEndpointDisplayName,
+        host: executionEndpointHost,
+        user: executionEndpointUser,
+        port: executionEndpointPort,
+        identityFile: executionEndpointIdentityFile,
+        cwd: executionEndpointCwd,
+      });
+    } catch (error) {
+      setExecutionEndpointMutationError(
+        error instanceof Error ? error.message : "Invalid SSH endpoint.",
+      );
+      return;
+    }
+
+    setIsAddingExecutionEndpoint(true);
+    setExecutionEndpointMutationError(null);
+    const result = await upsertExecutionEndpoint({ environmentId: primaryEnvironmentId, input });
+    setIsAddingExecutionEndpoint(false);
+    if (result._tag === "Failure") {
+      if (!isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        setExecutionEndpointMutationError(
+          error instanceof Error ? error.message : "Failed to add execution endpoint.",
+        );
+      }
+      return;
+    }
+
+    setAddExecutionEndpointDialogOpen(false);
+    resetExecutionEndpointForm();
+  }, [
+    executionEndpointCwd,
+    executionEndpointDisplayName,
+    executionEndpointHost,
+    executionEndpointId,
+    executionEndpointIdentityFile,
+    executionEndpointPort,
+    executionEndpointUser,
+    primaryEnvironmentId,
+    resetExecutionEndpointForm,
+    upsertExecutionEndpoint,
+  ]);
+
+  const handleRemoveExecutionEndpoint = useCallback(
+    async (endpointId: string) => {
+      if (primaryEnvironmentId === null) return;
+      setRemovingExecutionEndpointId(endpointId);
+      setExecutionEndpointMutationError(null);
+      const result = await removeExecutionEndpoint({
+        environmentId: primaryEnvironmentId,
+        input: { endpointId: ExecutionEndpointId.make(endpointId) },
+      });
+      setRemovingExecutionEndpointId(null);
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        setExecutionEndpointMutationError(
+          error instanceof Error ? error.message : "Failed to remove execution endpoint.",
+        );
+      }
+    },
+    [primaryEnvironmentId, removeExecutionEndpoint],
+  );
 
   const handleDesktopServerExposureChange = useCallback(
     async (checked: boolean) => {
@@ -3074,6 +3191,161 @@ export function ConnectionsSettings() {
                 <CloudLinkRow canManageRelay={canManageRelay} />
               </>
             )}
+          </SettingsSection>
+
+          <SettingsSection
+            title="Execution endpoints"
+            headerAction={
+              <Dialog
+                open={addExecutionEndpointDialogOpen}
+                onOpenChange={(open) => {
+                  setAddExecutionEndpointDialogOpen(open);
+                  if (!open) resetExecutionEndpointForm();
+                }}
+              >
+                <DialogTrigger render={<Button size="xs" variant="outline" />}>
+                  <PlusIcon className="size-3.5" />
+                  Add SSH endpoint
+                </DialogTrigger>
+                <DialogPopup className="max-w-md">
+                  <DialogHeader>
+                    <DialogTitle>Add SSH execution endpoint</DialogTitle>
+                    <DialogDescription>
+                      Connection details stay on this server. Chat clients receive only the endpoint
+                      name, kind, and working directory.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <DialogPanel className="space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-medium">Endpoint ID</span>
+                        <Input
+                          value={executionEndpointId}
+                          onChange={(event) => setExecutionEndpointId(event.target.value)}
+                          placeholder="meridian-news"
+                          disabled={isAddingExecutionEndpoint}
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-medium">Display name</span>
+                        <Input
+                          value={executionEndpointDisplayName}
+                          onChange={(event) => setExecutionEndpointDisplayName(event.target.value)}
+                          placeholder="Meridian News"
+                          disabled={isAddingExecutionEndpoint}
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-medium">SSH host</span>
+                        <Input
+                          value={executionEndpointHost}
+                          onChange={(event) => setExecutionEndpointHost(event.target.value)}
+                          placeholder="192.168.1.5"
+                          disabled={isAddingExecutionEndpoint}
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-medium">SSH user</span>
+                        <Input
+                          value={executionEndpointUser}
+                          onChange={(event) => setExecutionEndpointUser(event.target.value)}
+                          placeholder="aeris"
+                          disabled={isAddingExecutionEndpoint}
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-medium">Port</span>
+                        <Input
+                          value={executionEndpointPort}
+                          onChange={(event) => setExecutionEndpointPort(event.target.value)}
+                          inputMode="numeric"
+                          placeholder="22"
+                          disabled={isAddingExecutionEndpoint}
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-medium">Identity file</span>
+                        <Input
+                          value={executionEndpointIdentityFile}
+                          onChange={(event) => setExecutionEndpointIdentityFile(event.target.value)}
+                          placeholder="/home/aeris/.ssh/id_ed25519"
+                          disabled={isAddingExecutionEndpoint}
+                        />
+                      </label>
+                    </div>
+                    <label className="block">
+                      <span className="mb-1.5 block text-xs font-medium">Working directory</span>
+                      <Input
+                        value={executionEndpointCwd}
+                        onChange={(event) => setExecutionEndpointCwd(event.target.value)}
+                        placeholder="/home/aeris/project"
+                        disabled={isAddingExecutionEndpoint}
+                      />
+                    </label>
+                    {executionEndpointMutationError ? (
+                      <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                        {executionEndpointMutationError}
+                      </div>
+                    ) : null}
+                  </DialogPanel>
+                  <DialogFooter>
+                    <DialogClose
+                      render={<Button variant="outline" disabled={isAddingExecutionEndpoint} />}
+                    >
+                      Cancel
+                    </DialogClose>
+                    <Button
+                      onClick={() => void handleAddExecutionEndpoint()}
+                      disabled={isAddingExecutionEndpoint}
+                    >
+                      {isAddingExecutionEndpoint ? (
+                        <Spinner className="size-3.5" />
+                      ) : (
+                        <PlusIcon className="size-3.5" />
+                      )}
+                      {isAddingExecutionEndpoint ? "Adding…" : "Add endpoint"}
+                    </Button>
+                  </DialogFooter>
+                </DialogPopup>
+              </Dialog>
+            }
+          >
+            {executionEndpoints.map(([endpointId, endpoint]) => (
+              <SettingsRow
+                key={endpointId}
+                title={endpoint.displayName}
+                description={
+                  endpoint.kind === "local"
+                    ? "Built-in local execution"
+                    : `${endpoint.targetLabel} · ${endpoint.cwd}`
+                }
+                control={
+                  endpoint.kind === "local" ? (
+                    <span className="text-xs text-muted-foreground">Built in</span>
+                  ) : (
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      disabled={removingExecutionEndpointId === endpointId}
+                      onClick={() => void handleRemoveExecutionEndpoint(endpointId)}
+                    >
+                      {removingExecutionEndpointId === endpointId ? (
+                        <Spinner className="size-3.5" />
+                      ) : (
+                        <Trash2Icon className="size-3.5" />
+                      )}
+                      Remove
+                    </Button>
+                  )
+                }
+              />
+            ))}
+            {executionEndpoints.length === 0 ? (
+              <SettingsRow
+                title="No execution endpoints"
+                description="The Local endpoint will be restored automatically."
+              />
+            ) : null}
           </SettingsSection>
 
           {isLocalBackendRemotelyReachable ? (

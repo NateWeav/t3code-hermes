@@ -10,6 +10,8 @@
  * @module ProviderServiceLive
  */
 import {
+  DEFAULT_EXECUTION_ENDPOINT_ID,
+  type ExecutionEndpointId,
   ModelSelection,
   NonNegativeInt,
   ThreadId,
@@ -49,7 +51,10 @@ import {
   withMetrics,
 } from "../../observability/Metrics.ts";
 import { type ProviderAdapterError, ProviderValidationError } from "../Errors.ts";
-import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
+import type {
+  ProviderAdapterShape,
+  ProviderSessionExecutionEnvironment,
+} from "../Services/ProviderAdapter.ts";
 import * as ProviderAdapterRegistry from "../Services/ProviderAdapterRegistry.ts";
 import * as ProviderService from "../Services/ProviderService.ts";
 import * as ProviderSessionDirectory from "../Services/ProviderSessionDirectory.ts";
@@ -150,6 +155,7 @@ function toRuntimePayloadFromSession(
     ...(extra?.lastRuntimeEventAt !== undefined
       ? { lastRuntimeEventAt: extra.lastRuntimeEventAt }
       : {}),
+    executionEndpointId: session.executionEndpointId ?? DEFAULT_EXECUTION_ENDPOINT_ID,
   };
 }
 
@@ -312,6 +318,51 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           ),
         );
 
+  const resolveExecutionEnvironment = Effect.fn("resolveExecutionEnvironment")(function* (input: {
+    readonly provider: ProviderDriverKind;
+    readonly endpointId: ExecutionEndpointId;
+    readonly operation: string;
+  }): Effect.fn.Return<ProviderSessionExecutionEnvironment, ProviderValidationError> {
+    const settings = yield* serverSettings.getSettings.pipe(
+      Effect.mapError((cause) =>
+        toValidationError(
+          input.operation,
+          `Failed to resolve execution endpoint '${input.endpointId}'.`,
+          cause,
+        ),
+      ),
+    );
+    const endpoint = settings.executionEndpoints[input.endpointId];
+    if (endpoint === undefined) {
+      return yield* toValidationError(
+        input.operation,
+        `Execution endpoint '${input.endpointId}' is not configured.`,
+      );
+    }
+    if (!endpoint.enabled) {
+      return yield* toValidationError(
+        input.operation,
+        `Execution endpoint '${input.endpointId}' is disabled.`,
+      );
+    }
+    if (endpoint.kind === "local") return { kind: "local" } as const;
+    if (input.provider !== "hermes") {
+      return yield* toValidationError(
+        input.operation,
+        `Provider '${input.provider}' does not support non-local execution endpoint '${input.endpointId}'. Select Hermes or the Local endpoint.`,
+      );
+    }
+    return {
+      kind: "ssh",
+      host: endpoint.host,
+      user: endpoint.user,
+      port: endpoint.port,
+      identityFile: endpoint.identityFile,
+      cwd: endpoint.cwd,
+      persistentShell: endpoint.persistentShell,
+    } as const;
+  });
+
   const upsertSessionBinding = (
     session: ProviderSession,
     threadId: ThreadId,
@@ -330,6 +381,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         threadId,
         provider: session.provider,
         providerInstanceId,
+        executionEndpointId: session.executionEndpointId ?? DEFAULT_EXECUTION_ENDPOINT_ID,
         runtimeMode: session.runtimeMode,
         status: toRuntimeStatus(session),
         ...(session.resumeCursor !== undefined ? { resumeCursor: session.resumeCursor } : {}),
@@ -430,6 +482,15 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           (session) => session.threadId === input.binding.threadId,
         );
         if (existing) {
+          const adoptedEndpointId = existing.executionEndpointId ?? DEFAULT_EXECUTION_ENDPOINT_ID;
+          const bindingEndpointId =
+            input.binding.executionEndpointId ?? DEFAULT_EXECUTION_ENDPOINT_ID;
+          if (adoptedEndpointId !== bindingEndpointId) {
+            return yield* toValidationError(
+              input.operation,
+              `Cannot adopt active session for thread '${input.binding.threadId}': endpoint mismatch (active='${adoptedEndpointId}', binding='${bindingEndpointId}').`,
+            );
+          }
           yield* upsertSessionBinding(
             { ...existing, providerInstanceId: bindingInstanceId },
             input.binding.threadId,
@@ -452,6 +513,12 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
 
       const persistedCwd = readPersistedCwd(input.binding.runtimePayload);
       const persistedModelSelection = readPersistedModelSelection(input.binding.runtimePayload);
+      const recoveryEndpointId = input.binding.executionEndpointId ?? DEFAULT_EXECUTION_ENDPOINT_ID;
+      const executionEnvironment = yield* resolveExecutionEnvironment({
+        provider: input.binding.provider,
+        endpointId: recoveryEndpointId,
+        operation: input.operation,
+      });
 
       yield* prepareMcpSession(input.binding.threadId, bindingInstanceId);
       const resumed = yield* adapter
@@ -462,6 +529,8 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           ...(persistedCwd ? { cwd: persistedCwd } : {}),
           ...(persistedModelSelection ? { modelSelection: persistedModelSelection } : {}),
           ...(hasResumeCursor ? { resumeCursor: input.binding.resumeCursor } : {}),
+          executionEndpointId: recoveryEndpointId,
+          ...(input.binding.provider === "hermes" ? { executionEnvironment } : {}),
           runtimeMode: input.binding.runtimeMode ?? "full-access",
         })
         .pipe(Effect.onError(() => clearMcpSession(input.binding.threadId)));
@@ -511,6 +580,18 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
 
     const hasRequestedSession = yield* adapter.hasSession(input.threadId);
     if (hasRequestedSession) {
+      const activeSessions = yield* adapter.listSessions();
+      const active = activeSessions.find((session) => session.threadId === input.threadId);
+      if (active) {
+        const activeEndpointId = active.executionEndpointId ?? DEFAULT_EXECUTION_ENDPOINT_ID;
+        const bindingEndpointId = binding.executionEndpointId ?? DEFAULT_EXECUTION_ENDPOINT_ID;
+        if (activeEndpointId !== bindingEndpointId) {
+          return yield* toValidationError(
+            input.operation,
+            `Cannot route thread '${input.threadId}': endpoint mismatch (active='${activeEndpointId}', binding='${bindingEndpointId}').`,
+          );
+        }
+      }
       return {
         adapter,
         instanceId,
@@ -649,11 +730,19 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           "provider.cwd.effective": effectiveCwd ?? "",
         });
         const adapter = yield* registry.getByInstance(resolvedInstanceId);
+        const executionEndpointId = parsed.executionEndpointId ?? DEFAULT_EXECUTION_ENDPOINT_ID;
+        const executionEnvironment = yield* resolveExecutionEnvironment({
+          provider: resolvedProvider,
+          endpointId: executionEndpointId,
+          operation: "ProviderService.startSession",
+        });
         yield* prepareMcpSession(threadId, resolvedInstanceId);
         const session = yield* adapter
           .startSession({
             ...input,
             providerInstanceId: resolvedInstanceId,
+            executionEndpointId,
+            ...(resolvedProvider === "hermes" ? { executionEnvironment } : {}),
             ...(effectiveCwd !== undefined ? { cwd: effectiveCwd } : {}),
             ...(effectiveResumeCursor !== undefined ? { resumeCursor: effectiveResumeCursor } : {}),
           })
@@ -669,6 +758,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         const sessionWithInstance = {
           ...session,
           providerInstanceId: resolvedInstanceId,
+          executionEndpointId,
         };
 
         yield* stopStaleSessionsForThread({

@@ -1,6 +1,8 @@
 import type {
   ApprovalRequestId,
   EnvironmentId,
+  ExecutionEndpointId,
+  ExecutionEndpointPresentation,
   ModelSelection,
   PreviewAnnotationPayload,
   ProviderApprovalDecision,
@@ -127,6 +129,7 @@ import {
   renderProviderTraitsPicker,
 } from "./composerProviderState";
 import { ContextWindowMeter } from "./ContextWindowMeter";
+import { ExecutionEndpointPicker } from "./ExecutionEndpointPicker";
 import { resolveContextWindowModelDisplayName } from "./ContextWindowMeter.logic";
 import { buildExpandedImagePreview, type ExpandedImagePreview } from "./ExpandedImagePreview";
 import { basenameOfPath } from "../../pierre-icons";
@@ -604,6 +607,9 @@ export interface ChatComposerProps {
   // Mode
   runtimeMode: RuntimeMode;
   interactionMode: ProviderInteractionMode;
+  executionEndpointId: ExecutionEndpointId;
+  executionEndpoints: Readonly<Record<string, ExecutionEndpointPresentation>>;
+  executionEndpointLocked: boolean;
 
   // Provider / model
   lockedProvider: ProviderDriverKind | null;
@@ -652,6 +658,7 @@ export interface ChatComposerProps {
   toggleInteractionMode: () => void;
   handleRuntimeModeChange: (mode: RuntimeMode) => void;
   handleInteractionModeChange: (mode: ProviderInteractionMode) => void;
+  handleExecutionEndpointChange: (endpointId: ExecutionEndpointId) => void;
 
   focusComposer: () => void;
   scheduleComposerFocus: () => void;
@@ -700,6 +707,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeTaskSteps,
     runtimeMode,
     interactionMode,
+    executionEndpointId,
+    executionEndpoints,
+    executionEndpointLocked,
     lockedProvider,
     providerStatuses,
     activeProjectDefaultModelSelection,
@@ -728,6 +738,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     toggleInteractionMode,
     handleRuntimeModeChange,
     handleInteractionModeChange,
+    handleExecutionEndpointChange,
     focusComposer,
     scheduleComposerFocus,
     setThreadError,
@@ -3546,13 +3557,24 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     <CompactComposerControlsMenu
                       interactionMode={interactionMode}
                       runtimeMode={runtimeMode}
+                      executionEndpointId={executionEndpointId}
+                      executionEndpoints={executionEndpoints}
+                      executionEndpointLocked={executionEndpointLocked}
                       showInteractionModeToggle={composerProviderControls.showInteractionModeToggle}
                       traitsMenuContent={providerTraitsMenuContent}
                       onToggleInteractionMode={toggleInteractionMode}
                       onRuntimeModeChange={handleRuntimeModeChange}
+                      onExecutionEndpointChange={handleExecutionEndpointChange}
                     />
                   ) : (
                     <>
+                      <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
+                      <ExecutionEndpointPicker
+                        value={executionEndpointId}
+                        endpoints={executionEndpoints}
+                        locked={executionEndpointLocked}
+                        onChange={handleExecutionEndpointChange}
+                      />
                       {providerTraitsPicker ? (
                         <>
                           <Separator

@@ -16,6 +16,7 @@ import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 
 import {
+  DEFAULT_EXECUTION_ENDPOINT_ID,
   ApprovalRequestId,
   GrokSettings,
   ProviderDriverKind,
@@ -145,6 +146,7 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
 
       const session = yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("grok"),
         cwd: process.cwd(),
         runtimeMode: "full-access",
@@ -205,6 +207,7 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
 
       yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("grok"),
         cwd: process.cwd(),
         runtimeMode: "full-access",
@@ -237,6 +240,7 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
 
       yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("grok"),
         cwd: process.cwd(),
         runtimeMode: "approval-required",
@@ -285,6 +289,7 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
 
       yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("grok"),
         cwd: process.cwd(),
         runtimeMode: "full-access",
@@ -354,6 +359,7 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
 
       yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("grok"),
         cwd: process.cwd(),
         runtimeMode: "full-access",
@@ -434,6 +440,7 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
 
       yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("grok"),
         cwd: process.cwd(),
         runtimeMode: "full-access",
@@ -493,6 +500,7 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
 
       yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("grok"),
         cwd: process.cwd(),
         runtimeMode: "full-access",
@@ -538,6 +546,7 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
 
       yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("grok"),
         cwd: process.cwd(),
         runtimeMode: "full-access",
@@ -635,6 +644,7 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
 
       yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("grok"),
         cwd: process.cwd(),
         runtimeMode: "full-access",
@@ -715,6 +725,7 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
 
       yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("grok"),
         cwd: process.cwd(),
         runtimeMode: "full-access",
@@ -794,6 +805,7 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
 
       yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("grok"),
         cwd: process.cwd(),
         runtimeMode: "full-access",
@@ -866,6 +878,7 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
 
       yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("grok"),
         cwd: process.cwd(),
         runtimeMode: "full-access",
@@ -910,6 +923,7 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
 
       yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("grok"),
         cwd: process.cwd(),
         runtimeMode: "full-access",
@@ -961,6 +975,7 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
 
       const session = yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("grok"),
         cwd: process.cwd(),
         runtimeMode: "full-access",
@@ -1004,6 +1019,7 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
       const error = yield* Effect.flip(
         adapter.startSession({
           threadId,
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           provider: ProviderDriverKind.make("cursor"),
           cwd: process.cwd(),
           runtimeMode: "full-access",
@@ -1024,6 +1040,7 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
 
       yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("grok"),
         cwd: process.cwd(),
         runtimeMode: "full-access",
@@ -1071,6 +1088,7 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
 
       yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("grok"),
         cwd: process.cwd(),
         runtimeMode: "approval-required",
@@ -1124,6 +1142,7 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
 
       yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("grok"),
         cwd: process.cwd(),
         runtimeMode: "full-access",
@@ -1186,6 +1205,7 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
 
       yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("grok"),
         cwd: process.cwd(),
         runtimeMode: "full-access",
@@ -1230,6 +1250,7 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
       const startSessionFiber = yield* adapter
         .startSession({
           threadId,
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           provider: ProviderDriverKind.make("grok"),
           cwd: process.cwd(),
           runtimeMode: "full-access",

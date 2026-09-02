@@ -15,6 +15,7 @@ import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 
 import {
+  DEFAULT_EXECUTION_ENDPOINT_ID,
   ApprovalRequestId,
   HermesSettings,
   ProviderDriverKind,
@@ -187,6 +188,7 @@ it.layer(hermesAdapterTestLayer)("HermesAdapterLive", (it) => {
 
       const session = yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("hermes"),
         cwd: process.cwd(),
         runtimeMode: "full-access",
@@ -253,6 +255,7 @@ it.layer(hermesAdapterTestLayer)("HermesAdapterLive", (it) => {
 
       yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("hermes"),
         cwd: process.cwd(),
         runtimeMode: "full-access",
@@ -319,6 +322,7 @@ it.layer(hermesAdapterTestLayer)("HermesAdapterLive", (it) => {
 
       yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("hermes"),
         cwd: process.cwd(),
         runtimeMode: "full-access",
@@ -386,6 +390,7 @@ it.layer(hermesAdapterTestLayer)("HermesAdapterLive", (it) => {
 
       yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("hermes"),
         cwd: process.cwd(),
         runtimeMode: "full-access",
@@ -434,6 +439,7 @@ it.layer(hermesAdapterTestLayer)("HermesAdapterLive", (it) => {
 
       yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("hermes"),
         cwd: process.cwd(),
         runtimeMode: "approval-required",
@@ -477,6 +483,7 @@ it.layer(hermesAdapterTestLayer)("HermesAdapterLive", (it) => {
 
       yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("hermes"),
         cwd: process.cwd(),
         runtimeMode: "full-access",
@@ -540,6 +547,7 @@ it.layer(hermesAdapterTestLayer)("HermesAdapterLive", (it) => {
 
       const session = yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("hermes"),
         cwd: process.cwd(),
         runtimeMode: "full-access",
@@ -583,6 +591,7 @@ it.layer(hermesAdapterTestLayer)("HermesAdapterLive", (it) => {
 
       yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("hermes"),
         cwd: process.cwd(),
         runtimeMode: "full-access",
@@ -610,6 +619,7 @@ it.layer(hermesAdapterTestLayer)("HermesAdapterLive", (it) => {
 
       yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("hermes"),
         cwd: process.cwd(),
         runtimeMode: "full-access",
@@ -645,6 +655,7 @@ it.layer(hermesAdapterTestLayer)("HermesAdapterLive", (it) => {
       const error = yield* Effect.flip(
         adapter.startSession({
           threadId: ThreadId.make("hermes-provider-mismatch"),
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           provider: ProviderDriverKind.make("grok"),
           cwd: process.cwd(),
           runtimeMode: "full-access",
@@ -663,6 +674,7 @@ it.layer(hermesAdapterTestLayer)("HermesAdapterLive", (it) => {
 
       yield* adapter.startSession({
         threadId,
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         provider: ProviderDriverKind.make("hermes"),
         cwd: process.cwd(),
         runtimeMode: "full-access",
@@ -710,6 +722,7 @@ it.layer(hermesAdapterTestLayer)("HermesAdapterLive", (it) => {
       const startSessionFiber = yield* adapter
         .startSession({
           threadId,
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           provider: ProviderDriverKind.make("hermes"),
           cwd: process.cwd(),
           runtimeMode: "full-access",

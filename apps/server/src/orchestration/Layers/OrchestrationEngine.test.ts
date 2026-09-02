@@ -1,4 +1,5 @@
 import {
+  DEFAULT_EXECUTION_ENDPOINT_ID,
   CheckpointRef,
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
@@ -138,6 +139,7 @@ describe("OrchestrationEngine", () => {
           id: ThreadId.make("thread-bootstrap"),
           projectId: asProjectId("project-bootstrap"),
           title: "Bootstrap Thread",
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           modelSelection: {
             instanceId: ProviderInstanceId.make("codex"),
             model: "gpt-5-codex",
@@ -268,6 +270,7 @@ describe("OrchestrationEngine", () => {
         threadId: ThreadId.make("thread-1"),
         projectId: asProjectId("project-1"),
         title: "Thread",
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         modelSelection: {
           instanceId: ProviderInstanceId.make("codex"),
           model: "gpt-5-codex",
@@ -328,6 +331,7 @@ describe("OrchestrationEngine", () => {
         threadId: ThreadId.make("thread-archive"),
         projectId: asProjectId("project-archive"),
         title: "Archive me",
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         modelSelection: {
           instanceId: ProviderInstanceId.make("codex"),
           model: "gpt-5-codex",
@@ -421,6 +425,7 @@ describe("OrchestrationEngine", () => {
         threadId: ThreadId.make("thread-replay"),
         projectId: asProjectId("project-replay"),
         title: "replay",
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         modelSelection: {
           instanceId: ProviderInstanceId.make("codex"),
           model: "gpt-5-codex",
@@ -489,6 +494,7 @@ describe("OrchestrationEngine", () => {
           threadId: ThreadId.make("thread-stream"),
           projectId: asProjectId("project-stream"),
           title: "domain-stream",
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           modelSelection: {
             instanceId: ProviderInstanceId.make("codex"),
             model: "gpt-5-codex",
@@ -540,6 +546,7 @@ describe("OrchestrationEngine", () => {
         threadId: ThreadId.make("thread-branch-race"),
         projectId: asProjectId("project-branch-race"),
         title: "Branch Race Thread",
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         modelSelection: {
           instanceId: ProviderInstanceId.make("codex"),
           model: "gpt-5-codex",
@@ -593,6 +600,7 @@ describe("OrchestrationEngine", () => {
         threadId: ThreadId.make("thread-worktree-bootstrap"),
         projectId: asProjectId("project-worktree-bootstrap"),
         title: "Worktree Bootstrap Thread",
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         modelSelection: {
           instanceId: ProviderInstanceId.make("codex"),
           model: "gpt-5-codex",
@@ -647,6 +655,7 @@ describe("OrchestrationEngine", () => {
         threadId: ThreadId.make("thread-ack"),
         projectId: asProjectId("project-ack"),
         title: "Ack Thread",
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         modelSelection: {
           instanceId: ProviderInstanceId.make("codex"),
           model: "gpt-5-codex",
@@ -684,6 +693,7 @@ describe("OrchestrationEngine", () => {
           threadId: ThreadId.make("thread-missing-project"),
           projectId: asProjectId("project-missing"),
           title: "Missing Project Thread",
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           modelSelection: {
             instanceId: ProviderInstanceId.make("codex"),
             model: "gpt-5-codex",
@@ -735,6 +745,7 @@ describe("OrchestrationEngine", () => {
         threadId: ThreadId.make("thread-turn-diff"),
         projectId: asProjectId("project-turn-diff"),
         title: "Turn diff thread",
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         modelSelection: {
           instanceId: ProviderInstanceId.make("codex"),
           model: "gpt-5-codex",
@@ -858,6 +869,7 @@ describe("OrchestrationEngine", () => {
           threadId: ThreadId.make("thread-flaky-fail"),
           projectId: asProjectId("project-flaky"),
           title: "flaky-fail",
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           modelSelection: {
             instanceId: ProviderInstanceId.make("codex"),
             model: "gpt-5-codex",
@@ -878,6 +890,7 @@ describe("OrchestrationEngine", () => {
         threadId: ThreadId.make("thread-flaky-ok"),
         projectId: asProjectId("project-flaky"),
         title: "flaky-ok",
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         modelSelection: {
           instanceId: ProviderInstanceId.make("codex"),
           model: "gpt-5-codex",
@@ -962,6 +975,7 @@ describe("OrchestrationEngine", () => {
         threadId: ThreadId.make("thread-atomic"),
         projectId: asProjectId("project-atomic"),
         title: "atomic",
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         modelSelection: {
           instanceId: ProviderInstanceId.make("codex"),
           model: "gpt-5-codex",
@@ -1107,6 +1121,7 @@ describe("OrchestrationEngine", () => {
         threadId: ThreadId.make("thread-sync"),
         projectId: asProjectId("project-sync"),
         title: "sync-before",
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         modelSelection: {
           instanceId: ProviderInstanceId.make("codex"),
           model: "gpt-5-codex",
@@ -1195,6 +1210,7 @@ describe("OrchestrationEngine", () => {
         threadId: ThreadId.make("thread-duplicate"),
         projectId: asProjectId("project-duplicate"),
         title: "duplicate",
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         modelSelection: {
           instanceId: ProviderInstanceId.make("codex"),
           model: "gpt-5-codex",
@@ -1215,6 +1231,7 @@ describe("OrchestrationEngine", () => {
           threadId: ThreadId.make("thread-duplicate"),
           projectId: asProjectId("project-duplicate"),
           title: "duplicate",
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           modelSelection: {
             instanceId: ProviderInstanceId.make("codex"),
             model: "gpt-5-codex",
@@ -1257,6 +1274,7 @@ describe("OrchestrationEngine", () => {
         threadId: ThreadId.make("thread-retry"),
         projectId: asProjectId("project-retry"),
         title: "retry",
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         modelSelection: {
           instanceId: ProviderInstanceId.make("codex"),
           model: "gpt-5-codex",
@@ -1322,6 +1340,7 @@ describe("OrchestrationEngine", () => {
           threadId: ThreadId.make(threadId),
           projectId: asProjectId("project-conflict"),
           title: threadId,
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           modelSelection: {
             instanceId: ProviderInstanceId.make("codex"),
             model: "gpt-5-codex",

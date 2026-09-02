@@ -62,6 +62,7 @@ import { applyHermesReasoningSelection } from "../../hermes/hermesReasoningOptio
 import type { HermesReasoningLevel } from "../../hermes/hermesReasoning.ts";
 import {
   applyHermesAcpModelSelection,
+  buildHermesSessionEnvironment,
   currentHermesModelIdFromSessionSetup,
   hermesSessionInfoIndicatesCompaction,
   makeHermesAcpRuntime,
@@ -700,6 +701,10 @@ export function makeHermesAdapter(
           }
 
           const cwd = path.resolve(input.cwd.trim());
+          const sessionEnvironment = buildHermesSessionEnvironment(
+            options?.environment,
+            input.executionEnvironment,
+          );
           const hermesModelSelection =
             input.modelSelection?.instanceId === boundInstanceId ? input.modelSelection : undefined;
           const existing = sessions.get(input.threadId);
@@ -728,7 +733,7 @@ export function makeHermesAdapter(
           const startReasoningLevel = yield* applyHermesReasoningSelection({
             model: hermesModelSelection?.model,
             selections: hermesModelSelection?.options,
-            ...(options?.environment ? { environment: options.environment } : {}),
+            environment: sessionEnvironment,
           }).pipe(
             Effect.provideService(FileSystem.FileSystem, fileSystem),
             Effect.provideService(Path.Path, path),
@@ -744,7 +749,7 @@ export function makeHermesAdapter(
           const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
           const acp = yield* makeHermesAcpRuntime({
             hermesSettings,
-            ...(options?.environment ? { environment: options.environment } : {}),
+            environment: sessionEnvironment,
             childProcessSpawner,
             cwd,
             ...(resumeSessionId ? { resumeSessionId } : {}),

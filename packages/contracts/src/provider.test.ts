@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
 
 import { ThreadId } from "./baseSchemas.ts";
+import { DEFAULT_EXECUTION_ENDPOINT_ID } from "./executionEndpoint.ts";
 import {
   ProviderEvent,
   ProviderSendTurnInput,
@@ -27,6 +28,14 @@ function getOptionValue(
 }
 
 describe("ProviderSessionStartInput", () => {
+  it("defaults to the local execution endpoint", () => {
+    const parsed = decodeProviderSessionStartInput({
+      threadId: "thread-1",
+      runtimeMode: "full-access",
+    });
+    expect(parsed.executionEndpointId).toBe(DEFAULT_EXECUTION_ENDPOINT_ID);
+  });
+
   it("accepts codex-compatible payloads", () => {
     const parsed = decodeProviderSessionStartInput({
       threadId: "thread-1",

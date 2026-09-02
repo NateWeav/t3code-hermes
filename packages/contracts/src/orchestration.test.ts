@@ -30,6 +30,7 @@ import {
   isProviderSendTurnSupportedImageMimeType,
 } from "./orchestration.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
+import { DEFAULT_EXECUTION_ENDPOINT_ID } from "./executionEndpoint.ts";
 
 const decodeTurnDiffInput = Schema.decodeUnknownEffect(OrchestrationGetTurnDiffInput);
 const decodeFullThreadDiffInput = Schema.decodeUnknownEffect(OrchestrationGetFullThreadDiffInput);
@@ -451,6 +452,7 @@ it.effect("accepts bootstrap metadata in thread.turn.start", () =>
       createdAt: "2026-01-01T00:00:00.000Z",
     });
     assert.strictEqual(parsed.bootstrap?.createThread?.projectId, "project-1");
+    assert.strictEqual(parsed.bootstrap?.createThread?.executionEndpointId, undefined);
     assert.strictEqual(parsed.bootstrap?.prepareWorktree?.baseBranch, "main");
     assert.strictEqual(parsed.bootstrap?.prepareWorktree?.startFromOrigin, true);
     assert.strictEqual(parsed.bootstrap?.runSetupScript, true);
@@ -475,6 +477,7 @@ it.effect("decodes thread.created runtime mode for historical events", () =>
     });
 
     assert.strictEqual(parsed.runtimeMode, DEFAULT_RUNTIME_MODE);
+    assert.strictEqual(parsed.executionEndpointId, DEFAULT_EXECUTION_ENDPOINT_ID);
     assert.strictEqual(parsed.modelSelection.instanceId, "codex");
   }),
 );

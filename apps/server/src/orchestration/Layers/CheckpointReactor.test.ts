@@ -5,6 +5,8 @@ import * as NodePath from "node:path";
 import * as NodeChildProcess from "node:child_process";
 
 import {
+  DEFAULT_EXECUTION_ENDPOINT_ID,
+  ExecutionEndpointId,
   ProviderDriverKind,
   ProviderRuntimeEvent,
   ProviderSession,
@@ -286,6 +288,7 @@ describe("CheckpointReactor", () => {
     readonly providerSessionCwd?: string;
     readonly providerName?: ProviderDriverKind;
     readonly gitStatusRefreshCalls?: Array<string>;
+    readonly executionEndpointId?: ExecutionEndpointId;
   }) {
     const cwd = createGitRepository();
     tempDirs.push(cwd);
@@ -392,6 +395,7 @@ describe("CheckpointReactor", () => {
             instanceId: ProviderInstanceId.make("codex"),
             model: "gpt-5-codex",
           },
+          executionEndpointId: options?.executionEndpointId ?? DEFAULT_EXECUTION_ENDPOINT_ID,
           interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
           runtimeMode: "approval-required",
           branch: options?.threadBranch ?? null,
@@ -411,6 +415,7 @@ describe("CheckpointReactor", () => {
                     instanceId: ProviderInstanceId.make("codex"),
                     model: "gpt-5-codex",
                   },
+                  executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
                   interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
                   runtimeMode: "approval-required",
                   branch: null,
@@ -453,6 +458,32 @@ describe("CheckpointReactor", () => {
       drain,
     };
   }
+
+  it("skips local checkpoint and VCS work for remote execution threads", async () => {
+    const gitStatusRefreshCalls: string[] = [];
+    const harness = await createHarness({
+      seedFilesystemCheckpoints: false,
+      executionEndpointId: ExecutionEndpointId.make("meridian-news"),
+      providerName: ProviderDriverKind.make("hermes"),
+      gitStatusRefreshCalls,
+    });
+
+    harness.provider.emit({
+      type: "turn.completed",
+      eventId: EventId.make("evt-turn-completed-remote"),
+      provider: ProviderDriverKind.make("hermes"),
+      createdAt: "2026-01-01T00:00:00.000Z",
+      threadId: ThreadId.make("thread-1"),
+      turnId: asTurnId("turn-remote"),
+      payload: { state: "completed" },
+    });
+    await harness.drain();
+
+    expect(gitStatusRefreshCalls).toEqual([]);
+    expect(
+      gitRefExists(harness.cwd, checkpointRefForThreadTurn(ThreadId.make("thread-1"), 1)),
+    ).toBe(false);
+  });
 
   it("captures pre-turn baseline on turn.started and post-turn checkpoint on turn.completed", async () => {
     const harness = await createHarness({ seedFilesystemCheckpoints: false });

@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import {
+  DEFAULT_EXECUTION_ENDPOINT_ID,
+  EnvironmentId,
+  ProjectId,
+  ProviderInstanceId,
+  ThreadId,
+} from "@t3tools/contracts";
 import type { Thread } from "../types";
 import {
   browseInputEndPaddingClass,
@@ -149,6 +155,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     projectId: PROJECT_ID,
     title: "Thread",
     modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5" },
+    executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
     runtimeMode: "full-access",
     interactionMode: "default",
     session: null,

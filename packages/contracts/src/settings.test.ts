@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
 
+import { DEFAULT_EXECUTION_ENDPOINT_ID } from "./executionEndpoint.ts";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import {
   ClientSettingsSchema,
@@ -17,6 +18,31 @@ const decodeClientSettingsPatch = Schema.decodeUnknownSync(ClientSettingsPatch);
 const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
 const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
 const encodeServerSettings = Schema.encodeSync(ServerSettings);
+
+describe("ServerSettings.executionEndpoints", () => {
+  it("defaults to the enabled built-in Local endpoint", () => {
+    expect(decodeServerSettings({}).executionEndpoints).toEqual({
+      [DEFAULT_EXECUTION_ENDPOINT_ID]: { kind: "local", displayName: "Local", enabled: true },
+    });
+  });
+
+  it("does not accept private execution endpoint details through generic patches", () => {
+    const patch = decodeServerSettingsPatch({
+      executionEndpoints: {
+        "build-host": {
+          kind: "ssh",
+          displayName: "Build host",
+          enabled: true,
+          host: "builder.internal",
+          user: "aeris",
+          identityFile: "~/.ssh/id_ed25519",
+          cwd: "/srv/work",
+        },
+      },
+    });
+    expect("executionEndpoints" in patch).toBe(false);
+  });
+});
 
 describe("ClientSettings word wrap", () => {
   it("defaults word wrap on", () => {

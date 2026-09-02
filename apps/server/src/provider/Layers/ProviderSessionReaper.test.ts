@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
+  DEFAULT_EXECUTION_ENDPOINT_ID,
   type OrchestrationCommand,
   ProjectId,
   ThreadId,
@@ -83,6 +84,7 @@ function makeReadModel(
       {
         id: projectId,
         title: "Provider Reaper Project",
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         workspaceRoot: "/tmp/provider-reaper-project",
         defaultModelSelection,
         scripts: [],
@@ -95,6 +97,7 @@ function makeReadModel(
       id: thread.id,
       projectId,
       title: `Thread ${thread.id}`,
+      executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
       modelSelection: defaultModelSelection,
       interactionMode: "default" as const,
       runtimeMode: "full-access" as const,

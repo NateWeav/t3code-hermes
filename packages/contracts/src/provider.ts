@@ -1,3 +1,4 @@
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 import {
@@ -22,6 +23,7 @@ import {
   RuntimeMode,
 } from "./orchestration.ts";
 import { ProviderInstanceId, ProviderDriverKind } from "./providerInstance.ts";
+import { DEFAULT_EXECUTION_ENDPOINT_ID, ExecutionEndpointId } from "./executionEndpoint.ts";
 
 const ProviderSessionStatus = Schema.Literals([
   "connecting",
@@ -37,6 +39,7 @@ export const ProviderSession = Schema.Struct({
   // populates it (post-slice-4), routing flips to instance-id-only and the
   // legacy `provider` field is removed.
   providerInstanceId: Schema.optional(ProviderInstanceId),
+  executionEndpointId: Schema.optional(ExecutionEndpointId),
   status: ProviderSessionStatus,
   runtimeMode: RuntimeMode,
   cwd: Schema.optional(TrimmedNonEmptyString),
@@ -55,6 +58,9 @@ export const ProviderSessionStartInput = Schema.Struct({
   provider: Schema.optional(ProviderDriverKind),
   // See ProviderSession for the migration story.
   providerInstanceId: Schema.optional(ProviderInstanceId),
+  executionEndpointId: ExecutionEndpointId.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_EXECUTION_ENDPOINT_ID)),
+  ),
   cwd: Schema.optional(TrimmedNonEmptyString),
   title: Schema.optional(TrimmedNonEmptyString),
   modelSelection: Schema.optional(ModelSelection),

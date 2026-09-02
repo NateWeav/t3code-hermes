@@ -1,4 +1,5 @@
 import {
+  DEFAULT_EXECUTION_ENDPOINT_ID,
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   EventId,
@@ -286,6 +287,7 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
           threadId: ThreadId.make("thread-1"),
           projectId: asProjectId("project-1"),
           title: "Thread",
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           modelSelection: {
             instanceId: ProviderInstanceId.make("codex"),
             model: "gpt-5-codex",
@@ -334,6 +336,7 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
       expect(turnStartEvent.payload).toMatchObject({
         threadId: ThreadId.make("thread-1"),
         messageId: asMessageId("message-user-1"),
+        executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
         modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.3-codex", [
           { id: "reasoningEffort", value: "high" },
           { id: "fastMode", value: true },
@@ -383,6 +386,7 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
           threadId: ThreadId.make("thread-1"),
           projectId: asProjectId("project-1"),
           title: "Thread",
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           modelSelection: {
             instanceId: ProviderInstanceId.make("codex"),
             model: "gpt-5-codex",
@@ -461,6 +465,7 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
           threadId: ThreadId.make("thread-1"),
           projectId: asProjectId("project-1"),
           title: "Thread",
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           modelSelection: {
             instanceId: ProviderInstanceId.make("codex"),
             model: "gpt-5-codex",

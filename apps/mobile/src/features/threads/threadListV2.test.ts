@@ -3,6 +3,7 @@ import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-searc
 import { resolveSnoozePresets } from "@t3tools/client-runtime/state/thread-settled";
 import {
   CommandId,
+  DEFAULT_EXECUTION_ENDPOINT_ID,
   EnvironmentId,
   MessageId,
   ProjectId,
@@ -34,6 +35,7 @@ function makeThread(
     environmentId,
     projectId: ProjectId.make("project-1"),
     modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+    executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
     runtimeMode: "full-access",
     interactionMode: "default",
     branch: null,

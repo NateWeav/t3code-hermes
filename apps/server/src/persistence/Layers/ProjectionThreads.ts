@@ -14,7 +14,11 @@ import {
   ProjectionThreadRepository,
   type ProjectionThreadRepositoryShape,
 } from "../Services/ProjectionThreads.ts";
-import { ModelSelection, ThreadLinkedPullRequest } from "@t3tools/contracts";
+import {
+  DEFAULT_EXECUTION_ENDPOINT_ID,
+  ModelSelection,
+  ThreadLinkedPullRequest,
+} from "@t3tools/contracts";
 
 const ProjectionThreadDbRow = ProjectionThread.mapFields(
   Struct.assign({
@@ -36,6 +40,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           project_id,
           title,
           model_selection_json,
+          execution_endpoint_id,
           runtime_mode,
           interaction_mode,
           branch,
@@ -64,6 +69,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           ${row.projectId},
           ${row.title},
           ${JSON.stringify(row.modelSelection)},
+          ${row.executionEndpointId ?? DEFAULT_EXECUTION_ENDPOINT_ID},
           ${row.runtimeMode},
           ${row.interactionMode},
           ${row.branch},
@@ -92,6 +98,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           project_id = excluded.project_id,
           title = excluded.title,
           model_selection_json = excluded.model_selection_json,
+          execution_endpoint_id = excluded.execution_endpoint_id,
           runtime_mode = excluded.runtime_mode,
           interaction_mode = excluded.interaction_mode,
           branch = excluded.branch,
@@ -127,6 +134,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           project_id AS "projectId",
           title,
           model_selection_json AS "modelSelection",
+          execution_endpoint_id AS "executionEndpointId",
           runtime_mode AS "runtimeMode",
           interaction_mode AS "interactionMode",
           branch,
@@ -164,6 +172,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           project_id AS "projectId",
           title,
           model_selection_json AS "modelSelection",
+          execution_endpoint_id AS "executionEndpointId",
           runtime_mode AS "runtimeMode",
           interaction_mode AS "interactionMode",
           branch,

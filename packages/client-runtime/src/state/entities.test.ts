@@ -1,4 +1,5 @@
 import {
+  DEFAULT_EXECUTION_ENDPOINT_ID,
   EnvironmentId,
   ProjectId,
   ProviderInstanceId,
@@ -88,6 +89,7 @@ const THREAD_SHELL = {
   projectId: PROJECT_ID,
   title: "Thread",
   modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+  executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
   runtimeMode: "full-access",
   interactionMode: "default",
   branch: null,

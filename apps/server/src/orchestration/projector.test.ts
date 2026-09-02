@@ -1,6 +1,8 @@
 import {
   CommandId,
+  DEFAULT_EXECUTION_ENDPOINT_ID,
   EventId,
+  ExecutionEndpointId,
   ProjectId,
   ProviderDriverKind,
   ThreadId,
@@ -62,6 +64,7 @@ describe("orchestration projector", () => {
               model: "gpt-5-codex",
             },
             runtimeMode: "full-access",
+            executionEndpointId: ExecutionEndpointId.make("build-host"),
             branch: null,
             worktreePath: null,
             createdAt: now,
@@ -82,6 +85,7 @@ describe("orchestration projector", () => {
           model: "gpt-5-codex",
         },
         runtimeMode: "full-access",
+        executionEndpointId: "build-host",
         interactionMode: "default",
         branch: null,
         worktreePath: null,
@@ -101,6 +105,35 @@ describe("orchestration projector", () => {
         session: null,
       },
     ]);
+  });
+
+  it("defaults legacy thread.created events to the local execution endpoint", async () => {
+    const now = "2026-01-01T00:00:00.000Z";
+    const next = await Effect.runPromise(
+      projectEvent(
+        createEmptyReadModel(now),
+        makeEvent({
+          sequence: 1,
+          type: "thread.created",
+          aggregateKind: "thread",
+          aggregateId: "legacy-thread",
+          occurredAt: now,
+          commandId: "cmd-legacy-thread",
+          payload: {
+            threadId: "legacy-thread",
+            projectId: "project-1",
+            title: "legacy",
+            modelSelection: { provider: "codex", model: "gpt-5-codex" },
+            runtimeMode: "full-access",
+            branch: null,
+            worktreePath: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        }),
+      ),
+    );
+    expect(next.threads[0]?.executionEndpointId).toBe(DEFAULT_EXECUTION_ENDPOINT_ID);
   });
 
   it("fails when event payload cannot be decoded by runtime schema", async () => {

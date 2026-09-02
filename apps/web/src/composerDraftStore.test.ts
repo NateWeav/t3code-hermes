@@ -6,8 +6,10 @@ import {
 } from "@t3tools/client-runtime/environment";
 import * as Schema from "effect/Schema";
 import {
+  DEFAULT_EXECUTION_ENDPOINT_ID,
   defaultInstanceIdForDriver,
   EnvironmentId,
+  ExecutionEndpointId,
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -286,6 +288,79 @@ describe("composerDraftStore clearComposerContent", () => {
     const draft = draftFor(threadId, TEST_ENVIRONMENT_ID);
     expect(draft).toBeUndefined();
     expect(revokeSpy).not.toHaveBeenCalledWith("blob:optimistic");
+  });
+});
+
+describe("composerDraftStore execution endpoint selection", () => {
+  const draftId = DraftId.make("draft-execution-endpoint");
+  const projectRef = scopeProjectRef(TEST_ENVIRONMENT_ID, ProjectId.make("project-execution"));
+  const remoteEndpointId = ExecutionEndpointId.make("build-host");
+
+  beforeEach(() => {
+    resetComposerDraftStore();
+  });
+
+  it("defaults new composer drafts and draft sessions to Local", () => {
+    const store = useComposerDraftStore.getState();
+    store.setProjectDraftThreadId(projectRef, draftId);
+    store.setPrompt(draftId, "hello");
+
+    expect(useComposerDraftStore.getState().getDraftSession(draftId)?.executionEndpointId).toBe(
+      DEFAULT_EXECUTION_ENDPOINT_ID,
+    );
+    expect(useComposerDraftStore.getState().getComposerDraft(draftId)?.executionEndpointId).toBe(
+      DEFAULT_EXECUTION_ENDPOINT_ID,
+    );
+  });
+
+  it("updates both draft content and draft-session endpoint state", () => {
+    const store = useComposerDraftStore.getState();
+    store.setProjectDraftThreadId(projectRef, draftId);
+    store.setExecutionEndpointId(draftId, remoteEndpointId);
+    store.setDraftThreadContext(draftId, { executionEndpointId: remoteEndpointId });
+
+    expect(useComposerDraftStore.getState().getComposerDraft(draftId)?.executionEndpointId).toBe(
+      remoteEndpointId,
+    );
+    expect(useComposerDraftStore.getState().getDraftSession(draftId)?.executionEndpointId).toBe(
+      remoteEndpointId,
+    );
+  });
+
+  it("migrates persisted drafts and sessions without an endpoint to Local", () => {
+    const threadId = ThreadId.make("thread-endpoint-migration");
+    const mergedState = useComposerDraftStore.persist.getOptions().merge!(
+      {
+        draftsByThreadKey: {
+          [draftId]: { prompt: "persisted", attachments: [] },
+        },
+        draftThreadsByThreadKey: {
+          [draftId]: {
+            threadId,
+            environmentId: TEST_ENVIRONMENT_ID,
+            projectId: projectRef.projectId,
+            createdAt: "2026-08-26T00:00:00.000Z",
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+            envMode: "local",
+            startFromOrigin: false,
+          },
+        },
+        logicalProjectDraftThreadKeyByLogicalProjectKey: {
+          [scopedProjectKey(projectRef)]: draftId,
+        },
+      },
+      useComposerDraftStore.getInitialState(),
+    );
+
+    expect(mergedState.draftsByThreadKey[draftId]?.executionEndpointId).toBe(
+      DEFAULT_EXECUTION_ENDPOINT_ID,
+    );
+    expect(mergedState.draftThreadsByThreadKey[draftId]?.executionEndpointId).toBe(
+      DEFAULT_EXECUTION_ENDPOINT_ID,
+    );
   });
 });
 

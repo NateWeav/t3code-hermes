@@ -1,4 +1,5 @@
 import {
+  DEFAULT_EXECUTION_ENDPOINT_ID,
   DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
   ServerConfig,
@@ -130,7 +131,18 @@ const SERVER_CONFIG: ServerConfigType = {
     otlpTracesEnabled: false,
     otlpMetricsEnabled: false,
   },
-  settings: DEFAULT_SERVER_SETTINGS,
+  settings: {
+    ...DEFAULT_SERVER_SETTINGS,
+    executionEndpoints: {
+      [DEFAULT_EXECUTION_ENDPOINT_ID]: {
+        kind: "local",
+        displayName: "Local",
+        enabled: true,
+        available: true,
+        targetLabel: "This device",
+      },
+    },
+  },
 };
 
 const RpcRequest = Schema.TaggedStruct("Request", {

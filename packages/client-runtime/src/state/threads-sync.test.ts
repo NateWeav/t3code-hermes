@@ -1,4 +1,5 @@
 import {
+  DEFAULT_EXECUTION_ENDPOINT_ID,
   EnvironmentId,
   EventId,
   ORCHESTRATION_WS_METHODS,
@@ -61,6 +62,7 @@ const BASE_THREAD: OrchestrationThread = {
     instanceId: ProviderInstanceId.make("codex"),
     model: "gpt-5.4",
   },
+  executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
   runtimeMode: "full-access",
   interactionMode: "default",
   branch: "main",

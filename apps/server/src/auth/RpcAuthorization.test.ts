@@ -1,4 +1,5 @@
 import {
+  AuthAccessWriteScope,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   AuthRelayReadScope,
@@ -40,6 +41,15 @@ describe("RPC authorization scopes", () => {
   it("requires permission to operate on a thread before uploading feedback", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.providerUploadFeedback)).toBe(
       AuthOrchestrationOperateScope,
+    );
+  });
+
+  it("reserves execution endpoint authority changes for administrative clients", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.serverUpsertExecutionEndpoint)).toBe(
+      AuthAccessWriteScope,
+    );
+    expect(requiredScopeForRpcMethod(WS_METHODS.serverRemoveExecutionEndpoint)).toBe(
+      AuthAccessWriteScope,
     );
   });
 

@@ -30,6 +30,7 @@ export interface SettingsSearchItem {
   readonly providerSettingsOnly?: boolean;
   readonly localBackendManagementOnly?: boolean;
   readonly wslAvailableOnly?: boolean;
+  readonly requiresThreadAutoSettlement?: boolean;
 }
 
 export interface SettingsSearchAvailability {
@@ -38,6 +39,7 @@ export interface SettingsSearchAvailability {
   readonly hasProviderSettingsEnvironment: boolean;
   readonly canManageLocalBackend: boolean;
   readonly isWslSettingsRowVisible: boolean;
+  readonly hasThreadAutoSettlement: boolean;
 }
 
 /**
@@ -91,6 +93,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Glass opacity",
     to: "/settings/appearance",
     searchTerms: ["transparent transparency solid menus dialogs composer"],
+  },
+  {
+    id: "panel-animations",
+    title: "Panel animations",
+    to: "/settings/appearance",
   },
   {
     id: "environment-identification",
@@ -148,12 +155,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Auto-settle inactive threads",
     to: "/settings/general",
     searchTerms: ["sidebar inactivity days no activity automatically"],
+    requiresThreadAutoSettlement: true,
   },
   {
     id: "auto-settle-merged-threads",
     title: "Auto-settle merged threads",
     to: "/settings/general",
     searchTerms: ["pull request merge closed automatically sidebar"],
+    requiresThreadAutoSettlement: true,
   },
   {
     id: "days-before-auto-settle",
@@ -161,6 +170,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/general",
     targetId: "auto-settle-inactive-threads",
     searchTerms: ["thread timeout activity sidebar"],
+    requiresThreadAutoSettlement: true,
   },
   {
     id: "time-format",
@@ -175,6 +185,18 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["diff ignore spaces edits default"],
   },
   {
+    id: "diff-layout",
+    title: "Diff layout",
+    to: "/settings/general",
+    searchTerms: ["stacked split side by side unified inline view"],
+  },
+  {
+    id: "proactive-panels",
+    title: "Proactive panels",
+    to: "/settings/general",
+    searchTerms: ["automatically open diff pull request pr right panel agent completion"],
+  },
+  {
     id: "skills-in-slash-menu",
     title: "Show skills in slash menu",
     to: "/settings/general",
@@ -185,6 +207,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Provider update checks",
     to: "/settings/general",
     searchTerms: ["installed cli versions newer available codex claude cursor grok opencode"],
+  },
+  {
+    id: "continue-threads-after-server-update",
+    title: "Continue threads after server updates",
+    to: "/settings/general",
+    searchTerms: ["resume running active work restart desktop update automatically"],
   },
   {
     id: "background-activity",
@@ -233,9 +261,9 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "quit-confirmation",
-    title: "Hold to quit",
+    title: "Quit shortcut",
     to: "/settings/general",
-    searchTerms: ["confirmation shortcut desktop app exit"],
+    searchTerms: ["confirmation desktop app exit direct hold double click press twice"],
     desktopOnly: true,
   },
   {
@@ -255,6 +283,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Plan mode (legacy)",
     to: "/settings/general",
     searchTerms: ["build plan composer old"],
+  },
+  {
+    id: "legacy-context-window-indicator",
+    title: "Context window indicator (legacy)",
+    to: "/settings/general",
+    searchTerms: ["composer meter usage tokens circle old"],
   },
   {
     id: "legacy-token-streaming",
@@ -279,7 +313,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Providers",
     to: "/settings/providers",
     searchTerms: [
-      "agents cli codex claude cursor grok opencode instances authentication api key models configuration binary path config directory endpoint arguments environment variables display name accent color custom favorite hidden auto compact",
+      "agents cli codex claude cursor grok opencode antigravity google sign in sign out install subscription instances authentication api key models configuration binary path config directory endpoint arguments environment variables display name accent color custom favorite hidden auto compact",
     ],
   },
   {
@@ -294,6 +328,18 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Agent browser access",
     to: "/settings/integrations",
     searchTerms: ["allow open drive preview tools sessions"],
+  },
+  {
+    id: "browser-profiles",
+    title: "Browser profiles",
+    to: "/settings/integrations",
+    targetId: "browser",
+  },
+  {
+    id: "browser-default-profile",
+    title: "Default browser profile",
+    to: "/settings/integrations",
+    targetId: "browser",
   },
   {
     id: "browser-default-viewport",
@@ -317,6 +363,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "browser-recording-frame-rate",
     title: "Browser recording frame rate",
     to: "/settings/integrations",
+  },
+  {
+    id: "browser-link-target",
+    title: "Open links in",
+    to: "/settings/integrations",
+    searchTerms: ["links default browser in-app browser external open"],
   },
   {
     id: "browser-auto-show-floating-preview",
@@ -365,6 +417,14 @@ export const SETTINGS_SEARCH_ITEMS = [
       "override generated commit change request pr titles descriptions branch bookmark",
     ],
     primaryOnly: true,
+  },
+  {
+    id: "environment-icon",
+    title: "Environment icon",
+    to: "/settings/connections",
+    targetId: "connections-environment",
+    searchTerms: ["machine glyph sidebar mac mini studio laptop desktop server cloud vm"],
+    localBackendManagementOnly: true,
   },
   {
     id: "network-access",
@@ -461,7 +521,8 @@ export function filterAvailableSettingsSearchItems(
       (!item.primaryOnly || availability.hasPrimaryEnvironment) &&
       (!item.providerSettingsOnly || availability.hasProviderSettingsEnvironment) &&
       (!item.localBackendManagementOnly || availability.canManageLocalBackend) &&
-      (!item.wslAvailableOnly || availability.isWslSettingsRowVisible),
+      (!item.wslAvailableOnly || availability.isWslSettingsRowVisible) &&
+      (!item.requiresThreadAutoSettlement || availability.hasThreadAutoSettlement),
   );
 }
 

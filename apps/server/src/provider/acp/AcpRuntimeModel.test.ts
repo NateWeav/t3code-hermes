@@ -377,6 +377,45 @@ describe("AcpRuntimeModel", () => {
     ]);
   });
 
+  it("keeps thought chunks separate from assistant text", () => {
+    const notification = {
+      sessionId: "session-1",
+      update: {
+        sessionUpdate: "agent_thought_chunk",
+        content: { type: "text", text: "Inspect the current implementation first." },
+      },
+    } satisfies EffectAcpSchema.SessionNotification;
+
+    expect(parseSessionUpdateEvent(notification).events).toEqual([
+      {
+        _tag: "ThoughtDelta",
+        text: "Inspect the current implementation first.",
+        rawPayload: notification,
+      },
+    ]);
+  });
+
+  it("preserves native command inputs and empty command lists", () => {
+    const availableCommands = [
+      { name: "plan", description: "Plan a task", input: { hint: "task" } },
+      { name: "logout", description: "Sign out" },
+    ] satisfies ReadonlyArray<EffectAcpSchema.AvailableCommand>;
+
+    for (const commands of [availableCommands, []]) {
+      const notification = {
+        sessionId: "session-1",
+        update: { sessionUpdate: "available_commands_update", availableCommands: commands },
+      } satisfies EffectAcpSchema.SessionNotification;
+      expect(parseSessionUpdateEvent(notification).events).toEqual([
+        {
+          _tag: "AvailableCommandsUpdated",
+          availableCommands: commands,
+          rawPayload: notification,
+        },
+      ]);
+    }
+  });
+
   it("keeps permission request parsing compatible with loose extension payloads", () => {
     const request = parsePermissionRequest({
       sessionId: "session-1",
@@ -421,48 +460,29 @@ describe("AcpRuntimeModel", () => {
   // `_build_usage_update`), so a Hermes-side rename shows up as a test failure.
   describe("available_commands_update", () => {
     it("maps ACP command entries onto provider slash commands", () => {
-      const parsed = parseSessionUpdateEvent({
-        sessionId: "session-1",
-        update: {
-          sessionUpdate: "available_commands_update",
-          availableCommands: [
-            { name: "help", description: "List available commands" },
-            {
-              name: "model",
-              description: "Show current model and provider, or switch models",
-              input: { hint: "model name to switch to" },
-            },
-            { name: "compress", description: "Compress conversation context" },
-          ],
-        },
-      } satisfies EffectAcpSchema.SessionNotification);
-
-      expect(parsed.events).toEqual([
+      expect(
+        parseAcpAvailableCommands([
+          { name: "help", description: "List available commands" },
+          {
+            name: "model",
+            description: "Show current model and provider, or switch models",
+            input: { hint: "model name to switch to" },
+          },
+          { name: "compress", description: "Compress conversation context" },
+        ]),
+      ).toEqual([
+        { name: "help", description: "List available commands" },
         {
-          _tag: "CommandsUpdated",
-          commands: [
-            { name: "help", description: "List available commands" },
-            {
-              name: "model",
-              description: "Show current model and provider, or switch models",
-              input: { hint: "model name to switch to" },
-            },
-            { name: "compress", description: "Compress conversation context" },
-          ],
-          rawPayload: expect.anything(),
+          name: "model",
+          description: "Show current model and provider, or switch models",
+          input: { hint: "model name to switch to" },
         },
+        { name: "compress", description: "Compress conversation context" },
       ]);
     });
 
     it("emits an empty list so a stale menu is cleared", () => {
-      const parsed = parseSessionUpdateEvent({
-        sessionId: "session-1",
-        update: { sessionUpdate: "available_commands_update", availableCommands: [] },
-      } satisfies EffectAcpSchema.SessionNotification);
-
-      expect(parsed.events).toEqual([
-        { _tag: "CommandsUpdated", commands: [], rawPayload: expect.anything() },
-      ]);
+      expect(parseAcpAvailableCommands([])).toEqual([]);
     });
 
     it("strips a leading slash, drops nameless entries, and dedupes by name", () => {

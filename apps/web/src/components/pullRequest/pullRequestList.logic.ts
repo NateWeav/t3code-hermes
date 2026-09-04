@@ -8,6 +8,7 @@ import {
   resolvePullRequestAuthorFilter,
 } from "@t3tools/contracts";
 import type {
+  ProjectId,
   PullRequestActor,
   PullRequestDiffStat,
   PullRequestInvolvement,
@@ -429,6 +430,155 @@ export function pullRequestEntryKey(entry: ScopedEntry): string {
   return `${scope}${entry.host}:${entry.repository}#${entry.number}`;
 }
 
+export interface PullRequestStatsTarget {
+  readonly environmentId: EnvironmentId;
+  readonly input: {
+    readonly refs: ReadonlyArray<{
+      readonly projectId: ProjectId;
+      readonly repository: string;
+      readonly number: number;
+    }>;
+  };
+}
+
+export interface PullRequestStatsBatch extends PullRequestStatsTarget {
+  readonly keys: ReadonlySet<string>;
+}
+
+export type PullRequestStatsPolicy = "visible" | "eager";
+
+export interface PullRequestStatsScope {
+  readonly key: string;
+  readonly policy: PullRequestStatsPolicy;
+}
+
+const MAX_PULL_REQUEST_STATS_REFS = 500;
+
+/** Excludes rows already covered by an active batch or the received-count cache. */
+export function pullRequestStatsKeysToRequest(
+  entriesByKey: ReadonlyMap<string, EnvironmentPullRequestEntry>,
+  enteredKeys: ReadonlySet<string>,
+  batches: ReadonlyArray<PullRequestStatsBatch>,
+  statsByRow: ReadonlyMap<string, unknown>,
+): ReadonlySet<string> {
+  const requested = new Set(batches.flatMap((batch) => [...batch.keys]));
+  return new Set(
+    [...enteredKeys].filter((key) => {
+      const entry = entriesByKey.get(key);
+      return (
+        entry !== undefined && !requested.has(key) && !statsByRow.has(pullRequestDiffStatKey(entry))
+      );
+    }),
+  );
+}
+
+/** Groups selected rows into bounded, immutable line-count reads per environment. */
+export function pullRequestStatsBatches(
+  entriesByKey: ReadonlyMap<string, EnvironmentPullRequestEntry>,
+  keys: ReadonlySet<string>,
+): ReadonlyArray<PullRequestStatsBatch> {
+  const byEnvironment = new Map<
+    EnvironmentId,
+    Array<{
+      readonly key: string;
+      readonly ref: PullRequestStatsTarget["input"]["refs"][number];
+    }>
+  >();
+  for (const key of keys) {
+    const entry = entriesByKey.get(key);
+    if (entry === undefined) continue;
+    const rows = byEnvironment.get(entry.environmentId) ?? [];
+    rows.push({
+      key,
+      ref: {
+        projectId: entry.projectId,
+        repository: entry.repository,
+        number: entry.number,
+      },
+    });
+    byEnvironment.set(entry.environmentId, rows);
+  }
+  return [...byEnvironment].flatMap(([environmentId, rows]) => {
+    const batches: PullRequestStatsBatch[] = [];
+    for (let index = 0; index < rows.length; index += MAX_PULL_REQUEST_STATS_REFS) {
+      const batch = rows.slice(index, index + MAX_PULL_REQUEST_STATS_REFS);
+      batches.push({
+        environmentId,
+        input: { refs: batch.map((row) => row.ref) },
+        keys: new Set(batch.map((row) => row.key)),
+      });
+    }
+    return batches;
+  });
+}
+
+/**
+ * Selects the next immutable stats batches. Size sorting needs every loaded row, while the other
+ * modes only need rows near the viewport. Normal reads skip active and cached rows; an explicit
+ * refresh asks for the selected rows again.
+ */
+export function pullRequestStatsRequestBatches({
+  entriesByKey,
+  candidateKeys,
+  policy,
+  activeBatches,
+  statsByRow,
+  refresh = false,
+}: {
+  readonly entriesByKey: ReadonlyMap<string, EnvironmentPullRequestEntry>;
+  readonly candidateKeys: ReadonlySet<string>;
+  readonly policy: PullRequestStatsPolicy;
+  readonly activeBatches: ReadonlyArray<PullRequestStatsBatch>;
+  readonly statsByRow: ReadonlyMap<string, unknown>;
+  readonly refresh?: boolean;
+}): ReadonlyArray<PullRequestStatsBatch> {
+  const requestedKeys = policy === "eager" ? new Set(entriesByKey.keys()) : candidateKeys;
+  const keys = refresh
+    ? requestedKeys
+    : pullRequestStatsKeysToRequest(entriesByKey, requestedKeys, activeBatches, statsByRow);
+  return pullRequestStatsBatches(entriesByKey, keys);
+}
+
+/** Ignores a refresh that finished after the list moved to another filter or stats policy. */
+export function pullRequestStatsRefreshBatches({
+  requestedScope,
+  currentScope,
+  entriesByKey,
+  candidateKeys,
+  statsByRow,
+}: {
+  readonly requestedScope: PullRequestStatsScope;
+  readonly currentScope: PullRequestStatsScope;
+  readonly entriesByKey: ReadonlyMap<string, EnvironmentPullRequestEntry>;
+  readonly candidateKeys: ReadonlySet<string>;
+  readonly statsByRow: ReadonlyMap<string, unknown>;
+}): ReadonlyArray<PullRequestStatsBatch> | null {
+  if (requestedScope.key !== currentScope.key || requestedScope.policy !== currentScope.policy) {
+    return null;
+  }
+  return pullRequestStatsRequestBatches({
+    entriesByKey,
+    candidateKeys,
+    policy: requestedScope.policy,
+    activeBatches: [],
+    statsByRow,
+    refresh: true,
+  });
+}
+
+/** Drops completed batches once every row in them has left the observer window. */
+export function retainVisiblePullRequestStatsBatches(
+  batches: ReadonlyArray<PullRequestStatsBatch>,
+  visibleKeys: ReadonlySet<string>,
+): ReadonlyArray<PullRequestStatsBatch> {
+  return batches.filter((batch) => {
+    for (const key of batch.keys) {
+      if (visibleKeys.has(key)) return true;
+    }
+    return false;
+  });
+}
+
 /**
  * The priority groups built from the hosts' own answers rather than re-partitioned from the
  * paginated feed. The feed is sliced by recency, so an older authored or review-requested row
@@ -835,7 +985,7 @@ export function scorePullRequestMatch(entry: PullRequestListEntry, query: string
 
 /**
  * Search results in the order they answer the question, most convincing first, and by recency
- * among equals. Only for a search: without one, a listing is a timeline and recency is the order.
+ * among equals. Without a search, preserve the host order for the caller's browse-time ranking.
  */
 export function rankPullRequestMatches<Entry extends PullRequestListEntry>(
   entries: ReadonlyArray<Entry>,
@@ -845,6 +995,35 @@ export function rankPullRequestMatches<Entry extends PullRequestListEntry>(
   return entries.toSorted((left, right) => {
     const byScore = scorePullRequestMatch(right, query) - scorePullRequestMatch(left, query);
     return byScore !== 0 ? byScore : right.updatedAt.localeCompare(left.updatedAt);
+  });
+}
+
+/**
+ * The default review queue: work that is green and approved, then green work still waiting on a
+ * verdict, then everything else still open. Drafts stay in that third tier because their author
+ * has not made them mergeable yet. Finished work follows open work when all states are visible. A
+ * known conflict is never ready, whatever its checks, review or state say, so it stays at the
+ * bottom. Smaller measured changes come first within a tier; recency only breaks a remaining tie.
+ */
+export function rankPullRequestsByMergeReadiness<Entry extends PullRequestListEntry>(
+  entries: ReadonlyArray<Entry>,
+  hasMeasuredSize: (entry: Entry) => boolean = (entry) => entry.additions + entry.deletions > 0,
+): ReadonlyArray<Entry> {
+  const tier = (entry: Entry) => {
+    if (entry.mergeability === "conflicting") return 4;
+    if (entry.state !== "open") return 3;
+    if (entry.isDraft) return 2;
+    if (entry.checksState === "passing" && entry.reviewDecision === "approved") return 0;
+    if (entry.checksState === "passing") return 1;
+    return 2;
+  };
+  return entries.toSorted((left, right) => {
+    const byTier = tier(left) - tier(right);
+    if (byTier !== 0) return byTier;
+    const byMeasurement = Number(hasMeasuredSize(right)) - Number(hasMeasuredSize(left));
+    if (byMeasurement !== 0) return byMeasurement;
+    const bySize = left.additions + left.deletions - (right.additions + right.deletions);
+    return bySize !== 0 ? bySize : right.updatedAt.localeCompare(left.updatedAt);
   });
 }
 

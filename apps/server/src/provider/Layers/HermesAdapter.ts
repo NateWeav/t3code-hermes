@@ -953,7 +953,7 @@ export function makeHermesAdapter(
                 // snapshot's `slashCommands` is filled by the provider probe
                 // (HermesProvider), which owns that snapshot; here the
                 // advertisement is only logged so a mismatch is diagnosable.
-                if (event._tag === "CommandsUpdated") {
+                if (event._tag === "AvailableCommandsUpdated") {
                   yield* logNative(ctx.threadId, "session/update", event.rawPayload);
                   return;
                 }

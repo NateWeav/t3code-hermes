@@ -2,6 +2,7 @@ import * as NodeURL from "node:url";
 
 import {
   ApprovalRequestId,
+  DEFAULT_EXECUTION_ENDPOINT_ID,
   type HermesSettings,
   EventId,
   type ProviderApprovalDecision,
@@ -901,6 +902,7 @@ export function makeHermesAdapter(
           const session: ProviderSession = {
             provider: PROVIDER,
             providerInstanceId: boundInstanceId,
+            executionEndpointId: input.executionEndpointId ?? DEFAULT_EXECUTION_ENDPOINT_ID,
             status: "ready",
             runtimeMode: input.runtimeMode,
             cwd,

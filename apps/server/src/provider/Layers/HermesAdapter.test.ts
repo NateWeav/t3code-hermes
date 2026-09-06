@@ -196,6 +196,7 @@ it.layer(hermesAdapterTestLayer)("HermesAdapterLive", (it) => {
       });
 
       assert.equal(session.provider, "hermes");
+      assert.equal(session.executionEndpointId, DEFAULT_EXECUTION_ENDPOINT_ID);
       assert.equal(session.model, "openai/gpt-5");
       assert.deepStrictEqual(session.resumeCursor, {
         schemaVersion: 1,

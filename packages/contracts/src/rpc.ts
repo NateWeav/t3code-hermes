@@ -607,61 +607,61 @@ const WsServerGetUsageSummaryRpc = Rpc.make(WS_METHODS.serverGetUsageSummary, {
   error: Schema.Union([EnvironmentAuthorizationError, UsageReadError]),
 });
 
-export const WsHermesCronListRpc = Rpc.make(WS_METHODS.hermesCronList, {
+const WsHermesCronListRpc = Rpc.make(WS_METHODS.hermesCronList, {
   payload: HermesCronListInput,
   success: HermesCronSnapshot,
   error: Schema.Union([EnvironmentAuthorizationError, HermesCronError]),
 });
 
-export const WsHermesCronSetEnabledRpc = Rpc.make(WS_METHODS.hermesCronSetEnabled, {
+const WsHermesCronSetEnabledRpc = Rpc.make(WS_METHODS.hermesCronSetEnabled, {
   payload: HermesCronSetEnabledInput,
   success: HermesCronSnapshot,
   error: Schema.Union([EnvironmentAuthorizationError, HermesCronError]),
 });
 
-export const WsHermesCronSetMutedRpc = Rpc.make(WS_METHODS.hermesCronSetMuted, {
+const WsHermesCronSetMutedRpc = Rpc.make(WS_METHODS.hermesCronSetMuted, {
   payload: HermesCronSetMutedInput,
   success: HermesCronSnapshot,
   error: Schema.Union([EnvironmentAuthorizationError, HermesCronError]),
 });
 
-export const WsHindsightListBanksRpc = Rpc.make(WS_METHODS.hindsightListBanks, {
+const WsHindsightListBanksRpc = Rpc.make(WS_METHODS.hindsightListBanks, {
   payload: HindsightListBanksInput,
   success: HindsightBanksResult,
   error: Schema.Union([EnvironmentAuthorizationError, HindsightError]),
 });
 
-export const WsHindsightBrowseRpc = Rpc.make(WS_METHODS.hindsightBrowse, {
+const WsHindsightBrowseRpc = Rpc.make(WS_METHODS.hindsightBrowse, {
   payload: HindsightBrowseInput,
   success: HindsightMemoryResult,
   error: Schema.Union([EnvironmentAuthorizationError, HindsightError]),
 });
 
-export const WsHindsightRecallRpc = Rpc.make(WS_METHODS.hindsightRecall, {
+const WsHindsightRecallRpc = Rpc.make(WS_METHODS.hindsightRecall, {
   payload: HindsightRecallInput,
   success: HindsightMemoryResult,
   error: Schema.Union([EnvironmentAuthorizationError, HindsightError]),
 });
 
-export const WsHindsightStatsRpc = Rpc.make(WS_METHODS.hindsightStats, {
+const WsHindsightStatsRpc = Rpc.make(WS_METHODS.hindsightStats, {
   payload: HindsightStatsInput,
   success: HindsightStatsResult,
   error: Schema.Union([EnvironmentAuthorizationError, HindsightError]),
 });
 
-export const WsHindsightRetainRpc = Rpc.make(WS_METHODS.hindsightRetain, {
+const WsHindsightRetainRpc = Rpc.make(WS_METHODS.hindsightRetain, {
   payload: HindsightRetainInput,
   success: HindsightRetainResult,
   error: Schema.Union([EnvironmentAuthorizationError, HindsightError]),
 });
 
-export const WsHindsightReflectRpc = Rpc.make(WS_METHODS.hindsightReflect, {
+const WsHindsightReflectRpc = Rpc.make(WS_METHODS.hindsightReflect, {
   payload: HindsightReflectInput,
   success: HindsightReflectResult,
   error: Schema.Union([EnvironmentAuthorizationError, HindsightError]),
 });
 
-export const WsServerGetProviderQuotaRpc = Rpc.make(WS_METHODS.serverGetProviderQuota, {
+const WsServerGetProviderQuotaRpc = Rpc.make(WS_METHODS.serverGetProviderQuota, {
   payload: Schema.Struct({}),
   success: ProviderQuotaSummary,
   error: Schema.Union([EnvironmentAuthorizationError, ProviderQuotaReadError]),
@@ -1274,7 +1274,7 @@ const WsSubscribeResourceTelemetryRpc = Rpc.make(WS_METHODS.subscribeResourceTel
   stream: true,
 });
 
-export const WsSubscribeHermesCronRpc = Rpc.make(WS_METHODS.subscribeHermesCron, {
+const WsSubscribeHermesCronRpc = Rpc.make(WS_METHODS.subscribeHermesCron, {
   payload: Schema.Struct({}),
   success: HermesCronStreamEvent,
   error: Schema.Union([EnvironmentAuthorizationError, HermesCronError]),

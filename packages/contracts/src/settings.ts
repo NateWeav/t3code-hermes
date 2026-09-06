@@ -807,7 +807,7 @@ export const ObservabilitySettings = Schema.Struct({
 export type ObservabilitySettings = typeof ObservabilitySettings.Type;
 
 /** Where a co-located Hindsight instance listens when nobody says otherwise. */
-export const DEFAULT_HINDSIGHT_BASE_URL = "http://127.0.0.1:8888";
+const DEFAULT_HINDSIGHT_BASE_URL = "http://127.0.0.1:8888";
 
 /**
  * Connection to a [Hindsight](https://github.com/vectorize-io/hindsight) agent

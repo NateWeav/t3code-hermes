@@ -55,9 +55,3 @@ export function hasUnseenHermesCompletions(environmentId: EnvironmentKey): boole
   const current = state(environmentId);
   return current.latestSeq > current.lastSeenSeq;
 }
-
-/** Test-only: the counters outlive a single test otherwise. */
-export function resetHermesTasksSeenForTests(): void {
-  seenByEnvironment.clear();
-  listeners.clear();
-}

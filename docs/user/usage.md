@@ -1,37 +1,78 @@
-# Review usage and plan limits
+# Usage and limits
 
-The Usage page shows subscription capacity and activity together. Account cards keep short and long
-reset windows separate, show the remaining percentage, and display when each window resets.
-Refreshing asks each environment for current provider data; T3 Code keeps the last successful
-reading visible when a provider is temporarily unavailable.
+## Understand your usage
 
-Codex and Claude limits use their CLI's signed-in account. On macOS, Claude's native Keychain
-credential is reused; on other platforms T3 Code reads Claude Code's native credentials file.
-OpenCode Go detects `~/.local/share/opencode/auth.json` and uses that API key to read authoritative
-rolling, weekly, and monthly limits. If the usage API is temporarily unavailable, finalized
-OpenCode Go costs in the local `opencode.db` provide an estimated fallback. The card labels these
-local estimates in their window names. Optional `OPENCODE_GO_WORKSPACE_ID` and
-`OPENCODE_GO_AUTH_COOKIE` overrides enable the web-dashboard source. The cookie contains sensitive
-dashboard session credentials; avoid exposing it in environment diagnostics and rotate it if it is
-exposed.
-Cards with a detected sign-in but no readable usage explain that state instead of reporting a
-misleading zero.
+**Usage** combines Codex, Claude Code, Grok Build, Hermes, and OpenCode session history from your connected
+environments. It shows token use, cache savings, model breakdowns, and estimated API-equivalent
+cost. These estimates are not your subscription bill.
 
-Activity appears below the account cards and contains token and API-equivalent cost reporting. It
-scans provider transcripts stored on each environment; raw transcript contents remain on that
-machine.
+Totals depend on the history available on each server. Grok turns without a saved completed-turn
+record are missing from the totals.
 
-Activity combines Codex, Claude Code, Grok Build, Hermes, and OpenCode usage from your connected
-environments. It reads the providers' local session history and shows API-equivalent token cost,
-processed tokens, cache savings, provider shares, and model breakdowns. Subscription billing is
-separate from the raw token cost shown here. For OpenCode, the page uses the provider-aware cost
-stored with each completed response, including OpenCode Go models such as Kimi.
+On web and desktop, use the environment dropdown to filter costs, tokens, and limits. All
+environments are selected by default. The dropdown shows which environments are still scanning;
+results appear as each one responds.
 
-Grok Build totals come from persisted session updates. Interactive turns that never wrote a
-completed-turn record will not appear.
+If recent work is missing or a new model shows no cost, refresh to rescan session history and
+update model pricing.
 
-Use **Past 24h** for an hourly chart covering the exact rolling 24-hour period. The **7 days**,
-**30 days**, and **90 days** ranges use daily resolution. Cost and token toggles update both the
-headline and chart. Refreshing rescans every connected environment and refetches model pricing on
-each of them, so a newly released model that showed $0.00 gets a price without waiting for the daily
-pricing update.
+## Set custom model prices
+
+On web or desktop, open the environment dropdown on **Usage**, then choose **Model prices** to add,
+edit, or reset a model's estimated price. **Apply to** starts with your current Usage filter;
+choose all environments or select individual destinations. Enter the exact model ID and USD
+rates per million input and output tokens. You can enter any model ID, including models
+without public pricing.
+
+Cache read and cache write rates are optional and use the input rate when blank. Enter `0` for
+tokens that are free. Saved prices replace automatic pricing for all of that environment's
+history and are shared with clients connected to it. When environments have different prices,
+cells show **Mixed**. Edit rates directly in the table, then choose **Save changes** to apply all
+edited rows. Untouched cells keep each environment's rate. Select one environment to inspect its
+prices. **Reset to automatic** marks a model's override for removal when you save; you can undo
+it before saving.
+
+Each destination reports whether the change saved. Offline or unavailable environments are
+marked **Not saved**. Reconnect them and choose **Retry failed saves** to finish the same change
+without writing again to environments that already saved. Changes are not queued after you close
+the dialog.
+
+## Track subscription limits
+
+**Usage → Limits** pools every subscription account it can see per provider, so with several Codex
+or Claude accounts across your environments and hubs you read one number per window rather than a
+list. Each window card shows how much of the pool is left and a bar with one segment per account,
+ordered by which resets soonest; when the provider reports reset times, the card also says when
+the next reset lands and how much it hands back. The hatched
+part of a segment is what that reset restores. Tap a segment or account row for the account's plan,
+where it is signed in, and its reset time. On web, you can hover too. Codex accounts with banked
+reset credits show a ticket count and the **Use reset** action in the account details. On narrow screens, numbered rows below
+the bar show each account's quota, countdown, and credits. Tap a row to open its details.
+
+The same account signed in on more than one environment, or reported by a hub as well, counts once.
+Filter with the environment dropdown to see what a single machine has.
+
+The Hermes fork also shows OpenCode Go rolling, weekly, and monthly limits when its local
+credentials expose them. If the provider API is unavailable, finalized costs in the local
+`opencode.db` can supply an estimated fallback, identified in the window label. Set
+`OPENCODE_GO_WORKSPACE_ID` and `OPENCODE_GO_AUTH_COOKIE` only when the dashboard source is needed;
+the cookie is a sensitive session credential.
+
+If a window looks stale, refresh Limits to re-check every provider and hub.
+
+Pick `/usage-limits` from the composer's command menu, or send it as a message, to check the
+current model's limits without leaving the conversation. The result opens above the composer and
+closes when you dismiss it or send your next message. It uses the same snapshot as **Usage → Limits**, so it does not run the agent or refresh
+anything. The command is offered only for providers that appear under **Usage → Limits**.
+
+API-key accounts may not report subscription limits. This also applies to Claude connections
+using a proxy through `ANTHROPIC_AUTH_TOKEN`.
+
+## Connect a CLIProxyAPI hub
+
+To see pooled accounts, open **Settings → Providers → Usage providers → Add hub**. Choose the
+environment that will connect to the hub and enter its URL and management key.
+
+The accounts appear under **Usage → Limits**. This connection supplies usage information; configure
+the provider separately to send agent requests through the hub. Remove the hub from the same
+settings section when you no longer need it.

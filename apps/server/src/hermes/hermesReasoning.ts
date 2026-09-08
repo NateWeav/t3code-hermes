@@ -216,7 +216,7 @@ function findModelEntry(
  * The catalogue's answer for one model: `true`/`false` when it knows,
  * `null` when it does not.
  */
-export function lookupModelsDevReasoning(
+function lookupModelsDevReasoning(
   cache: ModelsDevCache | null,
   parsed: ParsedHermesModelSlug,
 ): boolean | null {
@@ -323,7 +323,7 @@ export function classifyZaiGlm(
  * `_filter_reasoning_efforts_for_provider`, minus the heuristics hermes-webui
  * needs for locally probed endpoints.
  */
-export function applyHermesReasoningCeilings(
+function applyHermesReasoningCeilings(
   parsed: ParsedHermesModelSlug,
 ): ReadonlyArray<HermesReasoningLevel> {
   const provider = parsed.provider ?? "";

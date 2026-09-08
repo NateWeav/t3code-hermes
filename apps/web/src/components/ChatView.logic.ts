@@ -15,6 +15,7 @@ import {
   type ScopedProjectRef,
   type ScopedThreadRef,
   type ThreadId,
+  type ThreadLinkedPullRequest,
   type TurnId,
 } from "@t3tools/contracts";
 import { resolveAssetUrl } from "@t3tools/client-runtime/state/assets";
@@ -103,7 +104,51 @@ export function shouldOpenProactivePullRequest(
   previousTargetKey: string | null | undefined,
   targetKey: string | null,
 ): boolean {
-  return previousTargetKey !== undefined && targetKey !== null && targetKey !== previousTargetKey;
+  return targetKey !== null && targetKey !== previousTargetKey;
+}
+
+interface ProactivePanelObservation {
+  threadKey: string;
+  runningTurnId: TurnId | null | undefined;
+  targetKey: string | null | undefined;
+  userActionTurnId: TurnId | null;
+  userActionRevision: number;
+}
+
+/** Capture user intent before loading or metadata writes can defer panel activation. */
+export function observeProactivePanelUserChoice(
+  previous: ProactivePanelObservation | null,
+  input: { threadKey: string; runningTurnId: TurnId | null; userActionRevision: number },
+): ProactivePanelObservation {
+  const sameThread = previous?.threadKey === input.threadKey;
+  const newTurn =
+    sameThread && input.runningTurnId !== null && input.runningTurnId !== previous.userActionTurnId;
+  return {
+    threadKey: input.threadKey,
+    runningTurnId: sameThread ? previous.runningTurnId : undefined,
+    targetKey: sameThread ? previous.targetKey : undefined,
+    userActionTurnId: input.runningTurnId ?? (sameThread ? previous.userActionTurnId : null),
+    userActionRevision:
+      !sameThread || newTurn ? input.userActionRevision : previous.userActionRevision,
+  };
+}
+
+/** Follow a changed server link only when the panel still shows the previous linked PR. */
+export function shouldRetargetThreadPullRequestPanel(
+  previous: ThreadLinkedPullRequest | null,
+  current: ThreadLinkedPullRequest | null,
+  surface: RightPanelSurface | null,
+): boolean {
+  if (previous === null || current === null || surface?.kind !== "pull-request") return false;
+  const previousRepository = previous.repository.toLowerCase();
+  return (
+    (previous.projectId !== current.projectId ||
+      previousRepository !== current.repository.toLowerCase() ||
+      previous.number !== current.number) &&
+    surface.projectId === previous.projectId &&
+    surface.repository.toLowerCase() === previousRepository &&
+    surface.number === previous.number
+  );
 }
 
 export function shouldOpenProactiveTurnDiff(input: {
@@ -113,20 +158,18 @@ export function shouldOpenProactiveTurnDiff(input: {
   turnCompleted: boolean;
 }): boolean {
   return (
-    input.previousRunningTurnId !== undefined &&
-    input.previousRunningTurnId !== null &&
     input.runningTurnId === null &&
     input.turnCompleted &&
-    input.settledTurnId === input.previousRunningTurnId
+    input.settledTurnId !== null &&
+    (input.previousRunningTurnId === undefined ||
+      input.settledTurnId === input.previousRunningTurnId)
   );
 }
 
 export function resolveProactiveTurnDiffAction(input: {
   checkpoint: Pick<TurnDiffSummary, "status" | "files"> | undefined;
   isGitRepo: boolean | undefined;
-  activeSurfaceKind: RightPanelSurface["kind"] | null;
 }): "defer" | "ignore" | "open" {
-  if (input.activeSurfaceKind === "pull-request") return "ignore";
   if (input.checkpoint === undefined || input.checkpoint.status === "missing") return "defer";
   if (input.isGitRepo === undefined) return "defer";
   if (
@@ -462,6 +505,16 @@ export function getAntigravitySendBlockReason(
     return "That Antigravity model is no longer available. Choose another model.";
   }
   return null;
+}
+
+export function buildRunningThreadTurnInterruptInput(
+  thread: Pick<Thread, "id" | "session"> | null | undefined,
+  phase: SessionPhase,
+): { threadId: ThreadId; turnId?: TurnId } | null {
+  if (phase !== "running" || thread?.session?.status !== "running") {
+    return null;
+  }
+  return buildThreadTurnInterruptInput(thread);
 }
 
 export function reconcileMountedTerminalThreadIds(input: {
@@ -982,5 +1035,31 @@ export function hasServerAcknowledgedLocalDispatch(input: {
     latestTurnChanged ||
     input.localDispatch.sessionStatus !== (session?.status ?? null) ||
     input.localDispatch.sessionUpdatedAt !== (session?.updatedAt ?? null)
+  );
+}
+
+// Returning to the window should land the caret in the composer, so the reader can type right
+// away. The exceptions are places where focus is deliberate: another text field, a terminal in
+// the drawer or the right panel, or an open dialog or popup. A focused button outside those is
+// not one of them, so it yields to the composer.
+export function shouldRefocusComposerOnWindowFocus(
+  activeElement:
+    | (Pick<Element, "tagName" | "closest" | "getAttribute"> & { isContentEditable?: boolean })
+    | null,
+): boolean {
+  if (activeElement === null || activeElement.tagName === "BODY") return true;
+  if (
+    activeElement.tagName === "INPUT" ||
+    activeElement.tagName === "TEXTAREA" ||
+    activeElement.tagName === "SELECT" ||
+    activeElement.isContentEditable === true ||
+    activeElement.getAttribute("role") === "textbox"
+  ) {
+    return false;
+  }
+  return (
+    activeElement.closest(
+      '[role="dialog"], [role="alertdialog"], [data-slot$="-popup"], [data-terminal-owner]',
+    ) === null
   );
 }

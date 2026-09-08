@@ -51,7 +51,7 @@ import {
   issueHeadlessServeAccessInfo,
 } from "./startupAccess.ts";
 
-export class ServerRuntimeStartupError extends Schema.TaggedErrorClass<ServerRuntimeStartupError>()(
+export class ServerRuntimeStartupError extends Schema.TaggedError<ServerRuntimeStartupError>()(
   "ServerRuntimeStartupError",
   {
     mode: ServerConfig.RuntimeMode,
@@ -147,7 +147,7 @@ export const makeCommandGate = Effect.gen(function* () {
   } satisfies CommandGate;
 });
 
-export const recordStartupHeartbeat = Effect.gen(function* () {
+const recordStartupHeartbeat = Effect.gen(function* () {
   const analytics = yield* AnalyticsService.AnalyticsService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
 
@@ -181,7 +181,7 @@ export const recordStartupHeartbeat = Effect.gen(function* () {
  * deployment. Probe results deliberately are not consulted: bootstrap runs
  * before provider probes settle, which would make the choice racy.
  */
-export const getAutoBootstrapThreadModelSelection = (): ModelSelection => ({
+const getAutoBootstrapThreadModelSelection = (): ModelSelection => ({
   instanceId: ProviderInstanceId.make(
     process.env.T3CODE_BOOTSTRAP_PROVIDER_INSTANCE?.trim() || "codex",
   ),
@@ -353,7 +353,7 @@ const ORPHANED_PROVIDER_SESSION_ERROR =
 const SERVER_UPDATE_CONTINUATION_KEY = "continueAfterServerUpdate";
 const SERVER_UPDATE_CONTINUATION_PROMPT = "Continue where you left off.";
 
-class ProviderSessionContinuationError extends Schema.TaggedErrorClass<ProviderSessionContinuationError>()(
+class ProviderSessionContinuationError extends Schema.TaggedError<ProviderSessionContinuationError>()(
   "ProviderSessionContinuationError",
   {
     threadId: ThreadId,
@@ -364,7 +364,7 @@ class ProviderSessionContinuationError extends Schema.TaggedErrorClass<ProviderS
   }
 }
 
-export class ServerUpdateThreadContinuationError extends Schema.TaggedErrorClass<ServerUpdateThreadContinuationError>()(
+export class ServerUpdateThreadContinuationError extends Schema.TaggedError<ServerUpdateThreadContinuationError>()(
   "ServerUpdateThreadContinuationError",
   {
     cause: Schema.Defect(),
@@ -479,7 +479,7 @@ const clearContinuationMarkers = (
     { concurrency: "unbounded", discard: true },
   );
 
-export const clearProviderSessionContinuationMarkers = (threadIds: ReadonlyArray<ThreadId>) =>
+const clearProviderSessionContinuationMarkers = (threadIds: ReadonlyArray<ThreadId>) =>
   Effect.gen(function* () {
     const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
     yield* clearContinuationMarkers(directory, threadIds);
@@ -568,7 +568,8 @@ export const reconcileProviderSessions = Effect.gen(function* () {
       continuationTurnId !== null &&
       (session.activeTurnId === null || continuationTurnId === session.activeTurnId) &&
       Option.isSome(binding) &&
-      (readRuntimePayload(binding.value.runtimePayload).activeTurnId == null ||
+      (session.activeTurnId !== null ||
+        readRuntimePayload(binding.value.runtimePayload).activeTurnId == null ||
         readRuntimePayload(binding.value.runtimePayload).activeTurnId === continuationTurnId);
     const preparedWhileReady =
       session.status === "ready" &&
@@ -577,16 +578,15 @@ export const reconcileProviderSessions = Effect.gen(function* () {
       Option.isSome(binding) &&
       readRuntimePayload(binding.value.runtimePayload).activeTurnId === null &&
       readRuntimePayload(binding.value.runtimePayload).continueAfterServerUpdatePrepared === true;
-    // Abrupt shutdowns cannot write an update marker. Require both durable
-    // records to agree on an unfinished turn before recovering one implicitly.
+    // Runtime events advance the projection's turn, but not the directory's
+    // last admitted turn. Use the projection to identify interrupted work.
     const interruptedByRestart =
       continueAfterRestart &&
       session.status === "running" &&
       session.activeTurnId !== null &&
       Option.isSome(binding) &&
       binding.value.status === "running" &&
-      binding.value.resumeCursor != null &&
-      readRuntimePayload(binding.value.runtimePayload).activeTurnId === session.activeTurnId;
+      binding.value.resumeCursor != null;
     const settleAsError = (lastError: string) =>
       Effect.gen(function* () {
         yield* Effect.gen(function* () {
@@ -816,6 +816,7 @@ export const autoPullProjects = Effect.fn("autoPullProjects")(function* (
   );
 });
 
+/** @public Service construction is part of the canonical Effect module API. */
 export const make = (options?: StartupOptions) =>
   Effect.gen(function* () {
     const serverConfig = yield* ServerConfig.ServerConfig;

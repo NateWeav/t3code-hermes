@@ -249,7 +249,7 @@ interface ExecutionRow {
   readonly error: unknown;
 }
 
-export function parseHermesCronRun(row: ExecutionRow): ParsedHermesCronRun | null {
+function parseHermesCronRun(row: ExecutionRow): ParsedHermesCronRun | null {
   const id = coerceText(row.id).trim();
   const jobId = coerceText(row.job_id).trim();
   if (id.length === 0 || jobId.length === 0) return null;
@@ -274,7 +274,7 @@ export function parseHermesCronRun(row: ExecutionRow): ParsedHermesCronRun | nul
   };
 }
 
-export function parseHermesCronRuns(rows: readonly ExecutionRow[]): readonly ParsedHermesCronRun[] {
+function parseHermesCronRuns(rows: readonly ExecutionRow[]): readonly ParsedHermesCronRun[] {
   const runs: ParsedHermesCronRun[] = [];
   for (const row of rows) {
     const run = parseHermesCronRun(row);

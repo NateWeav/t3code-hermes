@@ -1048,11 +1048,6 @@ export function createServerEnvironmentAtoms<R, E>(
       staleTimeMs: 60_000,
       refreshTrigger: ({ environmentId }) => usagePricesAtom(environmentId),
     }),
-    providerQuota: createEnvironmentRpcQueryAtomFamily(runtime, {
-      label: "environment-data:server:provider-quota",
-      tag: WS_METHODS.serverGetProviderQuota,
-      staleTimeMs: 60_000,
-    }),
     /**
      * Hermes scheduled tasks. A subscription rather than a query because the
      * environment polls Hermes only while someone is watching, and pushes a

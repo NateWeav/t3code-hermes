@@ -22,7 +22,6 @@ import {
   type OrchestrationThreadActivity,
   type OrchestrationProposedPlanId,
   ProviderApprovalOption,
-  ProviderDriverKind,
   ProviderRequestKind,
   type ToolLifecycleItemType,
   type UserInputQuestion,
@@ -41,7 +40,6 @@ import {
   type TurnDiffSummary,
 } from "./types";
 
-export type ProviderPickerKind = ProviderDriverKind;
 export { formatDuration } from "@t3tools/shared/orchestrationTiming";
 
 export {

@@ -7,7 +7,6 @@ import {
   type IsoDateTime,
   type OrchestrationCommand,
   OrchestrationDispatchCommandError,
-  PROVIDER_SEND_TURN_MAX_INLINE_FILE_BYTES,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
 } from "@t3tools/contracts";
 
@@ -199,36 +198,17 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
             return normalizedAttachment;
           }
 
-          const expectedMimeType = attachment.mimeType.toLowerCase();
-          const emptyFileDataUrl = `data:${expectedMimeType};base64,`;
-          const parsed =
-            attachment.type === "file" &&
-            attachment.sizeBytes === 0 &&
-            attachment.dataUrl.toLowerCase() === emptyFileDataUrl
-              ? { mimeType: expectedMimeType, base64: "" }
-              : parseBase64DataUrl(attachment.dataUrl);
-          if (
-            !parsed ||
-            parsed.mimeType !== expectedMimeType ||
-            (attachment.type === "image" && !parsed.mimeType.startsWith("image/"))
-          ) {
+          const parsed = parseBase64DataUrl(attachment.dataUrl);
+          if (!parsed || !parsed.mimeType.startsWith("image/")) {
             return yield* new OrchestrationDispatchCommandError({
-              message: `Invalid ${attachment.type} attachment payload for '${attachment.name}'.`,
+              message: `Invalid image attachment payload for '${attachment.name}'.`,
             });
           }
 
-          const maxBytes =
-            attachment.type === "image"
-              ? PROVIDER_SEND_TURN_MAX_IMAGE_BYTES
-              : PROVIDER_SEND_TURN_MAX_INLINE_FILE_BYTES;
           const bytes = Buffer.from(parsed.base64, "base64");
-          if (
-            (attachment.type === "image" && bytes.byteLength === 0) ||
-            bytes.byteLength > maxBytes ||
-            bytes.byteLength !== attachment.sizeBytes
-          ) {
+          if (bytes.byteLength === 0 || bytes.byteLength > PROVIDER_SEND_TURN_MAX_IMAGE_BYTES) {
             return yield* new OrchestrationDispatchCommandError({
-              message: `${attachment.type === "image" ? "Image" : "File"} attachment '${attachment.name}' is empty, too large, or has an invalid size.`,
+              message: `Image attachment '${attachment.name}' is empty or too large.`,
             });
           }
 
@@ -240,10 +220,10 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
           }
 
           const persistedAttachment = {
-            type: attachment.type,
+            type: "image" as const,
             id: attachmentId,
             name: attachment.name,
-            mimeType: parsed.mimeType,
+            mimeType: parsed.mimeType.toLowerCase(),
             sizeBytes: bytes.byteLength,
           };
 

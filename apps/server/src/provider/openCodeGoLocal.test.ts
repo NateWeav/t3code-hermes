@@ -7,22 +7,9 @@ import * as NodeSqlite from "node:sqlite";
 import { describe, expect, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 
-import { parseClaudeNativeCredentials, readOpenCodeGoLocalQuota } from "./providerQuotaLocal.ts";
+import { readOpenCodeGoLocalQuota } from "./openCodeGoLocal.ts";
 
 describe("provider quota native stores", () => {
-  it("reads Claude Code's native OAuth credential shape", () => {
-    expect(
-      parseClaudeNativeCredentials({
-        claudeAiOauth: {
-          accessToken: "oauth-token",
-          subscriptionType: "pro",
-          refreshToken: "not-returned",
-        },
-      }),
-    ).toEqual({ accessToken: "oauth-token", planLabel: "pro" });
-    expect(parseClaudeNativeCredentials({ mcpOAuth: {} })).toBeNull();
-  });
-
   it("estimates OpenCode Go windows from the signed-in CLI's local history", () => {
     const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-opencode-quota-"));
     const authPath = NodePath.join(directory, "auth.json");
@@ -60,9 +47,9 @@ describe("provider quota native stores", () => {
       const quota = readOpenCodeGoLocalQuota({ authPath, databasePath, nowMs });
       expect(quota.authenticated).toBe(true);
       expect(quota.windows).toMatchObject([
-        { id: "five-hour", usedPercent: 50 },
-        { id: "weekly", usedPercent: 20 },
-        { id: "monthly", usedPercent: 10 },
+        { id: "five-hour-estimated", usedPercent: 50 },
+        { id: "weekly-estimated", usedPercent: 20 },
+        { id: "monthly-estimated", usedPercent: 10 },
       ]);
     } finally {
       database.close();
@@ -147,9 +134,9 @@ describe("provider quota native stores", () => {
         );
 
       expect(readOpenCodeGoLocalQuota({ authPath, databasePath, nowMs }).windows).toMatchObject([
-        { id: "five-hour", usedPercent: 50 },
-        { id: "weekly", usedPercent: 20 },
-        { id: "monthly", usedPercent: 10 },
+        { id: "five-hour-estimated", usedPercent: 50 },
+        { id: "weekly-estimated", usedPercent: 20 },
+        { id: "monthly-estimated", usedPercent: 10 },
       ]);
     } finally {
       database.close();

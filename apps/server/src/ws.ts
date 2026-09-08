@@ -141,7 +141,6 @@ import * as HostResources from "./resourceTelemetry/HostResources.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
 import * as UsageService from "./usage/UsageService.ts";
-import * as ProviderQuotaService from "./providerQuota/ProviderQuotaService.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import * as SourceControlDiscovery from "./sourceControl/SourceControlDiscovery.ts";
@@ -615,7 +614,6 @@ const makeWsRpcLayer = (
       const usage = yield* UsageService.UsageService;
       const hermesCron = yield* HermesCronService.HermesCronService;
       const hindsight = yield* HindsightService.HindsightService;
-      const providerQuota = yield* ProviderQuotaService.ProviderQuotaService;
       const relayClient = yield* RelayClient.RelayClient;
       const authorizationError = (requiredScope: AuthEnvironmentScope) =>
         new EnvironmentAuthorizationError({
@@ -2050,10 +2048,6 @@ const makeWsRpcLayer = (
           ),
         [WS_METHODS.serverGetUsageSummary]: (input) =>
           observeRpcEffect(WS_METHODS.serverGetUsageSummary, usage.readSummary(input), {
-            "rpc.aggregate": "server",
-          }),
-        [WS_METHODS.serverGetProviderQuota]: (_input) =>
-          observeRpcEffect(WS_METHODS.serverGetProviderQuota, providerQuota.read, {
             "rpc.aggregate": "server",
           }),
         [WS_METHODS.hermesCronList]: (input) =>

@@ -1,12 +1,6 @@
 import { EnvironmentId, USAGE_CONTRACT_VERSION } from "@t3tools/contracts";
 import { useNavigation } from "@react-navigation/native";
 import {
-  presentQuotaAccounts,
-  quotaEnvironmentLabel,
-  type PresentedQuotaAccount,
-} from "@t3tools/client-runtime/state/provider-quota";
-import type { ProviderQuotaAccount } from "@t3tools/contracts";
-import {
   isCompatibleUsageContractVersion,
   type DailyTotals,
   type MergedUsage,
@@ -31,7 +25,6 @@ import { AndroidScreenHeader } from "../../components/AndroidScreenHeader";
 import { AppText as Text } from "../../components/AppText";
 import { cn } from "../../lib/cn";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
-import { useProviderQuota } from "../../state/providerQuota";
 import { useUsage, type EnvironmentUsageStatus } from "../../state/usage";
 import { SettingsSection } from "../settings/components/SettingsSection";
 import { UsageDailyChart } from "./UsageDailyChart";
@@ -88,23 +81,6 @@ export function UsageRouteScreen() {
     selectedEnvironmentIds,
   );
   const limits = useRefreshLimits(selectedEnvironmentIds);
-  const quota = useProviderQuota();
-  const selectedQuotaEnvironments = useMemo(
-    () =>
-      selectedEnvironmentIds === null
-        ? quota.environments
-        : quota.environments.filter(({ environmentId }) =>
-            selectedEnvironmentIds.has(environmentId),
-          ),
-    [quota.environments, selectedEnvironmentIds],
-  );
-  const openCodeQuotaAccounts = useMemo(
-    () =>
-      presentQuotaAccounts(selectedQuotaEnvironments).filter(
-        (account) => account.provider === "opencode",
-      ),
-    [selectedQuotaEnvironments],
-  );
 
   const days = useMemo(
     () => enumerateDays(window.sinceDay, window.untilDay),
@@ -130,11 +106,6 @@ export function UsageRouteScreen() {
     [isPast24Hours, merged.daily, merged.hourly],
   );
 
-  // An unreachable environment can stay pending forever, so only quota
-  // sources with an existing answer contribute to the limits spinner.
-  const refreshingQuota = selectedQuotaEnvironments.some(
-    (entry) => entry.isPending && entry.accounts.length > 0,
-  );
   const [refreshingUsage, setRefreshingUsage] = useState(false);
   const refreshingRef = useRef(false);
   const showingLimits = tab === "limits";
@@ -268,15 +239,8 @@ export function UsageRouteScreen() {
         contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 18) + 18 }}
         refreshControl={
           <RefreshControl
-            refreshing={showingLimits ? limits.refreshing || refreshingQuota : refreshingUsage}
-            onRefresh={
-              showingLimits
-                ? () => {
-                    quota.refresh();
-                    void limits.refresh();
-                  }
-                : refreshWindow
-            }
+            refreshing={showingLimits ? limits.refreshing : refreshingUsage}
+            onRefresh={showingLimits ? () => void limits.refresh() : refreshWindow}
           />
         }
       >
@@ -288,17 +252,11 @@ export function UsageRouteScreen() {
           className="gap-6"
         >
           {showingLimits ? (
-            <>
-              <UsageLimitsSection
-                now={limits.now}
-                failedLabels={limits.failedLabels}
-                selectedEnvironmentIds={selectedEnvironmentIds}
-              />
-              <MobileOpenCodeQuotaLimits
-                accounts={openCodeQuotaAccounts}
-                environmentCount={selectedQuotaEnvironments.length}
-              />
-            </>
+            <UsageLimitsSection
+              now={limits.now}
+              failedLabels={limits.failedLabels}
+              selectedEnvironmentIds={selectedEnvironmentIds}
+            />
           ) : (
             <>
               {/* Period and metric together: neither applies to Limits, and
@@ -356,111 +314,6 @@ export function UsageRouteScreen() {
           )}
         </Animated.View>
       </ScrollView>
-    </View>
-  );
-}
-
-function mobileQuotaProvider(account: ProviderQuotaAccount): "codex" | "claude" | "opencode" {
-  return account.provider === "claudeAgent"
-    ? "claude"
-    : account.provider === "opencode"
-      ? "opencode"
-      : "codex";
-}
-
-function mobileFormatReset(resetsAt: string | null): string {
-  if (resetsAt === null) return "Reset unavailable";
-  const reset = new Date(resetsAt);
-  const minutes = Math.ceil((reset.valueOf() - Date.now()) / 60_000);
-  if (!Number.isFinite(minutes)) return "Reset unavailable";
-  if (minutes <= 0) return "Resetting now";
-  if (minutes < 60) return `Resets in ${minutes}m`;
-  if (minutes < 24 * 60) return `Resets in ${Math.floor(minutes / 60)}h ${minutes % 60}m`;
-  return `Resets ${reset.toLocaleDateString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}`;
-}
-
-function MobileOpenCodeQuotaLimits(props: {
-  readonly accounts: readonly PresentedQuotaAccount[];
-  readonly environmentCount: number;
-}) {
-  if (props.accounts.length === 0) return null;
-  return (
-    <View className="gap-4 border-t border-border pt-6">
-      <View className="gap-1">
-        <Text className="text-xl font-t3-semibold text-foreground">OpenCode Go</Text>
-        <Text className="text-sm text-foreground-muted">
-          Provider-reported and locally estimated limits across connected environments.
-        </Text>
-      </View>
-      {props.accounts.map((account) => (
-        <MobileQuotaCard
-          key={account.key}
-          account={account}
-          showEnvironment={props.environmentCount > 1}
-        />
-      ))}
-    </View>
-  );
-}
-
-function MobileQuotaCard(props: {
-  readonly account: PresentedQuotaAccount;
-  readonly showEnvironment: boolean;
-}) {
-  const colors = useProviderColors();
-  const provider = mobileQuotaProvider(props.account);
-  const [firstWindow, ...otherWindows] = props.account.windows;
-  if (firstWindow === undefined) return null;
-  const strongest = otherWindows.reduce(
-    (current, window) => (window.usedPercent > current.usedPercent ? window : current),
-    firstWindow,
-  );
-  return (
-    <View className="gap-5 rounded-[24px] border-continuous bg-card p-5">
-      <View className="flex-row items-center gap-3">
-        <View className="size-3 rounded-full" style={{ backgroundColor: colors[provider] }} />
-        <View className="min-w-0 flex-1">
-          <Text className="text-base font-t3-medium text-foreground" numberOfLines={1}>
-            {props.account.displayName}
-          </Text>
-          <Text className="text-sm text-foreground-muted" numberOfLines={1}>
-            {[
-              props.account.accountLabel,
-              props.account.planLabel,
-              props.showEnvironment ? quotaEnvironmentLabel(props.account) : null,
-            ]
-              .filter(Boolean)
-              .join(" · ") || PROVIDER_LABEL[provider]}
-          </Text>
-        </View>
-      </View>
-      <View className="gap-0.5">
-        <Text className="text-4xl font-t3-bold tabular-nums text-foreground">
-          {Math.round(100 - strongest.usedPercent)}% left
-        </Text>
-        <Text className="text-sm text-foreground-muted">Most constrained: {strongest.label}</Text>
-      </View>
-      <View className="gap-4">
-        {props.account.windows.map((window) => (
-          <View key={window.id} className="gap-2">
-            <View className="flex-row justify-between gap-3">
-              <Text className="text-sm text-foreground">{window.label}</Text>
-              <Text className="text-sm tabular-nums text-foreground-muted">
-                {Math.round(window.usedPercent)}% · {mobileFormatReset(window.resetsAt)}
-              </Text>
-            </View>
-            <View className="h-2 overflow-hidden rounded-full bg-subtle">
-              <View
-                className="h-full rounded-full"
-                style={{
-                  width: `${window.usedPercent}%`,
-                  backgroundColor: window.usedPercent >= 85 ? "#f59e0b" : colors[provider],
-                }}
-              />
-            </View>
-          </View>
-        ))}
-      </View>
     </View>
   );
 }

@@ -1,4 +1,4 @@
-import type { ProviderQuotaWindow } from "@t3tools/contracts";
+import type { ServerProviderUsageWindow } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 
@@ -15,100 +15,8 @@ const boundedPercent = (value: unknown): number | null => {
   return number === null ? null : Math.max(0, Math.min(100, number));
 };
 
-const plural = (count: number, unit: string): string => `${count} ${unit}${count === 1 ? "" : "s"}`;
 const OPEN_CODE_DOCUMENT_SCAN_CHAR_LIMIT = 256 * 1024;
 const OPEN_CODE_DOCUMENT_CANDIDATE_LIMIT = 64;
-
-const isoFromEpochSeconds = (value: unknown): string | null => {
-  const seconds = finiteNumber(value);
-  if (seconds === null) return null;
-  return Option.getOrNull(DateTime.make(seconds * 1000).pipe(Option.map(DateTime.formatIso)));
-};
-
-function windowLabel(durationMinutes: number | null, fallback: string): string {
-  if (durationMinutes === null) return fallback;
-  if (durationMinutes < 60) return plural(durationMinutes, "minute");
-  if (durationMinutes < 24 * 60 && durationMinutes % 60 === 0)
-    return plural(durationMinutes / 60, "hour");
-  if (durationMinutes % (7 * 24 * 60) === 0) {
-    const weeks = durationMinutes / (7 * 24 * 60);
-    return weeks === 1 ? "Weekly" : plural(weeks, "week");
-  }
-  if (durationMinutes % (24 * 60) === 0) return plural(durationMinutes / (24 * 60), "day");
-  return fallback;
-}
-
-function parseCodexWindow(
-  value: unknown,
-  id: string,
-  fallbackLabel: string,
-): ProviderQuotaWindow | null {
-  if (!isRecord(value)) return null;
-  const usedPercent = boundedPercent(value.usedPercent);
-  if (usedPercent === null) return null;
-  const rawDurationMinutes = finiteNumber(value.windowDurationMins);
-  const durationMinutes =
-    rawDurationMinutes !== null && rawDurationMinutes > 0 ? rawDurationMinutes : null;
-  return {
-    id,
-    label: windowLabel(durationMinutes, fallbackLabel),
-    usedPercent,
-    resetsAt: isoFromEpochSeconds(value.resetsAt),
-    durationMinutes,
-  };
-}
-
-export function parseCodexRateLimits(value: unknown): {
-  readonly planLabel: string | null;
-  readonly windows: readonly ProviderQuotaWindow[];
-} {
-  if (!isRecord(value)) return { planLabel: null, windows: [] };
-  const rateLimits = isRecord(value.rateLimits) ? value.rateLimits : value;
-  const windows = [
-    parseCodexWindow(rateLimits.primary, "primary", "Primary"),
-    parseCodexWindow(rateLimits.secondary, "secondary", "Secondary"),
-  ].filter((window): window is ProviderQuotaWindow => window !== null);
-  return {
-    planLabel: typeof rateLimits.planType === "string" ? rateLimits.planType : null,
-    windows,
-  };
-}
-
-interface ClaudeUsageWindow {
-  readonly utilization?: unknown;
-  readonly resets_at?: unknown;
-}
-
-function parseClaudeWindow(
-  value: unknown,
-  id: string,
-  label: string,
-  durationMinutes: number,
-): ProviderQuotaWindow | null {
-  if (!isRecord(value)) return null;
-  const window = value as ClaudeUsageWindow;
-  const usedPercent = boundedPercent(window.utilization);
-  if (usedPercent === null) return null;
-  const resetsAt =
-    typeof window.resets_at === "string" ? Option.getOrNull(DateTime.make(window.resets_at)) : null;
-  return {
-    id,
-    label,
-    usedPercent,
-    resetsAt: resetsAt === null ? null : DateTime.formatIso(resetsAt),
-    durationMinutes,
-  };
-}
-
-export function parseClaudeUsage(value: unknown): readonly ProviderQuotaWindow[] {
-  if (!isRecord(value)) return [];
-  return [
-    parseClaudeWindow(value.five_hour, "five-hour", "5 hour", 5 * 60),
-    parseClaudeWindow(value.seven_day, "seven-day", "Weekly", 7 * 24 * 60),
-    parseClaudeWindow(value.seven_day_opus, "seven-day-opus", "Weekly · Opus", 7 * 24 * 60),
-    parseClaudeWindow(value.seven_day_sonnet, "seven-day-sonnet", "Weekly · Sonnet", 7 * 24 * 60),
-  ].filter((window): window is ProviderQuotaWindow => window !== null);
-}
 
 const PERCENT_KEYS = [
   "usagePercent",
@@ -138,7 +46,7 @@ function parseOpenCodeWindow(
   id: string,
   label: string,
   nowMs: number,
-): ProviderQuotaWindow | null {
+): ServerProviderUsageWindow | null {
   const apiPercent = boundedPercent(record.percent);
   let usedPercent = apiPercent ?? boundedPercent(valueForKeys(record, PERCENT_KEYS));
   if (apiPercent === null && usedPercent !== null && usedPercent < 1) usedPercent *= 100;
@@ -158,7 +66,13 @@ function parseOpenCodeWindow(
   } else if (typeof rawResetAt === "string" || typeof rawResetAt === "number") {
     resetsAt = Option.getOrNull(DateTime.make(rawResetAt).pipe(Option.map(DateTime.formatIso)));
   }
-  return { id, label, usedPercent, resetsAt, durationMinutes: null };
+  return {
+    id,
+    kind: id === "five-hour" ? "session" : id === "weekly" ? "weekly" : "monthly",
+    label,
+    usedPercent,
+    ...(resetsAt ? { resetsAt } : {}),
+  };
 }
 
 function findNamedRecord(value: unknown, pattern: RegExp, depth = 0): JsonRecord | null {
@@ -184,7 +98,7 @@ function findNamedRecord(value: unknown, pattern: RegExp, depth = 0): JsonRecord
 export function parseOpenCodeGoUsage(
   value: unknown,
   nowMs: number,
-): readonly ProviderQuotaWindow[] {
+): readonly ServerProviderUsageWindow[] {
   const definitions = [
     { id: "five-hour", label: "5 hour", pattern: /(rolling|five.?hour|5h)/i },
     { id: "weekly", label: "Weekly", pattern: /week/i },
@@ -195,7 +109,7 @@ export function parseOpenCodeGoUsage(
       const record = findNamedRecord(value, pattern);
       return record === null ? null : parseOpenCodeWindow(record, id, label, nowMs);
     })
-    .filter((window): window is ProviderQuotaWindow => window !== null);
+    .filter((window): window is ServerProviderUsageWindow => window !== null);
 }
 
 export function parseOpenCodeGoDocument(text: string, nowMs: number): unknown {

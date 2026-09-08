@@ -621,11 +621,7 @@ export function resolveBackgroundDraftWorkspaceOptions(input: {
 export function cloneComposerImageForRetry(
   image: ComposerImageAttachment,
 ): ComposerImageAttachment {
-  if (
-    image.type !== "image" ||
-    typeof URL === "undefined" ||
-    !image.previewUrl.startsWith("blob:")
-  ) {
+  if (typeof URL === "undefined" || !image.previewUrl.startsWith("blob:")) {
     return image;
   }
   try {

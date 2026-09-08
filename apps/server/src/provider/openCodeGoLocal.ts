@@ -2,51 +2,13 @@
 import * as NodeFS from "node:fs";
 import * as NodeSqlite from "node:sqlite";
 
-import type { ProviderQuotaWindow } from "@t3tools/contracts";
+import type { ServerProviderUsageWindow } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 
 type JsonRecord = Record<string, unknown>;
 
 const isRecord = (value: unknown): value is JsonRecord =>
   typeof value === "object" && value !== null && !Array.isArray(value);
-
-export interface ClaudeNativeCredentials {
-  readonly accessToken: string;
-  readonly planLabel: string | null;
-}
-
-export function parseClaudeNativeCredentials(value: unknown): ClaudeNativeCredentials | null {
-  if (!isRecord(value) || !isRecord(value.claudeAiOauth)) return null;
-  const accessToken = value.claudeAiOauth.accessToken;
-  if (typeof accessToken !== "string" || accessToken.trim().length === 0) return null;
-  const subscriptionType = value.claudeAiOauth.subscriptionType;
-  const rateLimitTier = value.claudeAiOauth.rateLimitTier;
-  return {
-    accessToken: accessToken.trim(),
-    planLabel:
-      typeof subscriptionType === "string" && subscriptionType.trim().length > 0
-        ? subscriptionType.trim()
-        : typeof rateLimitTier === "string" && rateLimitTier.trim().length > 0
-          ? rateLimitTier.trim()
-          : null,
-  };
-}
-
-export function parseClaudeNativeCredentialsText(text: string): ClaudeNativeCredentials | null {
-  try {
-    return parseClaudeNativeCredentials(JSON.parse(text));
-  } catch {
-    return null;
-  }
-}
-
-export function readClaudeNativeCredentialsFile(path: string): ClaudeNativeCredentials | null {
-  try {
-    return parseClaudeNativeCredentialsText(NodeFS.readFileSync(path, "utf8"));
-  } catch {
-    return null;
-  }
-}
 
 export function readOpenCodeGoApiKey(path: string): string | null {
   try {
@@ -138,12 +100,11 @@ const iso = (epochMs: number): string => DateTime.formatIso(DateTime.makeUnsafe(
 
 export interface OpenCodeGoLocalQuota {
   readonly authenticated: boolean;
-  readonly windows: readonly ProviderQuotaWindow[];
+  readonly windows: readonly ServerProviderUsageWindow[];
 }
 
 /**
- * OpenCode Go does not expose quota through its CLI credential. Match CodexBar's
- * local fallback by estimating the documented plan windows from finalized
+ * When the Go API is unavailable, estimate the documented plan windows from finalized
  * `opencode-go` message costs, while using auth.json only as a sign-in signal.
  */
 export function readOpenCodeGoLocalQuota(input: {
@@ -189,25 +150,28 @@ export function readOpenCodeGoLocalQuota(input: {
       authenticated: true,
       windows: [
         {
-          id: "five-hour",
+          id: "five-hour-estimated",
+          kind: "session",
           label: "5 hour · estimated",
           usedPercent: percent(rollingCost, OPEN_CODE_GO_FIVE_HOUR_BUDGET_USD),
           resetsAt: iso((oldestRollingMs ?? input.nowMs) + fiveHoursMs),
-          durationMinutes: 5 * 60,
+          windowDurationMins: 5 * 60,
         },
         {
-          id: "weekly",
+          id: "weekly-estimated",
+          kind: "weekly",
           label: "Weekly · estimated",
           usedPercent: percent(weeklyCost, OPEN_CODE_GO_WEEKLY_BUDGET_USD),
           resetsAt: iso(weekStart + weekMs),
-          durationMinutes: 7 * 24 * 60,
+          windowDurationMins: 7 * 24 * 60,
         },
         {
-          id: "monthly",
+          id: "monthly-estimated",
+          kind: "monthly",
           label: "Monthly · estimated",
           usedPercent: percent(monthlyCost, OPEN_CODE_GO_MONTHLY_BUDGET_USD),
           resetsAt: iso(monthEnd),
-          durationMinutes: Math.round((monthEnd - monthStart) / 60_000),
+          windowDurationMins: Math.round((monthEnd - monthStart) / 60_000),
         },
       ],
     };

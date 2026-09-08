@@ -56,7 +56,9 @@ The Hermes fork also shows OpenCode Go rolling, weekly, and monthly limits when 
 credentials expose them. If the provider API is unavailable, finalized costs in the local
 `opencode.db` can supply an estimated fallback, identified in the window label. Set
 `OPENCODE_GO_WORKSPACE_ID` and `OPENCODE_GO_AUTH_COOKIE` only when the dashboard source is needed;
-the cookie is a sensitive session credential.
+the cookie is a sensitive session credential. Remote OpenCode servers require this dashboard
+source; local credentials and history belong to the environment running T3. Estimated windows
+are shown separately from provider-reported windows when pooling accounts.
 
 If a window looks stale, refresh Limits to re-check every provider and hub.
 

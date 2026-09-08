@@ -58,7 +58,6 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.serverGetResourceTelemetryHistory]: AuthOrchestrationReadScope,
   [WS_METHODS.serverRetryResourceTelemetry]: AuthOrchestrationOperateScope,
   [WS_METHODS.serverGetUsageSummary]: AuthOrchestrationReadScope,
-  [WS_METHODS.serverGetProviderQuota]: AuthOrchestrationReadScope,
   [WS_METHODS.hermesCronList]: AuthOrchestrationReadScope,
   // Pausing a scheduled task changes what the host will do on its own.
   [WS_METHODS.hermesCronSetEnabled]: AuthOrchestrationOperateScope,

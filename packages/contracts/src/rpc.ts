@@ -238,7 +238,6 @@ import {
   HindsightStatsInput,
   HindsightStatsResult,
 } from "./hindsight.ts";
-import { ProviderQuotaReadError, ProviderQuotaSummary } from "./providerQuota.ts";
 import {
   ProviderConsumeResetCreditInput,
   ProviderConsumeResetCreditResult,
@@ -356,7 +355,6 @@ export const WS_METHODS = {
   serverReportHostPowerState: "server.reportHostPowerState",
   serverGetBackgroundPolicy: "server.getBackgroundPolicy",
   serverGetUsageSummary: "server.getUsageSummary",
-  serverGetProviderQuota: "server.getProviderQuota",
   hermesCronList: "hermes.cronList",
   hermesCronSetEnabled: "hermes.cronSetEnabled",
   hermesCronSetMuted: "hermes.cronSetMuted",
@@ -659,12 +657,6 @@ const WsHindsightReflectRpc = Rpc.make(WS_METHODS.hindsightReflect, {
   payload: HindsightReflectInput,
   success: HindsightReflectResult,
   error: Schema.Union([EnvironmentAuthorizationError, HindsightError]),
-});
-
-const WsServerGetProviderQuotaRpc = Rpc.make(WS_METHODS.serverGetProviderQuota, {
-  payload: Schema.Struct({}),
-  success: ProviderQuotaSummary,
-  error: Schema.Union([EnvironmentAuthorizationError, ProviderQuotaReadError]),
 });
 
 /**
@@ -1311,7 +1303,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetResourceTelemetryHistoryRpc,
   WsServerRetryResourceTelemetryRpc,
   WsServerGetUsageSummaryRpc,
-  WsServerGetProviderQuotaRpc,
   WsHermesCronListRpc,
   WsHermesCronSetEnabledRpc,
   WsHermesCronSetMutedRpc,

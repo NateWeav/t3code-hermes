@@ -127,7 +127,6 @@ import * as HermesCronService from "./hermes/HermesCronService.ts";
 import * as HindsightService from "./integrations/hindsight/HindsightService.ts";
 import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
 import * as UsageService from "./usage/UsageService.ts";
-import * as ProviderQuotaService from "./providerQuota/ProviderQuotaService.ts";
 import { OrchestrationLayerLive } from "./orchestration/runtimeLayer.ts";
 import {
   clearPersistedServerRuntimeState,
@@ -205,10 +204,6 @@ const HermesCronLayerLive = HermesCronService.layer.pipe(Layer.provide(ServerSet
 // HttpClient comes from the outermost FetchHttpClient layer, the same way the
 // provider maintenance checks get theirs.
 const HindsightLayerLive = HindsightService.layer.pipe(Layer.provide(ServerSettingsLayerLive));
-const ProviderQuotaLayerLive = ProviderQuotaService.layer.pipe(
-  Layer.provide(ProcessRunner.layer),
-  Layer.provide(ServerSettingsLayerLive),
-);
 
 const ResourceDiagnosticsLayerLive = Layer.mergeAll(
   HostResources.layer,
@@ -530,7 +525,6 @@ const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
   Layer.provideMerge(UsageLayerLive),
   Layer.provideMerge(HermesCronLayerLive),
   Layer.provideMerge(HindsightLayerLive),
-  Layer.provideMerge(ProviderQuotaLayerLive),
   Layer.provideMerge(TraceDiagnostics.layer),
   Layer.provideMerge(AnalyticsService.layer),
   Layer.provideMerge(ExternalLauncher.layer),

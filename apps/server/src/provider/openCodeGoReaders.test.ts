@@ -1,53 +1,8 @@
 import { describe, expect, it } from "@effect/vitest";
 
-import {
-  parseClaudeUsage,
-  parseCodexRateLimits,
-  parseOpenCodeGoDocument,
-  parseOpenCodeGoUsage,
-} from "./providerQuotaReaders.ts";
+import { parseOpenCodeGoDocument, parseOpenCodeGoUsage } from "./openCodeGoReaders.ts";
 
 describe("provider quota readers", () => {
-  it("normalizes Codex primary and secondary windows", () => {
-    const parsed = parseCodexRateLimits({
-      rateLimits: {
-        planType: "plus",
-        primary: { usedPercent: 72, windowDurationMins: 300, resetsAt: 1_800_000_000 },
-        secondary: { usedPercent: 38, windowDurationMins: 10_080, resetsAt: 1_800_500_000 },
-      },
-    });
-
-    expect(parsed.planLabel).toBe("plus");
-    expect(parsed.windows).toEqual([
-      {
-        id: "primary",
-        label: "5 hours",
-        usedPercent: 72,
-        resetsAt: "2027-01-15T08:00:00.000Z",
-        durationMinutes: 300,
-      },
-      {
-        id: "secondary",
-        label: "Weekly",
-        usedPercent: 38,
-        resetsAt: "2027-01-21T02:53:20.000Z",
-        durationMinutes: 10_080,
-      },
-    ]);
-  });
-
-  it("normalizes Claude OAuth windows", () => {
-    expect(
-      parseClaudeUsage({
-        five_hour: { utilization: 41, resets_at: "2026-08-16T21:00:00Z" },
-        seven_day: { utilization: 23, resets_at: "2026-08-17T07:00:00Z" },
-      }),
-    ).toMatchObject([
-      { id: "five-hour", label: "5 hour", usedPercent: 41 },
-      { id: "seven-day", label: "Weekly", usedPercent: 23 },
-    ]);
-  });
-
   it("finds OpenCode Go rolling, weekly, and monthly windows in nested data", () => {
     const now = 1_700_000_000_000;
     expect(
@@ -111,17 +66,7 @@ describe("provider quota readers", () => {
     expect(parseOpenCodeGoDocument("<html>No quota data</html>", 0)).toBeNull();
   });
 
-  it("rejects non-positive Codex window durations", () => {
-    expect(
-      parseCodexRateLimits({
-        primary: { usedPercent: 10, windowDurationMins: 0, resetsAt: 1_800_000_000 },
-      }).windows,
-    ).toMatchObject([{ id: "primary", label: "Primary", durationMinutes: null }]);
-  });
-
   it("does not turn malformed provider payloads into zero usage", () => {
-    expect(parseCodexRateLimits({}).windows).toEqual([]);
-    expect(parseClaudeUsage({ five_hour: null })).toEqual([]);
     expect(parseOpenCodeGoUsage({ usage: "unknown" }, 0)).toEqual([]);
   });
 });

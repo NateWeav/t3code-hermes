@@ -1,17 +1,11 @@
 import { RefreshIcon } from "~/components/ui/refresh-icon";
 import { useAtomValue } from "@effect/atom-react";
 import {
-  quotaEnvironmentLabel,
-  type PresentedQuotaAccount,
-} from "@t3tools/client-runtime/state/provider-quota";
-import {
   USAGE_CONTRACT_VERSION,
   type EnvironmentId,
-  type ProviderQuotaAccount,
   type UsageProviderKind,
 } from "@t3tools/contracts";
 import {
-  AlertTriangleIcon,
   CircleAlertIcon,
   ChevronDownIcon,
   CircleDashedIcon,
@@ -28,7 +22,6 @@ import {
 import { isElectron } from "../../env";
 import { cn } from "../../lib/utils";
 import { environmentPresentations } from "../../state/presentation";
-import { useProviderQuota } from "../../state/providerQuota";
 import { serverEnvironment } from "../../state/server";
 import { useUsage, type EnvironmentUsageStatus } from "../../state/usage";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -58,7 +51,6 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { SidebarInset } from "../ui/sidebar";
 import { Skeleton } from "../ui/skeleton";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
   WorkspaceBreadcrumb,
   WorkspaceBreadcrumbItem,
@@ -125,8 +117,6 @@ export function UsagePage() {
   const refreshProviders = useAtomCommand(serverEnvironment.refreshProviders, {
     reportFailure: false,
   });
-  const quota = useProviderQuota();
-  const openCodeQuotaAccounts = quota.accounts.filter((account) => account.provider === "opencode");
 
   const days = useMemo(
     () => enumerateDays(window.sinceDay, window.untilDay),
@@ -176,7 +166,6 @@ export function UsagePage() {
     if (refreshingRef.current) return;
 
     if (showingLimits) {
-      quota.refresh();
       refreshingRef.current = true;
       setIsRefreshing(true);
       void Promise.all(
@@ -360,13 +349,7 @@ export function UsagePage() {
                   : `Select an environment to see ${showingLimits ? "limits" : "usage"}.`}
               </p>
             ) : showingLimits ? (
-              <div className="flex flex-col gap-8">
-                <UsageLimitsSection selectedEnvironmentIds={selectedEnvironmentIds} />
-                <OpenCodeQuotaLimits
-                  accounts={openCodeQuotaAccounts}
-                  environmentCount={quota.environments.length}
-                />
-              </div>
+              <UsageLimitsSection selectedEnvironmentIds={selectedEnvironmentIds} />
             ) : isPending ? (
               <UsageSkeleton />
             ) : (
@@ -611,141 +594,6 @@ export function UsagePage() {
         </ScrollArea>
       </div>
     </SidebarInset>
-  );
-}
-
-function quotaProvider(account: ProviderQuotaAccount): UsageProviderKind {
-  return account.provider === "claudeAgent"
-    ? "claude"
-    : account.provider === "opencode"
-      ? "opencode"
-      : "codex";
-}
-
-function formatQuotaResetTime(resetsAt: string | null): string {
-  if (resetsAt === null) return "Reset time unavailable";
-  const reset = new Date(resetsAt);
-  if (Number.isNaN(reset.valueOf())) return "Reset time unavailable";
-  const remainingMs = reset.valueOf() - Date.now();
-  if (remainingMs <= 0) return "Resetting now";
-  const minutes = Math.ceil(remainingMs / 60_000);
-  if (minutes < 60) return `Resets in ${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  const remainder = minutes % 60;
-  if (hours < 24) return `Resets in ${hours}h${remainder === 0 ? "" : ` ${remainder}m`}`;
-  return `Resets ${reset.toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}`;
-}
-
-/** The fork's OpenCode Go source is additive to upstream's provider and hub limit snapshots. */
-function OpenCodeQuotaLimits({
-  accounts,
-  environmentCount,
-}: {
-  readonly accounts: readonly PresentedQuotaAccount[];
-  readonly environmentCount: number;
-}) {
-  if (accounts.length === 0) return null;
-  return (
-    <section className="flex flex-col gap-3">
-      <div className="flex flex-col gap-1">
-        <h2 className="text-sm font-medium text-foreground">OpenCode Go</h2>
-        <p className="text-xs text-muted-foreground">
-          Provider-reported and locally estimated OpenCode Go limits across connected environments.
-        </p>
-      </div>
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {accounts.map((account) => (
-          <QuotaAccountCard
-            key={account.key}
-            account={account}
-            showEnvironment={environmentCount > 1}
-          />
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function QuotaAccountCard({
-  account,
-  showEnvironment,
-}: {
-  readonly account: PresentedQuotaAccount;
-  readonly showEnvironment: boolean;
-}) {
-  const provider = quotaProvider(account);
-  const [firstWindow, ...otherWindows] = account.windows;
-  if (firstWindow === undefined) return null;
-  const strongestWindow = otherWindows.reduce(
-    (strongest, window) => (window.usedPercent > strongest.usedPercent ? window : strongest),
-    firstWindow,
-  );
-  const remaining = Math.max(0, 100 - strongestWindow.usedPercent);
-  const color = PROVIDER_PRESENTATION[provider].color;
-  return (
-    <article className="flex min-h-52 flex-col rounded-xl border border-border bg-card p-5">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <ProviderMark provider={provider} className="size-5" />
-          <div className="min-w-0">
-            <h3 className="truncate text-sm font-medium text-foreground">
-              {account.displayName || "OpenCode Go"}
-            </h3>
-            <p className="truncate text-xs text-muted-foreground">
-              {[
-                account.accountLabel,
-                account.planLabel,
-                showEnvironment ? quotaEnvironmentLabel(account) : null,
-              ]
-                .filter(Boolean)
-                .join(" · ") || "OpenCode Go"}
-            </p>
-          </div>
-        </div>
-        {account.status === "failed" ? (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <span className="text-amber-500">
-                  <AlertTriangleIcon className="size-4" />
-                </span>
-              }
-            />
-            <TooltipPopup side="top">Showing the last successful values</TooltipPopup>
-          </Tooltip>
-        ) : null}
-      </div>
-      <div className="mt-7 text-3xl font-semibold tracking-tight text-foreground tabular-nums">
-        {Math.round(remaining)}% left
-      </div>
-      <p className="mt-0.5 text-xs text-muted-foreground">
-        Most constrained: {strongestWindow.label}
-      </p>
-      <div className="mt-5 flex flex-col gap-4">
-        {account.windows.map((window) => (
-          <div key={window.id} className="flex flex-col gap-1.5">
-            <div className="flex items-baseline justify-between gap-3 text-xs">
-              <span className="text-foreground">{window.label}</span>
-              <span className="text-muted-foreground tabular-nums">
-                {Math.round(window.usedPercent)}% used · {formatQuotaResetTime(window.resetsAt)}
-              </span>
-            </div>
-            <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-              <div
-                className="h-full rounded-full"
-                style={{
-                  width: `${window.usedPercent}%`,
-                  backgroundColor: window.usedPercent >= 85 ? "var(--color-amber-500)" : color,
-                }}
-              />
-            </div>
-          </div>
-        ))}
-      </div>
-      {account.status === "failed" ? (
-        <div className="mt-auto pt-4 text-[10px] text-muted-foreground">{account.message}</div>
-      ) : null}
-    </article>
   );
 }
 

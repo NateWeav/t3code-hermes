@@ -41,6 +41,7 @@ import {
   type ProviderDriver,
   type ProviderInstance,
 } from "../ProviderDriver.ts";
+import { readOpenCodeGoUsageLimits } from "../openCodeGoUsageLimits.ts";
 import { withInstanceIdentity } from "./instanceIdentity.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import {
@@ -152,6 +153,17 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
         serverConfig.cwd,
         processEnv,
       ).pipe(
+        Effect.flatMap((snapshot) =>
+          !enabled
+            ? Effect.succeed(snapshot)
+            : readOpenCodeGoUsageLimits({
+                environment: processEnv,
+                isExternalServer: effectiveConfig.serverUrl.trim().length > 0,
+              }).pipe(
+                Effect.provideService(HttpClient.HttpClient, httpClient),
+                Effect.map((usageLimits) => ({ ...snapshot, usageLimits })),
+              ),
+        ),
         Effect.map(stampIdentity),
         Effect.provideService(OpenCodeServerOwner.OpenCodeServerOwner, serverOwner),
         Effect.provideService(OpenCodeRuntime, openCodeRuntime),

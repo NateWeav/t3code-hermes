@@ -229,6 +229,7 @@ export class HindsightService extends Context.Service<
   }
 >()("t3/integrations/hindsight/HindsightService") {}
 
+/** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const settingsService = yield* ServerSettings.ServerSettingsService;
   const client = yield* HttpClient.HttpClient;

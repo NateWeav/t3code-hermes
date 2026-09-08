@@ -319,7 +319,7 @@ export type HindsightReflectResult = typeof HindsightReflectResult.Type;
  * has no such resting state — the user pressed a button and is owed an answer —
  * so it keeps the same vocabulary in a failure the client can toast.
  */
-export class HindsightError extends Schema.TaggedErrorClass<HindsightError>()("HindsightError", {
+export class HindsightError extends Schema.TaggedError<HindsightError>()("HindsightError", {
   reason: Schema.Literals([
     "notConfigured",
     "offline",

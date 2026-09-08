@@ -45,7 +45,7 @@ export const emptyHermesCronView: HermesCronView = {
  * environment sends the announcement and the refreshed snapshot separately,
  * and blanking the list in between would flash the panel empty.
  */
-export function foldHermesCronEvent(
+function foldHermesCronEvent(
   previous: HermesCronView,
   event: HermesCronStreamEvent,
 ): HermesCronView {

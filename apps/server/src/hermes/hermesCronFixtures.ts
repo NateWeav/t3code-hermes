@@ -19,7 +19,6 @@
  */
 
 /** The Hermes release these fixtures were transcribed from. */
-export const HERMES_FIXTURE_VERSION = "0.20.2";
 
 /**
  * Verbatim from `cron/executions.py`. The `CHECK` constraint is load-bearing:

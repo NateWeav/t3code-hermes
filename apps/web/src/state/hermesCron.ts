@@ -28,7 +28,7 @@ const HERMES_DRIVER_KIND = ProviderDriverKind.make("hermes");
  * keeps the panel reachable from a laptop pointed at a remote host, matching
  * how mobile already picks its environment.
  */
-export const hermesEnvironmentIdAtom = Atom.make((get): EnvironmentId | null => {
+const hermesEnvironmentIdAtom = Atom.make((get): EnvironmentId | null => {
   const primaryId = get(primaryEnvironmentIdAtom);
   const candidates: EnvironmentId[] = [];
   for (const [environmentId] of get(environmentPresentations.presentationsAtom)) {
@@ -57,7 +57,7 @@ export const hermesEnvironmentIdAtom = Atom.make((get): EnvironmentId | null => 
  * Drives the sidebar entry point: with no Hermes there is nothing to schedule,
  * so the button never appears rather than leading to an explanatory page.
  */
-export const hermesProviderPresentAtom = Atom.make(
+const hermesProviderPresentAtom = Atom.make(
   (get): boolean => get(hermesEnvironmentIdAtom) !== null,
 ).pipe(Atom.withLabel("web-hermes-provider-present"));
 

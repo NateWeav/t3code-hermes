@@ -203,7 +203,7 @@ export const HermesCronMutationResult = Schema.Struct({
 });
 export type HermesCronMutationResult = typeof HermesCronMutationResult.Type;
 
-export class HermesCronError extends Schema.TaggedErrorClass<HermesCronError>()("HermesCronError", {
+export class HermesCronError extends Schema.TaggedError<HermesCronError>()("HermesCronError", {
   reason: Schema.Literals(["providerDisabled", "unknownJob", "commandFailed", "unreadable"]),
   /** Stable, bounded description. The underlying failure travels in `cause`. */
   detail: TrimmedNonEmptyString,

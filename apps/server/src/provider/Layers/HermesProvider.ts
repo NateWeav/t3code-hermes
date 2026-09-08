@@ -201,7 +201,7 @@ const UPSTREAM_DISPLAY_NAMES: Readonly<Record<string, string>> = {
 };
 
 /** Render the upstreams Hermes reported as an auth card subtitle. */
-export function formatUpstreamLabel(upstreams: ReadonlyArray<string>): string {
+function formatUpstreamLabel(upstreams: ReadonlyArray<string>): string {
   return upstreams
     .map(
       (upstream) =>

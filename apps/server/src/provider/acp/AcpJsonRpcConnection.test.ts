@@ -71,6 +71,7 @@ describe("AcpSessionRuntime", () => {
           "AvailableCommandsUpdated",
           "ModeChanged",
           "ConfigOptionsUpdated",
+          "UsageUpdated",
         ]);
         expect(events[0]).toMatchObject({
           availableCommands: [{ name: "plan", description: "Native command" }],
@@ -78,6 +79,10 @@ describe("AcpSessionRuntime", () => {
         expect(yield* runtime.getModeState).toMatchObject({ currentModeId: "code" });
         expect(events[2]).toMatchObject({
           configOptions: yield* runtime.getConfigOptions,
+        });
+        expect(events[3]).toMatchObject({
+          _tag: "UsageUpdated",
+          usage: { usedTokens: 48_120, maxTokens: 200_000 },
         });
         expect(
           (yield* runtime.getConfigOptions).find((option) => option.category === "model"),

@@ -408,14 +408,28 @@ describe("ClientSettings sidebar", () => {
 });
 
 describe("ClientSettings context window meter", () => {
-  it("defaults off and preserves an explicit legacy opt-in", () => {
-    expect(decodeClientSettings({}).contextWindowMeterEnabled).toBe(false);
+  it("restores the indicator for settings saved with the retired hidden default", () => {
     expect(
-      decodeClientSettings({ contextWindowMeterEnabled: true }).contextWindowMeterEnabled,
+      decodeClientSettings({ contextWindowMeterEnabled: false }).contextWindowIndicatorEnabled,
+    ).toBe(true);
+  });
+
+  it("defaults on and preserves explicit visibility preferences", () => {
+    expect(decodeClientSettings({}).contextWindowIndicatorEnabled).toBe(true);
+    expect(
+      decodeClientSettings({ contextWindowIndicatorEnabled: false }).contextWindowIndicatorEnabled,
+    ).toBe(false);
+    expect(
+      decodeClientSettings({ contextWindowIndicatorEnabled: true }).contextWindowIndicatorEnabled,
     ).toBe(true);
     expect(
-      decodeClientSettingsPatch({ contextWindowMeterEnabled: true }).contextWindowMeterEnabled,
+      decodeClientSettingsPatch({ contextWindowIndicatorEnabled: true })
+        .contextWindowIndicatorEnabled,
     ).toBe(true);
+    expect(
+      decodeClientSettingsPatch({ contextWindowIndicatorEnabled: false })
+        .contextWindowIndicatorEnabled,
+    ).toBe(false);
   });
 });
 

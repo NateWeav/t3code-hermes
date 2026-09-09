@@ -1350,6 +1350,14 @@ const program = Effect.gen(function* () {
           yield* agent.client.sessionUpdate({
             sessionId: metadataSessionId,
             update: {
+              sessionUpdate: "usage_update",
+              used: metadataSessionId === sessionId ? 48_120 : 100,
+              size: 200_000,
+            },
+          });
+          yield* agent.client.sessionUpdate({
+            sessionId: metadataSessionId,
+            update: {
               sessionUpdate: "agent_message_chunk",
               content: { type: "text", text: "Startup transcript must not replay." },
             },

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 #
 # t3code-update.sh — idempotent self-update for a headless T3 Code (Hermes fork)
-# install that runs from TypeScript source under a systemd *user* unit.
+# install that runs bundled published nightlies under a systemd *user* unit.
 #
-#   1. fetch origin/<branch>; exit 0 quietly when the checkout is already current
+#   1. resolve the latest published nightly and fetch its tag
 #   2. stop the server FIRST (frees RAM before the memory-heavy web build)
-#   3. hard-reset the checkout, `pnpm install --frozen-lockfile`, build only the web app
+#   3. hard-reset the checkout, `pnpm install --frozen-lockfile`, build the web app and server bundle
 #   4. restart, then health-check (systemctl is-active + HTTP probe)
 #   5. on failure: roll back to the previous commit, restore/rebuild, restart, exit non-zero
 #
@@ -27,7 +27,8 @@ set -euo pipefail
 # remainder. Run from a throwaway copy instead. A script change therefore takes
 # effect on the *next* run, which is the safe ordering.
 # ---------------------------------------------------------------------------
-if [[ "${T3CODE_UPDATE_REEXEC:-0}" != "1" ]]; then
+if [[ "${BASH_SOURCE[0]}" == "$0" && "${T3CODE_UPDATE_REEXEC:-0}" != "1" ]]; then
+  export T3CODE_UPDATE_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   __self_copy="$(mktemp "${TMPDIR:-/tmp}/t3code-update.XXXXXX")"
   cat "${BASH_SOURCE[0]}" >"${__self_copy}"
   export T3CODE_UPDATE_REEXEC=1
@@ -51,7 +52,7 @@ fi
 
 # Git remote the install tracks. Must be the fork, never upstream.
 T3CODE_REPO_URL="${T3CODE_REPO_URL:-https://github.com/NateWeav/t3code-hermes.git}"
-T3CODE_BRANCH="${T3CODE_BRANCH:-main}"
+T3CODE_BRANCH="nightly-deploy"
 # Checkout the systemd unit runs from (WorkingDirectory / ExecStart path).
 T3CODE_DIR="${T3CODE_DIR:-${HOME}/t3code}"
 # The server's systemd *user* unit.
@@ -65,9 +66,8 @@ T3CODE_HEALTH_PATH="${T3CODE_HEALTH_PATH:-/}"
 T3CODE_HEALTH_TIMEOUT_SECONDS="${T3CODE_HEALTH_TIMEOUT_SECONDS:-150}"
 T3CODE_HEALTH_REQUEST_TIMEOUT_SECONDS="${T3CODE_HEALTH_REQUEST_TIMEOUT_SECONDS:-10}"
 T3CODE_HEALTH_INTERVAL_SECONDS="${T3CODE_HEALTH_INTERVAL_SECONDS:-5}"
-# V8 heap cap for the web build. hyperion has 11 GB RAM and NO swap; the server
-# is stopped before this runs, but other services still hold most of it.
-T3CODE_BUILD_HEAP_MB="${T3CODE_BUILD_HEAP_MB:-2560}"
+# V8 heap cap for builds; stop the server first to free memory.
+T3CODE_BUILD_HEAP_MB="${T3CODE_BUILD_HEAP_MB:-4096}"
 T3CODE_WEB_PACKAGE="${T3CODE_WEB_PACKAGE:-@t3tools/web}"
 # Marker files (last deployed commit, known-bad commit) and the run lock.
 T3CODE_STATE_DIR="${T3CODE_STATE_DIR:-${XDG_STATE_HOME:-${HOME}/.local/state}/t3code-update}"
@@ -77,10 +77,13 @@ T3CODE_DISCARD_LOCAL_CHANGES="${T3CODE_DISCARD_LOCAL_CHANGES:-0}"
 VERBOSE="${T3CODE_UPDATE_VERBOSE:-0}"
 FORCE=0
 
-FETCH_REFSPEC="+refs/heads/${T3CODE_BRANCH}:refs/remotes/origin/${T3CODE_BRANCH}"
-REMOTE_REF="refs/remotes/origin/${T3CODE_BRANCH}"
+NIGHTLY_TAG=""
+FETCH_REFSPEC=""
+REMOTE_REF=""
 WEB_DIST="${T3CODE_DIR}/apps/web/dist"
 DIST_ROLLBACK="${T3CODE_STATE_DIR}/web-dist-rollback"
+SERVER_DIST="${T3CODE_DIR}/apps/server/dist"
+SERVER_DIST_ROLLBACK="${T3CODE_STATE_DIR}/server-dist-rollback"
 FAILED_MARKER="${T3CODE_STATE_DIR}/failed-commit"
 DEPLOYED_MARKER="${T3CODE_STATE_DIR}/deployed-commit"
 
@@ -209,16 +212,16 @@ ensure_checkout() {
   case "${T3CODE_DIR}" in
     "${HOME}" | "${HOME}/" | /) die "refusing to manage T3CODE_DIR=${T3CODE_DIR}" ;;
   esac
-  local t3_home="${T3CODE_HOME:-${HOME}/.t3}"
+  local t3_home="${T3HERMES_HOME:-${HOME}/.t3}"
   case "${t3_home%/}/" in
     "${T3CODE_DIR%/}"/*)
-      die "T3CODE_HOME (${t3_home}) is inside ${T3CODE_DIR}; the updater would clobber server state"
+      die "T3HERMES_HOME (${t3_home}) is inside ${T3CODE_DIR}; the updater would clobber server state"
       ;;
   esac
 
   if [[ ! -e "${T3CODE_DIR}" ]]; then
     log "no checkout at ${T3CODE_DIR} — cloning ${T3CODE_REPO_URL} (${T3CODE_BRANCH})"
-    run git clone --branch "${T3CODE_BRANCH}" "${T3CODE_REPO_URL}" "${T3CODE_DIR}"
+    run git clone --branch "${NIGHTLY_TAG}" "${T3CODE_REPO_URL}" "${T3CODE_DIR}"
     BOOTSTRAPPED=1
     return
   fi
@@ -241,9 +244,16 @@ ensure_checkout() {
   run git -C "${T3CODE_DIR}" fetch --prune origin "${FETCH_REFSPEC}"
   run git -C "${T3CODE_DIR}" symbolic-ref HEAD "refs/heads/${T3CODE_BRANCH}"
   run git -C "${T3CODE_DIR}" reset --hard "${REMOTE_REF}"
-  git_repo branch --set-upstream-to "origin/${T3CODE_BRANCH}" "${T3CODE_BRANCH}" >/dev/null 2>&1 || true
   BOOTSTRAPPED=1
   log "bootstrap complete at $(git_repo rev-parse --short HEAD)"
+}
+
+resolve_nightly() {
+  NIGHTLY_TAG="$(node "${T3CODE_UPDATE_SCRIPT_DIR}/resolve-nightly.ts" "${T3CODE_REPO_URL}")"
+  export APP_VERSION="${NIGHTLY_TAG#v}"
+  FETCH_REFSPEC="+refs/tags/${NIGHTLY_TAG}:refs/tags/${NIGHTLY_TAG}"
+  REMOTE_REF="refs/tags/${NIGHTLY_TAG}"
+  debug "latest published nightly: ${NIGHTLY_TAG}"
 }
 
 fetch_origin() {
@@ -372,36 +382,55 @@ install_deps() {
   (cd "${T3CODE_DIR}" && run pnpm install --frozen-lockfile)
 }
 
-# The web build is the only build step (the server runs from TS source) and the
-# only memory-heavy one, hence the explicit heap cap on a swapless host.
-build_web() {
+# Build both artifacts from the same release, with the release version embedded.
+build_release() {
   log "+ NODE_OPTIONS=--max-old-space-size=${T3CODE_BUILD_HEAP_MB} pnpm --filter ${T3CODE_WEB_PACKAGE} build"
   (
-    cd "${T3CODE_DIR}"
+    cd "${T3CODE_DIR}" || exit $?
     NODE_OPTIONS="--max-old-space-size=${T3CODE_BUILD_HEAP_MB}" \
       pnpm --filter "${T3CODE_WEB_PACKAGE}" build
+  ) || return $?
+  # Stamp only the bundle input, then restore the tracked manifest even on failure.
+  (
+    cd "${T3CODE_DIR}" || exit $?
+    manifest_backup="$(mktemp)" || exit $?
+    cp apps/server/package.json "$manifest_backup" || exit $?
+    trap 'status=$?; cp "$manifest_backup" apps/server/package.json || exit 1; rm -f "$manifest_backup"; exit "$status"' EXIT
+    node --input-type=module - <<'STAMP' || exit $?
+import { readFileSync, writeFileSync } from "node:fs";
+const path = "apps/server/package.json";
+const pkg = JSON.parse(readFileSync(path, "utf8"));
+pkg.version = process.env.APP_VERSION;
+writeFileSync(path, JSON.stringify(pkg, null, 2) + "\n");
+STAMP
+    NODE_OPTIONS="--max-old-space-size=${T3CODE_BUILD_HEAP_MB}" pnpm --filter t3-hermes build:bundle || exit $?
+    cp -a apps/web/dist apps/server/dist/client || exit $?
+    [[ "$(node apps/server/dist/bin.mjs --version)" == "t3-hermes v${APP_VERSION}" ]] || exit 1
+    printf "%s\n" "$APP_VERSION" > apps/server/dist/.nightly-version
   )
 }
 
 stash_dist() {
-  rm -rf "${DIST_ROLLBACK}"
-  if [[ -d "${WEB_DIST}" ]]; then
-    mv "${WEB_DIST}" "${DIST_ROLLBACK}"
-    DIST_STASHED=1
-    debug "kept the previous web build at ${DIST_ROLLBACK} for rollback"
+  rm -rf "${DIST_ROLLBACK}" "${SERVER_DIST_ROLLBACK}" || return $?
+  [[ ! -d "${SERVER_DIST}" ]] || mv "${SERVER_DIST}" "${SERVER_DIST_ROLLBACK}" || return $?
+  if [[ -d "${WEB_DIST}" ]] && ! mv "${WEB_DIST}" "${DIST_ROLLBACK}"; then
+    [[ ! -d "${SERVER_DIST_ROLLBACK}" ]] || mv "${SERVER_DIST_ROLLBACK}" "${SERVER_DIST}" || return $?
+    return 1
   fi
+  DIST_STASHED=1
 }
 
 restore_dist() {
-  [[ "${DIST_STASHED}" == "1" && -d "${DIST_ROLLBACK}" ]] || return 1
-  rm -rf "${WEB_DIST}"
-  mv "${DIST_ROLLBACK}" "${WEB_DIST}"
+  [[ "${DIST_STASHED}" == "1" ]] || return 1
+  rm -rf "${WEB_DIST}" "${SERVER_DIST}" || return $?
+  [[ ! -d "${SERVER_DIST_ROLLBACK}" ]] || mv "${SERVER_DIST_ROLLBACK}" "${SERVER_DIST}" || return $?
+  [[ ! -d "${DIST_ROLLBACK}" ]] || mv "${DIST_ROLLBACK}" "${WEB_DIST}" || return $?
   DIST_STASHED=0
-  log "restored the previous web build from ${DIST_ROLLBACK}"
+  log "restored the pre-update server and web assets"
 }
 
 discard_dist_backup() {
-  rm -rf "${DIST_ROLLBACK}"
+  rm -rf "${DIST_ROLLBACK}" "${SERVER_DIST_ROLLBACK}" || return $?
   DIST_STASHED=0
 }
 
@@ -409,14 +438,14 @@ discard_dist_backup() {
 # disk are still the ones that go with the commit we are rolling back to.
 restore_web_assets_for_rollback() {
   if restore_dist; then
-    log "reused the pre-update web build; skipping the rollback rebuild"
+    log "reused the pre-update assets; skipping the rollback rebuild"
     return
   fi
   if [[ -f "${WEB_DIST}/index.html" ]]; then
     log "the existing web build predates this run; skipping the rollback rebuild"
     return
   fi
-  build_web || err "rollback rebuild failed — the web assets may be missing or stale"
+  build_release || err "rollback rebuild failed — the web assets may be missing or stale"
 }
 
 # ---------------------------------------------------------------------------
@@ -472,24 +501,26 @@ rollback() {
 main() {
   preflight
   acquire_lock
+  resolve_nightly
   ensure_checkout
   resolve_health_target
 
   fetch_origin
 
   local target_sha current_sha
-  target_sha="$(git_repo rev-parse "${REMOTE_REF}")"
+  target_sha="$(git_repo rev-parse "${REMOTE_REF}^{commit}")"
   current_sha="$(git_repo rev-parse HEAD 2>/dev/null || echo "")"
 
-  if [[ "${current_sha}" == "${target_sha}" && -f "${WEB_DIST}/index.html" ]] &&
-    [[ "${FORCE}" != "1" && "${BOOTSTRAPPED}" != "1" ]]; then
+  if [[ "${current_sha}" == "${target_sha}" && -f "${WEB_DIST}/index.html" && -f "${SERVER_DIST}/bin.mjs" && -f "${SERVER_DIST}/client/index.html" && -f "${SERVER_DIST}/.nightly-version" ]] &&
+    [[ "${FORCE}" != "1" && "${BOOTSTRAPPED}" != "1" ]] &&
+    [[ "$(cat "${SERVER_DIST}/.nightly-version")" == "${APP_VERSION}" ]]; then
     debug "already at ${target_sha} with a built web app — nothing to do"
     exit 0
   fi
 
   if [[ "${FORCE}" != "1" && -f "${FAILED_MARKER}" ]] &&
     [[ "$(cat "${FAILED_MARKER}")" == "${target_sha}" ]]; then
-    err "origin/${T3CODE_BRANCH} is still ${target_sha}, which failed to deploy on a previous run"
+    err "${NIGHTLY_TAG} is still ${target_sha}, which failed to deploy on a previous run"
     err "not retrying. Remove ${FAILED_MARKER} or run with --force once it is fixed."
     exit 1
   fi
@@ -521,10 +552,12 @@ main() {
     rollback "${current_sha}" "${target_sha}" "pnpm install --frozen-lockfile failed"
   fi
 
-  stash_dist
+  if ! stash_dist; then
+    rollback "${current_sha}" "${target_sha}" "could not back up build artifacts"
+  fi
 
-  if ! build_web; then
-    rollback "${current_sha}" "${target_sha}" "web build failed (out of memory? lower T3CODE_BUILD_HEAP_MB)"
+  if ! build_release; then
+    rollback "${current_sha}" "${target_sha}" "release build failed (check build logs and T3CODE_BUILD_HEAP_MB)"
   fi
 
   if ! start_service; then
@@ -538,7 +571,10 @@ main() {
   discard_dist_backup
   rm -f "${FAILED_MARKER}"
   printf '%s\n' "${target_sha}" >"${DEPLOYED_MARKER}"
-  log "updated to ${target_sha} and ${T3CODE_SERVICE} is healthy"
+  printf '%s\n' "${NIGHTLY_TAG}" >"${T3CODE_STATE_DIR}/deployed-nightly"
+  log "updated to ${NIGHTLY_TAG} (${target_sha}) and ${T3CODE_SERVICE} is healthy"
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

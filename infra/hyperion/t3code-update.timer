@@ -12,14 +12,10 @@ Documentation=file:%h/t3code/infra/hyperion/README.md
 
 [Timer]
 Unit=t3code-update.service
-; 09:00 UTC = 05:00 US/Eastern in EDT, 04:00 in EST. Deliberately in UTC so the
-; window does not drift across DST.
-OnCalendar=*-*-* 09:00:00 UTC
-; Spread the load (and the GitHub fetch) over the following half hour.
-RandomizedDelaySec=30m
-AccuracySec=1m
-; Run once after boot if the machine was off when the timer should have fired.
-Persistent=true
+OnBootSec=2m
+OnUnitInactiveSec=5m
+RandomizedDelaySec=30s
+AccuracySec=10s
 
 [Install]
 WantedBy=timers.target

@@ -9,7 +9,7 @@
 ; Adjust the two %h-relative paths below if the checkout does not live in ~/t3code.
 
 [Unit]
-Description=Update the T3 Code checkout (Hermes fork) and rebuild the web app
+Description=Deploy the latest published T3 Code nightly (Hermes fork)
 Documentation=file:%h/t3code/infra/hyperion/README.md
 After=network-online.target
 Wants=network-online.target
@@ -18,12 +18,11 @@ After=t3code.service
 
 [Service]
 Type=oneshot
-WorkingDirectory=%h/t3code
-; The script re-execs from a private copy of itself, so running it out of the
-; checkout it is about to hard-reset is safe.
-ExecStart=%h/t3code/infra/hyperion/t3code-update.sh
+WorkingDirectory=%h
+; Keep the updater and its helper outside the release checkout.
+ExecStart=%h/.local/lib/t3code-update/t3code-update.sh
 
-; Host-specific settings (repo URL, branch, health host:port, heap cap).
+; Host-specific settings (repo URL, health host:port, heap cap).
 ; The leading "-" makes the file optional. See t3code-update.env.example.
 EnvironmentFile=-%h/.config/t3code-update.env
 
@@ -40,8 +39,7 @@ TimeoutStartSec=3600
 Nice=10
 IOSchedulingClass=idle
 ; Optional hard cap (needs the memory controller delegated to the user slice).
-; The box has no swap, so a too-low value gets the build OOM-killed rather than
-; slowed down — prefer lowering T3CODE_BUILD_HEAP_MB instead.
+; Prefer tuning T3CODE_BUILD_HEAP_MB before setting a hard cap.
 ;MemoryMax=4G
 
 ; No [Install] section on purpose: this unit is triggered by t3code-update.timer

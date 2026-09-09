@@ -1,14 +1,14 @@
 {
-  "name": "t3",
+  "name": "t3-hermes",
   "version": "0.0.40",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/pingdotgg/t3code",
+    "url": "https://github.com/NateWeav/t3code-hermes",
     "directory": "apps/server"
   },
   "bin": {
-    "t3": "./dist/bin.mjs"
+    "t3-hermes": "./dist/bin.mjs"
   },
   "files": [
     "dist"

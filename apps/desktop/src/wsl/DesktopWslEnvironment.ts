@@ -276,7 +276,7 @@ export const buildWslRuntimeInstallScript = (
   const safeRuntimeId = sanitizeWslRuntimeId(runtimeId);
   return [
     "set -eu",
-    'runtime_parent="$HOME/.t3/wsl-runtime"',
+    'runtime_parent="$HOME/.t3-hermes/wsl-runtime"',
     `runtime_root="$runtime_parent/${safeRuntimeId}"`,
     `ready_marker="$runtime_root/${WSL_RUNTIME_READY_MARKER}"`,
     // The native payload is the part of the tree the WSL backend actually
@@ -412,7 +412,7 @@ export const buildWslRuntimePruneScript = (runtimeId: string): string => {
   const safeRuntimeId = sanitizeWslRuntimeId(runtimeId);
   return [
     "set -eu",
-    'runtime_parent="$HOME/.t3/wsl-runtime"',
+    'runtime_parent="$HOME/.t3-hermes/wsl-runtime"',
     `current_runtime="$runtime_parent/${safeRuntimeId}"`,
     '[ -d "$runtime_parent" ] || exit 0',
     // Serialize the whole retention decision so two backends cannot select
@@ -476,7 +476,7 @@ export const buildWslRuntimeInvalidateScript = (runtimeId: string): string => {
   const safeRuntimeId = sanitizeWslRuntimeId(runtimeId);
   return [
     "set -eu",
-    `rm -f "$HOME/.t3/wsl-runtime/${safeRuntimeId}/${WSL_RUNTIME_READY_MARKER}"`,
+    `rm -f "$HOME/.t3-hermes/wsl-runtime/${safeRuntimeId}/${WSL_RUNTIME_READY_MARKER}"`,
   ].join("\n");
 };
 
@@ -492,7 +492,7 @@ const NODE_PTY_PREBUILD_MISSING_EXIT_CODE = 4;
 
 const formatNodePtyProbeFailureReason = (exitCode: number): string | null =>
   exitCode === NODE_PTY_PREBUILD_MISSING_EXIT_CODE
-    ? "WSL support is missing from this T3 Code build: the packaged Linux node-pty binary was not included. Rebuild the Windows artifact with `--wsl-prebuild <path-to-linux-pty.node>` or install a build that includes WSL support."
+    ? "WSL support is missing from this T3 Hermes build: the packaged Linux node-pty binary was not included. Rebuild the Windows artifact with `--wsl-prebuild <path-to-linux-pty.node>` or install a build that includes WSL support."
     : null;
 
 const NODE_PTY_PROBE_SCRIPT = (

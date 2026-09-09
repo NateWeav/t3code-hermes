@@ -38,18 +38,18 @@ function detectCliRunner(entryPath: string): CliRunner | null {
 
 /**
  * The `t3` package spec to suggest. The literal spec the user typed (e.g.
- * `t3@nightly`) is resolved away before our process starts, so re-derive it
+ * `t3-hermes@nightly`) is resolved away before our process starts, so re-derive it
  * from the running version: nightly builds re-suggest the nightly channel,
  * anything else suggests the bare package.
  */
 function suggestedPackageSpec(version: string): string {
-  return version.includes("-nightly.") ? "t3@nightly" : "t3";
+  return version.includes("-nightly.") ? "t3-hermes@nightly" : "t3-hermes";
 }
 
 /**
- * Render a `t3 <subcommand>` suggestion that matches how this process was
- * launched, so copy/pasting it actually works: `npx t3 connect` suggests
- * `npx t3 serve`, a global install suggests `t3 serve`, and a nightly build
+ * Render a `t3-hermes <subcommand>` suggestion that matches how this process was
+ * launched, so copy/pasting it actually works: `npx t3-hermes connect` suggests
+ * `npx t3-hermes serve`, a global install suggests `t3-hermes serve`, and a nightly build
  * keeps the `@nightly` tag.
  */
 export function formatCliCommand(input: {
@@ -59,7 +59,7 @@ export function formatCliCommand(input: {
 }): string {
   const runner = detectCliRunner(input.entryPath);
   if (runner === null) {
-    return `t3 ${input.subcommand}`;
+    return `t3-hermes ${input.subcommand}`;
   }
   return `${runner} ${suggestedPackageSpec(input.version)} ${input.subcommand}`;
 }

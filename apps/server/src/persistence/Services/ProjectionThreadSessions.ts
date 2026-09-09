@@ -75,4 +75,4 @@ export interface ProjectionThreadSessionRepositoryShape {
 export class ProjectionThreadSessionRepository extends Context.Service<
   ProjectionThreadSessionRepository,
   ProjectionThreadSessionRepositoryShape
->()("t3/persistence/Services/ProjectionThreadSessions/ProjectionThreadSessionRepository") {}
+>()("t3-hermes/persistence/Services/ProjectionThreadSessions/ProjectionThreadSessionRepository") {}

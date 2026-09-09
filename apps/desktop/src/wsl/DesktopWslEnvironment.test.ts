@@ -157,12 +157,12 @@ describe("WSL runtime cache", () => {
 
   it("installs through a temporary directory and only reuses valid completed caches", () => {
     const script = buildWslRuntimeInstallScript(
-      "/mnt/c/Program Files/T3 Code/wsl-runtime.tar.gz",
+      "/mnt/c/Program Files/T3 Hermes/wsl-runtime.tar.gz",
       "1.2.3-x64",
       "b".repeat(64),
     );
 
-    expect(script).toContain('runtime_parent="$HOME/.t3/wsl-runtime"');
+    expect(script).toContain('runtime_parent="$HOME/.t3-hermes/wsl-runtime"');
     expect(script).toContain('  [ -f "$ready_marker" ] &&');
     expect(script).toContain('  [ -f "$runtime_root/apps/server/dist/bin.mjs" ] &&');
     expect(script).toContain('  [ -f "$runtime_root/node_modules/node-pty/package.json" ] &&');
@@ -175,7 +175,7 @@ describe("WSL runtime cache", () => {
     expect(script).toContain('mv -T "$runtime_root" "$runtime_stale"');
     expect(script).toContain('mktemp -d "$runtime_parent/.1.2.3-x64.tmp.XXXXXX"');
     expect(script).toContain(
-      "tar -xzf '/mnt/c/Program Files/T3 Code/wsl-runtime.tar.gz' -C \"$runtime_tmp\"",
+      "tar -xzf '/mnt/c/Program Files/T3 Hermes/wsl-runtime.tar.gz' -C \"$runtime_tmp\"",
     );
     expect(script).toContain('test -f "$runtime_tmp/apps/server/dist/bin.mjs"');
     expect(script).toContain('test -f "$runtime_tmp/node_modules/node-pty/package.json"');
@@ -192,14 +192,14 @@ describe("WSL runtime cache", () => {
 
   it("verifies the archive digest before extracting, and only on a cache miss", () => {
     const script = buildWslRuntimeInstallScript(
-      "/mnt/c/Program Files/T3 Code/wsl-runtime.tar.gz",
+      "/mnt/c/Program Files/T3 Hermes/wsl-runtime.tar.gz",
       "1.2.3-x64",
       "b".repeat(64),
     );
 
     const expected = "b".repeat(64);
     expect(script).toContain(
-      "archive_sha=$(sha256sum '/mnt/c/Program Files/T3 Code/wsl-runtime.tar.gz' | cut -d ' ' -f 1)",
+      "archive_sha=$(sha256sum '/mnt/c/Program Files/T3 Hermes/wsl-runtime.tar.gz' | cut -d ' ' -f 1)",
     );
     expect(script).toContain(`if [ "$archive_sha" != '${expected}' ]; then`);
 
@@ -221,7 +221,7 @@ describe("WSL runtime cache", () => {
   // the install path has to refuse too.
   it("moves an in-use runtime aside instead of deleting it under a live backend", () => {
     const script = buildWslRuntimeInstallScript(
-      "/mnt/c/Program Files/T3 Code/wsl-runtime.tar.gz",
+      "/mnt/c/Program Files/T3 Hermes/wsl-runtime.tar.gz",
       "sha256-" + "c".repeat(64),
       "b".repeat(64),
     );
@@ -250,7 +250,7 @@ describe("WSL runtime cache", () => {
 
   it("treats a runtime whose native payload went missing as a cache miss", () => {
     const script = buildWslRuntimeInstallScript(
-      "/mnt/c/Program Files/T3 Code/wsl-runtime.tar.gz",
+      "/mnt/c/Program Files/T3 Hermes/wsl-runtime.tar.gz",
       "1.2.3-x64",
       "b".repeat(64),
     );
@@ -280,7 +280,7 @@ describe("WSL runtime cache", () => {
   // reinstalls. The digest the install records is what turns that into a miss.
   it("re-hashes the server entry against the digest the install recorded", () => {
     const script = buildWslRuntimeInstallScript(
-      "/mnt/c/Program Files/T3 Code/wsl-runtime.tar.gz",
+      "/mnt/c/Program Files/T3 Hermes/wsl-runtime.tar.gz",
       "1.2.3-x64",
       "b".repeat(64),
     );
@@ -312,7 +312,7 @@ describe("WSL runtime cache", () => {
 
   it("refuses to mark an archive without a native payload as ready", () => {
     const script = buildWslRuntimeInstallScript(
-      "/mnt/c/Program Files/T3 Code/wsl-runtime.tar.gz",
+      "/mnt/c/Program Files/T3 Hermes/wsl-runtime.tar.gz",
       "1.2.3-x64",
       "b".repeat(64),
     );
@@ -330,8 +330,8 @@ describe("WSL runtime cache", () => {
   });
 
   it("parses only absolute Linux runtime paths", () => {
-    expect(parseWslRuntimeRoot("runtimeRoot:/home/josh/.t3/wsl-runtime/1.2.3-x64\n")).toBe(
-      "/home/josh/.t3/wsl-runtime/1.2.3-x64",
+    expect(parseWslRuntimeRoot("runtimeRoot:/home/josh/.t3-hermes/wsl-runtime/1.2.3-x64\n")).toBe(
+      "/home/josh/.t3-hermes/wsl-runtime/1.2.3-x64",
     );
     expect(parseWslRuntimeRoot("runtimeRoot:relative/path\n")).toBeNull();
     expect(parseWslRuntimeRoot("noise\n")).toBeNull();
@@ -386,7 +386,9 @@ describe("WSL runtime cache", () => {
 
     // Readiness is a presence check, so a tree whose pty.node is present but
     // unloadable stays ready forever unless the probe can revoke the marker.
-    expect(script).toContain('rm -f "$HOME/.t3/wsl-runtime/1.2.3_x64/.t3code-wsl-runtime-ready"');
+    expect(script).toContain(
+      'rm -f "$HOME/.t3-hermes/wsl-runtime/1.2.3_x64/.t3code-wsl-runtime-ready"',
+    );
     // Deleting the tree here would pull it out from under any backend still
     // running from it; the next install moves an unready root aside instead.
     expect(script).not.toContain("rm -rf");
@@ -441,9 +443,9 @@ describe.skipIf(posixShellRunner === null)("WSL runtime install script (executed
       archivePath,
       archiveSha,
       runtimeId,
-      runtimeParent: `${work}/home/.t3/wsl-runtime`,
-      runtimeRoot: `${work}/home/.t3/wsl-runtime/${runtimeId}`,
-      serverEntry: `${work}/home/.t3/wsl-runtime/${runtimeId}/apps/server/dist/bin.mjs`,
+      runtimeParent: `${work}/home/.t3-hermes/wsl-runtime`,
+      runtimeRoot: `${work}/home/.t3-hermes/wsl-runtime/${runtimeId}`,
+      serverEntry: `${work}/home/.t3-hermes/wsl-runtime/${runtimeId}/apps/server/dist/bin.mjs`,
       installScript,
       install: (archive?: string, sha?: string) => runShell(installScript(archive, sha)),
     };
@@ -670,7 +672,7 @@ describe.skipIf(posixShellRunner === null)("WSL runtime install script (executed
         "set -eu",
         "work=$(mktemp -d)",
         'home="$work/home"',
-        'runtime_parent="$home/.t3/wsl-runtime"',
+        'runtime_parent="$home/.t3-hermes/wsl-runtime"',
         'mkdir -p "$runtime_parent"',
         'make_ready() { mkdir -p "$runtime_parent/$1/apps/server/dist"; printf ready > "$runtime_parent/$1/.t3code-wsl-runtime-ready"; }',
         "make_ready sha256-current",

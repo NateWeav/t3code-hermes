@@ -35,7 +35,7 @@ it("reports the installed service version and host paths", () => {
     formatServiceStatus(status, "0.0.29"),
     [
       "T3 Code service",
-      "  Status: installed · t3@0.0.29",
+      "  Status: installed · t3-hermes@0.0.29",
       "  Unit: /home/me/.config/systemd/user/t3code.service",
       "  Logs: /home/me/.t3/userdata/logs/boot-service.log",
     ].join("\n"),
@@ -45,7 +45,7 @@ it("reports the installed service version and host paths", () => {
 it("gives a direct repair command for a stale service", () => {
   assert.include(
     formatServiceStatus({ ...status, current: false }, "0.0.29"),
-    "Next: Run `npx t3@0.0.29 service update`.",
+    "Next: Run `npx t3-hermes@0.0.29 service update`.",
   );
 });
 
@@ -64,8 +64,8 @@ it("explains an incomplete nightly installation and keeps repair on its installe
   expect(output).toContain("last login session ends");
   expect(output).toContain('sudo loginctl enable-linger "$(id -un)"');
   expect(output).toContain("[service-stopped]");
-  expect(output).toContain("npx t3@0.0.32-nightly.1 service update");
-  expect(output).not.toContain("t3@latest");
+  expect(output).toContain("npx t3-hermes@0.0.32-nightly.1 service update");
+  expect(output).not.toContain("t3-hermes@latest");
 });
 
 it("suggests the newer CLI version when the installed service needs an update", () => {
@@ -73,8 +73,8 @@ it("suggests the newer CLI version when the installed service needs an update", 
     { ...status, current: false, installedVersion: "0.0.28" },
     "0.0.29",
   );
-  expect(output).toContain("npx t3@0.0.29 service update");
-  expect(output).not.toContain("npx t3@0.0.28 service update");
+  expect(output).toContain("npx t3-hermes@0.0.29 service update");
+  expect(output).not.toContain("npx t3-hermes@0.0.28 service update");
 });
 
 it("explains where the service is supported", () => {
@@ -90,9 +90,9 @@ it("reports a newer installed service and gives an exact-version repair command"
     "0.0.31",
   );
 
-  assert.include(output, "t3@0.0.32-nightly.1 (newer than this t3@0.0.31 CLI)");
-  assert.include(output, "npx t3@0.0.32-nightly.1 service update");
-  assert.notInclude(output, "npx t3@latest service update");
+  assert.include(output, "t3-hermes@0.0.32-nightly.1 (newer than this t3-hermes@0.0.31 CLI)");
+  assert.include(output, "npx t3-hermes@0.0.32-nightly.1 service update");
+  assert.notInclude(output, "npx t3-hermes@latest service update");
 });
 
 const newerServiceStatus = { ...status, current: false, installedVersion: "999.0.0" };

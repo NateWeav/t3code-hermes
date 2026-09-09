@@ -8,7 +8,7 @@ export class BrowserTraceCollector extends Context.Service<
   {
     readonly record: (records: ReadonlyArray<TraceRecord>) => Effect.Effect<void>;
   }
->()("t3/observability/BrowserTraceCollector") {}
+>()("t3-hermes/observability/BrowserTraceCollector") {}
 
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = (sink: TraceSink): BrowserTraceCollector["Service"] =>

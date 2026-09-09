@@ -12,7 +12,7 @@ export class EnvironmentAuthPolicy extends Context.Service<
   {
     readonly getDescriptor: () => Effect.Effect<ServerAuthDescriptor>;
   }
->()("t3/auth/EnvironmentAuthPolicy") {}
+>()("t3-hermes/auth/EnvironmentAuthPolicy") {}
 
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {

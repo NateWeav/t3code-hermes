@@ -45,7 +45,7 @@ function recoveryHint(error: RelayProtectedError): string {
     case "RelayEnvironmentLinkLimitExceededError":
       return "Unlink an unused environment in T3 Connect, then restart T3 Code on this machine.";
     case "RelayAuthInvalidError":
-      return "Run `t3 connect login` to check this machine's authorization. If the stored credential was revoked, sign out with `t3 connect logout`, then run `t3 connect` again. Restart T3 Code after signing in.";
+      return "Run `t3-hermes connect login` to check this machine's authorization. If the stored credential was revoked, sign out with `t3-hermes connect logout`, then run `t3-hermes connect` again. Restart T3 Hermes after signing in.";
     case "RelayEnvironmentLinkProofExpiredError":
     case "RelayEnvironmentLinkProofInvalidError":
       return "Check this machine's date and time, update T3 Code, then restart it.";

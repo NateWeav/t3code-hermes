@@ -1,0 +1,43 @@
+<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="night" x1="12" y1="6" x2="116" y2="124" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#001d1e"/>
+      <stop offset="0.5" stop-color="#002535"/>
+      <stop offset="1" stop-color="#003356"/>
+    </linearGradient>
+    <radialGradient id="skyGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(90 28) rotate(137) scale(78 70)">
+      <stop stop-color="#0088a7" stop-opacity="0.4"/>
+      <stop offset="0.5" stop-color="#00465a" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#002127" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="horizonGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(42 127) rotate(-70) scale(68 96)">
+      <stop stop-color="#0072a4" stop-opacity="0.34"/>
+      <stop offset="1" stop-color="#003c5c" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="frame">
+      <rect width="128" height="128" rx="10"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#frame)">
+    <rect width="128" height="128" fill="url(#night)"/>
+    <rect width="128" height="128" fill="url(#skyGlow)"/>
+    <rect width="128" height="128" fill="url(#horizonGlow)"/>
+
+
+    <!-- A few tiny stars kept to the perimeter so the wordmark stays clear. -->
+    <g fill="#d1f1ef">
+      <circle cx="17" cy="18" r="0.55" fill-opacity="0.82"/>
+      <circle cx="54" cy="14" r="0.4" fill-opacity="0.65"/>
+      <circle cx="116" cy="42" r="0.45" fill-opacity="0.72"/>
+      <circle cx="10" cy="70" r="0.35" fill-opacity="0.56"/>
+      <circle cx="117" cy="88" r="0.4" fill-opacity="0.6"/>
+    </g>
+    <path d="M31 22V24.8M29.6 23.4H32.4" stroke="#e3f6f5" stroke-width="0.5" stroke-linecap="round" opacity="0.72"/>
+    <path d="M111 58V60M110 59H112" stroke="#a5e4e2" stroke-width="0.45" stroke-linecap="round" opacity="0.58"/>
+
+    <!-- Broad horizon remains below the T3 baseline (y=94). -->
+    <path d="M-12 119C14 99 39 99 63 110C87 121 110 116 140 96V140H-12V119Z" fill="#002b41" fill-opacity="0.42"/>
+    <path d="M-12 129C15 111 42 112 66 122C91 132 114 124 140 107V140H-12V129Z" fill="#0073a7" fill-opacity="0.22"/>
+  </g>
+</svg>

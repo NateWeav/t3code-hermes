@@ -107,4 +107,6 @@ export interface ProjectionThreadActivityRepositoryShape {
 export class ProjectionThreadActivityRepository extends Context.Service<
   ProjectionThreadActivityRepository,
   ProjectionThreadActivityRepositoryShape
->()("t3/persistence/Services/ProjectionThreadActivities/ProjectionThreadActivityRepository") {}
+>()(
+  "t3-hermes/persistence/Services/ProjectionThreadActivities/ProjectionThreadActivityRepository",
+) {}

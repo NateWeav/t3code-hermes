@@ -195,7 +195,7 @@ const desktopEnvironmentLayer = DesktopEnvironment.layer(environmentInput).pipe(
     Layer.mergeAll(
       NodeServices.layer,
       DesktopConfig.layerTest({
-        T3CODE_PORT: "3773",
+        T3HERMES_PORT: "3773",
         VITE_DEV_SERVER_URL: "http://127.0.0.1:5733",
       }),
     ),
@@ -1415,7 +1415,7 @@ describe("DesktopWindow", () => {
         createCount,
         mainWindow,
         onReveal: () => {
-          foreground = "T3 Code";
+          foreground = "T3 Hermes";
           operations.push("reveal");
         },
       });
@@ -1424,7 +1424,7 @@ describe("DesktopWindow", () => {
         const desktopWindow = yield* DesktopWindow.DesktopWindow;
         yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
         yield* desktopWindow.dispatchSnapShotEvent({ type: "started", id: captureOne });
-        assert.equal(foreground, "T3 Code");
+        assert.equal(foreground, "T3 Hermes");
         foreground = "Explorer";
         yield* desktopWindow.dispatchSnapShotEvent({ type: "ready", id: captureOne });
         yield* desktopWindow.dispatchSnapShotEvent({ type: "failed", id: captureTwo });

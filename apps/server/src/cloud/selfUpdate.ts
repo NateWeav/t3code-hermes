@@ -54,7 +54,7 @@ export class ServerSelfUpdate extends Context.Service<
       onHandoffAccepted?: () => Effect.Effect<void>,
     ) => Effect.Effect<never, ServerSelfUpdateError>;
   }
->()("t3/cloud/selfUpdate/ServerSelfUpdate") {}
+>()("t3-hermes/cloud/selfUpdate/ServerSelfUpdate") {}
 
 export const withRunningThreadContinuation = Effect.fn(
   "cloud.server_self_update.withRunningThreadContinuation",
@@ -196,7 +196,7 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* () {
     }
     if (capability === null) {
       return yield* failWith(
-        "Remote updates require the T3 Code background service. Run `t3 service install` on the server machine.",
+        "Remote updates require the T3 Code background service. Run `t3-hermes service install` on the server machine.",
       );
     }
 
@@ -289,7 +289,7 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* () {
         Effect.mapError((error) =>
           error._tag === "PinnedRuntimePreflightBlockedError"
             ? failWith(error.reason, error)
-            : failWith(`Could not prepare t3@${targetVersion}.`, error),
+            : failWith(`Could not prepare t3-hermes@${targetVersion}.`, error),
         ),
       );
 

@@ -102,4 +102,6 @@ export interface ProjectionPendingApprovalRepositoryShape {
 export class ProjectionPendingApprovalRepository extends Context.Service<
   ProjectionPendingApprovalRepository,
   ProjectionPendingApprovalRepositoryShape
->()("t3/persistence/Services/ProjectionPendingApprovals/ProjectionPendingApprovalRepository") {}
+>()(
+  "t3-hermes/persistence/Services/ProjectionPendingApprovals/ProjectionPendingApprovalRepository",
+) {}

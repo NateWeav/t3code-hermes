@@ -34,10 +34,10 @@ if (
 
 const DEVELOPMENT_ASSETS = {
   appIcon: fromRepoRoot(BRAND_ASSET_PATHS.developmentIosIconPng),
-  iosIcon: fromRepoRoot(BRAND_ASSET_PATHS.developmentIconComposerProject),
+  iosIcon: fromRepoRoot(BRAND_ASSET_PATHS.developmentIosIconPng),
   splashIcon: fromRepoRoot(BRAND_ASSET_PATHS.developmentIosIconPng),
   androidAdaptiveForeground,
-  androidAdaptiveBackgroundColor: "#347FF8",
+  androidAdaptiveBackgroundColor: "#0D9488",
   androidAdaptiveBackgroundImage: "./assets/android-icon-background-dev.png",
   androidSplashIcon: "./assets/android-splash-icon-dev.png",
   androidMonochromeIcon: "./assets/android-icon-mark.png",
@@ -47,10 +47,10 @@ const DEVELOPMENT_ASSETS = {
 
 const PREVIEW_ASSETS = {
   appIcon: fromRepoRoot(BRAND_ASSET_PATHS.nightlyIosIconPng),
-  iosIcon: fromRepoRoot(BRAND_ASSET_PATHS.nightlyIconComposerProject),
+  iosIcon: fromRepoRoot(BRAND_ASSET_PATHS.nightlyIosIconPng),
   splashIcon: fromRepoRoot(BRAND_ASSET_PATHS.nightlyIosIconPng),
   androidAdaptiveForeground,
-  androidAdaptiveBackgroundColor: "#111533",
+  androidAdaptiveBackgroundColor: "#0D9488",
   androidAdaptiveBackgroundImage: "./assets/android-icon-background-nightly.png",
   androidSplashIcon: "./assets/android-splash-icon-nightly.png",
   androidMonochromeIcon: "./assets/android-icon-mark.png",
@@ -60,11 +60,11 @@ const PREVIEW_ASSETS = {
 
 const RELEASE_ASSETS = {
   appIcon: fromRepoRoot(BRAND_ASSET_PATHS.productionIosIconPng),
-  iosIcon: fromRepoRoot(BRAND_ASSET_PATHS.productionIconComposerProject),
+  iosIcon: fromRepoRoot(BRAND_ASSET_PATHS.productionIosIconPng),
   splashIcon: fromRepoRoot(BRAND_ASSET_PATHS.productionIosIconPng),
   androidAdaptiveForeground,
-  androidAdaptiveBackgroundColor: "#000000",
-  androidAdaptiveBackgroundImage: undefined,
+  androidAdaptiveBackgroundColor: "#0D9488",
+  androidAdaptiveBackgroundImage: "./assets/android-icon-background-prod.png",
   androidSplashIcon: "./assets/android-splash-icon-prod.png",
   androidMonochromeIcon: "./assets/android-icon-mark.png",
   androidNotificationIcon: "./assets/android-notification-icon.png",
@@ -73,26 +73,26 @@ const RELEASE_ASSETS = {
 
 const VARIANT_CONFIG = {
   development: {
-    appName: "T3 Code Dev",
-    scheme: "t3code-dev",
-    iosBundleIdentifier: "com.t3tools.t3code.dev",
-    androidPackage: "com.t3tools.t3code.dev",
+    appName: "T3 Hermes Dev",
+    scheme: "t3-hermes-dev",
+    iosBundleIdentifier: "com.nateweav.t3hermes.dev",
+    androidPackage: "com.nateweav.t3hermes.dev",
     relyingParty: "clerk.t3.codes",
     assets: DEVELOPMENT_ASSETS,
   },
   preview: {
-    appName: "T3 Code Preview",
-    scheme: "t3code-preview",
-    iosBundleIdentifier: "com.t3tools.t3code.preview",
-    androidPackage: "com.t3tools.t3code.preview",
+    appName: "T3 Hermes Preview",
+    scheme: "t3-hermes-preview",
+    iosBundleIdentifier: "com.nateweav.t3hermes.preview",
+    androidPackage: "com.nateweav.t3hermes.preview",
     relyingParty: "clerk.t3.codes",
     assets: PREVIEW_ASSETS,
   },
   production: {
-    appName: "T3 Code",
-    scheme: "t3code",
-    iosBundleIdentifier: "com.t3tools.t3code",
-    androidPackage: "com.t3tools.t3code",
+    appName: "T3 Hermes",
+    scheme: "t3-hermes",
+    iosBundleIdentifier: "com.nateweav.t3hermes",
+    androidPackage: "com.nateweav.t3hermes",
     relyingParty: "clerk.t3.codes",
     assets: RELEASE_ASSETS,
   },
@@ -133,7 +133,7 @@ const widgetsPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
       {
         name: "AgentActivity",
         displayName: "Agent Activity",
-        description: "Shows the current state of active T3 Code agents.",
+        description: "Shows the current state of active T3 Hermes agents.",
         supportedFamilies: ["systemSmall", "systemMedium", "accessoryRectangular"],
       },
     ],
@@ -172,7 +172,7 @@ const sharingPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
 
 const config: ExpoConfig = {
   name: variant.appName,
-  slug: "t3-code",
+  slug: "t3-hermes",
   platforms: ["ios", "android"],
   scheme: variant.scheme,
   version: "1.1.1",
@@ -186,8 +186,10 @@ const config: ExpoConfig = {
   icon: variant.assets.appIcon,
   userInterfaceStyle: "automatic",
   updates: {
-    enabled: true,
-    url: "https://u.expo.dev/d763fcb8-d37c-41ea-a773-b54a0ab4a454",
+    enabled: Boolean(repoEnv.T3HERMES_EAS_PROJECT_ID?.trim()),
+    ...(repoEnv.T3HERMES_EAS_PROJECT_ID?.trim()
+      ? { url: `https://u.expo.dev/${repoEnv.T3HERMES_EAS_PROJECT_ID.trim()}` }
+      : {}),
     checkAutomatically: "ON_LOAD",
     fallbackToCacheTimeout: 0,
   },
@@ -198,24 +200,22 @@ const config: ExpoConfig = {
     // showcase capture build requires full screen (see infoPlist below).
     requireFullScreen: process.env.T3_SHOWCASE_CAPTURE_BUILD === "1",
     bundleIdentifier: iosBundleIdentifier,
-    // Pin code signing to the T3 Tools team so non-interactive `expo run:ios`
-    // does not fall back to a personal team (which cannot sign app groups,
-    // Sign in with Apple, or push notification entitlements).
-    appleTeamId: "ARK85ZXQ4Z",
+    // Signing belongs to the Hermes distributor, including extension targets.
+    appleTeamId: repoEnv.T3CODE_APPLE_TEAM_ID?.trim() || undefined,
     associatedDomains: [
       `applinks:${variant.relyingParty}`,
       `webcredentials:${variant.relyingParty}`,
     ],
     entitlements: {
-      "keychain-access-groups": [`$(AppIdentifierPrefix)${variant.iosBundleIdentifier}`],
+      "keychain-access-groups": [`$(AppIdentifierPrefix)${iosBundleIdentifier}`],
     },
     infoPlist: {
       NSAppTransportSecurity: {
         NSAllowsArbitraryLoads: true,
       },
       NSLocalNetworkUsageDescription:
-        "Allow T3 Code to connect to T3 Code servers on your local network or tailnet.",
-      NSPhotoLibraryAddUsageDescription: "Allow T3 Code to save images to your photo library.",
+        "Allow T3 Hermes to connect to T3 Hermes servers on your local network or tailnet.",
+      NSPhotoLibraryAddUsageDescription: "Allow T3 Hermes to save images to your photo library.",
       ITSAppUsesNonExemptEncryption: false,
       // The App Store screenshot harness rotates the iPad interface from
       // inside the app (CI denies osascript the Accessibility access that
@@ -315,7 +315,7 @@ const config: ExpoConfig = {
     [
       "expo-audio",
       {
-        microphonePermission: "Allow T3 Code to use your microphone for voice input.",
+        microphonePermission: "Allow T3 Hermes to use your microphone for voice input.",
         recordAudioAndroid: false,
         enableBackgroundPlayback: false,
         enableBackgroundRecording: false,
@@ -324,7 +324,7 @@ const config: ExpoConfig = {
     [
       "expo-camera",
       {
-        cameraPermission: "Allow T3 Code to access your camera so you can scan pairing QR codes.",
+        cameraPermission: "Allow T3 Hermes to access your camera so you can scan pairing QR codes.",
         microphonePermission: false,
         barcodeScannerEnabled: true,
         recordAudioAndroid: false,
@@ -406,11 +406,11 @@ const config: ExpoConfig = {
       tracesDataset: repoEnv.EXPO_PUBLIC_OTLP_TRACES_DATASET ?? null,
       tracesToken: repoEnv.EXPO_PUBLIC_OTLP_TRACES_TOKEN ?? null,
     },
-    eas: {
-      projectId: "d763fcb8-d37c-41ea-a773-b54a0ab4a454",
-    },
+    ...(repoEnv.T3HERMES_EAS_PROJECT_ID?.trim()
+      ? { eas: { projectId: repoEnv.T3HERMES_EAS_PROJECT_ID.trim() } }
+      : {}),
   },
-  owner: "pingdotgg",
+  owner: repoEnv.T3HERMES_EXPO_OWNER?.trim() || undefined,
 };
 
 export default config;

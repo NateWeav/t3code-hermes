@@ -512,7 +512,7 @@ export class ExternalLauncher extends Context.Service<
      */
     readonly launchEditor: (input: LaunchEditorInput) => Effect.Effect<void, ExternalLauncherError>;
   }
->()("t3/process/externalLauncher") {}
+>()("t3-hermes/process/externalLauncher") {}
 
 // ==============================
 // Implementations

@@ -76,8 +76,10 @@ function createDesktopClerkBridge(stateDir: string, isDevelopment: boolean) {
   return createClerkBridge({
     storage: storage({ path: stateDir }),
     passkeys: true,
+    // Share upstream-approved callbacks so desktop login needs no separate Clerk tenant.
+    // The SDK registers this app as the OS handler when the bridge starts.
     renderer: {
-      scheme: ElectronProtocol.getDesktopScheme(isDevelopment),
+      scheme: ElectronProtocol.getDesktopCallbackScheme(isDevelopment),
       host: ElectronProtocol.DESKTOP_HOST,
     },
   });
@@ -92,7 +94,7 @@ export const make = Effect.gen(function* () {
   // creates that directory when the lock is acquired. The SDK bridge takes
   // the lock at creation, so userData must already point at the real
   // directory here — under the default productName-derived path, acquiring
-  // the lock would create "T3 Code (Alpha)" and make the legacy-install
+  // the lock would create "T3 Hermes (Alpha)" and make the legacy-install
   // detection in resolveUserDataPath match on fresh installs.
   const userDataPath = yield* DesktopAppIdentity.resolveUserDataPath;
   yield* electronApp.setPath("userData", userDataPath);

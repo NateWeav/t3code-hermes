@@ -86,7 +86,7 @@ export class EnvironmentThemeService extends Context.Service<
      */
     readonly streamChanges: Stream.Stream<ReadonlyArray<EnvironmentTheme>>;
   }
->()("t3/environmentTheme/EnvironmentThemeService") {}
+>()("t3-hermes/environmentTheme/EnvironmentThemeService") {}
 
 /**
  * Reads a theme file through one opened handle, so every check binds to the

@@ -22,9 +22,9 @@ const makeEnvironment = (overrides: Record<string, unknown> = {}) =>
     platform: "linux",
     isPackaged: true,
     isDevelopment: false,
-    displayName: "T3 Code (Alpha)",
-    linuxDesktopEntryName: "com.t3tools.T3Code.desktop",
-    linuxWmClass: "t3code",
+    displayName: "T3 Hermes (Alpha)",
+    linuxDesktopEntryName: "com.nateweav.T3Hermes.desktop",
+    linuxWmClass: "t3-hermes",
     linuxApplicationsDir: "/home/alice/.local/share/applications",
     appImagePath: Option.some("/home/alice/Applications/T3-Code.AppImage"),
     path: { join: (...parts: ReadonlyArray<string>) => parts.join("/") },
@@ -108,13 +108,13 @@ const emptyRecording = (): RecordedRegistration => ({
 describe("DesktopLinuxUrlHandler", () => {
   it("renders a scheme-handler desktop entry with freedesktop Exec quoting", () => {
     const entry = DesktopLinuxUrlHandler.renderUrlHandlerDesktopEntry({
-      displayName: "T3 Code (Nightly)",
+      displayName: "T3 Hermes (Nightly)",
       execTarget: '/home/al ice/Apps/T3 "100%" $HOME\\x.AppImage',
       scheme: "t3code",
     });
 
     assert.include(entry, "[Desktop Entry]");
-    assert.include(entry, "Name=T3 Code (Nightly)");
+    assert.include(entry, "Name=T3 Hermes (Nightly)");
     // Exec composes both escaping layers: a literal backslash becomes four
     // backslashes in the file, a quote three characters, a dollar sign two
     // backslashes plus the sign.
@@ -131,7 +131,7 @@ describe("DesktopLinuxUrlHandler", () => {
     const writeError = new DesktopLinuxUrlHandler.DesktopLinuxUrlHandlerRegistrationError({
       step: "write-desktop-entry",
       scheme: "t3code",
-      desktopEntryPath: "/home/alice/.local/share/applications/com.t3tools.T3Code.desktop",
+      desktopEntryPath: "/home/alice/.local/share/applications/com.nateweav.T3Hermes.desktop",
       cause: new Error("boom"),
     });
     assert.equal(
@@ -140,7 +140,7 @@ describe("DesktopLinuxUrlHandler", () => {
     );
     assert.equal(
       writeError.desktopEntryPath,
-      "/home/alice/.local/share/applications/com.t3tools.T3Code.desktop",
+      "/home/alice/.local/share/applications/com.nateweav.T3Hermes.desktop",
     );
 
     const exitError = new DesktopLinuxUrlHandler.DesktopLinuxUrlHandlerRegistrationError({
@@ -164,7 +164,7 @@ describe("DesktopLinuxUrlHandler", () => {
       assert.equal(recorded.files.length, 1);
       assert.equal(
         recorded.files[0]?.path,
-        "/home/alice/.local/share/applications/com.t3tools.T3Code.desktop",
+        "/home/alice/.local/share/applications/com.nateweav.T3Hermes.desktop",
       );
       assert.include(
         recorded.files[0]?.content,
@@ -174,7 +174,7 @@ describe("DesktopLinuxUrlHandler", () => {
       assert.deepEqual(recorded.commands, [
         {
           command: "xdg-mime",
-          args: ["default", "com.t3tools.T3Code.desktop", "x-scheme-handler/t3code"],
+          args: ["default", "com.nateweav.T3Hermes.desktop", "x-scheme-handler/t3code"],
         },
       ]);
     });
@@ -199,7 +199,7 @@ describe("DesktopLinuxUrlHandler", () => {
     return Effect.gen(function* () {
       yield* runRegister(recorded, {
         existingEntry: DesktopLinuxUrlHandler.renderUrlHandlerDesktopEntry({
-          displayName: "T3 Code (Alpha)",
+          displayName: "T3 Hermes (Alpha)",
           execTarget: "/home/alice/Applications/T3-Code.AppImage",
           scheme: "t3code",
         }),
@@ -220,14 +220,14 @@ describe("DesktopLinuxUrlHandler", () => {
       yield* runRegister(unpackaged, {
         environment: {
           isPackaged: false,
-          linuxDesktopEntryName: "com.t3tools.T3Code.Development.desktop",
+          linuxDesktopEntryName: "com.nateweav.T3Hermes.Development.desktop",
         },
       });
 
       assert.deepEqual(nonLinux.files, []);
       assert.equal(
         unpackaged.files[0]?.path,
-        "/home/alice/.local/share/applications/com.t3tools.T3Code.Development.desktop",
+        "/home/alice/.local/share/applications/com.nateweav.T3Hermes.Development.desktop",
       );
       assert.deepEqual(unpackaged.commands, []);
     });
@@ -245,7 +245,7 @@ describe("DesktopLinuxUrlHandler", () => {
           module: "FileSystem",
           method: "writeFileString",
           description: "read-only filesystem",
-          pathOrDescriptor: "/home/alice/.local/share/applications/com.t3tools.T3Code.desktop",
+          pathOrDescriptor: "/home/alice/.local/share/applications/com.nateweav.T3Hermes.desktop",
         }),
       });
 

@@ -52,7 +52,7 @@ import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
 
 // Test-local service tag so the rest of the file can keep using `yield* OpenCodeAdapter`.
 class OpenCodeAdapter extends Context.Service<OpenCodeAdapter, OpenCodeAdapterShape>()(
-  "t3/provider/Layers/OpenCodeAdapter.test/OpenCodeAdapter",
+  "t3-hermes/provider/Layers/OpenCodeAdapter.test/OpenCodeAdapter",
 ) {}
 
 const asThreadId = (value: string): ThreadId => ThreadId.make(value);

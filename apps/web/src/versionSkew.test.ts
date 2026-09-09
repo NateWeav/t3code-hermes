@@ -14,6 +14,7 @@ import {
   dismissVersionMismatch,
   isServerUpdateFailureDismissed,
   isVersionMismatchDismissed,
+  manualServerUpdateCommand,
   resolveServerConfigVersionMismatch,
   resolveServerSelfUpdateCapability,
   resolveVersionMismatch,
@@ -25,6 +26,13 @@ const MISMATCH_HINT =
   "Version mismatch. Try syncing the client and server to the same T3 Code version.";
 
 describe("versionSkew", () => {
+  it.each(["0.0.40", "0.0.41-nightly.20260909.73"])(
+    "copies the Hermes npm package at the target version %s",
+    (version) => {
+      expect(manualServerUpdateCommand(version)).toBe(`npx t3-hermes@${version}`);
+    },
+  );
+
   beforeEach(() => {
     branding.APP_VERSION = "0.0.34";
   });

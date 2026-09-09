@@ -5631,7 +5631,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   "relative",
                   isComposerResting && "flex min-w-0 items-center gap-1",
                   isComposerResting &&
-                    (settings.contextWindowMeterEnabled && activeContextWindow
+                    (settings.contextWindowIndicatorEnabled && activeContextWindow
                       ? "pr-28"
                       : showComposerAttachAction
                         ? "pr-20"
@@ -5806,7 +5806,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   <ComposerFooterPrimaryActions
                     compact={isComposerResting || isComposerPrimaryActionsCompact}
                     activeContextWindow={
-                      settings.contextWindowMeterEnabled ? activeContextWindow : null
+                      settings.contextWindowIndicatorEnabled ? activeContextWindow : null
                     }
                     activeThreadModelDisplayName={activeThreadModelDisplayName}
                     pendingAction={pendingPrimaryAction}

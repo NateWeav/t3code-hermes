@@ -545,7 +545,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.composerCollapseOnScroll !== DEFAULT_UNIFIED_SETTINGS.composerCollapseOnScroll
         ? ["Collapse composer on scroll"]
         : []),
-      ...(settings.contextWindowMeterEnabled !== DEFAULT_UNIFIED_SETTINGS.contextWindowMeterEnabled
+      ...(settings.contextWindowIndicatorEnabled !==
+      DEFAULT_UNIFIED_SETTINGS.contextWindowIndicatorEnabled
         ? ["Context window indicator"]
         : []),
       ...(settings.enableLegacyTokenStreaming !==
@@ -610,7 +611,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.diffLayout,
       settings.proactivePanelsEnabled,
       settings.environmentIdentificationMode,
-      settings.contextWindowMeterEnabled,
+      settings.contextWindowIndicatorEnabled,
       settings.fontFamilyCode,
       settings.fontFamilyComposer,
       settings.fontFamilySans,
@@ -708,7 +709,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       proactivePanelsEnabled: DEFAULT_UNIFIED_SETTINGS.proactivePanelsEnabled,
       showSkillsInSlashMenu: DEFAULT_UNIFIED_SETTINGS.showSkillsInSlashMenu,
       composerCollapseOnScroll: DEFAULT_UNIFIED_SETTINGS.composerCollapseOnScroll,
-      contextWindowMeterEnabled: DEFAULT_UNIFIED_SETTINGS.contextWindowMeterEnabled,
+      contextWindowIndicatorEnabled: DEFAULT_UNIFIED_SETTINGS.contextWindowIndicatorEnabled,
       environmentIdentificationMode: DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode,
       glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity,
       panelAnimationDurationMs: DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs,
@@ -1951,9 +1952,9 @@ function LegacyFeaturesSection() {
               description="Shows context window usage as a circular indicator in the composer."
               control={
                 <Switch
-                  checked={settings.contextWindowMeterEnabled}
+                  checked={settings.contextWindowIndicatorEnabled}
                   onCheckedChange={(checked) =>
-                    updateSettings({ contextWindowMeterEnabled: Boolean(checked) })
+                    updateSettings({ contextWindowIndicatorEnabled: Boolean(checked) })
                   }
                   aria-label="Context window indicator (legacy)"
                 />

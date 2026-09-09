@@ -75,7 +75,7 @@ using a proxy through `ANTHROPIC_AUTH_TOKEN`.
 ## Connect a CLIProxyAPI hub
 
 On web or desktop, open **Settings → Providers → Usage providers → Add hub**.
-On mobile, open **Settings → Usage → Limits → CLIProxyAPI hubs → Add hub**. Choose the
+On mobile, open **Settings → Environments → CLIProxyAPI hubs → Add hub**. Choose the
 environment that will connect to the hub and enter its URL and management key.
 
 The accounts appear under **Usage → Limits**. Codex accounts show banked reset credits; select an

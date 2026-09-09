@@ -1,3 +1,4 @@
+import { EnvironmentHubSettings } from "../settings/EnvironmentHubSettings";
 import { NativeHeaderToolbar } from "../../native/StackHeader";
 import { useNavigation } from "@react-navigation/native";
 import { SymbolView } from "../../components/AppSymbol";
@@ -95,6 +96,9 @@ export function ConnectionsRouteScreen() {
             </Text>
           </View>
         )}
+        <View className="mt-6">
+          <EnvironmentHubSettings />
+        </View>
       </ScrollView>
     </View>
   );

@@ -27,7 +27,6 @@ import { cn } from "../../lib/cn";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { useUsage, type EnvironmentUsageStatus } from "../../state/usage";
 import { SettingsSection } from "../settings/components/SettingsSection";
-import { UsageHubSettings } from "./UsageHubSettings";
 import { UsageDailyChart } from "./UsageDailyChart";
 import { toggleUsageEnvironment } from "./usageEnvironmentSelection";
 import { useRefreshLimits } from "./UsageLimitsSection";
@@ -255,14 +254,11 @@ export function UsageRouteScreen() {
           className="gap-6"
         >
           {showingLimits ? (
-            <>
-              <UsageLimitsSection
-                now={limits.now}
-                failedLabels={limits.failedLabels}
-                selectedEnvironmentIds={selectedEnvironmentIds}
-              />
-              <UsageHubSettings selectedEnvironmentIds={selectedEnvironmentIds} />
-            </>
+            <UsageLimitsSection
+              now={limits.now}
+              failedLabels={limits.failedLabels}
+              selectedEnvironmentIds={selectedEnvironmentIds}
+            />
           ) : (
             <>
               {/* Period and metric together: neither applies to Limits, and

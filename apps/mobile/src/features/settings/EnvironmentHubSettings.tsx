@@ -1,8 +1,4 @@
-import {
-  type EnvironmentId,
-  type ServerSettingsPatch,
-  UsageLimitSourceId,
-} from "@t3tools/contracts";
+import { type ServerSettingsPatch, UsageLimitSourceId } from "@t3tools/contracts";
 import { useRef, useState } from "react";
 import { Alert, Pressable, View } from "react-native";
 
@@ -10,14 +6,10 @@ import { AppText as Text, AppTextInput as TextInput } from "../../components/App
 import { type EnvironmentPresentation, useEnvironments } from "../../state/environments";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { SettingsSection } from "../settings/components/SettingsSection";
+import { SettingsSection } from "./components/SettingsSection";
 
 /** Hubs belong to the environment that connects to them, including remote servers. */
-export function UsageHubSettings({
-  selectedEnvironmentIds,
-}: {
-  readonly selectedEnvironmentIds: ReadonlySet<EnvironmentId> | null;
-}) {
+export function EnvironmentHubSettings() {
   const { environments } = useEnvironments();
   return (
     <SettingsSection title="CLIProxyAPI hubs" card>
@@ -26,15 +18,9 @@ export function UsageHubSettings({
           Connect an environment to add a hub.
         </Text>
       ) : (
-        environments
-          .filter(
-            (environment) =>
-              selectedEnvironmentIds === null ||
-              selectedEnvironmentIds.has(environment.environmentId),
-          )
-          .map((environment) => (
-            <EnvironmentHubs key={environment.environmentId} environment={environment} />
-          ))
+        environments.map((environment) => (
+          <EnvironmentHubs key={environment.environmentId} environment={environment} />
+        ))
       )}
     </SettingsSection>
   );

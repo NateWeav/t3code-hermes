@@ -52,6 +52,8 @@ export function ConnectionsRouteScreen() {
         </NativeHeaderToolbar>
       )}
       <ScrollView
+        automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
+        keyboardShouldPersistTaps="handled"
         contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}
         className="flex-1"

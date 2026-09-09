@@ -173,7 +173,14 @@ describe("ClientSettings window capture", () => {
 
     expect(settings.snapShotEnabled).toBe(false);
     expect(settings.snapShotIncludeAccessibility).toBe(true);
-    expect(settings.snapShotShortcut).toEqual({ kind: "both-shift-keys" });
+    expect(settings.snapShotShortcut).toEqual({
+      key: "h",
+      ctrlKey: true,
+      altKey: true,
+      shiftKey: true,
+      modKey: false,
+      metaKey: false,
+    });
     expect(settings.snapShotPlaySound).toBe(true);
     expect(settings.snapShotSound).toBe("soft-pop");
     expect(settings.snapShotFlash).toBe(true);

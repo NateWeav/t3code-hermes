@@ -204,8 +204,14 @@ export function snapShotModifierPairLabel(modifier: SnapShotModifier, apple: boo
   const label = (apple ? APPLE_MODIFIER_LABELS : OTHER_MODIFIER_LABELS)[modifier];
   return `${label} + ${label}`;
 }
+// A separate global chord lets Hermes and upstream capture coexist.
 const DEFAULT_SNAP_SHOT_SHORTCUT: SnapShotShortcut = {
-  kind: "both-shift-keys",
+  key: "h",
+  ctrlKey: true,
+  altKey: true,
+  shiftKey: true,
+  modKey: false,
+  metaKey: false,
 };
 
 export const QuitConfirmationMode = Schema.Literals(["direct", "hold", "double-click"]);

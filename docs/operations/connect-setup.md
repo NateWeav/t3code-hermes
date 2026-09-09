@@ -4,6 +4,31 @@ Deployment and client configuration for T3 Connect. The [architecture note](../i
 explains the trust boundaries; the [relay README](../../infra/relay/README.md#deployment) owns relay
 provisioning instructions.
 
+## T3 Hermes builds
+
+T3 Hermes installs alongside T3 Code with its own application IDs and data. Desktop and CLI
+state defaults to `~/.t3-hermes/userdata`; use `T3HERMES_HOME` or `--home-dir` to override it.
+`T3HERMES_PORT` overrides the default server port of 4773. Existing T3 Code data is not migrated.
+The CLI executable and npm package are `t3-hermes`; background-service installation and SSH
+provisioning require that package/version to be published before use.
+
+Desktop release builds use the fork's GitHub release feed via `GITHUB_REPOSITORY` (or the explicit
+`T3CODE_DESKTOP_UPDATE_REPOSITORY` override). Do not point Hermes at upstream's release feed.
+
+Mobile uses `com.nateweav.t3hermes` with `.dev` and `.preview` variants. Set
+`T3CODE_APPLE_TEAM_ID` for your Apple team and configure signing for these IDs, including their
+widget and sharing extensions. Set `T3HERMES_EAS_PROJECT_ID` and `T3HERMES_EXPO_OWNER` to your
+own Expo project; OTA updates are disabled until a project ID is set. Configure your own App Store
+submission target in `apps/mobile/eas.json` before submitting.
+
+Using the production Connect service still requires its Clerk administrator to allow Hermes's
+native sign-in callbacks: `t3-hermes://app/`, `t3-hermes-dev://app/`, and the mobile redirect URLs
+for `t3-hermes`, `t3-hermes-dev`, and `t3-hermes-preview`. Desktop content retains the
+`t3code://app` / `t3code-dev://app` renderer origins for upstream server compatibility; those
+origins are not registered as OS launch handlers by Hermes. Native passkeys, Apple/Google sign-in,
+and mobile push require configuration for the new app IDs. The upstream relay's APNs credentials
+must not be assumed to support Hermes's bundle ID.
+
 ## Public application configuration
 
 T3 Connect is disabled in a fresh clone. To build against the production deployment, copy the
@@ -64,8 +89,8 @@ URL selects the deployment.
 Enable Clerk's Native API and add the desktop redirects to its SSO redirect allowlist:
 
 ```text
-t3code-dev://app/
-t3code://app/
+t3-hermes-dev://app/
+t3-hermes://app/
 ```
 
 Add the corresponding origin to the Clerk instance's Backend API `allowed_origins` array.
@@ -76,14 +101,14 @@ persistence and system-browser callback delivery.
 
 ## Desktop passkeys
 
-For a production macOS app with bundle ID `com.t3tools.t3code`:
+For a production macOS app with bundle ID `com.nateweav.t3hermes`:
 
 1. Create an explicit macOS App ID in the Apple Developer portal with **Associated Domains**.
 2. Create a provisioning profile for that App ID and the distribution signing certificate.
 3. In Clerk's Native API settings, add an iOS app with the same Apple Team ID and bundle ID.
    This setting also configures Electron/macOS passkeys.
 4. Check `https://<frontend-api>/.well-known/apple-app-site-association`. Its
-   `webcredentials.apps` must include `<TEAM_ID>.com.t3tools.t3code`.
+   `webcredentials.apps` must include `<TEAM_ID>.com.nateweav.t3hermes`.
 5. Configure signing as described in the [release runbook](./release.md#2-apple-signing--notarization-setup-macos).
 
 Local signed builds additionally use:
@@ -105,8 +130,8 @@ actual web and server ports. For example, with the default ports:
 
 ```sh
 VITE_DEV_SERVER_URL=http://127.0.0.1:5733 \
-T3CODE_PORT=13773 \
-  "/Applications/T3 Code (Alpha).app/Contents/MacOS/T3 Code (Alpha)"
+T3HERMES_PORT=14773 \
+  "/Applications/T3 Hermes (Alpha).app/Contents/MacOS/T3 Hermes (Alpha)"
 ```
 
 Rebuild the signed app after native dependency, main-process, preload, entitlement, provisioning,

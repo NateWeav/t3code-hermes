@@ -494,7 +494,7 @@ const testLayer = (
       DesktopEnvironment.DesktopEnvironment.of({
         platform,
         stateDir: "/state",
-        linuxDesktopEntryName: "com.t3tools.T3Code.desktop",
+        linuxDesktopEntryName: "com.nateweav.T3Hermes.desktop",
         appRoot: "/repo",
         linuxApplicationsDir: "/test-data/applications",
       } as DesktopEnvironment.DesktopEnvironment["Service"]),
@@ -929,9 +929,9 @@ it.effect.each(["win32", "darwin", "linux"] as const)(
     const bounds = { x: 10, y: 20, width: 800, height: 600 };
     const t3 = {
       id: 42,
-      title: "T3 Code",
-      appIdentifier: "com.t3tools.T3Code.desktop",
-      owner: { name: "T3 Code", processId: 123 },
+      title: "T3 Hermes",
+      appIdentifier: "com.nateweav.T3Hermes.desktop",
+      owner: { name: "T3 Hermes", processId: 123 },
       bounds,
       png: Buffer.from([1, 2, 3]),
     };
@@ -1605,7 +1605,7 @@ it.effect(
     focusedWindowMock.mockReturnValue(undefined);
     const destination = {
       getBounds: () => ({ x: 0, y: 0, width: 1000, height: 800 }),
-      getTitle: () => "T3 Code",
+      getTitle: () => "T3 Hermes",
       isDestroyed: () => false,
       isVisible: () => true,
       isMinimized: () => false,
@@ -1621,7 +1621,7 @@ it.effect(
         const warning = logs.find(
           (message) =>
             Array.isArray(message) &&
-            message[0] === "The compositor could not activate T3 Code after the snapshot",
+            message[0] === "The compositor could not activate T3 Hermes after the snapshot",
         );
         assert.strictEqual(Array.isArray(warning) ? warning[1] : undefined, activationFailure);
         const pending = yield* decodePendingMetadata(saved);
@@ -2882,7 +2882,7 @@ it.effect("flags revoked macOS permissions on read and re-registers once they re
       const revoked = yield* service.state;
       assert.equal(
         revoked.message,
-        "Allow Screen Recording in System Settings, then restart T3 Code.",
+        "Allow Screen Recording in System Settings, then restart T3 Hermes.",
       );
       assert.deepEqual(revoked.macPermissions, { screenRecording: false, accessibility: true });
 
@@ -2895,7 +2895,7 @@ it.effect("flags revoked macOS permissions on read and re-registers once they re
       const blocked = yield* service.state;
       assert.equal(
         blocked.message,
-        "Allow Screen Recording in System Settings, then restart T3 Code.",
+        "Allow Screen Recording in System Settings, then restart T3 Hermes.",
       );
       assert.isFalse(blocked.shortcutRegistered);
 
@@ -2944,7 +2944,11 @@ it.effect("starts the Shift listener outside the Electron main process", () => {
   shortcutForkArgs.length = 0;
   shortcutForkOptions.length = 0;
   shortcutProcesses.length = 0;
-  const settings = { ...DEFAULT_CLIENT_SETTINGS, snapShotEnabled: true };
+  const settings = {
+    ...DEFAULT_CLIENT_SETTINGS,
+    snapShotEnabled: true,
+    snapShotShortcut: { kind: "both-shift-keys" as const },
+  };
 
   return Effect.scoped(
     Effect.gen(function* () {
@@ -3276,7 +3280,11 @@ it.effect(
 it.effect("does not register a Wayland modifier-pair shortcut when enabled", () => {
   vi.stubEnv("XDG_SESSION_TYPE", "wayland");
   registerShortcutMock.mockReset().mockReturnValue(true);
-  const settings = { ...DEFAULT_CLIENT_SETTINGS, snapShotEnabled: true };
+  const settings = {
+    ...DEFAULT_CLIENT_SETTINGS,
+    snapShotEnabled: true,
+    snapShotShortcut: { kind: "both-shift-keys" as const },
+  };
 
   return Effect.scoped(
     Effect.gen(function* () {
@@ -3286,7 +3294,7 @@ it.effect("does not register a Wayland modifier-pair shortcut when enabled", () 
       const state = yield* service.state;
       assert.lengthOf(registerShortcutMock.mock.calls, 0);
       assert.isFalse(state.shortcutRegistered);
-      assert.deepEqual(state.shortcut, DEFAULT_CLIENT_SETTINGS.snapShotShortcut);
+      assert.deepEqual(state.shortcut, settings.snapShotShortcut);
       assert.match(state.shortcutMessage ?? "", /Modifier-pair shortcuts aren't available/);
     }),
   ).pipe(
@@ -3600,7 +3608,7 @@ for (const fails of [false, true]) {
       platform: "macos",
       id: 42,
       title: "Setup",
-      owner: { name: "T3 Code", processId: 123, path: "/Applications/T3 Code.app" },
+      owner: { name: "T3 Hermes", processId: 123, path: "/Applications/T3 Hermes.app" },
       bounds: { x: 0, y: 0, width: 800, height: 600 },
     };
     activeWindowMock.mockReset().mockResolvedValue(active);

@@ -227,7 +227,7 @@ export class HindsightService extends Context.Service<
       input: HindsightReflectInput,
     ) => Effect.Effect<HindsightReflectResult, HindsightError>;
   }
->()("t3/integrations/hindsight/HindsightService") {}
+>()("t3-hermes/integrations/hindsight/HindsightService") {}
 
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {

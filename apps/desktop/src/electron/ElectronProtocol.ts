@@ -16,6 +16,11 @@ export function getDesktopScheme(isDevelopment: boolean): string {
   return isDevelopment ? DESKTOP_DEVELOPMENT_SCHEME : DESKTOP_PRODUCTION_SCHEME;
 }
 
+/** OS callback schemes are distinct from the upstream-compatible renderer origin. */
+export function getDesktopCallbackScheme(isDevelopment: boolean): string {
+  return isDevelopment ? "t3-hermes-dev" : "t3-hermes";
+}
+
 function getDesktopOrigin(isDevelopment: boolean): string {
   return `${getDesktopScheme(isDevelopment)}://${DESKTOP_HOST}`;
 }

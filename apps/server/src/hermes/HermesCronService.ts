@@ -117,7 +117,7 @@ export class HermesCronService extends Context.Service<
       Scope.Scope
     >;
   }
->()("t3/hermes/HermesCronService") {}
+>()("t3-hermes/hermes/HermesCronService") {}
 
 interface PollResult {
   readonly snapshot: HermesCronSnapshot;

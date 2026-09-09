@@ -1,3 +1,4 @@
+import { EnvironmentHubSettings } from "./EnvironmentHubSettings";
 import { NativeHeaderToolbar, NativeStackScreenOptions } from "../../native/StackHeader";
 import { useNavigation } from "@react-navigation/native";
 import { SymbolView } from "../../components/AppSymbol";
@@ -114,6 +115,8 @@ export function SettingsEnvironmentsRouteScreen() {
         </NativeHeaderToolbar>
       )}
       <ScrollView
+        automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
+        keyboardShouldPersistTaps="handled"
         contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}
         className="flex-1"
@@ -171,6 +174,9 @@ export function SettingsEnvironmentsRouteScreen() {
               }
             : {})}
         />
+        <View className="mt-6">
+          <EnvironmentHubSettings />
+        </View>
       </ScrollView>
     </View>
   );

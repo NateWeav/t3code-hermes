@@ -97,6 +97,22 @@ describe("nightly artifact recovery", () => {
         "previous web",
       );
   });
+  it.each([true, false])(
+    "rebuilds after an empty backup with partial web assets = %s",
+    (partialWeb) => {
+      const root = fixture();
+      NodeFS.writeFileSync(NodePath.join(root, "apps/server/package.json"), '{"version":"0.0.40"}');
+      const result = shell(
+        root,
+        `stash_dist;
+      ${partialWeb ? 'mkdir -p "$WEB_DIST"; echo partial > "$WEB_DIST/index.html";' : ""}
+      build_release() { [[ ! -e "$WEB_DIST/index.html" ]] || exit 98; echo "$APP_VERSION" > "$T3CODE_DIR/rebuilt"; };
+      restore_web_assets_for_rollback`,
+      );
+      expect(result.status, result.stderr).toBe(0);
+      expect(NodeFS.readFileSync(NodePath.join(root, "rebuilt"), "utf8")).toBe("0.0.40\n");
+    },
+  );
   it("builds a versioned bundle with its client and restores the manifest", () => {
     const root = fixture();
     const manifest = '{"name":"t3-hermes","version":"0.0.0"}\n';

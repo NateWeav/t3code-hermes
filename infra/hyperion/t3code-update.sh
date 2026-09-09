@@ -28,12 +28,17 @@ set -euo pipefail
 # effect on the *next* run, which is the safe ordering.
 # ---------------------------------------------------------------------------
 if [[ "${BASH_SOURCE[0]}" == "$0" && "${T3CODE_UPDATE_REEXEC:-0}" != "1" ]]; then
-  export T3CODE_UPDATE_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  T3CODE_UPDATE_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  export T3CODE_UPDATE_SCRIPT_DIR
   __self_copy="$(mktemp "${TMPDIR:-/tmp}/t3code-update.XXXXXX")"
   cat "${BASH_SOURCE[0]}" >"${__self_copy}"
   export T3CODE_UPDATE_REEXEC=1
   export T3CODE_UPDATE_SELF_COPY="${__self_copy}"
   exec bash "${__self_copy}" "$@"
+fi
+if [[ -z "${T3CODE_UPDATE_SCRIPT_DIR:-}" ]]; then
+  T3CODE_UPDATE_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  export T3CODE_UPDATE_SCRIPT_DIR
 fi
 SELF_COPY="${T3CODE_UPDATE_SELF_COPY:-}"
 
@@ -422,10 +427,13 @@ stash_dist() {
 
 restore_dist() {
   [[ "${DIST_STASHED}" == "1" ]] || return 1
+  local had_artifacts=0
+  [[ ! -d "${SERVER_DIST_ROLLBACK}" && ! -d "${DIST_ROLLBACK}" ]] || had_artifacts=1
   rm -rf "${WEB_DIST}" "${SERVER_DIST}" || return $?
   [[ ! -d "${SERVER_DIST_ROLLBACK}" ]] || mv "${SERVER_DIST_ROLLBACK}" "${SERVER_DIST}" || return $?
   [[ ! -d "${DIST_ROLLBACK}" ]] || mv "${DIST_ROLLBACK}" "${WEB_DIST}" || return $?
   DIST_STASHED=0
+  [[ "$had_artifacts" == "1" ]] || return 1
   log "restored the pre-update server and web assets"
 }
 
@@ -445,6 +453,9 @@ restore_web_assets_for_rollback() {
     log "the existing web build predates this run; skipping the rollback rebuild"
     return
   fi
+  # A recovery rebuild must report the previous checkout version, not the failed nightly.
+  APP_VERSION="$(node -p "JSON.parse(require('fs').readFileSync(process.argv[1], 'utf8')).version" "${T3CODE_DIR}/apps/server/package.json")"
+  export APP_VERSION
   build_release || err "rollback rebuild failed — the web assets may be missing or stale"
 }
 

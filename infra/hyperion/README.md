@@ -19,12 +19,13 @@ Install these files from a checkout containing this updater. Keep them outside t
 checkout so switching release tags cannot remove the updater or its release resolver:
 
 ```bash
-mkdir -p ~/.local/lib/t3code-update ~/.config/systemd/user
+mkdir -p ~/.local/lib/t3code-update ~/.config/systemd/user/t3code.service.d
 install -m 755 infra/hyperion/t3code-update.sh infra/hyperion/t3code-server.sh ~/.local/lib/t3code-update/
 install -m 644 infra/hyperion/resolve-nightly.ts ~/.local/lib/t3code-update/
 cp infra/hyperion/t3code-update.service infra/hyperion/t3code-update.timer ~/.config/systemd/user/
 # For a new configuration; preserve and edit an existing file instead.
-cp -n infra/hyperion/t3code-update.env.example ~/.config/t3code-update.env
+(umask 077; cp -n infra/hyperion/t3code-update.env.example ~/.config/t3code-update.env)
+chmod 600 ~/.config/t3code-update.env
 ```
 
 The default deployment checkout is `~/t3code`. Edit the configuration for another location, service,
@@ -43,7 +44,7 @@ Environment=T3HERMES_HOME=/home/ubuntu/.t3
 Environment=PATH=%h/.local/share/pnpm:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 ```
 
-Create the drop-in directory first. For a custom checkout, set `T3CODE_DIR` in both the server unit
+For a custom checkout, set `T3CODE_DIR` in both the server unit
 and updater configuration. Keep `T3HERMES_HOME` outside the deployment checkout and set it in both
 places if it differs from `~/.t3`. The launcher uses the bundle once its nightly marker exists and
 falls back to source for rollback to an older installation.

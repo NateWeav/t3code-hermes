@@ -76,8 +76,8 @@ function createDesktopClerkBridge(stateDir: string, isDevelopment: boolean) {
   return createClerkBridge({
     storage: storage({ path: stateDir }),
     passkeys: true,
-    // The bridge uses this scheme for OS OAuth callbacks. App content keeps
-    // t3code://app so upstream servers and Clerk accept its renderer origin.
+    // Share upstream-approved callbacks so desktop login needs no separate Clerk tenant.
+    // The SDK registers this app as the OS handler when the bridge starts.
     renderer: {
       scheme: ElectronProtocol.getDesktopCallbackScheme(isDevelopment),
       host: ElectronProtocol.DESKTOP_HOST,

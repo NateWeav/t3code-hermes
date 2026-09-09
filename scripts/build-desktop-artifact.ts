@@ -2720,7 +2720,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       protocols: [
         {
           name: "T3 Hermes",
-          schemes: ["t3-hermes", "t3-hermes-dev"],
+          schemes: ["t3code", "t3code-dev"],
         },
       ],
       ...(signed ? { sign: path.join(repoRoot, "scripts/sign-macos.ts") } : {}),
@@ -2767,7 +2767,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       protocols: [
         {
           name: "T3 Hermes",
-          schemes: ["t3-hermes", "t3-hermes-dev"],
+          schemes: ["t3code", "t3code-dev"],
         },
       ],
       desktop: {

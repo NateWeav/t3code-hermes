@@ -110,7 +110,7 @@ describe("DesktopLinuxUrlHandler", () => {
     const entry = DesktopLinuxUrlHandler.renderUrlHandlerDesktopEntry({
       displayName: "T3 Hermes (Nightly)",
       execTarget: '/home/al ice/Apps/T3 "100%" $HOME\\x.AppImage',
-      scheme: "t3-hermes",
+      scheme: "t3code",
     });
 
     assert.include(entry, "[Desktop Entry]");
@@ -124,19 +124,19 @@ describe("DesktopLinuxUrlHandler", () => {
     );
     assert.include(entry, "NoDisplay=true");
     assert.notInclude(entry, "StartupWMClass=");
-    assert.include(entry, "MimeType=x-scheme-handler/t3-hermes;");
+    assert.include(entry, "MimeType=x-scheme-handler/t3code;");
   });
 
   it("carries structured context on registration errors", () => {
     const writeError = new DesktopLinuxUrlHandler.DesktopLinuxUrlHandlerRegistrationError({
       step: "write-desktop-entry",
-      scheme: "t3-hermes",
+      scheme: "t3code",
       desktopEntryPath: "/home/alice/.local/share/applications/com.nateweav.T3Hermes.desktop",
       cause: new Error("boom"),
     });
     assert.equal(
       writeError.message,
-      "Failed to register the t3-hermes:// URL handler (step: write-desktop-entry).",
+      "Failed to register the t3code:// URL handler (step: write-desktop-entry).",
     );
     assert.equal(
       writeError.desktopEntryPath,
@@ -145,12 +145,12 @@ describe("DesktopLinuxUrlHandler", () => {
 
     const exitError = new DesktopLinuxUrlHandler.DesktopLinuxUrlHandlerRegistrationError({
       step: "set-default-handler",
-      scheme: "t3-hermes",
+      scheme: "t3code",
       exitCode: 4,
     });
     assert.equal(
       exitError.message,
-      "Failed to register the t3-hermes:// URL handler (step: set-default-handler, xdg-mime exit code 4).",
+      "Failed to register the t3code:// URL handler (step: set-default-handler, xdg-mime exit code 4).",
     );
   });
 
@@ -170,11 +170,11 @@ describe("DesktopLinuxUrlHandler", () => {
         recorded.files[0]?.content,
         'Exec="/home/alice/Applications/T3-Code.AppImage" %U',
       );
-      assert.include(recorded.files[0]?.content, "MimeType=x-scheme-handler/t3-hermes;");
+      assert.include(recorded.files[0]?.content, "MimeType=x-scheme-handler/t3code;");
       assert.deepEqual(recorded.commands, [
         {
           command: "xdg-mime",
-          args: ["default", "com.nateweav.T3Hermes.desktop", "x-scheme-handler/t3-hermes"],
+          args: ["default", "com.nateweav.T3Hermes.desktop", "x-scheme-handler/t3code"],
         },
       ]);
     });
@@ -201,7 +201,7 @@ describe("DesktopLinuxUrlHandler", () => {
         existingEntry: DesktopLinuxUrlHandler.renderUrlHandlerDesktopEntry({
           displayName: "T3 Hermes (Alpha)",
           execTarget: "/home/alice/Applications/T3-Code.AppImage",
-          scheme: "t3-hermes",
+          scheme: "t3code",
         }),
       });
 

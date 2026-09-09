@@ -104,7 +104,7 @@ describe("DesktopPreReadyPlatform", () => {
             assert.equal(identity.desktopName, "com.nateweav.T3Hermes.desktop");
             assert.include(identity.desktopEntry ?? "", 'Exec="/Applications/current.AppImage" %U');
             assert.include(identity.desktopEntry ?? "", "Name=T3 Hermes (Alpha)");
-            assert.include(identity.desktopEntry ?? "", "MimeType=x-scheme-handler/t3-hermes;");
+            assert.include(identity.desktopEntry ?? "", "MimeType=x-scheme-handler/t3code;");
           }),
         ).pipe(Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())));
       },

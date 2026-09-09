@@ -21,11 +21,16 @@ widget and sharing extensions. Set `T3HERMES_EAS_PROJECT_ID` and `T3HERMES_EXPO_
 own Expo project; OTA updates are disabled until a project ID is set. Configure your own App Store
 submission target in `apps/mobile/eas.json` before submitting.
 
-Using the production Connect service still requires its Clerk administrator to allow Hermes's
-native sign-in callbacks: `t3-hermes://app/`, `t3-hermes-dev://app/`, and the mobile redirect URLs
-for `t3-hermes`, `t3-hermes-dev`, and `t3-hermes-preview`. Desktop content retains the
-`t3code://app` / `t3code-dev://app` renderer origins for upstream server compatibility; those
-origins are not registered as OS launch handlers by Hermes. Native passkeys, Apple/Google sign-in,
+Desktop uses upstream's `t3code://app/` and `t3code-dev://app/` sign-in callbacks and
+renderer origins, so it can use upstream Clerk without registering Hermes-specific desktop
+redirects. The callback handler is shared with T3 Code: quit the other app, then launch or restart
+the app you want to sign into before beginning login. Closing the other app alone does not change
+the OS handler; if the browser offers an application chooser, select the intended app. Both apps
+can run together after login, with independent sessions and data.
+
+Mobile retains separate `t3-hermes`, `t3-hermes-dev`, and `t3-hermes-preview` schemes; its
+redirect URLs still need approval in the Clerk instance used by the mobile build.
+Native passkeys, Apple/Google sign-in,
 and mobile push require configuration for the new app IDs. The upstream relay's APNs credentials
 must not be assumed to support Hermes's bundle ID.
 
@@ -89,8 +94,8 @@ URL selects the deployment.
 Enable Clerk's Native API and add the desktop redirects to its SSO redirect allowlist:
 
 ```text
-t3-hermes-dev://app/
-t3-hermes://app/
+t3code-dev://app/
+t3code://app/
 ```
 
 Add the corresponding origin to the Clerk instance's Backend API `allowed_origins` array.

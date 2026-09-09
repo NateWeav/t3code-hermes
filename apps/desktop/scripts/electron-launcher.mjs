@@ -19,7 +19,7 @@ const APP_DISPLAY_NAME = isDevelopment ? "T3 Hermes (Dev)" : "T3 Hermes (Alpha)"
 const APP_BUNDLE_ID = isDevelopment
   ? `com.nateweav.t3hermes.dev.${devBundleIdSuffix || "local"}`
   : "com.nateweav.t3hermes";
-const APP_PROTOCOL_SCHEMES = isDevelopment ? ["t3-hermes-dev"] : ["t3-hermes"];
+const APP_PROTOCOL_SCHEMES = isDevelopment ? ["t3code-dev"] : ["t3code"];
 const LAUNCHER_VERSION = 19;
 const developmentMacIconPngPath = NodePath.join(repoRoot, "assets", "hermes", "macos-1024.png");
 const productionMacIconPngPath = NodePath.join(repoRoot, "assets", "hermes", "macos-1024.png");

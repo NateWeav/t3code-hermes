@@ -16,9 +16,9 @@ export function getDesktopScheme(isDevelopment: boolean): string {
   return isDevelopment ? DESKTOP_DEVELOPMENT_SCHEME : DESKTOP_PRODUCTION_SCHEME;
 }
 
-/** OS callback schemes are distinct from the upstream-compatible renderer origin. */
+/** Upstream Clerk accepts these callbacks; the OS handler is shared with upstream T3. */
 export function getDesktopCallbackScheme(isDevelopment: boolean): string {
-  return isDevelopment ? "t3-hermes-dev" : "t3-hermes";
+  return getDesktopScheme(isDevelopment);
 }
 
 function getDesktopOrigin(isDevelopment: boolean): string {

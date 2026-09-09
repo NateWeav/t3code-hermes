@@ -557,6 +557,39 @@ describe("writeHermesReasoningOverride", () => {
 });
 
 describe("buildHermesModelCapabilities", () => {
+  it("caps GPT-6 reasoning choices and rejects stale selections above its ceiling", () => {
+    const cache = modelsDevCache({ openai: [["gpt-6-astra", true]] });
+    for (const slug of [
+      "openai:gpt-6-astra",
+      "cliproxyapi:gpt-6-astra",
+      "custom:openai/GPT-6-ASTRA",
+    ]) {
+      const descriptor = buildHermesModelCapabilities({
+        slug,
+        context: { cache, config: null, configFile: "/x" },
+      }).optionDescriptors?.[0];
+      expect(
+        descriptor?.type === "select" && descriptor.options.map((option) => option.id),
+      ).toEqual(["default", "minimal", "low", "medium", "high", "xhigh"]);
+      for (const value of ["max", "ultra"]) {
+        expect(
+          resolveHermesReasoningSelection({
+            slug,
+            cache,
+            selections: [{ id: HERMES_REASONING_OPTION_ID, value }],
+          }),
+        ).toBeUndefined();
+      }
+      expect(
+        resolveHermesReasoningSelection({
+          slug,
+          cache,
+          selections: [{ id: HERMES_REASONING_OPTION_ID, value: "xhigh" }],
+        }),
+      ).toBe("xhigh");
+    }
+  });
+
   const cache = modelsDevCache({
     openai: [
       ["gpt-5.4", true],

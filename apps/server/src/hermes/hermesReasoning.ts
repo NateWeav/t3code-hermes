@@ -353,7 +353,9 @@ function applyHermesReasoningCeilings(
   if (OPENAI_FAMILY_PROVIDERS.has(provider)) {
     // o-series reasoning models document low/medium/high only.
     if (/^o[134]/.test(bare)) return ["low", "medium", "high"];
-    if (bare.startsWith("gpt-5")) return capAt(isGpt56(bare) ? "max" : "xhigh");
+    if (bare.startsWith("gpt-5") || bare.startsWith("gpt-6")) {
+      return capAt(isGpt56(bare) ? "max" : "xhigh");
+    }
   }
   if (GEMINI_PROVIDERS.has(provider)) return capAt("xhigh");
   if (ANTHROPIC_LANES.has(provider) && isPreAdaptiveAnthropic(bare)) return capAt("xhigh");

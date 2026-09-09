@@ -18,6 +18,9 @@ reasoning limits.
 If Hermes has not yet built its model database, the control is hidden rather than guessed at. It
 appears once Hermes has refreshed that data.
 
+GPT-6 models offer effort levels through **Extra High**, including when served through a custom
+proxy. Max and Ultra are omitted because Hermes clamps them to Extra High on this model family.
+
 ## Where the setting is saved
 
 Choosing a level records it in your own Hermes configuration, against that specific model. This is

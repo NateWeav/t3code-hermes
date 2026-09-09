@@ -12,6 +12,12 @@ state defaults to `~/.t3-hermes/userdata`; use `T3HERMES_HOME` or `--home-dir` t
 The CLI executable and npm package are `t3-hermes`; background-service installation and SSH
 provisioning require that package/version to be published before use.
 
+The release workflow publishes `t3-hermes` with the `nightly` npm tag for nightlies and `latest`
+for stable releases, then installs and checks the published CLI before publishing the GitHub release.
+Configure an npm trusted publisher on the `t3-hermes` package for GitHub Actions: owner `NateWeav`,
+repository `t3code-hermes`, workflow `release.yml`, with no environment. Publishing uses the job's
+OIDC identity; no npm token secret is required.
+
 Desktop release builds use the fork's GitHub release feed via `GITHUB_REPOSITORY` (or the explicit
 `T3CODE_DESKTOP_UPDATE_REPOSITORY` override). Do not point Hermes at upstream's release feed.
 

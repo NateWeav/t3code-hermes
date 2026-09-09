@@ -823,9 +823,8 @@ jobs:
   publish_cli:
     name: Publish CLI to npm
     needs: [preflight, relay_public_config, quality, build]
-    # The leading repository check is a fork guard: the npm package `t3` is
-    # upstream's and forks cannot publish it.
-    if: ${{ !failure() && !cancelled() && github.repository == 'pingdotgg/t3code' && needs.preflight.result == 'success' && needs.relay_public_config.result == 'success' && needs.quality.result == 'success' && needs.build.result == 'success' }}
+    # Only the owning repository may publish the Hermes npm package.
+    if: ${{ !failure() && !cancelled() && github.repository == 'NateWeav/t3code-hermes' && needs.preflight.result == 'success' && needs.relay_public_config.result == 'success' && needs.quality.result == 'success' && needs.build.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -876,7 +875,7 @@ jobs:
       - name: Align package versions to release version
         run: node scripts/update-release-package-versions.ts "${{ needs.preflight.outputs.version }}"
 
-      # The t3 build task depends on @t3tools/web#build, so the web client is
+      # The t3-hermes build task depends on @t3tools/web#build, so the web client is
       # built (once) as part of this step.
       - name: Build CLI package
         run: vp run --filter t3-hermes build
@@ -900,14 +899,19 @@ jobs:
           done
 
       - name: Publish CLI package
-        run: node apps/server/scripts/cli.ts publish --tag "${{ needs.preflight.outputs.cli_dist_tag }}" --app-version "${{ needs.preflight.outputs.version }}" --verbose
+        run: node apps/server/scripts/cli.ts publish --tag "${{ needs.preflight.outputs.cli_dist_tag }}" --app-version "${{ needs.preflight.outputs.version }}" --provenance --verbose
+
+      - name: Verify published CLI from npm
+        env:
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+          RELEASE_DIST_TAG: ${{ needs.preflight.outputs.cli_dist_tag }}
+        run: bash scripts/verify-npm-release.sh "$RELEASE_VERSION" "$RELEASE_DIST_TAG"
 
   release:
     name: Publish GitHub Release
     needs: [preflight, build, publish_cli]
-    # The GitHub Release only needs the desktop artifacts, so a skipped
-    # publish_cli (fork, no npm rights) must not block it.
-    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.build.result == 'success' && (needs.publish_cli.result == 'success' || needs.publish_cli.result == 'skipped') }}
+    # Do not ship clients advertising a version that is missing from npm.
+    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.build.result == 'success' && needs.publish_cli.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:

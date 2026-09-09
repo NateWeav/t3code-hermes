@@ -1,5 +1,5 @@
 import { Image } from "expo-image";
-import { Circle, Path, Rect, Svg } from "react-native-svg";
+import { Path, Svg } from "react-native-svg";
 import { View } from "react-native";
 import { providerInstanceInitials } from "@t3tools/client-runtime/state/provider-instance-display";
 import { useAppearancePreferences } from "../features/settings/appearance/AppearancePreferencesProvider";
@@ -55,18 +55,12 @@ export function ProviderIcon(props: ProviderIconProps) {
 
   if (props.provider === "hermes") {
     return (
-      <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-        <Circle cx="12" cy="3.6" r="1.9" fill={mono} />
-        <Rect x="11.1" y="6.4" width="1.8" height="14" rx="0.9" fill={mono} />
-        <Path
-          fill={mono}
-          d="M10.9 8.2C9.1 6.6 6.2 5.9 3 6.3c1.3 1.4 2.6 2.3 4.1 2.8-1.2.2-2.5.2-3.8 0 1.6 1.8 4.2 2.7 7.6 2.6z"
-        />
-        <Path
-          fill={mono}
-          d="M13.1 8.2c1.8-1.6 4.7-2.3 7.9-1.9-1.3 1.4-2.6 2.3-4.1 2.8 1.2.2 2.5.2 3.8 0-1.6 1.8-4.2 2.7-7.6 2.6z"
-        />
-      </Svg>
+      <Image
+        source={require("../../assets/hermes.png")}
+        style={{ width: size, height: size }}
+        contentFit="contain"
+        tintColor={mono}
+      />
     );
   }
 

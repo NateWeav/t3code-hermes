@@ -1133,6 +1133,8 @@ function isStartupMetadataUpdate(notification: EffectAcpSchema.SessionNotificati
     case "current_mode_update":
     case "config_option_update":
     case "available_commands_update":
+    // Hermes can report context usage before session setup finishes.
+    case "usage_update":
       return true;
     default:
       return false;

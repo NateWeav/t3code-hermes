@@ -169,6 +169,7 @@ describe("resolveHermesReasoningLevels", () => {
       ["gpt-5.5", true],
       ["gpt-5.6", true],
       ["gpt-5.6-sol", true],
+      ["gpt-5.6-luna", true],
       ["o3", true],
     ],
     google: [["gemini-3-pro", true]],
@@ -197,6 +198,43 @@ describe("resolveHermesReasoningLevels", () => {
 
   it("has no opinion about a model the catalogue does not list", () => {
     expect(resolveHermesReasoningLevels({ slug: "openai:gpt-6", cache })).toBeNull();
+  });
+
+  it("resolves custom proxy models through their vendor with the vendor's limits", () => {
+    for (const slug of ["cliproxyapi:gpt-5.6-luna", "custom:openai/gpt-5.6-luna"]) {
+      expect(resolveHermesReasoningLevels({ slug, cache })).toEqual(GPT_56_LADDER);
+    }
+    expect(resolveHermesReasoningLevels({ slug: "cliproxyapi:o3", cache })).toEqual([
+      "low",
+      "medium",
+      "high",
+    ]);
+    for (const slug of ["cliproxyapi:claude-sonnet-4-5", "custom:gemini-3-pro"]) {
+      expect(resolveHermesReasoningLevels({ slug, cache })).toEqual([
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+      ]);
+    }
+    expect(resolveHermesReasoningLevels({ slug: "custom:gpt-6", cache })).toBeNull();
+    expect(resolveHermesReasoningLevels({ slug: "custom:unknown", cache })).toBeNull();
+  });
+
+  it("preserves a listed provider's answer instead of falling back to the vendor", () => {
+    expect(
+      resolveHermesReasoningLevels({
+        slug: "cliproxyapi:gpt-5.6-luna",
+        cache: { ...cache, ...modelsDevCache({ cliproxyapi: [["gpt-5.6-luna", false]] }) },
+      }),
+    ).toEqual([]);
+    expect(
+      resolveHermesReasoningLevels({
+        slug: "openrouter:gpt-5.6-luna",
+        cache,
+      }),
+    ).toBeNull();
   });
 
   it("has no opinion when the catalogue is unavailable", () => {
@@ -523,9 +561,36 @@ describe("buildHermesModelCapabilities", () => {
     openai: [
       ["gpt-5.4", true],
       ["gpt-4o", false],
+      ["gpt-5.6-luna", true],
     ],
   });
   const context = { cache, config: { agent: { reasoning_effort: "high" } }, configFile: "/x" };
+
+  it("offers and accepts reasoning for Hyperion's custom proxy model", () => {
+    const slug = "cliproxyapi:gpt-5.6-luna";
+    const descriptor = buildHermesModelCapabilities({ slug, context }).optionDescriptors?.[0];
+    expect(descriptor?.type === "select" && descriptor.options.map((option) => option.id)).toEqual([
+      HERMES_REASONING_DEFAULT_CHOICE_ID,
+      ...GPT_56_LADDER,
+    ]);
+    expect(descriptor?.currentValue).toBe("high");
+    for (const [value, expected] of [
+      ["max", "max"],
+      ["default", null],
+      ["ultra", undefined],
+    ] as const) {
+      expect(
+        resolveHermesReasoningSelection({
+          slug,
+          cache,
+          selections: [{ id: HERMES_REASONING_OPTION_ID, value }],
+        }),
+      ).toBe(expected);
+    }
+    expect(
+      buildHermesModelCapabilities({ slug: "cliproxyapi:gpt-4o", context }).optionDescriptors,
+    ).toEqual([]);
+  });
 
   it("offers the ladder plus a way back to the Hermes default", () => {
     const descriptor = buildHermesModelCapabilities({ slug: "openai:gpt-5.4", context })

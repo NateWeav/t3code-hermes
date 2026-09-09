@@ -11,6 +11,10 @@ disk to decide which models can reason at all, and trims the list where a provid
 higher levels. If a model cannot reason, no control appears rather than one that does nothing. If a
 model is forced to think, the control is hidden rather than offering an off option.
 
+Custom proxy endpoints also support this control for recognized OpenAI, Claude, and Gemini models.
+When the proxy has no catalogue entry, T3 Code checks the original model vendor's data and uses its
+reasoning limits.
+
 If Hermes has not yet built its model database, the control is hidden rather than guessed at. It
 appears once Hermes has refreshed that data.
 

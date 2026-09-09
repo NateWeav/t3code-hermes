@@ -21,7 +21,8 @@
  *     does nothing.
  *
  * Everything returns "no opinion" (`null`) when the catalogue cannot answer —
- * missing file, corrupt file, unknown provider, unknown model. Callers omit
+ * missing file, corrupt file, unknown model. Custom endpoints fall back to the
+ * underlying model vendor's catalogue when its family is recognizable. Callers omit
  * the selector entirely in that case. Guessing a ladder would mean rendering a
  * control that may not work, which is worse than rendering nothing.
  *
@@ -145,6 +146,24 @@ function modelsDevProviderId(provider: string): string {
   return PROVIDER_TO_MODELS_DEV[provider] ?? provider;
 }
 
+/** Custom endpoints inherit the underlying model vendor's catalogue and limits. */
+function resolveCatalogueModel(
+  cache: ModelsDevCache,
+  parsed: ParsedHermesModelSlug,
+): ParsedHermesModelSlug {
+  if (parsed.provider === null || isRecord(cache[modelsDevProviderId(parsed.provider)])) {
+    return parsed;
+  }
+  const provider = /^(gpt-|o[134](?:-|$))/.test(parsed.bare)
+    ? "openai"
+    : parsed.bare.startsWith("claude-")
+      ? "anthropic"
+      : parsed.bare.startsWith("gemini-")
+        ? "google"
+        : null;
+  return provider === null ? parsed : { ...parsed, provider, model: parsed.bare };
+}
+
 /**
  * The slice of `models_dev_cache.json` we depend on.
  *
@@ -221,11 +240,13 @@ export function lookupModelsDevReasoning(
   parsed: ParsedHermesModelSlug,
 ): boolean | null {
   if (cache === null || parsed.provider === null) return null;
-  const providerEntry = cache[modelsDevProviderId(parsed.provider)];
+  const catalogueModel = resolveCatalogueModel(cache, parsed);
+  if (catalogueModel.provider === null) return null;
+  const providerEntry = cache[modelsDevProviderId(catalogueModel.provider)];
   if (!isRecord(providerEntry)) return null;
   const models = providerEntry["models"];
   if (!isRecord(models)) return null;
-  const entry = findModelEntry(models, parsed.model);
+  const entry = findModelEntry(models, catalogueModel.model);
   if (entry === null) return null;
   const reasoning = entry["reasoning"];
   return typeof reasoning === "boolean" ? reasoning : null;
@@ -363,5 +384,7 @@ export function resolveHermesReasoningLevels(input: {
   if (supportsReasoning === null) return null;
   if (supportsReasoning === false) return [];
 
-  return applyHermesReasoningCeilings(parsed);
+  return applyHermesReasoningCeilings(
+    input.cache === null ? parsed : resolveCatalogueModel(input.cache, parsed),
+  );
 }

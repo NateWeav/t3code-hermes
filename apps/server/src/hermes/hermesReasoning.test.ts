@@ -120,6 +120,90 @@ describe("parseHermesModelSlug", () => {
   });
 });
 
+describe("named custom endpoint reasoning", () => {
+  const levels = ["low", "medium", "high", "xhigh", "max"];
+  const cache: ModelsDevCache = {
+    openai: {
+      models: {
+        "gpt-6-astra": {
+          reasoning: true,
+          reasoning_options: [{ type: "effort", values: levels }],
+        },
+      },
+    },
+  };
+  const slug = "custom:cliproxyapi:gpt-6-astra";
+
+  it("keeps the named endpoint separate from the model and its tags", () => {
+    expect(parseHermesModelSlug(slug)).toEqual({
+      provider: "custom:cliproxyapi",
+      model: "gpt-6-astra",
+      bare: "gpt-6-astra",
+    });
+    expect(parseHermesModelSlug("custom:ollama:vendor/model:cloud")?.model).toBe(
+      "vendor/model:cloud",
+    );
+    expect(parseHermesModelSlug("custom:cliproxyapi:")).toBeNull();
+    expect(hermesReasoningOverrideKey(slug)).toBe("gpt-6-astra");
+  });
+
+  it("uses explicit catalogue effort options for native and custom providers", () => {
+    for (const model of [slug, "openai:gpt-6-astra", "cliproxyapi:gpt-6-astra"]) {
+      expect(resolveHermesReasoningLevels({ slug: model, cache })).toEqual(levels);
+    }
+  });
+
+  it("filters unknown effort values without bypassing provider exclusions", () => {
+    for (const values of [[], ["unsupported"], ["high", "high", "unsupported"]]) {
+      const entry = { reasoning: true, reasoning_options: [{ type: "effort", values }] };
+      expect(
+        resolveHermesReasoningLevels({
+          slug,
+          cache: { openai: { models: { "gpt-6-astra": entry } } },
+        }),
+      ).toEqual(values.includes("high") ? ["high"] : []);
+      expect(
+        resolveHermesReasoningLevels({
+          slug: "zai:glm-4.7",
+          cache: { zai: { models: { "glm-4.7": entry } } },
+        }),
+      ).toEqual([]);
+    }
+  });
+
+  it("builds the selector and validates selections against the same ladder", () => {
+    const capabilities = buildHermesModelCapabilities({
+      slug,
+      context: {
+        cache,
+        config: { agent: { reasoning_overrides: { "gpt-6-astra": "high" } } },
+        configFile: "/unused",
+      },
+    });
+    expect(capabilities.optionDescriptors).toMatchObject([
+      {
+        id: "reasoningEffort",
+        currentValue: "high",
+        options: [{ id: "default" }, ...levels.map((id) => ({ id }))],
+      },
+    ]);
+    expect(
+      resolveHermesReasoningSelection({
+        slug,
+        cache,
+        selections: [{ id: "reasoningEffort", value: "max" }],
+      }),
+    ).toBe("max");
+    expect(
+      resolveHermesReasoningSelection({
+        slug,
+        cache,
+        selections: [{ id: "reasoningEffort", value: "ultra" }],
+      }),
+    ).toBeUndefined();
+  });
+});
+
 describe("readModelsDevCache", () => {
   it("returns null when the cache is missing", () => {
     withTempDir((dir) => {

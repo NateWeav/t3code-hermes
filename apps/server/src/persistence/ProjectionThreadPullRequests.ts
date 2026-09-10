@@ -92,7 +92,7 @@ export class ProjectionThreadPullRequestRepository extends Context.Service<
       input: DeleteProjectionThreadPullRequestsBySourceInput,
     ) => Effect.Effect<void, ProjectionRepositoryError>;
   }
->()("t3/persistence/ProjectionThreadPullRequests/ProjectionThreadPullRequestRepository") {}
+>()("t3-hermes/persistence/ProjectionThreadPullRequests/ProjectionThreadPullRequestRepository") {}
 
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {

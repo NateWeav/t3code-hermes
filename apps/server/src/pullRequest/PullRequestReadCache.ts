@@ -47,7 +47,7 @@ export class PullRequestReadCache extends Context.Service<
     ) => Effect.Effect<string, ReadError>;
     readonly invalidate: Effect.Effect<void>;
   }
->()("t3/pullRequest/PullRequestReadCache") {}
+>()("t3-hermes/pullRequest/PullRequestReadCache") {}
 
 export const make = Effect.gen(function* () {
   const backing = yield* KeyValueStore.KeyValueStore;

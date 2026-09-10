@@ -96,6 +96,7 @@ describe("buildInitialHermesProviderSnapshot", () => {
       const snapshot = yield* buildInitialHermesProviderSnapshot(decodeHermesSettings({}));
       expect(snapshot.enabled).toBe(false);
       expect(snapshot.status).toBe("disabled");
+      expect(snapshot.reportsContextWindow).toBe(true);
       expect(snapshot.installed).toBe(false);
       expect(snapshot.message).toContain("disabled");
     }),
@@ -209,6 +210,7 @@ it.live("reports authenticated with derived upstreams once ACP returns models", 
     );
 
     expect(snapshot.status).toBe("ready");
+    expect(snapshot.reportsContextWindow).toBe(true);
     expect(snapshot.auth.status).toBe("authenticated");
     // Derived from model slug prefixes, never from ~/.hermes/.env.
     expect(snapshot.auth.label).toBe("Anthropic, OpenAI");
@@ -235,6 +237,7 @@ it.live("reports unauthenticated when the handshake works but no models are conf
     );
 
     expect(snapshot.status).toBe("ready");
+    expect(snapshot.reportsContextWindow).toBe(true);
     expect(snapshot.auth.status).toBe("unauthenticated");
     expect(snapshot.message).toContain("no models");
     expect(snapshot.models.map((model) => model.slug)).toEqual(["hermes-4"]);

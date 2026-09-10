@@ -1,5 +1,7 @@
 "use client";
 
+import { threadPullRequestLinkMode } from "@t3tools/client-runtime/thread-pull-request-compatibility";
+
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   canCreateProjectInEnvironment,
@@ -43,6 +45,7 @@ import {
   FileSearchIcon,
   FolderIcon,
   FolderPlusIcon,
+  GitPullRequestArrowIcon,
   LinkIcon,
   MessageSquareIcon,
   PaletteIcon,
@@ -80,7 +83,7 @@ import { sourceControlEnvironment } from "../state/sourceControl";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
-import { useProjects, useThreadShells } from "../state/entities";
+import { useProjects, useServerConfigs, useThreadShells } from "../state/entities";
 import { useThreadSearch } from "../state/queries";
 import { resolveThreadActionProjectRef, startNewThreadFromContext } from "../lib/chatThreadActions";
 import {
@@ -131,6 +134,7 @@ import {
   buildProjectActionItems,
   buildRootGroups,
   buildThreadActionItems,
+  buildLinkedThreadActionItems,
   enumerateCommandPaletteItems,
   type CommandPaletteActionItem,
   type CommandPaletteOpenIntent,
@@ -153,6 +157,7 @@ import { AzureDevOpsIcon, BitbucketIcon, GitHubIcon, GitLabIcon } from "./Icons"
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { ProjectFilePicker } from "./files/ProjectFilePicker";
+import { openLinkPullRequestDialog } from "./pullRequest/LinkPullRequestDialog";
 import { ProjectContentSearchDialog } from "./search/ProjectContentSearchDialog";
 import { toggleThemeEditorForTheme } from "./settings/themeEditorStore";
 import { searchSettings, SETTINGS_SECTION_LABELS } from "./settings/settingsSearch";
@@ -509,6 +514,12 @@ export function CommandPalette({ children }: { children: ReactNode }) {
           openNewThreadIn();
         } else if (detail.open === "add-project") {
           openAddProject();
+        } else if (detail.query !== undefined) {
+          dispatch({
+            _tag: "OpenSearch",
+            query: detail.query,
+            ...(detail.linkedThreads ? { linkedThreads: detail.linkedThreads } : {}),
+          });
         } else {
           setOpen(true);
         }
@@ -600,7 +611,10 @@ function OpenCommandPaletteDialog(props: {
   const navigate = useNavigate();
   const pathname = useLocation({ select: (location) => location.pathname });
   const { clearOpenIntent, openIntent, openOverlayMode, setOpen } = props;
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(openIntent?.kind === "search" ? openIntent.query : "");
+  const [linkedThreadSearch, setLinkedThreadSearch] = useState(
+    openIntent?.kind === "search" ? openIntent : null,
+  );
   const deferredQuery = useDeferredValue(query);
   const isActionsOnly = deferredQuery.startsWith(">");
   const [highlightedItemValue, setHighlightedItemValue] = useState<string | null>(null);
@@ -636,12 +650,16 @@ function OpenCommandPaletteDialog(props: {
         ? scopeThreadRef(activeThread.environmentId, activeThread.id)
         : null;
   const openPanelPullRequestUrl = useOpenPanelPullRequestUrl(referenceThreadRef);
+  const activeThreadServerConfig = useServerConfigs().get(
+    activeThread?.environmentId ?? ("" as EnvironmentId),
+  );
   const activeThreadReferenceCopyTarget =
     referenceThreadRef === null || (pathname === "/pull-requests" && !openPanelPullRequestUrl)
       ? null
       : resolveThreadReferenceCopyTarget({
           threadId: referenceThreadRef.threadId,
           openPanelPullRequestUrl,
+          pullRequests: activeThread?.pullRequests,
           linkedPullRequestUrl:
             activeThread?.linkedPullRequest?.url ?? activeThread?.branchPullRequest?.url ?? null,
         });
@@ -719,6 +737,7 @@ function OpenCommandPaletteDialog(props: {
   );
   const [isPickingProjectFolder, setIsPickingProjectFolder] = useState(false);
   const [addProjectCloneFlow, setAddProjectCloneFlow] = useState<AddProjectCloneFlow | null>(null);
+  const cloneLookupGeneration = useRef(0);
   const [isRemoteProjectLookingUp, setIsRemoteProjectLookingUp] = useState(false);
   const [isRemoteProjectCloning, setIsRemoteProjectCloning] = useState(false);
   const projectGroupingSettings = useMemo(
@@ -1521,6 +1540,18 @@ function OpenCommandPaletteDialog(props: {
   ]);
 
   useLayoutEffect(() => {
+    if (openIntent?.kind !== "search") return;
+    browseNavigation.invalidate();
+    cloneLookupGeneration.current += 1;
+    setIsRemoteProjectLookingUp(false);
+    setAddProjectCloneFlow(null);
+    setViewStack([]);
+    setLinkedThreadSearch(openIntent);
+    setQuery(openIntent.query);
+    clearOpenIntent();
+  }, [browseNavigation, clearOpenIntent, openIntent]);
+
+  useLayoutEffect(() => {
     if (openIntent?.kind !== "add-project") {
       return;
     }
@@ -1620,6 +1651,35 @@ function OpenCommandPaletteDialog(props: {
       shortcutCommand: "thread.copyReference",
       run: copyActiveThreadReference,
     });
+  }
+
+  if (
+    activeThread !== null &&
+    threadPullRequestLinkMode(activeThreadServerConfig?.environment.capabilities) !== "unsupported"
+  ) {
+    const threadRef = scopeThreadRef(activeThread.environmentId, activeThread.id);
+    actionItems.push({
+      kind: "action",
+      value: "action:link-pull-request",
+      searchTerms: ["link", "pull request", "pr", "attach", "stack"],
+      title: "Link pull request to thread",
+      icon: <GitPullRequestArrowIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        openLinkPullRequestDialog(threadRef);
+      },
+    });
+    if (activeThreadServerConfig?.environment.capabilities.threadPullRequests === true) {
+      actionItems.push({
+        kind: "action",
+        value: "action:open-thread-pull-requests",
+        searchTerms: ["pull requests", "linked", "stack", "prs"],
+        title: "Show linked pull requests",
+        icon: <GitPullRequestArrowIcon className={ITEM_ICON_CLASS} />,
+        run: async () => {
+          useRightPanelStore.getState().open(threadRef, "pull-requests");
+        },
+      });
+    }
   }
 
   actionItems.push({
@@ -1799,7 +1859,20 @@ function OpenCommandPaletteDialog(props: {
     isInSubmenu: currentView !== null,
     projectSearchItems: projectSearchItems,
     settingsSearchItems,
-    threadSearchItems: allThreadItems,
+    threadSearchItems:
+      linkedThreadSearch?.linkedThreads && deferredQuery === linkedThreadSearch.query
+        ? buildLinkedThreadActionItems({
+            ...linkedThreadSearch.linkedThreads,
+            query: linkedThreadSearch.query,
+            icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
+            runThread: async (thread) => {
+              await navigate({
+                to: "/$environmentId/$threadId",
+                params: buildThreadRouteParams(scopeThreadRef(thread.environmentId, thread.id)),
+              });
+            },
+          })
+        : allThreadItems,
   });
 
   const handleAddProjectForEnvironment = useCallback(
@@ -2005,6 +2078,7 @@ function OpenCommandPaletteDialog(props: {
       }
 
       setIsRemoteProjectLookingUp(true);
+      const lookupGeneration = ++cloneLookupGeneration.current;
       const lookupResult = await lookupRepository({
         environmentId: addProjectCloneFlow.environmentId,
         input: {
@@ -2012,6 +2086,7 @@ function OpenCommandPaletteDialog(props: {
           repository: rawRepository,
         },
       });
+      if (lookupGeneration !== cloneLookupGeneration.current) return;
       setIsRemoteProjectLookingUp(false);
       if (lookupResult._tag === "Failure") {
         if (!isAtomCommandInterrupted(lookupResult)) {

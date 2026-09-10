@@ -102,9 +102,10 @@ export function parseHermesModelSlug(
   const trimmed = slug?.trim();
   if (!trimmed) return null;
 
-  const separator = trimmed.indexOf(":");
-  // A trailing tag such as `kimi-k2.6:cloud` is part of the model id, not a
-  // provider prefix, so only split when something model-shaped follows.
+  // Named endpoints encode their provider as `custom:<name>`. Keep model
+  // namespaces and trailing tags intact rather than splitting at the last colon.
+  const namedEndpoint = /^custom:[^:/]+:/i.exec(trimmed);
+  const separator = namedEndpoint ? namedEndpoint[0].length - 1 : trimmed.indexOf(":");
   const provider = separator > 0 ? trimmed.slice(0, separator).trim().toLowerCase() : "";
   const model = separator > 0 ? trimmed.slice(separator + 1).trim() : trimmed;
   if (model.length === 0) return null;
@@ -173,7 +174,12 @@ function resolveCatalogueModel(
  */
 export interface ModelsDevCache {
   readonly [providerId: string]: {
-    readonly models?: { readonly [modelId: string]: { readonly reasoning?: unknown } };
+    readonly models?: {
+      readonly [modelId: string]: {
+        readonly reasoning?: unknown;
+        readonly reasoning_options?: unknown;
+      };
+    };
   };
 }
 
@@ -231,14 +237,11 @@ function findModelEntry(
   return null;
 }
 
-/**
- * The catalogue's answer for one model: `true`/`false` when it knows,
- * `null` when it does not.
- */
-function lookupModelsDevReasoning(
+/** The catalogue entry for a model, including any explicit effort options. */
+function lookupModelsDevEntry(
   cache: ModelsDevCache | null,
   parsed: ParsedHermesModelSlug,
-): boolean | null {
+): Record<string, unknown> | null {
   if (cache === null || parsed.provider === null) return null;
   const catalogueModel = resolveCatalogueModel(cache, parsed);
   if (catalogueModel.provider === null) return null;
@@ -246,10 +249,7 @@ function lookupModelsDevReasoning(
   if (!isRecord(providerEntry)) return null;
   const models = providerEntry["models"];
   if (!isRecord(models)) return null;
-  const entry = findModelEntry(models, catalogueModel.model);
-  if (entry === null) return null;
-  const reasoning = entry["reasoning"];
-  return typeof reasoning === "boolean" ? reasoning : null;
+  return findModelEntry(models, catalogueModel.model);
 }
 
 const OPENAI_FAMILY_PROVIDERS = new Set([
@@ -380,11 +380,22 @@ export function resolveHermesReasoningLevels(input: {
   const parsed = parseHermesModelSlug(input.slug);
   if (parsed === null) return null;
 
-  const supportsReasoning = lookupModelsDevReasoning(input.cache, parsed);
-  if (supportsReasoning === null) return null;
-  if (supportsReasoning === false) return [];
+  const entry = lookupModelsDevEntry(input.cache, parsed);
+  if (entry === null || typeof entry["reasoning"] !== "boolean") return null;
+  if (entry["reasoning"] === false) return [];
 
-  return applyHermesReasoningCeilings(
+  const ladder = applyHermesReasoningCeilings(
     input.cache === null ? parsed : resolveCatalogueModel(input.cache, parsed),
   );
+  const options = entry["reasoning_options"];
+  const effort = Array.isArray(options)
+    ? options.find((option: unknown) => isRecord(option) && option["type"] === "effort")
+    : undefined;
+  // Explicit options narrow the legacy ladder; unsupported values never leak
+  // into the selector, and forced-thinking/provider exclusions still apply.
+  if (isRecord(effort) && Array.isArray(effort["values"])) {
+    const values = effort["values"];
+    return ladder.filter((level) => values.includes(level));
+  }
+  return ladder;
 }

@@ -168,7 +168,14 @@ it.layer(hermesAdapterTestLayer)("HermesAdapterLive", (it) => {
   it.effect("starts a session and maps the mock ACP prompt flow to runtime events", () =>
     Effect.gen(function* () {
       const threadId = ThreadId.make("hermes-mock-thread");
-      const wrapperPath = yield* Effect.promise(() => makeMockHermesWrapper());
+      const requestLogDir = yield* Effect.acquireRelease(
+        Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "hermes-prompts-"))),
+        (dir) => Effect.promise(() => NodeFSP.rm(dir, { recursive: true, force: true })),
+      );
+      const requestLogPath = NodePath.join(requestLogDir, "requests.jsonl");
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockHermesWrapper({ T3_ACP_REQUEST_LOG_PATH: requestLogPath }),
+      );
       const adapter = yield* makeTestAdapter(wrapperPath);
 
       const runtimeEvents: ProviderRuntimeEvent[] = [];
@@ -203,6 +210,15 @@ it.layer(hermesAdapterTestLayer)("HermesAdapterLive", (it) => {
       yield* adapter.sendTurn({ threadId, input: "hello hermes", attachments: [] });
 
       yield* Deferred.await(turnCompleted);
+      const requests = yield* Effect.promise(() => readJsonLines(requestLogPath));
+      const promptRequest = requests.find((request) => request.method === "session/prompt");
+      const params = promptRequest?.params as { prompt: Array<{ type: string; text: string }> };
+      assert.equal(params.prompt.length, 2);
+      assert.deepStrictEqual(params.prompt[0], { type: "text", text: "hello hermes" });
+      assert.equal(params.prompt[1]?.type, "text");
+      assert.include(params.prompt[1]!.text, "Hermes harness, as openai/gpt-5");
+      assert.include(params.prompt[1]!.text, "link_pull_request");
+      assert.include(params.prompt[1]!.text, "list_thread_pull_requests");
       yield* Fiber.interrupt(runtimeEventsFiber);
       const types = runtimeEvents.map((event) => event.type);
 

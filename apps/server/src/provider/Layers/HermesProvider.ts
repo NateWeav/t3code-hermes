@@ -45,6 +45,7 @@ import {
 
 const HERMES_PRESENTATION = {
   displayName: "Hermes",
+  reportsContextWindow: true,
   badgeLabel: "Early Access",
   showInteractionModeToggle: false,
 } as const;

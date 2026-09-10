@@ -42,6 +42,7 @@ import {
   ProviderAdapterSessionNotFoundError,
   ProviderAdapterValidationError,
 } from "../Errors.ts";
+import { buildRuntimeInstructions } from "../RuntimeInstructions.ts";
 import { mapAcpToAdapterError } from "../acp/AcpAdapterSupport.ts";
 import type * as AcpSessionRuntime from "../acp/AcpSessionRuntime.ts";
 import {
@@ -1285,7 +1286,17 @@ export function makeHermesAdapter(
         return yield* Effect.gen(function* () {
           const result = yield* prepared.acp
             .prompt({
-              prompt: prepared.promptParts,
+              // ACP has no system-message field; keep runtime context separate from user input.
+              prompt: [
+                ...prepared.promptParts,
+                {
+                  type: "text",
+                  text: buildRuntimeInstructions({
+                    harness: "Hermes",
+                    model: prepared.displayModel,
+                  }),
+                },
+              ],
             })
             .pipe(
               Effect.tap((promptResult) =>

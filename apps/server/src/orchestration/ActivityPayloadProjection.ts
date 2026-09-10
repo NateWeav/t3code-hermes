@@ -170,6 +170,9 @@ function summarizeToolTextOutput(value: string): string | null {
     if (line.length > 0) {
       meaningfulLineCount += 1;
       if (line !== "```") {
+        // An opening JSON delimiter is not a useful preview. Let clients use
+        // the tool title instead; the full result remains in persistence.
+        if (line === "{" || line === "[") return null;
         const summary = line.length <= 84 ? line : `${line.slice(0, 83).trimEnd()}…`;
         // V8 can retain the full tool output behind a short sliced string.
         // Join a tiny character array so the returned preview owns its bytes.

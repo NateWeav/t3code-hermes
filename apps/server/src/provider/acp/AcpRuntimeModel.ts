@@ -548,6 +548,9 @@ function makeToolCallState(
       ? title
       : undefined;
   const data: Record<string, unknown> = { toolCallId };
+  if (title) {
+    data.title = title;
+  }
   if (kind) {
     data.kind = kind;
   }
@@ -621,10 +624,22 @@ export function mergeToolCallState(
 ): AcpToolCallState {
   const nextKind = typeof next.data.kind === "string" ? next.data.kind : undefined;
   const kind = nextKind ?? previous?.kind;
-  const title = next.title ?? previous?.title;
+  const data = { ...previous?.data, ...next.data };
+  // ACP progress updates omit the original title and inputs. Derive their
+  // presentation from the merged call so result text cannot replace its identity.
+  const sourceTitle = typeof data.title === "string" ? data.title : undefined;
+  const presentation = sourceTitle
+    ? deriveToolActivityPresentation({
+        itemType: canonicalItemTypeFromAcpToolKind(kind),
+        title: sourceTitle,
+        detail: sourceTitle,
+        data,
+      })
+    : undefined;
+  const title = presentation?.summary ?? next.title ?? previous?.title;
   const status = next.status ?? previous?.status;
   const command = next.command ?? previous?.command;
-  const detail = next.detail ?? previous?.detail;
+  const detail = presentation ? presentation.detail : (next.detail ?? previous?.detail);
   return {
     toolCallId: next.toolCallId,
     ...(kind ? { kind } : {}),
@@ -632,10 +647,7 @@ export function mergeToolCallState(
     ...(status ? { status } : {}),
     ...(command ? { command } : {}),
     ...(detail ? { detail } : {}),
-    data: {
-      ...previous?.data,
-      ...next.data,
-    },
+    data,
   };
 }
 

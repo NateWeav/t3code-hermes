@@ -192,6 +192,7 @@ describe("AcpRuntimeModel", () => {
           detail: "bun run typecheck",
           data: {
             toolCallId: "tool-1",
+            title: "Terminal",
             kind: "execute",
             command: "bun run typecheck",
             rawInput: {
@@ -295,6 +296,51 @@ describe("AcpRuntimeModel", () => {
       },
     });
   });
+
+  it.each([
+    { kind: "other", title: "todo: update tasks", detail: undefined },
+    { kind: "execute", title: "terminal: vp test", detail: "vp test" },
+    { kind: "edit", title: "patch: src/app.ts", detail: "src/app.ts" },
+  ] as const)(
+    "preserves Hermes $kind presentation across output-only completion",
+    ({ kind, title, detail }) => {
+      const start = parseSessionUpdateEvent({
+        sessionId: "session-1",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "tool-1",
+          title,
+          kind,
+          status: "pending",
+          ...(kind === "execute" ? { rawInput: { command: "vp test" } } : {}),
+          ...(kind === "edit" ? { locations: [{ path: "src/app.ts" }] } : {}),
+        },
+      });
+      const content = [
+        { type: "content", content: { type: "text", text: '{\n  "success": true\n}' } },
+      ] as const;
+      const complete = parseSessionUpdateEvent({
+        sessionId: "session-1",
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "tool-1",
+          kind,
+          status: "completed",
+          content,
+        },
+      });
+      const first = start.events[0];
+      const last = complete.events[0];
+      if (first?._tag !== "ToolCallUpdated" || last?._tag !== "ToolCallUpdated") {
+        throw new Error("expected tool calls");
+      }
+      const merged = mergeToolCallState(first.toolCall, last.toolCall);
+      expect(merged.title).toBe(first.toolCall.title);
+      expect(merged.detail).toBe(detail);
+      expect(merged.status).toBe("completed");
+      expect(merged.data.content).toEqual(content);
+    },
+  );
 
   it("trims padded current mode updates before emitting a mode change", () => {
     const result = parseSessionUpdateEvent({

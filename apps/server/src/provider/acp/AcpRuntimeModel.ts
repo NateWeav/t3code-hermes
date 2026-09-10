@@ -517,6 +517,21 @@ export function canonicalItemTypeFromAcpToolKind(kind: string | undefined): Tool
   }
 }
 
+function isStructuredToolOutput(text: string): boolean {
+  const trimmed = text.trimStart();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return false;
+  // A bounded result may be incomplete, but its opening delimiter still
+  // identifies it. Do not mistake log prefixes such as [INFO] for JSON.
+  const firstLine = trimmed.split("\n", 1)[0]?.trim();
+  if (firstLine === "{" || firstLine === "[") return true;
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    return isRecord(parsed) || Array.isArray(parsed);
+  } catch {
+    return false;
+  }
+}
+
 function makeToolCallState(
   input: {
     readonly toolCallId: string;
@@ -548,6 +563,9 @@ function makeToolCallState(
       ? title
       : undefined;
   const data: Record<string, unknown> = { toolCallId };
+  if (title) {
+    data.title = title;
+  }
   if (kind) {
     data.kind = kind;
   }
@@ -566,7 +584,10 @@ function makeToolCallState(
   if (input.locations !== undefined) {
     data.locations = input.locations;
   }
-  const fallbackDetail = command ?? normalizedTitle ?? textContent;
+  // Structured results belong in tool output, not in the compact activity label.
+  const outputDetail =
+    textContent && !isStructuredToolOutput(textContent) ? textContent : undefined;
+  const fallbackDetail = command ?? normalizedTitle ?? outputDetail;
   const hasPresentationSeed =
     title !== undefined ||
     kind !== undefined ||
@@ -621,10 +642,22 @@ export function mergeToolCallState(
 ): AcpToolCallState {
   const nextKind = typeof next.data.kind === "string" ? next.data.kind : undefined;
   const kind = nextKind ?? previous?.kind;
-  const title = next.title ?? previous?.title;
+  const data = { ...previous?.data, ...next.data };
+  // ACP progress updates omit the original title and inputs. Derive their
+  // presentation from the merged call so result text cannot replace its identity.
+  const sourceTitle = typeof data.title === "string" ? data.title : undefined;
+  const presentation = sourceTitle
+    ? deriveToolActivityPresentation({
+        itemType: canonicalItemTypeFromAcpToolKind(kind),
+        title: sourceTitle,
+        detail: next.detail ?? previous?.detail ?? sourceTitle,
+        data,
+      })
+    : undefined;
+  const title = presentation?.summary ?? next.title ?? previous?.title;
   const status = next.status ?? previous?.status;
   const command = next.command ?? previous?.command;
-  const detail = next.detail ?? previous?.detail;
+  const detail = presentation?.detail ?? next.detail ?? previous?.detail;
   return {
     toolCallId: next.toolCallId,
     ...(kind ? { kind } : {}),
@@ -632,10 +665,7 @@ export function mergeToolCallState(
     ...(status ? { status } : {}),
     ...(command ? { command } : {}),
     ...(detail ? { detail } : {}),
-    data: {
-      ...previous?.data,
-      ...next.data,
-    },
+    data,
   };
 }
 

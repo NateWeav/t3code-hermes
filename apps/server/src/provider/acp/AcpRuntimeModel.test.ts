@@ -192,6 +192,7 @@ describe("AcpRuntimeModel", () => {
           detail: "bun run typecheck",
           data: {
             toolCallId: "tool-1",
+            title: "Terminal",
             kind: "execute",
             command: "bun run typecheck",
             rawInput: {
@@ -295,6 +296,62 @@ describe("AcpRuntimeModel", () => {
       },
     });
   });
+
+  it.each([
+    { kind: "other", title: "todo: update tasks", detail: undefined },
+    { kind: "execute", title: "terminal: vp test", detail: "vp test" },
+    { kind: "edit", title: "patch: src/app.ts", detail: "src/app.ts" },
+    { kind: "other", title: "todo: update tasks", detail: undefined, output: '{"success":true}' },
+    { kind: "other", title: "todo: update tasks", detail: undefined, output: '["done"]' },
+    { kind: "other", title: "custom tool", detail: "Cancelled.", output: "Cancelled." },
+    { kind: "other", title: "custom tool", detail: "[INFO] Done", output: "[INFO] Done" },
+  ] as const)(
+    "preserves Hermes $kind presentation across output-only completion ($detail)",
+    (fixture) => {
+      const { kind, title, detail } = fixture;
+      const start = parseSessionUpdateEvent({
+        sessionId: "session-1",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "tool-1",
+          title,
+          kind,
+          status: "pending",
+          ...(kind === "execute" ? { rawInput: { command: "vp test" } } : {}),
+          ...(kind === "edit" ? { locations: [{ path: "src/app.ts" }] } : {}),
+        },
+      });
+      const content = [
+        {
+          type: "content",
+          content: {
+            type: "text",
+            text: "output" in fixture ? fixture.output : '{\n  "success": true\n}',
+          },
+        },
+      ] as const;
+      const complete = parseSessionUpdateEvent({
+        sessionId: "session-1",
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "tool-1",
+          kind,
+          status: "completed",
+          content,
+        },
+      });
+      const first = start.events[0];
+      const last = complete.events[0];
+      if (first?._tag !== "ToolCallUpdated" || last?._tag !== "ToolCallUpdated") {
+        throw new Error("expected tool calls");
+      }
+      const merged = mergeToolCallState(first.toolCall, last.toolCall);
+      expect(merged.title).toBe(first.toolCall.title);
+      expect(merged.detail).toBe(detail);
+      expect(merged.status).toBe("completed");
+      expect(merged.data.content).toEqual(content);
+    },
+  );
 
   it("trims padded current mode updates before emitting a mode change", () => {
     const result = parseSessionUpdateEvent({

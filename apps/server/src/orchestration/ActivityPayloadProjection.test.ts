@@ -21,6 +21,30 @@ function activity(payload: Record<string, unknown>): OrchestrationThreadActivity
  * assertions are the tripwire.
  */
 describe("projectActivityPayload", () => {
+  it.each(['{\n  "success": true\n}', '[\n  "result"\n]'])(
+    "does not replace an ACP tool title with a JSON delimiter: %s",
+    (text) => {
+      const source = activity({
+        itemType: "dynamic_tool_call",
+        title: "todo: update tasks",
+        data: {
+          toolCallId: "todo-1",
+          kind: "other",
+          content: [{ type: "content", content: { type: "text", text } }],
+        },
+      });
+      const projected = projectActivityPayload(source);
+      expect(projected.payload).toEqual({
+        itemType: "dynamic_tool_call",
+        title: "todo: update tasks",
+        data: { toolCallId: "todo-1", kind: "other" },
+      });
+      expect(source.payload).toMatchObject({
+        data: { content: [{ content: { text } }] },
+      });
+    },
+  );
+
   it("preserves tool attribution (agentId/parentToolUseId) through data slimming", () => {
     const projected = projectActivityPayload(
       activity({

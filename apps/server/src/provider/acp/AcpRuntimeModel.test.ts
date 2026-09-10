@@ -301,9 +301,14 @@ describe("AcpRuntimeModel", () => {
     { kind: "other", title: "todo: update tasks", detail: undefined },
     { kind: "execute", title: "terminal: vp test", detail: "vp test" },
     { kind: "edit", title: "patch: src/app.ts", detail: "src/app.ts" },
+    { kind: "other", title: "todo: update tasks", detail: undefined, output: '{"success":true}' },
+    { kind: "other", title: "todo: update tasks", detail: undefined, output: '["done"]' },
+    { kind: "other", title: "custom tool", detail: "Cancelled.", output: "Cancelled." },
+    { kind: "other", title: "custom tool", detail: "[INFO] Done", output: "[INFO] Done" },
   ] as const)(
-    "preserves Hermes $kind presentation across output-only completion",
-    ({ kind, title, detail }) => {
+    "preserves Hermes $kind presentation across output-only completion ($detail)",
+    (fixture) => {
+      const { kind, title, detail } = fixture;
       const start = parseSessionUpdateEvent({
         sessionId: "session-1",
         update: {
@@ -317,7 +322,13 @@ describe("AcpRuntimeModel", () => {
         },
       });
       const content = [
-        { type: "content", content: { type: "text", text: '{\n  "success": true\n}' } },
+        {
+          type: "content",
+          content: {
+            type: "text",
+            text: "output" in fixture ? fixture.output : '{\n  "success": true\n}',
+          },
+        },
       ] as const;
       const complete = parseSessionUpdateEvent({
         sessionId: "session-1",

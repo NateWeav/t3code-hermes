@@ -517,6 +517,21 @@ export function canonicalItemTypeFromAcpToolKind(kind: string | undefined): Tool
   }
 }
 
+function isStructuredToolOutput(text: string): boolean {
+  const trimmed = text.trimStart();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return false;
+  // A bounded result may be incomplete, but its opening delimiter still
+  // identifies it. Do not mistake log prefixes such as [INFO] for JSON.
+  const firstLine = trimmed.split("\n", 1)[0]?.trim();
+  if (firstLine === "{" || firstLine === "[") return true;
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    return isRecord(parsed) || Array.isArray(parsed);
+  } catch {
+    return false;
+  }
+}
+
 function makeToolCallState(
   input: {
     readonly toolCallId: string;
@@ -569,7 +584,10 @@ function makeToolCallState(
   if (input.locations !== undefined) {
     data.locations = input.locations;
   }
-  const fallbackDetail = command ?? normalizedTitle ?? textContent;
+  // Structured results belong in tool output, not in the compact activity label.
+  const outputDetail =
+    textContent && !isStructuredToolOutput(textContent) ? textContent : undefined;
+  const fallbackDetail = command ?? normalizedTitle ?? outputDetail;
   const hasPresentationSeed =
     title !== undefined ||
     kind !== undefined ||
@@ -632,14 +650,14 @@ export function mergeToolCallState(
     ? deriveToolActivityPresentation({
         itemType: canonicalItemTypeFromAcpToolKind(kind),
         title: sourceTitle,
-        detail: sourceTitle,
+        detail: next.detail ?? previous?.detail ?? sourceTitle,
         data,
       })
     : undefined;
   const title = presentation?.summary ?? next.title ?? previous?.title;
   const status = next.status ?? previous?.status;
   const command = next.command ?? previous?.command;
-  const detail = presentation ? presentation.detail : (next.detail ?? previous?.detail);
+  const detail = presentation?.detail ?? next.detail ?? previous?.detail;
   return {
     toolCallId: next.toolCallId,
     ...(kind ? { kind } : {}),

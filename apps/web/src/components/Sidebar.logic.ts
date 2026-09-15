@@ -842,6 +842,75 @@ export function resolveSidebarThreadStatus(thread: SidebarThreadStatusInput): Si
   return "ready";
 }
 
+export interface ThreadStatusRing {
+  kind: SidebarThreadStatus | "done";
+  colorClass: string;
+  dashed: boolean;
+  motion: "travel" | "breathe" | "alarm" | "none";
+}
+
+export function resolveThreadStatusRing(input: {
+  status: SidebarThreadStatus;
+  isUnread: boolean;
+  motion?: boolean;
+}): ThreadStatusRing | null {
+  const ring = resolveRing(input);
+  if (ring === null || input.motion !== false) return ring;
+  return { ...ring, motion: "none" };
+}
+
+function resolveRing(input: {
+  status: SidebarThreadStatus;
+  isUnread: boolean;
+}): ThreadStatusRing | null {
+  switch (input.status) {
+    case "working":
+      return {
+        kind: "working",
+        colorClass: "text-sky-500 dark:text-sky-400",
+        dashed: true,
+        motion: "travel",
+      };
+    case "monitoring":
+      return {
+        kind: "monitoring",
+        colorClass: "text-sky-600/60 dark:text-sky-400/60",
+        dashed: true,
+        motion: "none",
+      };
+    case "approval":
+      return {
+        kind: "approval",
+        colorClass: "text-amber-500 dark:text-amber-300",
+        dashed: false,
+        motion: "breathe",
+      };
+    case "input":
+      return {
+        kind: "input",
+        colorClass: "text-indigo-500 dark:text-indigo-300",
+        dashed: false,
+        motion: "breathe",
+      };
+    case "failed":
+      return {
+        kind: "failed",
+        colorClass: "text-red-500 dark:text-red-400",
+        dashed: false,
+        motion: "alarm",
+      };
+    case "ready":
+      return input.isUnread
+        ? {
+            kind: "done",
+            colorClass: "text-emerald-500 dark:text-emerald-400",
+            dashed: false,
+            motion: "none",
+          }
+        : null;
+  }
+}
+
 /** First VALID timestamp wins: `a ?? b` falls through on null, but a present-
     yet-malformed string must also fall through to the next candidate rather
     than sink the row to the epoch. */

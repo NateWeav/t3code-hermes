@@ -533,6 +533,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.sidebarAutoSettleOnMerge !== DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge
         ? ["Auto-settle merged threads"]
         : []),
+      ...(settings.sidebarStatusRingMotion !== DEFAULT_UNIFIED_SETTINGS.sidebarStatusRingMotion
+        ? ["Thread status animations"]
+        : []),
       ...(settings.wordWrap !== DEFAULT_UNIFIED_SETTINGS.wordWrap ? ["Word wrap"] : []),
       ...getChangedTypographySettingLabels(settings),
       ...(settings.diffIgnoreWhitespace !== DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace
@@ -631,6 +634,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.continueThreadsAfterServerUpdate,
       settings.sidebarAutoSettleAfterDays,
       settings.sidebarAutoSettleOnMerge,
+      settings.sidebarStatusRingMotion,
       settings.sidebarProjectGroupingMode,
       settings.sidebarThreadPreviewCount,
       settings.showSkillsInSlashMenu,
@@ -722,6 +726,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       sidebarProjectGroupingMode: DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode,
       sidebarAutoSettleAfterDays: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays,
       sidebarAutoSettleOnMerge: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge,
+      sidebarStatusRingMotion: DEFAULT_UNIFIED_SETTINGS.sidebarStatusRingMotion,
       enableLegacyTokenStreaming: DEFAULT_UNIFIED_SETTINGS.enableLegacyTokenStreaming,
       enableProviderUpdateChecks: DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks,
       continueThreadsAfterServerUpdate: DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate,
@@ -1198,6 +1203,33 @@ export function AppearanceSettingsPanel() {
                 value={settings.glassOpacity}
               />
             </div>
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("status-ring-motion")}
+          description="Turn the ring around a thread's project icon while it works, and breathe it while it waits on you. Off keeps the rings and their colors, still."
+          resetAction={
+            settings.sidebarStatusRingMotion !==
+            DEFAULT_UNIFIED_SETTINGS.sidebarStatusRingMotion ? (
+              <SettingResetButton
+                label="thread status animations"
+                onClick={() =>
+                  updateSettings({
+                    sidebarStatusRingMotion: DEFAULT_UNIFIED_SETTINGS.sidebarStatusRingMotion,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.sidebarStatusRingMotion}
+              onCheckedChange={(checked) =>
+                updateSettings({ sidebarStatusRingMotion: Boolean(checked) })
+              }
+              aria-label="Thread status animations"
+            />
           }
         />
 

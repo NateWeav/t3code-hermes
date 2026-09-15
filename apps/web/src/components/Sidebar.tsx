@@ -162,6 +162,7 @@ import {
   resolveSidebarDropVerb,
   type SidebarDropVerb,
   resolveSidebarThreadStatus,
+  resolveThreadStatusRing,
   searchSidebarThreads,
   shouldCreateNewThreadInCurrentProject,
   shouldRecedeSidebarThread,
@@ -204,6 +205,7 @@ import {
   type SnoozePreset,
 } from "./Sidebar.snooze";
 import { ProjectFavicon, type ProjectFaviconProject } from "./ProjectFavicon";
+import { ThreadStatusRing } from "./ThreadStatusRing";
 import { makeWorkspaceFileDropHandlers } from "./chat/workspaceFileDrop";
 import { ProviderInstanceIcon } from "./chat/ProviderInstanceIcon";
 import { getTriggerDisplayModelLabel } from "./chat/providerIconUtils";
@@ -980,6 +982,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   project: EnvironmentProject | null;
   projectDisplayName: string | null;
   providerEntryByInstanceId: ReadonlyMap<string, ProviderInstanceEntry>;
+  statusRingMotion: boolean;
   timestampFormat: TimestampFormat;
   onThreadClick: (event: ReactMouseEvent, threadRef: ScopedThreadRef) => void;
   onThreadActivate: (threadRef: ScopedThreadRef) => void;
@@ -1085,6 +1088,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   // switching sidebars must not light up every historical thread as unread.
   const isUnread = hasUnseenCompletion({ ...thread, lastVisitedAt });
   const status = resolveSidebarThreadStatus(thread);
+  const statusRing = resolveThreadStatusRing({
+    status,
+    isUnread,
+    motion: props.statusRingMotion,
+  });
   const isInFlight =
     status === "working" || status === "monitoring" || status === "approval" || status === "input";
   // A woken thread reappears at its original position (the sort is
@@ -1742,6 +1750,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             />
           }
         >
+          <ThreadStatusRing ring={statusRing} />
           <div className="relative z-10 h-[4.875rem] px-[var(--sidebar-row-content-inset)] py-[var(--sidebar-content-inset)]">
             <div className="flex h-5 min-w-0 items-center gap-1.5">
               {draftIndicator}
@@ -2116,6 +2125,7 @@ export default function Sidebar() {
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
   const sidebarProjectSortOrder = useClientSettings((s) => s.sidebarProjectSortOrder);
   const timestampFormat = useClientSettings((s) => s.timestampFormat);
+  const statusRingMotion = useClientSettings((s) => s.sidebarStatusRingMotion);
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const {
     settleThread,
@@ -4725,6 +4735,7 @@ export default function Sidebar() {
                               providerEntriesByEnvironment.get(thread.environmentId) ??
                               EMPTY_PROVIDER_ENTRIES
                             }
+                            statusRingMotion={statusRingMotion}
                             timestampFormat={timestampFormat}
                             onThreadClick={handleThreadClick}
                             onThreadActivate={navigateToThread}

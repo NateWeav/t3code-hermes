@@ -13,6 +13,26 @@ an existing worktree, use **New thread in this worktree** from the branch toolba
 When you change a new thread's project, T3 Code stays in the current environment
 if that project exists there. Otherwise it selects an environment that has it.
 
+## Status at a glance
+
+Active threads outline their whole card in the same color as the status label inside it, so you can
+read a column of threads without reading the labels:
+
+| Outline                | State                                                            |
+| ---------------------- | ---------------------------------------------------------------- |
+| Blue, dashed, marching | Working — the agent is running                                   |
+| Blue, dashed, still    | Monitoring — a watch loop is running with no other live work     |
+| Amber, breathing       | Approval — a tool call is waiting on your decision               |
+| Indigo, breathing      | Input — the agent asked you a question                           |
+| Red, fast pulse        | Failed — the session hit an error                                |
+| Green, still           | Done — the agent finished and you have not opened the thread yet |
+
+Settled threads and threads you have already caught up on carry no outline.
+
+To stop the outlines moving, turn off **Thread status animations** in Settings under Appearance.
+The outlines and their colors stay; they just hold still. Your system's reduce-motion setting does
+the same thing on its own, without changing the setting.
+
 ### Start in the background
 
 In a desktop browser or the desktop app, press `Cmd+Enter` on macOS or `Ctrl+Enter`

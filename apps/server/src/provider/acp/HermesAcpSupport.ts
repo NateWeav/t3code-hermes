@@ -128,6 +128,7 @@ export interface HermesAcpRuntimeInput extends Omit<
 }
 
 const HERMES_REMOTE_ENVIRONMENT_KEYS = [
+  "HERMES_TERMINAL_ENV_AUTHORITY",
   "TERMINAL_ENV",
   "TERMINAL_SSH_HOST",
   "TERMINAL_SSH_USER",
@@ -148,6 +149,7 @@ export function buildHermesSessionEnvironment(
   }
   if (executionEnvironment?.kind === "ssh") {
     Object.assign(environment, {
+      HERMES_TERMINAL_ENV_AUTHORITY: "session",
       TERMINAL_ENV: "ssh",
       TERMINAL_SSH_HOST: executionEnvironment.host,
       TERMINAL_SSH_USER: executionEnvironment.user,

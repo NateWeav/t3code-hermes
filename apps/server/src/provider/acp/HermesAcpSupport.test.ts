@@ -84,6 +84,7 @@ describe("buildHermesSessionEnvironment", () => {
     expect(environment).toEqual({
       HERMES_HOME: "/home/dev/.hermes",
       SHARED: "value",
+      HERMES_TERMINAL_ENV_AUTHORITY: "session",
       TERMINAL_ENV: "ssh",
       TERMINAL_SSH_HOST: "builder.internal",
       TERMINAL_SSH_USER: "aeris",

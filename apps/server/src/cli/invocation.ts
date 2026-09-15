@@ -43,7 +43,8 @@ function detectCliRunner(entryPath: string): CliRunner | null {
  * anything else suggests the bare package.
  */
 function suggestedPackageSpec(version: string): string {
-  return version.includes("-nightly.") ? "t3-hermes@nightly" : "t3-hermes";
+  const channel = /^[^-+]+-(nightly|preview)\./.exec(version)?.[1];
+  return channel === undefined ? "t3-hermes" : `t3-hermes@${channel}`;
 }
 
 /**

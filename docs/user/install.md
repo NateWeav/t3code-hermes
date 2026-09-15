@@ -9,8 +9,10 @@ desktop, web, or mobile app. Set up the machine where the agents will work first
 
 ## Requirements
 
-Command-line use, SSH hosts, and WSL backends need Node.js 22.16+ (22.x), 23.11+
-(23.x), or 24.10 and later. The native desktop app includes its server runtime.
+`npx t3` needs Node.js only to run npm itself; the CLI it installs is a
+self-contained executable. SSH hosts and WSL backends need Node.js 22.16+
+(22.x), 23.11+ (23.x), or 24.10 and later. The native desktop app includes its
+server runtime.
 
 You need an installed, authenticated provider before starting a thread. You can
 launch T3 Hermes and configure providers afterwards.
@@ -25,6 +27,22 @@ npx t3-hermes@latest
 
 This starts the server and opens the local web app. Run
 `npx t3-hermes@latest --help` for command-line options.
+
+The executable is built for Apple Silicon Macs, Linux, and Windows. There is
+no Intel Mac build of it, because Node cannot produce a single executable for
+that platform; the Intel desktop app is unaffected. To run a standalone server
+on an Intel Mac, build it from source. You need Node.js 24 and `vp` (see
+[Install vp](https://github.com/pingdotgg/t3code#install-vp)):
+
+```bash
+git clone https://github.com/pingdotgg/t3code
+cd t3code && vp i && vp run build:desktop
+node apps/server/dist/bin.mjs
+```
+
+A server run this way is a plain Node program: `t3 update` and the background
+service do not apply, so update it with `git pull` and a rebuild, and start it
+however you run other Node processes.
 
 ## Desktop app
 
@@ -58,6 +76,12 @@ Install a T3 Hermes iOS or Android build from your distributor. It installs alon
 T3 Code mobile app and has its own sign-ins and saved connections.
 The phone connects to a server on another machine. Follow
 [remote access](./remote-access.md) to link it through T3 Connect or a pairing URL.
+
+If the app crashes during launch, open Settings → Diagnostics on the next launch
+that succeeds. It lists startup crashes from the last 7 days with the error and
+component stack that store crash reports leave out. Copy the report and paste it
+into a GitHub issue. Error messages can quote values from the app, so read it over
+before sharing.
 
 ## Providers
 

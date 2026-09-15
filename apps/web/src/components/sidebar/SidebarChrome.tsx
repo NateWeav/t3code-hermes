@@ -263,7 +263,7 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   const hermesPresent = useHermesProviderPresent();
 
   return (
-    <SidebarFooter className="p-[var(--sidebar-content-inset)]">
+    <SidebarFooter className="px-[var(--sidebar-content-inset)] py-1">
       {hermesPresent ? <HermesCronWatcher /> : null}
       <SidebarProviderUpdatePill />
       <SidebarUpdateArchitectureWarning />

@@ -120,7 +120,10 @@ describe("ssh tunnel scripts", () => {
       script,
       "T3_RELEASE_BASE_URL='https://github.com/NateWeav/t3code-hermes/releases/download'",
     );
-    assert.include(script, 'T3_RUNTIME_DIR="$HOME/.t3-hermes/runtime/versions/$T3_ARCHIVE_VERSION"');
+    assert.include(
+      script,
+      'T3_RUNTIME_DIR="$HOME/.t3-hermes/runtime/versions/$T3_ARCHIVE_VERSION"',
+    );
     assert.include(script, 'T3_ARCHIVE="t3-$T3_ARCHIVE_VERSION-$T3_PLATFORM-$T3_ARCH.tar.gz"');
     assert.include(script, "SHA256SUMS");
     assert.include(script, 'exec "$T3_RUNTIME_DIR/t3" "$@"');
@@ -780,7 +783,7 @@ describe("archive runner script", () => {
           assert.equal(result.exitCode, 0, result.stderr);
           assert.include(result.stdout, `t3 v${archiveVersion}`);
         }
-        const versionsDir = `${home}/.t3/runtime/versions`;
+        const versionsDir = `${home}/.t3-hermes/runtime/versions`;
         assert.deepEqual(yield* fs.readDirectory(versionsDir), [archiveVersion]);
         assert.equal(
           (yield* fs.readFileString(`${versionsDir}/${archiveVersion}/.install-complete`)).trim(),

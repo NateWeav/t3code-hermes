@@ -56,6 +56,11 @@
       // reports an entire component module when nothing imports it.
       "ignoreIssues": { "src/components/ui/*.tsx": ["exports", "nsExports", "duplicates"] },
     },
+    "packages/client-runtime": {
+      // Web and mobile consume this module through the package subpath export.
+      // Knip's workspace analysis does not follow those package boundary imports.
+      "ignoreIssues": { "src/state/hermesCronSeen.ts": ["exports"] },
+    },
     "apps/mobile": {
       // Expo loads local config plugins by string; Metro handles platform variants.
       "entry": ["index.ts!", "plugins/*.cjs"],

@@ -57,14 +57,6 @@ const hermesEnvironmentIdAtom = Atom.make((get): EnvironmentId | null => {
  * Drives the sidebar entry point: with no Hermes there is nothing to schedule,
  * so the button never appears rather than leading to an explanatory page.
  */
-const hermesProviderPresentAtom = Atom.make(
-  (get): boolean => get(hermesEnvironmentIdAtom) !== null,
-).pipe(Atom.withLabel("web-hermes-provider-present"));
-
-export function useHermesProviderPresent(): boolean {
-  return useAtomValue(hermesProviderPresentAtom);
-}
-
 export function useHermesEnvironmentId(): EnvironmentId | null {
   return useAtomValue(hermesEnvironmentIdAtom);
 }

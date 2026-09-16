@@ -170,6 +170,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     targetId: "appearance-interface",
   },
   {
+    id: "status-ring-motion",
+    title: "Thread status animations",
+    to: "/settings/appearance",
+  },
+  {
     id: "interface-font",
     title: "Interface font",
     to: "/settings/appearance",

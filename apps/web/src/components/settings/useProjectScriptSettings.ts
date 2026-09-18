@@ -52,7 +52,7 @@ function reportScriptFailure(result: AtomCommandResult<unknown, unknown>) {
 export function useProjectScriptSettings(
   targets: readonly {
     environmentId: EnvironmentId;
-    settings: ServerSettings;
+    settings: Omit<ServerSettings, "executionEndpoints">;
     keybindings: ResolvedKeybindingsConfig;
     project?: { id: ProjectId; scripts: readonly ProjectScript[] };
   }[],

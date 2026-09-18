@@ -15,9 +15,11 @@ export type ProjectSettingSources = Readonly<
   Record<ProjectScopedServerSettingKey, ProjectSettingSource>
 >;
 
-export interface ResolvedProjectSettings {
+type ProjectSettingsInput = Omit<ServerSettings, "executionEndpoints">;
+
+export interface ResolvedProjectSettings<Settings extends ProjectSettingsInput = ServerSettings> {
   /** Environment settings with the project's overrides applied. */
-  readonly settings: ServerSettings;
+  readonly settings: Settings;
   /** Where each scopable key's effective value came from. */
   readonly sources: ProjectSettingSources;
   /** The project's raw override entry; `{}` when it has none. */
@@ -56,13 +58,13 @@ export interface LegacyProjectSettingsFields {
  * override whose provider is disabled on this environment falls back to the
  * environment value, the same guard the environment-level selection gets.
  */
-export function resolveProjectSettings(
-  settings: ServerSettings,
+export function resolveProjectSettings<Settings extends ProjectSettingsInput>(
+  settings: Settings,
   projectId: ProjectId | null,
   // Nullable, not just optional: the mobile new-task flow passes its selected
   // project straight through, and that is null until the shell snapshot lands.
   project?: LegacyProjectSettingsFields | null,
-): ResolvedProjectSettings {
+): ResolvedProjectSettings<Settings> {
   const stored = projectId === null ? undefined : settings.projectSettingsOverrides[projectId];
   const overrides: ProjectSettingsOverrides =
     project == null || settings.projectSettingsFolded
@@ -99,7 +101,7 @@ export function resolveProjectSettings(
     effective[key] = value;
     sources[key] = "project";
   }
-  return { settings: effective as ServerSettings, sources, overrides };
+  return { settings: effective as Settings, sources, overrides };
 }
 
 /** Replace the project's entry, dropping it entirely when nothing is overridden. */

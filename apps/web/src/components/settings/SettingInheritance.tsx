@@ -78,11 +78,11 @@ function formatValue(key: keyof ServerSettings, value: unknown): string {
  */
 export function settingInheritanceLayers(
   target: ScopedSettingsTarget,
-  environmentSettings: ServerSettings,
+  environmentSettings: Omit<ServerSettings, "executionEndpoints">,
   key: keyof ServerSettings,
 ): readonly InheritanceLayer[] {
   const builtIn = DEFAULT_SERVER_SETTINGS[key];
-  const environmentValue = environmentSettings[key];
+  const environmentValue = (environmentSettings as Record<string, unknown>)[key];
   const projectSource = isProjectScopedSettingKey(key) ? target.sources[key] : "environment";
   const environmentSet = !Equal.equals(environmentValue, builtIn);
   const layers: InheritanceLayer[] = [];

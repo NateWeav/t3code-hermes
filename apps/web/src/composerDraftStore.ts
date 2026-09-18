@@ -1,10 +1,12 @@
 import { elementContextToPreviewAnnotation } from "./lib/elementContext";
 import {
   ElementContextDetails,
+  DEFAULT_EXECUTION_ENDPOINT_ID,
   DEFAULT_MODEL,
   DEFAULT_MODEL_BY_PROVIDER,
   defaultInstanceIdForDriver,
   EnvironmentId,
+  ExecutionEndpointId,
   ModelSelection,
   ProjectId,
   ProviderInstanceId,
@@ -252,6 +254,7 @@ const PersistedComposerThreadDraftState = Schema.Struct({
   modelSelectionExplicit: Schema.optionalKey(Schema.Boolean),
   runtimeMode: Schema.optionalKey(RuntimeMode),
   interactionMode: Schema.optionalKey(ProviderInteractionMode),
+  executionEndpointId: Schema.optionalKey(ExecutionEndpointId),
 });
 type PersistedComposerThreadDraftState = typeof PersistedComposerThreadDraftState.Type;
 
@@ -319,6 +322,9 @@ const PersistedDraftThreadState = Schema.Struct({
   createdAt: Schema.String,
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
+  executionEndpointId: ExecutionEndpointId.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_EXECUTION_ENDPOINT_ID)),
+  ),
   branch: Schema.NullOr(Schema.String),
   worktreePath: Schema.NullOr(Schema.String),
   envMode: DraftThreadEnvModeSchema,
@@ -403,6 +409,7 @@ export interface ComposerThreadDraftState {
   modelSelectionExplicit?: boolean;
   runtimeMode: RuntimeMode | null;
   interactionMode: ProviderInteractionMode | null;
+  executionEndpointId: ExecutionEndpointId;
 }
 
 /**
@@ -446,6 +453,7 @@ export interface DraftSessionState {
   createdAt: string;
   runtimeMode: RuntimeMode;
   interactionMode: ProviderInteractionMode;
+  executionEndpointId: ExecutionEndpointId;
   branch: string | null;
   worktreePath: string | null;
   envMode: DraftThreadEnvMode;
@@ -522,6 +530,7 @@ interface ComposerDraftStoreState {
       startFromOrigin?: boolean;
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
+      executionEndpointId?: ExecutionEndpointId;
       environmentSelection?: "auto" | "manual";
       loadBalancedEnvironmentId?: EnvironmentId | null;
     },
@@ -539,6 +548,7 @@ interface ComposerDraftStoreState {
       startFromOrigin?: boolean;
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
+      executionEndpointId?: ExecutionEndpointId;
       environmentSelection?: "auto" | "manual";
       loadBalancedEnvironmentId?: EnvironmentId | null;
     },
@@ -555,6 +565,7 @@ interface ComposerDraftStoreState {
       startFromOrigin?: boolean;
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
+      executionEndpointId?: ExecutionEndpointId;
       environmentSelection?: "auto" | "manual";
       loadBalancedEnvironmentId?: EnvironmentId | null;
     },
@@ -612,6 +623,10 @@ interface ComposerDraftStoreState {
   setInteractionMode: (
     threadRef: ComposerThreadTarget,
     interactionMode: ProviderInteractionMode | null | undefined,
+  ) => void;
+  setExecutionEndpointId: (
+    threadRef: ComposerThreadTarget,
+    executionEndpointId: ExecutionEndpointId,
   ) => void;
   addImage: (threadRef: ComposerThreadTarget, image: ComposerImageAttachment) => boolean;
   /** Returns the ids the draft accepted; duplicates and over-cap attachments are left out. */
@@ -789,6 +804,7 @@ const EMPTY_THREAD_DRAFT = Object.freeze<ComposerThreadDraftState>({
   activeProvider: null,
   runtimeMode: null,
   interactionMode: null,
+  executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
 });
 
 /**
@@ -811,6 +827,7 @@ function createEmptyThreadDraft(): ComposerThreadDraftState {
     activeProvider: null,
     runtimeMode: null,
     interactionMode: null,
+    executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
   };
 }
 
@@ -1506,6 +1523,7 @@ function createDraftThreadState(
     startFromOrigin?: boolean;
     runtimeMode?: RuntimeMode;
     interactionMode?: ProviderInteractionMode;
+    executionEndpointId?: ExecutionEndpointId;
     environmentSelection?: "auto" | "manual";
     loadBalancedEnvironmentId?: EnvironmentId | null;
   },
@@ -1555,6 +1573,10 @@ function createDraftThreadState(
     runtimeMode: options?.runtimeMode ?? existingThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE,
     interactionMode:
       options?.interactionMode ?? existingThread?.interactionMode ?? DEFAULT_INTERACTION_MODE,
+    executionEndpointId:
+      options?.executionEndpointId ??
+      existingThread?.executionEndpointId ??
+      DEFAULT_EXECUTION_ENDPOINT_ID,
     branch: nextBranch,
     worktreePath: nextWorktreePath,
     envMode:
@@ -1590,6 +1612,7 @@ function draftThreadsEqual(left: DraftThreadState | undefined, right: DraftThrea
     left.createdAt === right.createdAt &&
     left.runtimeMode === right.runtimeMode &&
     left.interactionMode === right.interactionMode &&
+    left.executionEndpointId === right.executionEndpointId &&
     left.branch === right.branch &&
     left.worktreePath === right.worktreePath &&
     left.envMode === right.envMode &&
@@ -1738,6 +1761,11 @@ function normalizePersistedDraftThreads(
           candidateDraftThread.interactionMode === "default"
             ? candidateDraftThread.interactionMode
             : DEFAULT_INTERACTION_MODE,
+        executionEndpointId:
+          typeof candidateDraftThread.executionEndpointId === "string" &&
+          candidateDraftThread.executionEndpointId.trim().length > 0
+            ? ExecutionEndpointId.make(candidateDraftThread.executionEndpointId)
+            : DEFAULT_EXECUTION_ENDPOINT_ID,
         branch: typeof branch === "string" ? branch : null,
         worktreePath: normalizedWorktreePath,
         envMode: normalizeDraftThreadEnvMode(candidateDraftThread.envMode, normalizedWorktreePath),
@@ -1800,6 +1828,7 @@ function normalizePersistedDraftThreads(
           createdAt: new Date().toISOString(),
           runtimeMode: DEFAULT_RUNTIME_MODE,
           interactionMode: DEFAULT_INTERACTION_MODE,
+          executionEndpointId: DEFAULT_EXECUTION_ENDPOINT_ID,
           branch: null,
           worktreePath: null,
           envMode: "local",
@@ -1904,6 +1933,11 @@ function normalizePersistedDraftsByThreadId(
       draftCandidate.interactionMode === "plan" || draftCandidate.interactionMode === "default"
         ? draftCandidate.interactionMode
         : null;
+    const executionEndpointId =
+      typeof draftCandidate.executionEndpointId === "string" &&
+      draftCandidate.executionEndpointId.trim().length > 0
+        ? ExecutionEndpointId.make(draftCandidate.executionEndpointId)
+        : DEFAULT_EXECUTION_ENDPOINT_ID;
     const contextIds = new Map<string, string>();
     for (const [kind, entries] of [
       ["image", attachments],
@@ -1999,7 +2033,8 @@ function normalizePersistedDraftsByThreadId(
       previewAnnotations.length === 0 &&
       !hasModelData &&
       !runtimeMode &&
-      !interactionMode
+      !interactionMode &&
+      executionEndpointId === DEFAULT_EXECUTION_ENDPOINT_ID
     ) {
       continue;
     }
@@ -2032,6 +2067,7 @@ function normalizePersistedDraftsByThreadId(
         : {}),
       ...(runtimeMode ? { runtimeMode } : {}),
       ...(interactionMode ? { interactionMode } : {}),
+      executionEndpointId,
     };
   }
 
@@ -2132,7 +2168,8 @@ export function partializeComposerDraftStoreState(
       draft.reviewComments.length === 0 &&
       !hasModelData &&
       draft.runtimeMode === null &&
-      draft.interactionMode === null
+      draft.interactionMode === null &&
+      draft.executionEndpointId === DEFAULT_EXECUTION_ENDPOINT_ID
     ) {
       continue;
     }
@@ -2196,6 +2233,7 @@ export function partializeComposerDraftStoreState(
         : {}),
       ...(draft.runtimeMode ? { runtimeMode: draft.runtimeMode } : {}),
       ...(draft.interactionMode ? { interactionMode: draft.interactionMode } : {}),
+      executionEndpointId: draft.executionEndpointId,
     };
     persistedDraftsByThreadKey[threadKey] = persistedDraft;
   }
@@ -2462,6 +2500,7 @@ function toHydratedThreadDraft(
     ...(persistedDraft.modelSelectionExplicit ? { modelSelectionExplicit: true } : {}),
     runtimeMode: persistedDraft.runtimeMode ?? null,
     interactionMode: persistedDraft.interactionMode ?? null,
+    executionEndpointId: persistedDraft.executionEndpointId ?? DEFAULT_EXECUTION_ENDPOINT_ID,
   };
 }
 
@@ -2483,6 +2522,7 @@ function toHydratedDraftThreadState(
     createdAt: persistedDraftThread.createdAt,
     runtimeMode: persistedDraftThread.runtimeMode,
     interactionMode: persistedDraftThread.interactionMode,
+    executionEndpointId: persistedDraftThread.executionEndpointId ?? DEFAULT_EXECUTION_ENDPOINT_ID,
     branch: persistedDraftThread.branch,
     worktreePath: persistedDraftThread.worktreePath,
     envMode: persistedDraftThread.envMode,
@@ -2785,6 +2825,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                   : options.createdAt || existing.createdAt,
               runtimeMode: options.runtimeMode ?? existing.runtimeMode,
               interactionMode: options.interactionMode ?? existing.interactionMode,
+              executionEndpointId: options.executionEndpointId ?? existing.executionEndpointId,
               branch: nextBranch,
               worktreePath: nextWorktreePath,
               envMode:
@@ -2801,6 +2842,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               nextDraftThread.createdAt === existing.createdAt &&
               nextDraftThread.runtimeMode === existing.runtimeMode &&
               nextDraftThread.interactionMode === existing.interactionMode &&
+              nextDraftThread.executionEndpointId === existing.executionEndpointId &&
               nextDraftThread.branch === existing.branch &&
               nextDraftThread.worktreePath === existing.worktreePath &&
               nextDraftThread.envMode === existing.envMode &&
@@ -3285,6 +3327,24 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               nextDraftsByThreadKey[threadKey] = nextDraft;
             }
             return { draftsByThreadKey: nextDraftsByThreadKey };
+          });
+        },
+        setExecutionEndpointId: (threadRef, executionEndpointId) => {
+          const threadKey = resolveComposerDraftKey(get(), threadRef) ?? "";
+          if (threadKey.length === 0) {
+            return;
+          }
+          set((state) => {
+            const existing = state.draftsByThreadKey[threadKey] ?? createEmptyThreadDraft();
+            if (existing.executionEndpointId === executionEndpointId) {
+              return state;
+            }
+            return {
+              draftsByThreadKey: {
+                ...state.draftsByThreadKey,
+                [threadKey]: { ...existing, executionEndpointId },
+              },
+            };
           });
         },
         addImage: (threadRef, image) => {

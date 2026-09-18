@@ -1,5 +1,5 @@
 import {
-  DEFAULT_SERVER_SETTINGS,
+  DEFAULT_CLIENT_SERVER_SETTINGS,
   EnvironmentId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -150,7 +150,7 @@ const SERVER_CONFIG: ServerConfigType = {
     otlpTracesEnabled: false,
     otlpMetricsEnabled: false,
   },
-  settings: DEFAULT_SERVER_SETTINGS,
+  settings: DEFAULT_CLIENT_SERVER_SETTINGS,
 };
 
 const RpcRequest = Schema.TaggedStruct("Request", {
@@ -721,7 +721,7 @@ describe("RpcSessionFactory", () => {
         const settingsEvents = Array.from({ length: 65 }, (): ServerConfigStreamEventType => ({
           version: 1,
           type: "settingsUpdated",
-          payload: { settings: DEFAULT_SERVER_SETTINGS },
+          payload: { settings: DEFAULT_CLIENT_SERVER_SETTINGS },
         }));
         const sourceEvents: ServerConfigStreamEventType[] = [
           SOURCE_EVENT,
@@ -1003,15 +1003,16 @@ describe("RpcSessionFactory", () => {
         type: "settingsUpdated",
         payload: {
           settings: {
-            ...DEFAULT_SERVER_SETTINGS,
-            newWorktreesStartFromOrigin: !DEFAULT_SERVER_SETTINGS.newWorktreesStartFromOrigin,
+            ...DEFAULT_CLIENT_SERVER_SETTINGS,
+            newWorktreesStartFromOrigin:
+              !DEFAULT_CLIENT_SERVER_SETTINGS.newWorktreesStartFromOrigin,
           },
         },
       },
       expectedConfig: {
         settings: {
-          ...DEFAULT_SERVER_SETTINGS,
-          newWorktreesStartFromOrigin: !DEFAULT_SERVER_SETTINGS.newWorktreesStartFromOrigin,
+          ...DEFAULT_CLIENT_SERVER_SETTINGS,
+          newWorktreesStartFromOrigin: !DEFAULT_CLIENT_SERVER_SETTINGS.newWorktreesStartFromOrigin,
         },
       },
     },

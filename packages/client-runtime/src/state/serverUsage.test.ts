@@ -1,12 +1,12 @@
 import {
-  DEFAULT_SERVER_SETTINGS,
+  DEFAULT_CLIENT_SERVER_SETTINGS,
   EnvironmentId,
   UsageDay,
   USAGE_CONTRACT_VERSION,
   WS_METHODS,
   type ServerConfig,
+  type ClientServerSettings,
   type ServerConfigStreamEvent,
-  type ServerSettings,
   type UsageSummary,
   type UsageSummaryInput,
 } from "@t3tools/contracts";
@@ -47,7 +47,7 @@ const INPUT: UsageSummaryInput = {
 };
 
 const CONFIG = {
-  settings: DEFAULT_SERVER_SETTINGS,
+  settings: DEFAULT_CLIENT_SERVER_SETTINGS,
   environment: { serverVersion: "0.0.1", capabilities: {} },
 } as ServerConfig;
 
@@ -55,7 +55,7 @@ const makeHarness = Effect.fn("ServerUsageTest.makeHarness")(function* (
   beforeRead: (request: number) => Effect.Effect<void> = () => Effect.void,
 ) {
   const events = yield* Queue.unbounded<ServerConfigStreamEvent>();
-  let settings = DEFAULT_SERVER_SETTINGS;
+  let settings = DEFAULT_CLIENT_SERVER_SETTINGS;
   let requests = 0;
   const client = {
     [WS_METHODS.subscribeServerConfig]: () =>
@@ -152,7 +152,7 @@ const makeHarness = Effect.fn("ServerUsageTest.makeHarness")(function* (
     Effect.sync(() => registry.dispose()),
   );
   const updateSettings = Effect.fn("ServerUsageTest.updateSettings")(function* (
-    next: ServerSettings,
+    next: ClientServerSettings,
   ) {
     settings = next;
     yield* Queue.offer(events, {
@@ -206,24 +206,27 @@ it.effect("refreshes cached usage windows only when override prices change", () 
         "custom-model": { inputCostPerMillionTokens: 3, outputCostPerMillionTokens: 9 },
         "other-model": { inputCostPerMillionTokens: 1, outputCostPerMillionTokens: 2 },
       };
-      yield* harness.updateSettings({ ...DEFAULT_SERVER_SETTINGS, usagePriceOverrides: prices });
+      yield* harness.updateSettings({
+        ...DEFAULT_CLIENT_SERVER_SETTINGS,
+        usagePriceOverrides: prices,
+      });
       yield* waitForCost(harness.registry, current, 3);
       yield* waitForCost(harness.registry, previous, 3);
       expect(harness.requests()).toBe(4);
 
       yield* harness.updateSettings({
-        ...DEFAULT_SERVER_SETTINGS,
+        ...DEFAULT_CLIENT_SERVER_SETTINGS,
         usagePriceOverrides: {
           "other-model": { outputCostPerMillionTokens: 2, inputCostPerMillionTokens: 1 },
           "custom-model": { outputCostPerMillionTokens: 9, inputCostPerMillionTokens: 3 },
         },
       });
       yield* harness.updateSettings({
-        ...DEFAULT_SERVER_SETTINGS,
+        ...DEFAULT_CLIENT_SERVER_SETTINGS,
         usagePriceOverrides: prices,
         defaultTheme: "custom-theme",
       });
-      yield* harness.updateSettings(DEFAULT_SERVER_SETTINGS);
+      yield* harness.updateSettings(DEFAULT_CLIENT_SERVER_SETTINGS);
       yield* waitForCost(harness.registry, current, 0);
       yield* waitForCost(harness.registry, previous, 0);
       expect(harness.requests()).toBe(6);
@@ -249,7 +252,7 @@ it.effect("restarts a pending usage read after a price change", () =>
       const unmount = harness.registry.mount(summary);
       yield* Deferred.await(started);
       yield* harness.updateSettings({
-        ...DEFAULT_SERVER_SETTINGS,
+        ...DEFAULT_CLIENT_SERVER_SETTINGS,
         usagePriceOverrides: {
           "custom-model": { inputCostPerMillionTokens: 5, outputCostPerMillionTokens: 10 },
         },

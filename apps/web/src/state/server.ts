@@ -1,12 +1,12 @@
 import {
-  DEFAULT_SERVER_SETTINGS,
+  type ClientServerSettings,
+  DEFAULT_CLIENT_SERVER_SETTINGS,
   type EditorId,
   type EnvironmentTheme,
   type ServerConfig,
   type ServerConfigStreamEvent,
   type ServerLifecycleWelcomePayload,
   type ServerProvider,
-  type ServerSettings,
 } from "@t3tools/contracts";
 import { createServerEnvironmentAtoms } from "@t3tools/client-runtime/state/server";
 import { createEnvironmentServerConfigsAtom } from "@t3tools/client-runtime/state/shell";
@@ -82,7 +82,8 @@ export const primaryServerWelcomeAtom = Atom.make(
 ).pipe(Atom.withLabel("web-primary-server-welcome"));
 
 export const primaryServerSettingsAtom = Atom.make(
-  (get): ServerSettings => get(primaryServerConfigAtom)?.settings ?? DEFAULT_SERVER_SETTINGS,
+  (get): ClientServerSettings =>
+    get(primaryServerConfigAtom)?.settings ?? DEFAULT_CLIENT_SERVER_SETTINGS,
 ).pipe(Atom.withLabel("web-primary-server-settings"));
 
 export const primaryServerProvidersAtom = Atom.make(

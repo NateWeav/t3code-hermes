@@ -167,7 +167,7 @@ export function getChangedBrowserSettingLabels(settings: BrowserDefaultSettings)
 }
 
 export function resolveBackgroundActivityProfileOption(
-  settings: ServerSettings,
+  settings: Omit<ServerSettings, "executionEndpoints">,
 ): BackgroundActivityProfile | "advanced" {
   const resolved = resolveServerBackgroundActivitySettings(settings);
   const normalized = normalizeBackgroundActivitySettings({
@@ -190,7 +190,7 @@ export function resolveBackgroundActivityProfileOption(
 }
 
 export function backgroundActivitySharedPolicySettings(
-  settings: ServerSettings,
+  settings: Omit<ServerSettings, "executionEndpoints">,
   profile: BackgroundActivityProfile,
 ): BackgroundActivitySettings {
   const normalized = normalizeServerBackgroundActivitySettings(settings);

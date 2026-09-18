@@ -195,7 +195,7 @@ export function normalizeBackgroundActivitySettings(
 }
 
 export function resolveServerBackgroundActivitySettings(
-  settings: ServerSettings,
+  settings: Omit<ServerSettings, "executionEndpoints">,
 ): ResolvedBackgroundActivitySettings {
   const defaultBackgroundActivity: BackgroundActivitySettings = {
     schemaVersion: 1,
@@ -248,7 +248,7 @@ export function resolveServerBackgroundActivitySettings(
 }
 
 export function normalizeServerBackgroundActivitySettings(
-  settings: ServerSettings,
+  settings: Omit<ServerSettings, "executionEndpoints">,
 ): BackgroundActivitySettings {
   const resolved = resolveServerBackgroundActivitySettings(settings);
   return normalizeBackgroundActivitySettings({

@@ -59,15 +59,16 @@ export function resolveProjectAutoPull(
 }
 
 type LegacyProviderSettings = ServerSettings["providers"][keyof ServerSettings["providers"]];
+type ProviderSelectionSettings = Omit<ServerSettings, "executionEndpoints">;
 
 const getLegacyProviderSettings = (
-  settings: ServerSettings,
+  settings: ProviderSelectionSettings,
   provider: ProviderDriverKind,
 ): LegacyProviderSettings | undefined =>
   (settings.providers as Record<string, LegacyProviderSettings | undefined>)[provider];
 
 export function isModelSelectionProviderEnabled(
-  settings: ServerSettings,
+  settings: ProviderSelectionSettings,
   selection: ModelSelection,
 ): boolean {
   const instanceConfig = settings.providerInstances[selection.instanceId];
@@ -82,7 +83,7 @@ export function isModelSelectionProviderEnabled(
 }
 
 export function resolveSourceControlWriterModelSelection(
-  settings: ServerSettings,
+  settings: ProviderSelectionSettings,
   providers?: ReadonlyArray<ServerProvider>,
 ): ModelSelection {
   const selection = settings.sourceControlWriterModelSelection;

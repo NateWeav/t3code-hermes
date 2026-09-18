@@ -270,7 +270,8 @@ import {
   ProviderConsumeResetCreditResult,
 } from "./providerUsageLimits.ts";
 import { UsagePricing, UsageReadError, UsageSummary, UsageSummaryInput } from "./usage.ts";
-import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
+import { ClientServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
+import { ExecutionEndpointRemoveInput, ExecutionEndpointUpsertInput } from "./executionEndpoint.ts";
 import {
   ProjectCloneActionInput,
   ProjectCloneActionResult,
@@ -388,6 +389,8 @@ export const WS_METHODS = {
   serverRemoveKeybinding: "server.removeKeybinding",
   serverGetSettings: "server.getSettings",
   serverUpdateSettings: "server.updateSettings",
+  serverUpsertExecutionEndpoint: "server.upsertExecutionEndpoint",
+  serverRemoveExecutionEndpoint: "server.removeExecutionEndpoint",
   serverDiscoverSourceControl: "server.discoverSourceControl",
   serverGetTraceDiagnostics: "server.getTraceDiagnostics",
   serverGetProcessDiagnostics: "server.getProcessDiagnostics",
@@ -600,13 +603,25 @@ const WsServerCommitDesktopUpdateRpc = Rpc.make(WS_METHODS.serverCommitDesktopUp
 
 const WsServerGetSettingsRpc = Rpc.make(WS_METHODS.serverGetSettings, {
   payload: Schema.Struct({}),
-  success: ServerSettings,
+  success: ClientServerSettings,
   error: Schema.Union([ServerSettingsError, EnvironmentAuthorizationError]),
 });
 
 const WsServerUpdateSettingsRpc = Rpc.make(WS_METHODS.serverUpdateSettings, {
   payload: Schema.Struct({ patch: ServerSettingsPatch }),
-  success: ServerSettings,
+  success: ClientServerSettings,
+  error: Schema.Union([ServerSettingsError, EnvironmentAuthorizationError]),
+});
+
+const WsServerUpsertExecutionEndpointRpc = Rpc.make(WS_METHODS.serverUpsertExecutionEndpoint, {
+  payload: ExecutionEndpointUpsertInput,
+  success: ClientServerSettings,
+  error: Schema.Union([ServerSettingsError, EnvironmentAuthorizationError]),
+});
+
+const WsServerRemoveExecutionEndpointRpc = Rpc.make(WS_METHODS.serverRemoveExecutionEndpoint, {
+  payload: ExecutionEndpointRemoveInput,
+  success: ClientServerSettings,
   error: Schema.Union([ServerSettingsError, EnvironmentAuthorizationError]),
 });
 
@@ -1472,6 +1487,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerRemoveKeybindingRpc,
   WsServerGetSettingsRpc,
   WsServerUpdateSettingsRpc,
+  WsServerUpsertExecutionEndpointRpc,
+  WsServerRemoveExecutionEndpointRpc,
   WsServerDiscoverSourceControlRpc,
   WsServerGetTraceDiagnosticsRpc,
   WsServerGetProcessDiagnosticsRpc,

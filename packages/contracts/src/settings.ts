@@ -39,6 +39,13 @@ import {
   type ProviderDriverKind,
 } from "./providerInstance.ts";
 import { PullRequestMergeMethod } from "./pullRequest.ts";
+import {
+  DEFAULT_EXECUTION_ENDPOINTS,
+  ExecutionEndpointConfig,
+  ExecutionEndpointId,
+  ExecutionEndpointPresentation,
+  presentExecutionEndpoint,
+} from "./executionEndpoint.ts";
 
 // ── Client Settings (local-only) ───────────────────────────────
 
@@ -1257,6 +1264,9 @@ export const ServerSettings = Schema.Struct({
   providerInstances: Schema.Record(ProviderInstanceId, ProviderInstanceConfig).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
+  executionEndpoints: Schema.Record(ExecutionEndpointId, ExecutionEndpointConfig).pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_EXECUTION_ENDPOINTS)),
+  ),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   integrations: IntegrationSettings,
   // Keyed by a user-chosen id so a source keeps its rows across edits. Entries
@@ -1329,6 +1339,8 @@ export const ServerSettingsOperation = Schema.Literals([
   "write-secret",
   "write-file",
   "prepare-directory",
+  "upsert-execution-endpoint",
+  "remove-execution-endpoint",
 ]);
 export type ServerSettingsOperation = typeof ServerSettingsOperation.Type;
 
@@ -1352,14 +1364,6 @@ export class ServerSettingsError extends Schema.TaggedError<ServerSettingsError>
     return `Server settings ${this.operation} failed${provider}${variable} at ${this.settingsPath}.`;
   }
 }
-
-// ── Unified type ─────────────────────────────────────────────────────
-
-export type UnifiedSettings = ServerSettings & ClientSettings;
-export const DEFAULT_UNIFIED_SETTINGS: UnifiedSettings = {
-  ...DEFAULT_SERVER_SETTINGS,
-  ...DEFAULT_CLIENT_SETTINGS,
-};
 
 // ── Server Settings Patch (replace with a Schema.deepPartial if available) ──────────────────────────────────────────
 
@@ -1534,6 +1538,28 @@ export const ServerSettingsPatch = Schema.Struct({
   ),
 });
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
+
+export const ClientServerSettings = Schema.Struct({
+  ...ServerSettings.fields,
+  executionEndpoints: Schema.Record(ExecutionEndpointId, ExecutionEndpointPresentation),
+});
+export type ClientServerSettings = typeof ClientServerSettings.Type;
+
+export const DEFAULT_CLIENT_SERVER_SETTINGS: ClientServerSettings = {
+  ...DEFAULT_SERVER_SETTINGS,
+  executionEndpoints: Object.fromEntries(
+    Object.entries(DEFAULT_EXECUTION_ENDPOINTS).map(([endpointId, endpoint]) => [
+      endpointId,
+      presentExecutionEndpoint(endpoint),
+    ]),
+  ) as Record<ExecutionEndpointId, ExecutionEndpointPresentation>,
+};
+
+export type UnifiedSettings = ClientServerSettings & ClientSettings;
+export const DEFAULT_UNIFIED_SETTINGS: UnifiedSettings = {
+  ...DEFAULT_CLIENT_SERVER_SETTINGS,
+  ...DEFAULT_CLIENT_SETTINGS,
+};
 
 export const ClientSettingsPatch = Schema.Struct({
   notificationMode: Schema.optionalKey(NotificationMode),

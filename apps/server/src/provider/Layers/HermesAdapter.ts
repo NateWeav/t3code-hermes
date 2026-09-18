@@ -2,6 +2,7 @@ import * as NodeURL from "node:url";
 
 import {
   ApprovalRequestId,
+  DEFAULT_EXECUTION_ENDPOINT_ID,
   type HermesSettings,
   EventId,
   type ProviderApprovalDecision,
@@ -63,6 +64,8 @@ import { applyHermesReasoningSelection } from "../../hermes/hermesReasoningOptio
 import type { HermesReasoningLevel } from "../../hermes/hermesReasoning.ts";
 import {
   applyHermesAcpModelSelection,
+  buildHermesExecutionContext,
+  buildHermesSessionEnvironment,
   currentHermesModelIdFromSessionSetup,
   hermesSessionInfoIndicatesCompaction,
   makeHermesAcpRuntime,
@@ -131,6 +134,7 @@ interface HermesSessionContext {
   session: ProviderSession;
   readonly scope: Scope.Closeable;
   readonly acp: AcpSessionRuntime.AcpSessionRuntime["Service"];
+  readonly executionContext: string;
   notificationFiber: Fiber.Fiber<void, never> | undefined;
   readonly pendingApprovals: Map<ApprovalRequestId, PendingApproval>;
   turns: Array<{ id: TurnId; items: Array<unknown> }>;
@@ -701,6 +705,10 @@ export function makeHermesAdapter(
           }
 
           const cwd = path.resolve(input.cwd.trim());
+          const sessionEnvironment = buildHermesSessionEnvironment(
+            options?.environment,
+            input.executionEnvironment,
+          );
           const hermesModelSelection =
             input.modelSelection?.instanceId === boundInstanceId ? input.modelSelection : undefined;
           const existing = sessions.get(input.threadId);
@@ -729,7 +737,7 @@ export function makeHermesAdapter(
           const startReasoningLevel = yield* applyHermesReasoningSelection({
             model: hermesModelSelection?.model,
             selections: hermesModelSelection?.options,
-            ...(options?.environment ? { environment: options.environment } : {}),
+            environment: sessionEnvironment,
           }).pipe(
             Effect.provideService(FileSystem.FileSystem, fileSystem),
             Effect.provideService(Path.Path, path),
@@ -745,7 +753,7 @@ export function makeHermesAdapter(
           const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
           const acp = yield* makeHermesAcpRuntime({
             hermesSettings,
-            ...(options?.environment ? { environment: options.environment } : {}),
+            environment: sessionEnvironment,
             childProcessSpawner,
             cwd,
             ...(resumeSessionId ? { resumeSessionId } : {}),
@@ -897,6 +905,7 @@ export function makeHermesAdapter(
           const session: ProviderSession = {
             provider: PROVIDER,
             providerInstanceId: boundInstanceId,
+            executionEndpointId: input.executionEndpointId ?? DEFAULT_EXECUTION_ENDPOINT_ID,
             status: "ready",
             runtimeMode: input.runtimeMode,
             cwd,
@@ -916,6 +925,11 @@ export function makeHermesAdapter(
             session,
             scope: sessionScope,
             acp,
+            executionContext: buildHermesExecutionContext(
+              session.executionEndpointId ?? DEFAULT_EXECUTION_ENDPOINT_ID,
+              input.executionEnvironment,
+              cwd,
+            ),
             notificationFiber: undefined,
             pendingApprovals,
             turns: [],
@@ -1256,6 +1270,7 @@ export function makeHermesAdapter(
                 acp: ctx.acp,
                 acpSessionId: ctx.acpSessionId,
                 displayModel,
+                executionContext: ctx.executionContext,
                 promptParts,
                 turnId,
               };
@@ -1291,10 +1306,10 @@ export function makeHermesAdapter(
                 ...prepared.promptParts,
                 {
                   type: "text",
-                  text: buildRuntimeInstructions({
+                  text: `${buildRuntimeInstructions({
                     harness: "Hermes",
                     model: prepared.displayModel,
-                  }),
+                  })}\n\n${prepared.executionContext}`,
                 },
               ],
             })

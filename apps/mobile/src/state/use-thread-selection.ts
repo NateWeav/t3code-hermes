@@ -59,6 +59,7 @@ function threadDetailToShell(
     projectId: thread.projectId,
     title: thread.title,
     modelSelection: thread.modelSelection,
+    executionEndpointId: thread.executionEndpointId,
     runtimeMode: thread.runtimeMode,
     interactionMode: thread.interactionMode,
     branch: thread.branch,

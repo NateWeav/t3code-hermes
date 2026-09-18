@@ -20,8 +20,10 @@ import {
   type AssistantCitation,
   type ApprovalRequestId,
   type ChatFileAttachment,
+  DEFAULT_EXECUTION_ENDPOINT_ID,
   DEFAULT_MODEL,
   type EnvironmentId,
+  type ExecutionEndpointId,
   type MessageId,
   type ModelSelection,
   type ProjectScript,
@@ -351,6 +353,7 @@ import {
 } from "../state/entities";
 import { environmentShell } from "../state/shell";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
+import { resolveExecutionEndpointSelection } from "./chat/executionEndpointPicker.logic";
 import { createPageScrollController, type PageScrollKey } from "./chat/pageScrollController";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
@@ -1563,6 +1566,7 @@ export default function ChatView(props: ChatViewProps) {
   }, [routeKind, routeThreadRef, routeThreadState]);
   const markThreadVisited = useUiStateStore((store) => store.markThreadVisited);
   const settings = useEnvironmentSettings(environmentId);
+  const executionEndpoints = settings.executionEndpoints;
   const setStickyComposerModelSelection = useComposerDraftStore(
     (store) => store.setStickyModelSelection,
   );
@@ -1587,6 +1591,11 @@ export default function ChatView(props: ChatViewProps) {
   );
   const composerInteractionMode = useComposerDraftStore(
     (store) => store.getComposerDraft(composerDraftTarget)?.interactionMode ?? null,
+  );
+  const composerExecutionEndpointId = useComposerDraftStore(
+    (store) =>
+      store.getComposerDraft(composerDraftTarget)?.executionEndpointId ??
+      DEFAULT_EXECUTION_ENDPOINT_ID,
   );
   const composerActiveProvider = useComposerDraftStore(
     (store) => store.getComposerDraft(composerDraftTarget)?.activeProvider ?? null,
@@ -1617,6 +1626,9 @@ export default function ChatView(props: ChatViewProps) {
   const setComposerDraftRuntimeMode = useComposerDraftStore((store) => store.setRuntimeMode);
   const setComposerDraftInteractionMode = useComposerDraftStore(
     (store) => store.setInteractionMode,
+  );
+  const setComposerDraftExecutionEndpointId = useComposerDraftStore(
+    (store) => store.setExecutionEndpointId,
   );
   const clearComposerDraftContent = useComposerDraftStore((store) => store.clearComposerContent);
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
@@ -1902,6 +1914,14 @@ export default function ChatView(props: ChatViewProps) {
   // Implicit drafts follow their current project/environment, including retargets.
   // Explicit composer choices and existing server threads retain their permissions.
   const runtimeMode = composerRuntimeMode ?? activeServerThread?.runtimeMode ?? defaultRuntimeMode;
+  const executionEndpointLocked = isServerThread;
+  const executionEndpointId = resolveExecutionEndpointSelection(
+    isServerThread
+      ? (activeThread?.executionEndpointId ?? DEFAULT_EXECUTION_ENDPOINT_ID)
+      : composerExecutionEndpointId,
+    executionEndpoints,
+    executionEndpointLocked,
+  );
   const isLocalDraftThread = !isServerThread && localDraftThread !== undefined;
   const canCheckoutPullRequestIntoThread = isLocalDraftThread;
   const activeThreadId = activeThread?.id ?? null;
@@ -4460,6 +4480,25 @@ export default function ChatView(props: ChatViewProps) {
       scheduleComposerFocus,
       composerDraftTarget,
       setComposerDraftInteractionMode,
+      setDraftThreadContext,
+    ],
+  );
+  const handleExecutionEndpointChange = useCallback(
+    (endpointId: ExecutionEndpointId) => {
+      if (executionEndpointLocked || endpointId === executionEndpointId) return;
+      setComposerDraftExecutionEndpointId(composerDraftTarget, endpointId);
+      if (isLocalDraftThread) {
+        setDraftThreadContext(composerDraftTarget, { executionEndpointId: endpointId });
+      }
+      scheduleComposerFocus();
+    },
+    [
+      composerDraftTarget,
+      executionEndpointId,
+      executionEndpointLocked,
+      isLocalDraftThread,
+      scheduleComposerFocus,
+      setComposerDraftExecutionEndpointId,
       setDraftThreadContext,
     ],
   );
@@ -7921,6 +7960,7 @@ export default function ChatView(props: ChatViewProps) {
                       projectId: activeProject.id,
                       title,
                       modelSelection: threadCreateModelSelection,
+                      executionEndpointId,
                       runtimeMode,
                       interactionMode: sendInteractionMode,
                       branch: activeThreadBranch,
@@ -9662,6 +9702,9 @@ export default function ChatView(props: ChatViewProps) {
                             threadSyncPhase={activeEnvironmentUnavailable ? null : threadSyncPhase}
                             runtimeMode={runtimeMode}
                             interactionMode={interactionMode}
+                            executionEndpointId={executionEndpointId}
+                            executionEndpoints={executionEndpoints}
+                            executionEndpointLocked={executionEndpointLocked}
                             lockedProvider={lockedProvider}
                             providerStatuses={providerStatuses as ServerProvider[]}
                             providerCatalogKnown={serverConfig !== null}
@@ -9721,6 +9764,7 @@ export default function ChatView(props: ChatViewProps) {
                             toggleInteractionMode={toggleInteractionMode}
                             handleRuntimeModeChange={handleRuntimeModeChange}
                             handleInteractionModeChange={handleInteractionModeChange}
+                            handleExecutionEndpointChange={handleExecutionEndpointChange}
                             focusComposer={focusComposer}
                             scheduleComposerFocus={scheduleComposerFocus}
                             setThreadError={setThreadError}

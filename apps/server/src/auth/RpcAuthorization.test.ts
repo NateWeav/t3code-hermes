@@ -1,4 +1,5 @@
 import {
+  AuthAccessWriteScope,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   AuthRelayReadScope,
@@ -49,6 +50,15 @@ describe("RPC authorization scopes", () => {
     );
     expect(requiredScopeForRpcMethod(WS_METHODS.agentSessionsImport)).toBe(
       AuthOrchestrationOperateScope,
+    );
+  });
+
+  it("reserves execution endpoint authority changes for administrative clients", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.serverUpsertExecutionEndpoint)).toBe(
+      AuthAccessWriteScope,
+    );
+    expect(requiredScopeForRpcMethod(WS_METHODS.serverRemoveExecutionEndpoint)).toBe(
+      AuthAccessWriteScope,
     );
   });
 

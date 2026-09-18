@@ -19,6 +19,8 @@ import type {
   AssistantCitation,
   ChatFileAttachment,
   EnvironmentId,
+  ExecutionEndpointId,
+  ExecutionEndpointPresentation,
   ModelSelection,
   ProjectId,
   PullRequestListInput,
@@ -272,6 +274,7 @@ import {
   renderProviderTraitsPicker,
 } from "./composerProviderState";
 import { ContextWindowMeter, ContextWindowMeterPlaceholder } from "./ContextWindowMeter";
+import { ExecutionEndpointPicker } from "./ExecutionEndpointPicker";
 import {
   providerSupportsManualCompaction,
   resolveContextWindowModelDisplayName,
@@ -1346,6 +1349,9 @@ export interface ChatComposerProps {
   // Mode
   runtimeMode: RuntimeMode;
   interactionMode: ProviderInteractionMode;
+  executionEndpointId: ExecutionEndpointId;
+  executionEndpoints: Readonly<Record<string, ExecutionEndpointPresentation>>;
+  executionEndpointLocked: boolean;
 
   // Provider / model
   lockedProvider: ProviderDriverKind | null;
@@ -1420,6 +1426,7 @@ export interface ChatComposerProps {
   toggleInteractionMode: () => void;
   handleRuntimeModeChange: (mode: RuntimeMode) => void;
   handleInteractionModeChange: (mode: ProviderInteractionMode) => void;
+  handleExecutionEndpointChange: (endpointId: ExecutionEndpointId) => void;
 
   focusComposer: () => void;
   scheduleComposerFocus: () => void;
@@ -1471,6 +1478,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeProposedPlan,
     runtimeMode,
     interactionMode: requestedInteractionMode,
+    executionEndpointId,
+    executionEndpoints,
+    executionEndpointLocked,
     lockedProvider,
     providerStatuses,
     providerCatalogKnown,
@@ -1519,6 +1529,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     toggleInteractionMode,
     handleRuntimeModeChange,
     handleInteractionModeChange,
+    handleExecutionEndpointChange,
     focusComposer,
     scheduleComposerFocus,
     setThreadError,
@@ -4954,13 +4965,24 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         <CompactComposerControlsMenu
           interactionMode={interactionMode}
           runtimeMode={runtimeMode}
+          executionEndpointId={executionEndpointId}
+          executionEndpoints={executionEndpoints}
+          executionEndpointLocked={executionEndpointLocked}
           showInteractionModeToggle={planModeUiEnabled}
           traitsMenuContent={providerTraitsMenuContent}
           onToggleInteractionMode={toggleInteractionMode}
           onRuntimeModeChange={handleRuntimeModeChange}
+          onExecutionEndpointChange={handleExecutionEndpointChange}
         />
       ) : (
         <>
+          <ComposerControlSeparator size={composerControlsInStrip ? "xs" : "sm"} />
+          <ExecutionEndpointPicker
+            value={executionEndpointId}
+            endpoints={executionEndpoints}
+            locked={executionEndpointLocked}
+            onChange={handleExecutionEndpointChange}
+          />
           {restingBlockDefs.map((def, index) => {
             if (!composerControlsInStrip) {
               return <Fragment key={def.id}>{def.content}</Fragment>;
@@ -4994,6 +5016,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               <CompactComposerControlsMenu
                 interactionMode={interactionMode}
                 runtimeMode={runtimeMode}
+                executionEndpointId={executionEndpointId}
+                executionEndpoints={executionEndpoints}
+                executionEndpointLocked={executionEndpointLocked}
                 size="xs"
                 hidden={composerControlsHidden || hiddenRestingBlockIds.length === 0}
                 showInteractionModeToggle={
@@ -5004,6 +5029,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 }
                 onToggleInteractionMode={toggleInteractionMode}
                 onRuntimeModeChange={handleRuntimeModeChange}
+                onExecutionEndpointChange={handleExecutionEndpointChange}
               />
             </div>
           ) : null}

@@ -104,7 +104,7 @@ export function resolveOnboardingProviderInstallCommand(
 /** Use the selected provider instance's binary when the setup terminal opens its login flow. */
 export function resolveOnboardingProviderLoginCommand(
   provider: ServerProvider,
-  settings: ServerSettings,
+  settings: Omit<ServerSettings, "executionEndpoints">,
   platform: ExecutionEnvironmentPlatformOs,
 ): string {
   const instance = settings.providerInstances[provider.instanceId];

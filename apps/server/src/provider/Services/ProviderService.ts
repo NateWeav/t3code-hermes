@@ -19,7 +19,6 @@ import type {
   ProviderRuntimeEvent,
   ProviderSendTurnInput,
   ProviderSession,
-  ProviderSessionStartInput,
   ProviderStopSessionInput,
   ProviderUploadFeedbackInput,
   ProviderUploadFeedbackResult,
@@ -32,7 +31,10 @@ import type * as Effect from "effect/Effect";
 import type * as Stream from "effect/Stream";
 
 import type { ProviderServiceError } from "../Errors.ts";
-import type { ProviderAdapterCapabilities } from "./ProviderAdapter.ts";
+import type {
+  ProviderAdapterCapabilities,
+  ProviderSessionRuntimeStartInput,
+} from "./ProviderAdapter.ts";
 import type { ProviderInstanceRoutingInfo } from "./ProviderAdapterRegistry.ts";
 
 /**
@@ -44,7 +46,7 @@ export interface ProviderServiceShape {
    */
   readonly startSession: (
     threadId: ThreadId,
-    input: ProviderSessionStartInput,
+    input: ProviderSessionRuntimeStartInput,
   ) => Effect.Effect<ProviderSession, ProviderServiceError>;
 
   /**

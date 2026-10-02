@@ -243,6 +243,13 @@ limited to `builtInDrivers.ts`, `settings.ts`, and the client branding lists. Re
 `usageProviders.ts` files (`apps/web/src/components/usage/`, `apps/mobile/src/features/usage/`) by
 reading both sides rather than taking one wholesale.
 
+**Keeping patches current.** The Hermes patches in [`infra/hermes/`](./infra/hermes) follow Hermes
+`main`, not T3 Code upstream. [`hermes-patches.yml`](./.github/workflows/hermes-patches.yml) checks
+them against it every three hours at :20 and files a **`hermes-patch-drift`** issue when one stops
+applying, stacking, or passing its tests, or becomes obsolete. The same `upstream-sync` profile
+answers it with a `hermes/patch-drift-<sha>` PR that adds rebased versions, and merges it once CI is
+green. See [`infra/hermes/README.md`](./infra/hermes/README.md#versions).
+
 ## CI on the fork
 
 Upstream's workflows target paid Blacksmith runners that only exist in its org, and several deploy

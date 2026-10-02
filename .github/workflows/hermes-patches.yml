@@ -1,0 +1,123 @@
+name: Hermes Patches
+
+# Checks that the Hermes patches this fork carries (infra/hermes) still fit
+# Hermes main, which users follow with `hermes update`. Every three hours the
+# newest version of each patch must apply to a fresh checkout of Hermes main,
+# must not reverse-apply (that means upstream now carries it), must stack in
+# manifest order, and must not fail any patch-relevant Hermes test that passes
+# on unpatched main.
+#
+# Drift files a `hermes-patch-drift` issue; the Hermes upstream-sync profile
+# picks it up from the webhook and opens a PR adding rebased versions (see
+# infra/hermes/automation/). The issue body is parsed there, so keep
+# .github/scripts/hermes-patch-drift.cjs's report format stable.
+#
+# This workflow only ever runs on a fork (see the job guard).
+
+on:
+  schedule:
+    - cron: "20 */3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: hermes-patches
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Check patches against Hermes main
+    if: github.repository != 'pingdotgg/t3code'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      HERMES_URL: https://github.com/NousResearch/hermes-agent
+      HERMES_DIR: ${{ github.workspace }}/../hermes-agent
+      STATE: ${{ github.workspace }}/../hermes-patches.json
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Test the checker
+        run: node --test .github/scripts/hermes-patch-drift.test.cjs
+
+      - name: Fetch Hermes main
+        # Blobless but full history: the checker needs merge-base and
+        # rev-list against each version's commit.
+        run: |
+          git clone --filter=blob:none --single-branch --branch main "$HERMES_URL" "$HERMES_DIR"
+          git -C "$HERMES_DIR" log -1 --format='Hermes main: %H (%cI)'
+
+      - id: check
+        name: Apply, reverse-apply, and stack the newest versions
+        run: node .github/scripts/hermes-patch-drift.cjs check --hermes "$HERMES_DIR" --state "$STATE"
+
+      - name: Set up uv
+        if: steps.check.outputs.applies == 'true'
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install Hermes test dependencies
+        if: steps.check.outputs.applies == 'true'
+        working-directory: ${{ env.HERMES_DIR }}
+        # As Hermes CI does.
+        run: uv sync --locked --python 3.14 --extra all --group dev
+
+      - name: Run patch-relevant tests against an unpatched baseline
+        if: steps.check.outputs.applies == 'true'
+        env:
+          OPENROUTER_API_KEY: ""
+          OPENAI_API_KEY: ""
+          NOUS_API_KEY: ""
+        run: >-
+          node .github/scripts/hermes-patch-drift.cjs test --hermes "$HERMES_DIR" --state "$STATE"
+          --python "$HERMES_DIR/.venv/bin/python"
+
+      - id: report
+        name: Decide
+        run: >-
+          node .github/scripts/hermes-patch-drift.cjs report --state "$STATE"
+          --body "$RUNNER_TEMP/drift.md"
+          --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+      - name: Summarize
+        if: steps.report.outputs.drift == 'false'
+        env:
+          HERMES_SHA: ${{ steps.check.outputs.hermes_sha }}
+        run: echo "Every patch fits Hermes main (\`$HERMES_SHA\`)." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Report drift
+        if: steps.report.outputs.drift == 'true'
+        uses: ./.github/actions/report-automation-failure
+        with:
+          title: Hermes patch drift (${{ github.run_id }})
+          body-file: ${{ runner.temp }}/drift.md
+          label: hermes-patch-drift
+          label-color: fbca04
+          label-description: A carried Hermes patch no longer fits Hermes main.
+          github-token: ${{ github.token }}
+
+      # Drift is reported above and is not a failure of this workflow. This
+      # catches the rest: a failed clone, a uv outage, a crashed checker.
+      - name: Compose unexpected failure report
+        if: failure()
+        run: |
+          {
+            echo "The Hermes patch check failed before it could decide whether the patches drifted."
+            echo
+            echo "[Run log](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID})"
+          } > "$RUNNER_TEMP/failure.md"
+
+      - name: Report unexpected failure
+        if: failure()
+        uses: ./.github/actions/report-automation-failure
+        with:
+          title: Hermes patch check failed (${{ github.run_id }})
+          body-file: ${{ runner.temp }}/failure.md
+          label: hermes-patch-check-failed
+          label-description: The scheduled Hermes patch check failed unexpectedly.
+          github-token: ${{ github.token }}

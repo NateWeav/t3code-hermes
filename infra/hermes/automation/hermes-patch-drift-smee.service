@@ -1,0 +1,21 @@
+[Unit]
+Description=Relay GitHub Hermes patch-drift webhooks to Hermes
+After=network-online.target hermes-gateway.service
+Wants=network-online.target hermes-gateway.service
+
+# Same smee channel as hermes-upstream-sync-smee.service: smee broadcasts each
+# delivery to every connected client, and smee-client forwards to one target,
+# so a second client is how one GitHub webhook reaches a second route.
+[Service]
+Type=simple
+EnvironmentFile=/home/ubuntu/.hermes/profiles/upstream-sync/smee.env
+ExecStart=/home/ubuntu/.hermes/automation/smee-client/node_modules/.bin/smee --url ${SMEE_URL} --target http://127.0.0.1:8644/p/upstream-sync/webhooks/t3code-hermes-patch-drift
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+
+[Install]
+WantedBy=default.target

@@ -8,6 +8,7 @@ import {
   type ThreadId as ThreadIdType,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -27,6 +28,7 @@ import { subscribeDynamic } from "../rpc/client.ts";
 import { ThreadSnapshotLoader, type ThreadSnapshotWindow } from "./threadSnapshotHttp.ts";
 import { parseThreadKey, threadKey } from "./entities.ts";
 import { applyThreadDetailEvent } from "./threadReducer.ts";
+import { observeTurnThroughputEvent } from "./turnThroughput.ts";
 import { THREAD_SNAPSHOT_IDLE_TTL_MS } from "./threadRetention.ts";
 import { followStreamInEnvironment } from "./runtime.ts";
 import {
@@ -191,6 +193,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
   const snapshotLoader = yield* ThreadSnapshotLoader;
   const wakeups = yield* Effect.serviceOption(ConnectionWakeups.ConnectionWakeups);
   const environmentId = supervisor.target.environmentId;
+  const threadRef = { environmentId, threadId };
   const retained = resumeCache?.snapshot;
   const owner = {};
   if (resumeCache) resumeCache.owner = owner;
@@ -469,6 +472,9 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
       return;
     }
     yield* SubscriptionRef.set(lastSequence, item.event.sequence);
+    if (!(yield* Ref.get(awaitingCompletion))) {
+      observeTurnThroughputEvent(threadRef, item.event, yield* Clock.currentTimeMillis);
+    }
 
     const current = yield* SubscriptionRef.get(state);
     if (Option.isNone(current.data)) {
@@ -557,14 +563,20 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
         let thread = current.data.value;
         let sequence = yield* SubscriptionRef.get(lastSequence);
         let synchronized = false;
+        // Replayed events describe the model's past, not its current pace.
+        let live = !(yield* Ref.get(awaitingCompletion));
         // Retain the last settled state even if the next turn starts before
         // this batch publishes. Its cursor must describe that settled content.
         let persistable: { thread: OrchestrationThread; sequence: number } | undefined;
         for (const item of items) {
           if (item.kind === "synchronized") {
             synchronized = true;
+            live = true;
           } else if (item.kind === "event" && item.event.sequence > sequence) {
             sequence = item.event.sequence;
+            if (live) {
+              observeTurnThroughputEvent(threadRef, item.event, yield* Clock.currentTimeMillis);
+            }
             const result = applyThreadDetailEvent(thread, item.event);
             if (result.kind === "updated") {
               thread = result.thread;

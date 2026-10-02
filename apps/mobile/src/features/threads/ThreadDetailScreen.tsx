@@ -406,7 +406,12 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
       return { kind: "compacting" };
     }
     if (props.activeWorkStartedAt !== null && contentPresentationKind === "ready") {
-      return { kind: "working", startedAt: props.activeWorkStartedAt };
+      return {
+        kind: "working",
+        startedAt: props.activeWorkStartedAt,
+        threadRef: { environmentId: props.environmentId, threadId: props.selectedThread.id },
+        turnId: props.selectedThread.latestTurn?.turnId ?? null,
+      };
     }
     return null;
   })();

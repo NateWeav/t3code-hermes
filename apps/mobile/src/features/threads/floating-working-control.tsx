@@ -1,3 +1,5 @@
+import { readTurnThroughput } from "@t3tools/client-runtime/state/turn-throughput";
+import type { ScopedThreadRef, TurnId } from "@t3tools/contracts";
 import { formatDuration } from "@t3tools/shared/orchestrationTiming";
 import { GlassContainer, GlassView } from "expo-glass-effect";
 import { type ReactNode, useEffect, useRef, useState } from "react";
@@ -346,7 +348,13 @@ function FloatingStatusLabel(props: {
     );
   }
   return (
-    <WorkingDuration key="working" startedAt={props.status.startedAt} onLayout={props.onLayout} />
+    <WorkingDuration
+      key="working"
+      startedAt={props.status.startedAt}
+      threadRef={props.status.threadRef}
+      turnId={props.status.turnId}
+      onLayout={props.onLayout}
+    />
   );
 }
 
@@ -387,6 +395,8 @@ function StatusLabelRow(props: {
 
 function WorkingDuration(props: {
   readonly startedAt: string;
+  readonly threadRef: ScopedThreadRef;
+  readonly turnId: TurnId | null;
   readonly onLayout: (event: LayoutChangeEvent) => void;
 }) {
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -398,7 +408,11 @@ function WorkingDuration(props: {
   }, [props.startedAt]);
 
   const duration = formatWorkingDuration(props.startedAt, nowMs);
-  const label = `Working for ${duration}`;
+  // Same once-a-second tick as the timer; the tracker is only ever polled.
+  const throughput =
+    props.turnId === null ? null : readTurnThroughput(props.threadRef, props.turnId, nowMs);
+  const rate = throughput === null ? null : formatTokensPerSecond(throughput.tokensPerSecond);
+  const label = rate === null ? `Working for ${duration}` : `Working for ${duration}, ${rate}`;
 
   return (
     <StatusLabelRow accessibilityLabel={label} onLayout={props.onLayout}>
@@ -409,8 +423,24 @@ function WorkingDuration(props: {
       >
         {duration}
       </SystemText>
+      {rate !== null ? (
+        <>
+          <Text className="text-xs text-foreground-muted"> · </Text>
+          <SystemText
+            className="font-mono text-2xs text-foreground-muted"
+            style={{ fontVariant: ["tabular-nums"] }}
+          >
+            {rate}
+          </SystemText>
+        </>
+      ) : null}
     </StatusLabelRow>
   );
+}
+
+/** Shown as "—" while the turn is live but no text has arrived for a while. */
+function formatTokensPerSecond(tokensPerSecond: number | null): string {
+  return tokensPerSecond === null ? "— tok/s" : `${Math.round(tokensPerSecond)} tok/s`;
 }
 
 function formatWorkingDuration(startedAt: string, nowMs: number): string {

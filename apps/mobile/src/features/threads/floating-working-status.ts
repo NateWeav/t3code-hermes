@@ -1,4 +1,5 @@
 import type { EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
+import type { ScopedThreadRef, TurnId } from "@t3tools/contracts";
 
 /**
  * What the floating pill says. Connection, syncing, and working share one
@@ -6,7 +7,13 @@ import type { EnvironmentConnectionPhase } from "@t3tools/client-runtime/connect
  * another. The connection variant is tappable and triggers a reconnect.
  */
 export type FloatingWorkingStatus =
-  | { readonly kind: "working"; readonly startedAt: string }
+  | {
+      readonly kind: "working";
+      readonly startedAt: string;
+      /** The turn whose output rate the label shows beside the timer. */
+      readonly threadRef: ScopedThreadRef;
+      readonly turnId: TurnId | null;
+    }
   | { readonly kind: "syncing"; readonly label: string }
   | { readonly kind: "compacting" }
   // A task whose thread the server has not created yet: the worktree may

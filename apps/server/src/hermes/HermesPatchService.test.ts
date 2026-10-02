@@ -11,6 +11,8 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 
 import * as ServerSettings from "../serverSettings.ts";
+import { writeFakeCli } from "../testUtils/fakeCli.ts";
+import { startFakeGateway } from "./hermesGatewayFixtures.ts";
 import { HERMES_PATCHES } from "./hermesPatches.ts";
 import { HermesPatchService, make } from "./HermesPatchService.ts";
 
@@ -39,6 +41,55 @@ const makeHermesCheckout = Effect.gen(function* () {
   NodeFS.writeFileSync(binaryPath, "#!/bin/sh\n", { mode: 0o755 });
   return { root, binaryPath };
 });
+
+/**
+ * The enabled Hermes as a provider instance whose environment points
+ * `HERMES_HOME` at `home`, the way the gateway restart has to find it.
+ */
+const withInstance = (binaryPath: string, home: string) =>
+  Effect.provide(
+    Layer.effect(HermesPatchService, make).pipe(
+      Layer.provide(
+        ServerSettings.layerTest({
+          providerInstances: {
+            hermes: {
+              driver: "hermes",
+              enabled: true,
+              config: { binaryPath },
+              environment: [{ name: "HERMES_HOME", value: home, sensitive: false }],
+            },
+          },
+        } as never),
+      ),
+      Layer.provideMerge(NodeServices.layer),
+    ),
+  );
+
+/**
+ * A checkout whose `hermes` stands in for `hermes gateway restart`: it
+ * replaces the gateway by writing a new pid, or fails with `exitCode`.
+ */
+const makeRestartableCheckout = (restart: { readonly exitCode: number }) =>
+  Effect.gen(function* () {
+    const { root, binaryPath } = yield* makeHermesCheckout;
+    const fileSystem = yield* FileSystem.FileSystem;
+    const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hermes-home-" });
+    writeFakeCli({
+      directory: NodePath.dirname(binaryPath),
+      name: "hermes",
+      source: [
+        'import { writeFileSync } from "node:fs";',
+        'import { join } from "node:path";',
+        'if (process.argv.slice(2).join(" ") !== "gateway restart") process.exit(64);',
+        `if (${restart.exitCode} !== 0) {`,
+        '  console.error("✗ Gateway service restart failed.");',
+        `  process.exit(${restart.exitCode});`,
+        "}",
+        'writeFileSync(join(process.env.HERMES_HOME, "gateway.pid"), JSON.stringify({ pid: 5151 }));',
+      ].join("\n"),
+    });
+    return { root, binaryPath, home };
+  });
 
 describe("HermesPatchService", () => {
   it.effect("says Hermes is disabled rather than failing", () =>
@@ -75,6 +126,106 @@ describe("HermesPatchService", () => {
         assert.strictEqual(misfit.reason, "wrongState");
         assert.strictEqual(git(root, "status", "--porcelain"), "");
       }).pipe(withService({ enabled: true, binaryPath }));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("flags a gateway older than the patched files and restarts it", () =>
+    Effect.gen(function* () {
+      const { root, binaryPath, home } = yield* makeRestartableCheckout({ exitCode: 0 });
+      const gateway = yield* Effect.acquireRelease(
+        Effect.promise(() => startFakeGateway({ home, pid: 4242 })),
+        (fake) => Effect.promise(fake.close),
+      );
+      // The gateway started before a patch rewrote a file it imports.
+      NodeFS.utimesSync(gateway.pidFile, 1_000, 1_000);
+      NodeFS.mkdirSync(NodePath.join(root, "gateway", "platforms"), { recursive: true });
+      NodeFS.writeFileSync(NodePath.join(root, "gateway", "platforms", "webhook.py"), "");
+      NodeFS.utimesSync(NodePath.join(root, "gateway", "platforms", "webhook.py"), 2_000, 2_000);
+
+      yield* Effect.gen(function* () {
+        const service = yield* HermesPatchService;
+        assert.deepStrictEqual((yield* service.list).gateway, {
+          state: "outdated",
+          canRestart: true,
+        });
+
+        const started = yield* service.restartGateway;
+        assert.strictEqual(started.gateway?.state, "restarting");
+        yield* service.awaitGatewayRestart;
+
+        const after = yield* service.list;
+        assert.deepStrictEqual(after.gateway, { state: "upToDate", canRestart: true });
+        assert.isNull(after.gatewayRestartFailure);
+      }).pipe(withInstance(binaryPath, home));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  // Live clock: the service really waits between reads of the socket.
+  it.live("waits for the replacement gateway's socket to answer", () =>
+    Effect.gen(function* () {
+      const { binaryPath, home } = yield* makeRestartableCheckout({ exitCode: 0 });
+      const gateway = yield* Effect.acquireRelease(
+        Effect.promise(() => startFakeGateway({ home, pid: 4242 })),
+        (fake) => Effect.promise(fake.close),
+      );
+      // The restart command returns while the old process still answers.
+      gateway.answerPid(4242);
+      setTimeout(() => gateway.answerPid(null), 1_500);
+
+      yield* Effect.gen(function* () {
+        const service = yield* HermesPatchService;
+        yield* service.restartGateway;
+        yield* service.awaitGatewayRestart;
+        const after = yield* service.list;
+        assert.isNull(after.gatewayRestartFailure);
+        assert.strictEqual(after.gateway?.state, "upToDate");
+      }).pipe(withInstance(binaryPath, home));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("reports a restart that did not replace the gateway", () =>
+    Effect.gen(function* () {
+      const { binaryPath, home } = yield* makeRestartableCheckout({ exitCode: 1 });
+      yield* Effect.acquireRelease(
+        Effect.promise(() => startFakeGateway({ home, pid: 4242 })),
+        (fake) => Effect.promise(fake.close),
+      );
+
+      yield* Effect.gen(function* () {
+        const service = yield* HermesPatchService;
+        yield* service.restartGateway;
+        yield* service.awaitGatewayRestart;
+        const after = yield* service.list;
+        assert.strictEqual(
+          after.gatewayRestartFailure,
+          "hermes gateway restart exited with code 1. ✗ Gateway service restart failed.",
+        );
+        assert.strictEqual(after.gateway?.state, "upToDate");
+      }).pipe(withInstance(binaryPath, home));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("leaves a gateway started in a terminal, or a missing one, alone", () =>
+    Effect.gen(function* () {
+      const { binaryPath, home } = yield* makeRestartableCheckout({ exitCode: 0 });
+      yield* Effect.gen(function* () {
+        const service = yield* HermesPatchService;
+        assert.isNull((yield* service.list).gateway);
+        const none = yield* Effect.flip(service.restartGateway);
+        assert.strictEqual(none.reason, "wrongState");
+
+        const gateway = yield* Effect.acquireRelease(
+          Effect.promise(() => startFakeGateway({ home, pid: 4242, supervisor: "manual" })),
+          (fake) => Effect.promise(fake.close),
+        );
+        assert.deepStrictEqual((yield* service.list).gateway, {
+          state: "upToDate",
+          canRestart: false,
+        });
+        const manual = yield* Effect.flip(service.restartGateway);
+        assert.strictEqual(manual.reason, "wrongState");
+        assert.include(NodeFS.readFileSync(gateway.pidFile, "utf8"), "4242");
+      }).pipe(withInstance(binaryPath, home));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });

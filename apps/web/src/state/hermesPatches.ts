@@ -1,10 +1,14 @@
 /**
  * Everything the Patches tab decides: which environment, the latest read of
- * its Hermes checkout, and what applying or removing a patch does afterwards.
+ * its Hermes checkout, and what applying or removing a patch, or updating
+ * Hermes, does afterwards.
  *
  * @module state/hermesPatches
  */
-import { describeHermesPatchFailure } from "@t3tools/client-runtime/state/hermes-patches";
+import {
+  describeHermesPatchFailure,
+  describeHermesUpdateResult,
+} from "@t3tools/client-runtime/state/hermes-patches";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -25,11 +29,15 @@ export function useHermesPatches() {
   );
   const applyCommand = useAtomCommand(serverEnvironment.hermesPatchApply);
   const revertCommand = useAtomCommand(serverEnvironment.hermesPatchRevert);
+  const updateCommand = useAtomCommand(serverEnvironment.hermesPatchUpdateHermes);
   const [changingPatchId, setChangingPatchId] = useState<HermesPatchId | null>(null);
+  const [updating, setUpdating] = useState(false);
+  const [updateSummary, setUpdateSummary] = useState<string | null>(null);
   const refresh = query.refresh;
+  const busy = changingPatchId !== null || updating;
 
   const change = async (patchId: HermesPatchId, direction: "apply" | "remove") => {
-    if (environmentId === null || changingPatchId !== null) return;
+    if (environmentId === null || busy) return;
     setChangingPatchId(patchId);
     try {
       const command = direction === "apply" ? applyCommand : revertCommand;
@@ -57,13 +65,42 @@ export function useHermesPatches() {
     }
   };
 
+  /** Removes the patches, updates Hermes, and reapplies; the outcome stays as a line in the tab. */
+  const updateHermes = async () => {
+    if (environmentId === null || busy) return;
+    setUpdating(true);
+    setUpdateSummary(null);
+    try {
+      const result = await updateCommand({ environmentId, input: {} });
+      if (result._tag === "Success") {
+        setUpdateSummary(describeHermesUpdateResult(result.value));
+      } else if (!isAtomCommandInterrupted(result)) {
+        toastManager.add({
+          type: "error",
+          title: "Hermes not updated",
+          description: describeHermesPatchFailure(
+            squashAtomCommandFailure(result),
+            "Hermes could not be updated.",
+          ),
+        });
+      }
+    } finally {
+      setUpdating(false);
+      refresh();
+    }
+  };
+
   return {
     environmentId,
     snapshot: query.data,
     isPending: query.isPending && query.data === null,
     error: query.data === null ? query.error : null,
     changingPatchId,
+    updating,
+    updateSummary,
+    busy,
     refresh,
+    updateHermes: () => void updateHermes(),
     apply: (patchId: HermesPatchId) => void change(patchId, "apply"),
     remove: (patchId: HermesPatchId) => void change(patchId, "remove"),
   };

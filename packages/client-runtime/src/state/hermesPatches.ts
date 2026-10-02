@@ -3,7 +3,13 @@
  *
  * @module state/hermesPatches
  */
-import type { HermesPatchState, HermesPatchesSnapshot } from "@t3tools/contracts";
+import type {
+  HermesPatch,
+  HermesPatchMisfitReason,
+  HermesPatchState,
+  HermesPatchesSnapshot,
+  HermesPatchUpdateHermesResult,
+} from "@t3tools/contracts";
 
 export const HERMES_PATCH_STATE_LABELS: Record<HermesPatchState, string> = {
   applied: "Applied",
@@ -18,6 +24,71 @@ export const HERMES_PATCH_STATE_HINTS: Record<HermesPatchState, string> = {
   doesNotApply:
     "Made for a different Hermes version. Update Hermes; if it still doesn't apply, the patch needs a rebase in T3 Code.",
 };
+
+/** Why a patch doesn't apply, replacing the generic hint when the server says. */
+export const HERMES_PATCH_REASON_HINTS: Record<HermesPatchMisfitReason, string> = {
+  hermesTooOld: "Hermes is older than this patch. Update Hermes to apply it.",
+  awaitingPatchUpdate:
+    "Waiting for a T3 Code update. Hermes has moved past this patch, so it needs a rebased version.",
+  localChanges:
+    "Local changes in the files this patch touches. Commit or discard them in the Hermes checkout.",
+};
+
+/** The line under a patch: its reason when it doesn't apply and the server gave one. */
+export function describeHermesPatchHint(patch: HermesPatch): string {
+  return patch.state === "doesNotApply" && patch.reason !== undefined
+    ? HERMES_PATCH_REASON_HINTS[patch.reason]
+    : HERMES_PATCH_STATE_HINTS[patch.state];
+}
+
+/** Whether to offer Update Hermes: it can run, and it would make a patch fit. */
+export function shouldOfferHermesUpdate(snapshot: HermesPatchesSnapshot): boolean {
+  return (
+    snapshot.canUpdateHermes === true &&
+    snapshot.patches.some((patch) => patch.reason === "hermesTooOld")
+  );
+}
+
+export const HERMES_UPDATE_LABEL = "Update Hermes";
+export const HERMES_UPDATE_PENDING_LABEL = "Updating Hermes…";
+export const HERMES_UPDATE_DESCRIPTION =
+  "Removes T3 Code's patches, updates Hermes, then puts back each one that fits. It won't run while the checkout has uncommitted edits of your own.";
+
+/** One line saying what Update Hermes did, built from the server's summary. */
+export function describeHermesUpdateResult(result: HermesPatchUpdateHermesResult): string {
+  const titleOf = (id: string) =>
+    result.snapshot.patches.find((patch) => patch.id === id)?.title ?? id;
+  const list = (ids: ReadonlyArray<string>) => ids.map(titleOf).join(", ");
+  const parts: string[] = [];
+  if (result.updateFailed) {
+    const lastLine = result.failureOutput
+      ?.split("\n")
+      .map((line) => line.trim())
+      .findLast((line) => line.length > 0);
+    parts.push(
+      lastLine === undefined
+        ? "Hermes could not be updated."
+        : `Hermes could not be updated: ${lastLine.replace(/[.:]$/, "")}.`,
+    );
+  } else if (
+    result.previousHeadCommit !== null &&
+    result.previousHeadCommit === result.snapshot.headCommit
+  ) {
+    parts.push("Hermes was already up to date.");
+  } else {
+    parts.push(
+      result.snapshot.headCommit === undefined
+        ? "Hermes updated."
+        : `Hermes updated to ${result.snapshot.headCommit}.`,
+    );
+  }
+  if (result.reapplied.length > 0) parts.push(`Reapplied: ${list(result.reapplied)}.`);
+  if (result.awaitingPatchUpdate.length > 0) {
+    parts.push(`Waiting for a T3 Code update: ${list(result.awaitingPatchUpdate)}.`);
+  }
+  if (result.notReapplied.length > 0) parts.push(`Not reapplied: ${list(result.notReapplied)}.`);
+  return parts.join(" ");
+}
 
 /** Why there is nothing to show, or null when the checkout was read. */
 export function describeHermesPatchesUnavailable(

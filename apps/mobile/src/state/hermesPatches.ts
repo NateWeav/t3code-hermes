@@ -1,4 +1,7 @@
-import { describeHermesPatchFailure } from "@t3tools/client-runtime/state/hermes-patches";
+import {
+  describeHermesPatchFailure,
+  describeHermesUpdateResult,
+} from "@t3tools/client-runtime/state/hermes-patches";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -11,8 +14,9 @@ import { serverEnvironment } from "./server";
 import { useAtomCommand } from "./use-atom-command";
 
 /**
- * The Patches tab's read of one environment's Hermes checkout. `change`
- * resolves to null on success, or the reason to show when it failed.
+ * The Patches tab's read of one environment's Hermes checkout. `change` and
+ * `updateHermes` resolve to null on success, or the reason to show when they
+ * failed; a finished update leaves its outcome in `updateSummary`.
  */
 export function useHermesPatches(environmentId: EnvironmentId | null) {
   const query = useEnvironmentQuery(
@@ -24,14 +28,20 @@ export function useHermesPatches(environmentId: EnvironmentId | null) {
   const revertCommand = useAtomCommand(serverEnvironment.hermesPatchRevert, {
     reportFailure: false,
   });
+  const updateCommand = useAtomCommand(serverEnvironment.hermesPatchUpdateHermes, {
+    reportFailure: false,
+  });
   const [changingPatchId, setChangingPatchId] = useState<HermesPatchId | null>(null);
+  const [updating, setUpdating] = useState(false);
+  const [updateSummary, setUpdateSummary] = useState<string | null>(null);
   const refresh = query.refresh;
+  const busy = changingPatchId !== null || updating;
 
   const change = async (
     patchId: HermesPatchId,
     direction: "apply" | "remove",
   ): Promise<string | null> => {
-    if (environmentId === null || changingPatchId !== null) return null;
+    if (environmentId === null || busy) return null;
     setChangingPatchId(patchId);
     try {
       const command = direction === "apply" ? applyCommand : revertCommand;
@@ -48,12 +58,37 @@ export function useHermesPatches(environmentId: EnvironmentId | null) {
     }
   };
 
+  const updateHermes = async (): Promise<string | null> => {
+    if (environmentId === null || busy) return null;
+    setUpdating(true);
+    setUpdateSummary(null);
+    try {
+      const result = await updateCommand({ environmentId, input: {} });
+      if (result._tag === "Success") {
+        setUpdateSummary(describeHermesUpdateResult(result.value));
+        return null;
+      }
+      if (isAtomCommandInterrupted(result)) return null;
+      return describeHermesPatchFailure(
+        squashAtomCommandFailure(result),
+        "Hermes could not be updated.",
+      );
+    } finally {
+      setUpdating(false);
+      refresh();
+    }
+  };
+
   return {
     snapshot: query.data,
     isPending: query.isPending && query.data === null,
     error: query.data === null ? query.error : null,
     changingPatchId,
+    updating,
+    updateSummary,
+    busy,
     refresh,
     change,
+    updateHermes,
   };
 }

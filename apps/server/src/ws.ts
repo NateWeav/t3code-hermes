@@ -3014,6 +3014,10 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.hermesPatchRevert, hermesPatches.revert(input), {
             "rpc.aggregate": "server",
           }),
+        [WS_METHODS.hermesPatchUpdateHermes]: () =>
+          observeRpcEffect(WS_METHODS.hermesPatchUpdateHermes, hermesPatches.updateHermes, {
+            "rpc.aggregate": "server",
+          }),
         [WS_METHODS.hindsightListBanks]: (input) =>
           observeRpcEffect(WS_METHODS.hindsightListBanks, hindsight.listBanks(input), {
             "rpc.aggregate": "server",

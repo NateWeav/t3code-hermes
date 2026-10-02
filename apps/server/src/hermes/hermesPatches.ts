@@ -2,9 +2,11 @@
  * The Hermes patches this server ships, and the git calls that read and change
  * them in a Hermes checkout.
  *
- * State is read with `git apply --check` in both directions rather than
- * recorded anywhere, so it is right no matter who touched the checkout last:
- * T3 Code, `hermes update`'s autostash, or someone at a terminal.
+ * Each patch ships several versions, each made for a different Hermes commit
+ * (`infra/hermes/patches.json`), because users' checkouts sit anywhere along
+ * Hermes `main`. State is read with `git apply --check` in both directions
+ * rather than recorded anywhere, so it is right no matter who touched the
+ * checkout last: T3 Code, `hermes update`'s autostash, or someone at a terminal.
  */
 import { HermesPatchId, type HermesPatch, type HermesPatchState } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -15,47 +17,34 @@ import { ChildProcess } from "effect/unstable/process";
 import { spawnAndCollect } from "../provider/providerSnapshot.ts";
 import { HERMES_PATCH_FILES } from "./hermesPatchFiles.generated.ts";
 
-export interface HermesPatchDefinition {
-  readonly id: HermesPatchId;
-  readonly title: string;
-  readonly neededFor: string;
+export interface HermesPatchVersion {
+  /** The Hermes commit this version was made and verified against. */
+  readonly hermesCommit: string;
+  readonly hermesCommitDate: string;
   /** Patch text, as `git apply` reads it. */
   readonly content: string;
 }
 
-/** A file under `infra/hermes`; empty when it is missing, which a test catches. */
-const bundledPatch = (file: string) => HERMES_PATCH_FILES[file] ?? "";
+export interface HermesPatchDefinition {
+  readonly id: HermesPatchId;
+  readonly title: string;
+  readonly neededFor: string;
+  /** Newest first. */
+  readonly versions: ReadonlyArray<HermesPatchVersion>;
+}
 
-export const HERMES_PATCHES: ReadonlyArray<HermesPatchDefinition> = [
-  {
-    id: HermesPatchId.make("acp-central-ssh-execution"),
-    title: "Central SSH execution",
-    neededFor:
-      "Hermes instances that run tools on an SSH host without copying credentials, skills, or cache to it.",
-    content: bundledPatch("0002-acp-central-ssh-execution.patch"),
-  },
-  {
-    id: HermesPatchId.make("acp-delegation-progress"),
-    title: "Live subagent progress",
-    neededFor:
-      "Live progress and background results for subagents Hermes delegates to. Without it, background subagents show as idle once dispatched.",
-    content: bundledPatch("0003-acp-delegation-progress.patch"),
-  },
-  {
-    id: HermesPatchId.make("acp-background-reports"),
-    title: "Background process reports",
-    neededFor:
-      "Monitoring status while Hermes's background processes run, and waking the agent when they finish. Without it, a background command reads as finished the moment it starts, and the agent never hears that it is done.",
-    content: bundledPatch("0004-acp-background-reports.patch"),
-  },
-  {
-    id: HermesPatchId.make("gateway-multiplex-webhook-session-close"),
-    title: "Finished webhook runs in profiles",
-    neededFor:
-      "Multi-profile gateways, so webhook runs in a profile are marked finished. Without it, T3 Code shows those runs as failed after two hours.",
-    content: bundledPatch("0005-gateway-multiplex-webhook-session-close.patch"),
-  },
-];
+export const HERMES_PATCHES: ReadonlyArray<HermesPatchDefinition> = HERMES_PATCH_FILES.map(
+  (patch) => ({
+    id: HermesPatchId.make(patch.id),
+    title: patch.title,
+    neededFor: patch.neededFor,
+    versions: patch.versions.map(({ hermesCommit, hermesCommitDate, content }) => ({
+      hermesCommit,
+      hermesCommitDate,
+      content,
+    })),
+  }),
+);
 
 /**
  * The git checkout a Hermes executable was installed from, or null.
@@ -97,32 +86,46 @@ const runGit = (checkoutRoot: string, args: ReadonlyArray<string>) =>
     }),
   );
 
-/** Writes patches to a scoped temp directory for `git apply` to read. */
+/** Writes every version of the given patches to a scoped temp directory for `git apply`. */
 const writePatchFiles = Effect.fn("writeHermesPatchFiles")(function* (
   patches: ReadonlyArray<HermesPatchDefinition>,
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-hermes-patches-" });
-  const files = new Map<HermesPatchId, string>();
+  const files = new Map<HermesPatchId, ReadonlyArray<string>>();
   for (const patch of patches) {
-    const file = path.join(directory, `${patch.id}.patch`);
-    yield* fileSystem.writeFileString(file, patch.content);
-    files.set(patch.id, file);
+    const versionFiles: string[] = [];
+    for (const [index, version] of patch.versions.entries()) {
+      const file = path.join(directory, `${patch.id}.${index}.patch`);
+      yield* fileSystem.writeFileString(file, version.content);
+      versionFiles.push(file);
+    }
+    files.set(patch.id, versionFiles);
   }
   return files;
 });
 
-const readPatchState = Effect.fn("readHermesPatchState")(function* (
+/**
+ * Where one patch stands, and the version file that got it there: the version
+ * whose change the checkout contains, or the one that applies cleanly.
+ */
+const resolvePatchState = Effect.fn("resolveHermesPatchState")(function* (
   checkoutRoot: string,
-  patchFile: string,
+  versionFiles: ReadonlyArray<string>,
 ) {
-  // Reverse first: a checkout that already has the change must read as
-  // applied, not as a conflict of the forward patch with itself.
-  const reverse = yield* runGit(checkoutRoot, ["apply", "--check", "-R", patchFile]);
-  if (reverse.code === 0) return "applied" satisfies HermesPatchState;
-  const forward = yield* runGit(checkoutRoot, ["apply", "--check", patchFile]);
-  return (forward.code === 0 ? "notApplied" : "doesNotApply") satisfies HermesPatchState;
+  const result = (state: HermesPatchState, file: string | null) => ({ state, file });
+  // Reverse first, over every version: a checkout that already has a change
+  // must read as applied, not as a conflict of a forward patch with itself.
+  for (const file of versionFiles) {
+    const reverse = yield* runGit(checkoutRoot, ["apply", "--check", "-R", file]);
+    if (reverse.code === 0) return result("applied", file);
+  }
+  for (const file of versionFiles) {
+    const forward = yield* runGit(checkoutRoot, ["apply", "--check", file]);
+    if (forward.code === 0) return result("notApplied", file);
+  }
+  return result("doesNotApply", null);
 });
 
 export const readHermesPatches = Effect.fn("readHermesPatches")(function* (
@@ -132,13 +135,8 @@ export const readHermesPatches = Effect.fn("readHermesPatches")(function* (
   const files = yield* writePatchFiles(patches);
   const statuses: HermesPatch[] = [];
   for (const patch of patches) {
-    const file = files.get(patch.id) ?? "";
-    statuses.push({
-      id: patch.id,
-      title: patch.title,
-      neededFor: patch.neededFor,
-      state: yield* readPatchState(checkoutRoot, file),
-    });
+    const { state } = yield* resolvePatchState(checkoutRoot, files.get(patch.id) ?? []);
+    statuses.push({ id: patch.id, title: patch.title, neededFor: patch.neededFor, state });
   }
   return statuses;
 }, Effect.scoped);
@@ -151,8 +149,9 @@ export const isHermesCheckoutDetached = (checkoutRoot: string) =>
 
 /**
  * Applies (`forward`) or removes (`reverse`) one patch, returning whether git
- * accepted it. `git apply` is all-or-nothing, so a refusal leaves the checkout
- * untouched.
+ * accepted it. Applying uses the newest version that fits the checkout;
+ * removing reverses whichever version is applied. `git apply` is
+ * all-or-nothing, so a refusal leaves the checkout untouched.
  */
 export const changeHermesPatch = Effect.fn("changeHermesPatch")(function* (
   checkoutRoot: string,
@@ -160,7 +159,9 @@ export const changeHermesPatch = Effect.fn("changeHermesPatch")(function* (
   direction: "forward" | "reverse",
 ) {
   const files = yield* writePatchFiles([patch]);
-  const file = files.get(patch.id) ?? "";
+  const { state, file } = yield* resolvePatchState(checkoutRoot, files.get(patch.id) ?? []);
+  const expected: HermesPatchState = direction === "forward" ? "notApplied" : "applied";
+  if (state !== expected || file === null) return { ok: false } as const;
   const result = yield* runGit(
     checkoutRoot,
     direction === "forward" ? ["apply", file] : ["apply", "-R", file],

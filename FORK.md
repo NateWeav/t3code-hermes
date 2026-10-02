@@ -27,7 +27,7 @@ Upstream is MIT licensed; that license is retained verbatim in [LICENSE](./LICEN
 | Hermes runs mirrored as threads ([guide](./docs/user/hermes-tasks.md#follow-runs-as-threads)) | `apps/server/src/hermes/{HermesRunService,hermesRun*}.ts`, `packages/contracts/src/hermesRuns.ts`, `apps/web/src/components/settings/HermesRunsSettings.tsx`                                            |
 | Hermes Memory: built-in notes and Hindsight ([guide](./docs/user/hermes-memory.md))           | `apps/server/src/hermes/HermesMemoryService.ts`, `apps/server/src/integrations/hindsight/`, `packages/contracts/src/{hermesMemory,hindsight}.ts`, `apps/web/src/components/settings/MemorySettings.tsx` |
 | Reasoning-effort selector ([guide](./docs/user/hermes-reasoning.md))                          | `apps/server/src/hermes/hermesReasoning*.ts`                                                                                                                                                            |
-| Hermes Patches tab ([guide](./docs/user/hermes-patches.md))                                   | `apps/server/src/hermes/{HermesPatchService,hermesPatches}.ts`, `infra/hermes/*.patch`, `scripts/generate-hermes-patches.ts`                                                                            |
+| Hermes Patches tab ([guide](./docs/user/hermes-patches.md))                                   | `apps/server/src/hermes/{HermesPatchService,hermesPatches}.ts`, `infra/hermes/patches.json`, `scripts/generate-hermes-patches.ts`                                                                       |
 | Hermes usage totals                                                                           | `apps/server/src/usage/usageHermes.ts`                                                                                                                                                                  |
 | Opt-in skill and memory rows in the work log                                                  | `packages/client-runtime/src/work-log/agentActivity.ts`                                                                                                                                                 |
 | Sidebar cards outlined with their status                                                      | `apps/web/src/components/ThreadStatusRing.tsx`                                                                                                                                                          |
@@ -166,14 +166,14 @@ up Hermes's own Hindsight config with no setup. To point it elsewhere or switch 
   appear as individual subagents. Current Hermes dispatches top-level delegations in the background,
   but stock ACP never sends their terminal results; these show idle with a completion-unavailable
   note instead of a false success or endless busy indicator. Apply
-  [`0003-acp-delegation-progress.patch`](./infra/hermes/README.md#0003-acp-delegation-progresspatch)
+  [`acp-delegation-progress`](./infra/hermes/README.md#acp-delegation-progress)
   (the Hermes panel's Patches tab applies it) for live child progress and background completion.
   Updates require the original ACP process to remain connected; results missed after it exits are
   not recovered from Hermes transcripts.
 - **Central SSH execution needs the carried Hermes patch.** Stock Hermes's SSH backend copies
   credential, skill, and cache files into the target's `~/.hermes`, and ACP replaces a configured
   remote cwd with T3's local project path. Apply
-  [`0002-acp-central-ssh-execution.patch`](./infra/hermes/README.md#0002-acp-central-ssh-executionpatch)
+  [`acp-central-ssh-execution`](./infra/hermes/README.md#acp-central-ssh-execution)
   (also from the Patches tab) and set `TERMINAL_SSH_SYNC_FILES=false` on the remote provider
   instance. The target then runs only shell and file operations; T3, Hermes, provider credentials,
   memories, and conversation state stay on the central host.

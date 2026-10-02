@@ -1,0 +1,52 @@
+{
+  "patches": [
+    {
+      "id": "acp-central-ssh-execution",
+      "title": "Central SSH execution",
+      "neededFor": "Hermes instances that run tools on an SSH host without copying credentials, skills, or cache to it.",
+      "versions": [
+        {
+          "hermesCommit": "5a8dea85fbb636ae09adafa2272d511ae1e227a3",
+          "hermesCommitDate": "2026-10-01T19:37:31Z",
+          "file": "acp-central-ssh-execution/5a8dea85fbb6.patch"
+        }
+      ]
+    },
+    {
+      "id": "acp-delegation-progress",
+      "title": "Live subagent progress",
+      "neededFor": "Live progress and background results for subagents Hermes delegates to. Without it, background subagents show as idle once dispatched.",
+      "versions": [
+        {
+          "hermesCommit": "5a8dea85fbb636ae09adafa2272d511ae1e227a3",
+          "hermesCommitDate": "2026-10-01T19:37:31Z",
+          "file": "acp-delegation-progress/5a8dea85fbb6.patch"
+        }
+      ]
+    },
+    {
+      "id": "acp-background-reports",
+      "title": "Background process reports",
+      "neededFor": "Monitoring status while Hermes's background processes run, and waking the agent when they finish. Without it, a background command reads as finished the moment it starts, and the agent never hears that it is done.",
+      "versions": [
+        {
+          "hermesCommit": "5a8dea85fbb636ae09adafa2272d511ae1e227a3",
+          "hermesCommitDate": "2026-10-01T19:37:31Z",
+          "file": "acp-background-reports/5a8dea85fbb6.patch"
+        }
+      ]
+    },
+    {
+      "id": "gateway-multiplex-webhook-session-close",
+      "title": "Finished webhook runs in profiles",
+      "neededFor": "Multi-profile gateways, so webhook runs in a profile are marked finished. Without it, T3 Code shows those runs as failed after two hours.",
+      "versions": [
+        {
+          "hermesCommit": "5a8dea85fbb636ae09adafa2272d511ae1e227a3",
+          "hermesCommitDate": "2026-10-01T19:37:31Z",
+          "file": "gateway-multiplex-webhook-session-close/5a8dea85fbb6.patch"
+        }
+      ]
+    }
+  ]
+}

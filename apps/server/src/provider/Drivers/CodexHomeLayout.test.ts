@@ -141,6 +141,37 @@ it.layer(NodeServices.layer)("CodexHomeLayout", (it) => {
     );
 
     it.effect.skipIf(!symlinksSupported)(
+      "links hooks.json ahead of time but keeps a real one the shadow already has",
+      () =>
+        Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const sharedHome = yield* makeTempDir("t3code-codex-shared-");
+          const shadowRoot = yield* makeTempDir("t3code-codex-shadow-root-");
+          const linkedShadow = path.join(shadowRoot, "linked");
+          const ownShadow = path.join(shadowRoot, "own");
+          yield* writeTextFile(path.join(ownShadow, "hooks.json"), '{"hooks":{}}\n');
+
+          for (const shadowHome of [linkedShadow, ownShadow]) {
+            const layout = yield* resolveCodexHomeLayout(
+              decodeCodexSettings({ homePath: sharedHome, shadowHomePath: shadowHome }),
+            );
+            yield* materializeCodexShadowHome(layout);
+          }
+
+          // Created after the shadow was built, as an install would.
+          yield* writeTextFile(path.join(sharedHome, "hooks.json"), '{"shared":true}\n');
+
+          expect(yield* fileSystem.readFileString(path.join(linkedShadow, "hooks.json"))).toContain(
+            "shared",
+          );
+          expect(
+            yield* fileSystem.readLink(path.join(ownShadow, "hooks.json")).pipe(Effect.result),
+          ).toMatchObject({ _tag: "Failure" });
+        }),
+    );
+
+    it.effect.skipIf(!symlinksSupported)(
       "replaces Codex-created local MCP OAuth locks with the shared lock directory",
       () =>
         Effect.gen(function* () {

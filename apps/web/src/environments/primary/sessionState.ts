@@ -9,7 +9,7 @@ import { isLocalEnvironmentDisabled } from "../../localEnvironment";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { fetchSessionState } from "./auth";
 
-const primarySessionStateAtom = Atom.make(
+export const primarySessionStateAtom = Atom.make(
   Effect.suspend(() =>
     isLocalEnvironmentDisabled() ? Effect.succeed(null) : Effect.promise(fetchSessionState),
   ),

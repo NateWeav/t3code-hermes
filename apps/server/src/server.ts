@@ -166,6 +166,7 @@ import * as HermesSkillsService from "./hermes/HermesSkillsService.ts";
 import * as HermesMemoryService from "./hermes/HermesMemoryService.ts";
 import * as HermesRunService from "./hermes/HermesRunService.ts";
 import * as HermesPatchService from "./hermes/HermesPatchService.ts";
+import * as HindsightAgentMemory from "./integrations/hindsight/HindsightAgentMemory.ts";
 import * as HindsightService from "./integrations/hindsight/HindsightService.ts";
 import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
 import * as UsageService from "./usage/UsageService.ts";
@@ -244,6 +245,11 @@ const HermesPatchLayerLive = HermesPatchService.layer.pipe(Layer.provide(ServerS
 // HttpClient comes from the outermost FetchHttpClient layer, the same way the
 // provider maintenance checks get theirs.
 const HindsightLayerLive = HindsightService.layer.pipe(Layer.provide(ServerSettingsLayerLive));
+const HindsightAgentMemoryLayerLive = HindsightAgentMemory.layer.pipe(
+  Layer.provide(HindsightLayerLive),
+  Layer.provide(ServerSettingsLayerLive),
+  Layer.provide(ProcessRunner.layer),
+);
 
 const ResourceDiagnosticsLayerLive = Layer.mergeAll(
   HostResources.layer,
@@ -601,6 +607,7 @@ const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
   Layer.provideMerge(HermesMemoryLayerLive),
   Layer.provideMerge(HermesPatchLayerLive),
   Layer.provideMerge(HindsightLayerLive),
+  Layer.provideMerge(HindsightAgentMemoryLayerLive),
   Layer.provideMerge(TraceDiagnostics.layer),
   Layer.provideMerge(AnalyticsService.layer),
   Layer.provideMerge(ExternalLauncher.layer),

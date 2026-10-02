@@ -200,6 +200,7 @@ import * as HermesSkillsService from "./hermes/HermesSkillsService.ts";
 import * as HermesMemoryService from "./hermes/HermesMemoryService.ts";
 import * as HermesRunService from "./hermes/HermesRunService.ts";
 import * as HermesPatchService from "./hermes/HermesPatchService.ts";
+import * as HindsightAgentMemory from "./integrations/hindsight/HindsightAgentMemory.ts";
 import * as HindsightService from "./integrations/hindsight/HindsightService.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
@@ -1100,6 +1101,7 @@ const buildAppUnderTest = (options?: {
       Layer.provide(HermesRunService.layerTest),
       Layer.provide(HermesPatchService.layerTest),
       Layer.provide(HindsightService.layerTest),
+      Layer.provide(HindsightAgentMemory.layerTest),
     );
     const appLayer = appLayerWithServices.pipe(
       Layer.provide(

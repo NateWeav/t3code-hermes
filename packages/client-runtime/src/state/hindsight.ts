@@ -12,6 +12,8 @@
  */
 import {
   HINDSIGHT_TARGET_API_VERSION,
+  type HindsightAgentMemoryState,
+  type HindsightAgentTarget,
   type HindsightBanksResult,
   type HindsightBankStats,
   type HindsightPathway,
@@ -239,4 +241,137 @@ export function describeHindsightRetainResult(itemsCount: number): string {
   return itemsCount === 1
     ? "Hindsight extracted 1 memory from it."
     : `Hindsight extracted ${itemsCount} memories from it.`;
+}
+
+const HINDSIGHT_AGENT_LABELS: Record<HindsightAgentTarget, string> = {
+  claudeCode: "Claude Code",
+  codex: "Codex",
+  hermes: "Hermes",
+};
+
+export interface HindsightAgentMemoryRow {
+  readonly target: HindsightAgentTarget;
+  readonly label: string;
+  /** Only a failure gets a word; the dot already says wired or not. */
+  readonly status: string | null;
+  readonly tone: "ready" | "attention" | "idle";
+  readonly detail: string | null;
+}
+
+export interface HindsightAgentMemorySummary {
+  readonly tone: "ready" | "attention" | "idle";
+  /** Null when the switch already says it all: plainly on, or plainly off. */
+  readonly label: string | null;
+  readonly detail: string | null;
+  readonly agents: ReadonlyArray<HindsightAgentMemoryRow>;
+}
+
+/**
+ * The Providers settings' account of agent memory: one headline for the
+ * switch, then one row per agent configured on the environment. `state` is
+ * null until the environment answers, or when it predates agent memory.
+ */
+export function describeHindsightAgentMemory(
+  state: HindsightAgentMemoryState | null,
+  options: { readonly enabled: boolean },
+): HindsightAgentMemorySummary {
+  if (state === null) return { tone: "idle", label: "Checking…", detail: null, agents: [] };
+  const agents = state.agents.map((agent): HindsightAgentMemoryRow => ({
+    target: agent.target,
+    label: HINDSIGHT_AGENT_LABELS[agent.target],
+    status: agent.state === "failed" ? "Failed" : null,
+    tone: agent.state === "installed" ? "ready" : agent.state === "failed" ? "attention" : "idle",
+    detail: agent.detail,
+  }));
+  const headline = (
+    tone: HindsightAgentMemorySummary["tone"],
+    label: string | null,
+    detail: string | null,
+  ): HindsightAgentMemorySummary => ({ tone, label, detail, agents });
+
+  if (state.applying) return headline("idle", "Applying…", null);
+  if (state.blocker === "notConfigured") {
+    return headline(
+      "attention",
+      "No Hindsight server",
+      "Set one up in Settings → Integrations → Memory first.",
+    );
+  }
+  if (state.blocker === "nodeMissing") {
+    return headline(
+      "attention",
+      "Node.js not found",
+      "Hindsight's installer and the hooks it adds need Node.js 18+ on this machine's PATH.",
+    );
+  }
+  if (state.detail !== null) return headline("attention", "Needs attention", state.detail);
+  if (!options.enabled) return headline("idle", null, null);
+  if (agents.length === 0) {
+    return headline(
+      "idle",
+      "No supported agents",
+      "Claude Code, Codex, and Hermes aren't set up on this environment.",
+    );
+  }
+  return agents.every((agent) => agent.tone === "ready")
+    ? headline("ready", null, null)
+    : headline("attention", "Needs attention", null);
+}
+
+/** One connected machine, as the all-machines switch needs to see it. */
+export interface HindsightMachineInput {
+  /** `integrations.hindsight.agentMemory` on that machine. */
+  readonly enabled: boolean;
+  /** This client may change settings there. */
+  readonly writable: boolean;
+  /** Its agent memory state, or null until the machine has answered. */
+  readonly state: HindsightAgentMemoryState | null;
+}
+
+export interface HindsightMachinesSummary {
+  /** Every writable machine has it on. */
+  readonly checked: boolean;
+  /** Some writable machines have it on and some do not. */
+  readonly mixed: boolean;
+  /** The switch is useless until a machine can be written to. */
+  readonly canToggle: boolean;
+  readonly tone: "ready" | "attention" | "idle";
+  /** One line for the switch; null whenever the switch and the rows say it all. */
+  readonly label: string | null;
+}
+
+/**
+ * The one switch over every connected machine. It reads as on only when every
+ * machine this client can write to has agent memory on; a partial set shows as
+ * mixed so one click finishes the job rather than undoing it.
+ */
+export function summarizeHindsightMachines(
+  machines: ReadonlyArray<HindsightMachineInput>,
+): HindsightMachinesSummary {
+  const writable = machines.filter((machine) => machine.writable);
+  const on = writable.filter((machine) => machine.enabled).length;
+  const checked = writable.length > 0 && on === writable.length;
+  const mixed = on > 0 && on < writable.length;
+  const summaries = machines.map((machine) =>
+    describeHindsightAgentMemory(machine.state, { enabled: machine.enabled }),
+  );
+  const tone: HindsightMachinesSummary["tone"] = summaries.some(
+    (summary) => summary.tone === "attention",
+  )
+    ? "attention"
+    : summaries.some((summary) => summary.label === "Applying…")
+      ? "idle"
+      : checked
+        ? "ready"
+        : "idle";
+  // Only what the rows cannot say themselves; each row carries its own state.
+  const label =
+    machines.length === 0
+      ? "No connected machines"
+      : writable.length === 0
+        ? "No machine lets this client change settings"
+        : mixed
+          ? `On for ${on} of ${writable.length} machines`
+          : null;
+  return { checked, mixed, canToggle: writable.length > 0, tone, label };
 }

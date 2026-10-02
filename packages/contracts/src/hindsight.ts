@@ -368,3 +368,50 @@ export class HindsightError extends Schema.TaggedError<HindsightError>()("Hindsi
     return `Hindsight request failed (${this.reason}): ${this.detail}`;
   }
 }
+
+/**
+ * A coding agent the environment can wire into Hindsight on its own host.
+ *
+ * Claude Code and Codex are wired by Hindsight's own installer; Hermes has a
+ * native Hindsight memory provider that only needs switching on.
+ */
+export const HindsightAgentTarget = Schema.Literals(["claudeCode", "codex", "hermes"]);
+export type HindsightAgentTarget = typeof HindsightAgentTarget.Type;
+
+/** One agent's wiring, as read back from its own config on the host. */
+export const HindsightAgentStatus = Schema.Struct({
+  target: HindsightAgentTarget,
+  state: Schema.Literals(["installed", "notInstalled", "failed"]),
+  /** Short, already-safe note: why it failed, or what is not covered. */
+  detail: Schema.NullOr(Schema.String),
+});
+export type HindsightAgentStatus = typeof HindsightAgentStatus.Type;
+
+/**
+ * Why agent memory cannot be applied at all on this environment.
+ *
+ * `notConfigured` — no Hindsight connection resolves (see Integrations → Memory).
+ * `nodeMissing` — the installer and the hooks it writes need Node.js on PATH.
+ */
+export const HindsightAgentMemoryBlocker = Schema.Literals(["notConfigured", "nodeMissing"]);
+export type HindsightAgentMemoryBlocker = typeof HindsightAgentMemoryBlocker.Type;
+
+/**
+ * Where the environment's agents stand against `integrations.hindsight.agentMemory`.
+ *
+ * Streamed, because applying it runs an installer that takes seconds, and a
+ * switch that flips before the work lands would be lying.
+ */
+export const HindsightAgentMemoryState = Schema.Struct({
+  /** An install or uninstall is running right now. */
+  applying: Schema.Boolean,
+  blocker: Schema.NullOr(HindsightAgentMemoryBlocker),
+  /** One entry per agent configured on this environment. */
+  agents: ForwardCompatibleArray(HindsightAgentStatus),
+  /** Short, already-safe note about the last pass when it failed as a whole. */
+  detail: Schema.NullOr(Schema.String),
+});
+export type HindsightAgentMemoryState = typeof HindsightAgentMemoryState.Type;
+
+export const HindsightAgentMemoryInput = Schema.Struct({});
+export type HindsightAgentMemoryInput = typeof HindsightAgentMemoryInput.Type;

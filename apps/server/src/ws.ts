@@ -162,6 +162,7 @@ import * as HermesSkillsService from "./hermes/HermesSkillsService.ts";
 import * as HermesMemoryService from "./hermes/HermesMemoryService.ts";
 import * as HermesRunService from "./hermes/HermesRunService.ts";
 import * as HermesPatchService from "./hermes/HermesPatchService.ts";
+import * as HindsightAgentMemory from "./integrations/hindsight/HindsightAgentMemory.ts";
 import * as HindsightService from "./integrations/hindsight/HindsightService.ts";
 import * as HostResources from "./resourceTelemetry/HostResources.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
@@ -686,6 +687,7 @@ const makeWsRpcLayer = (
       const hermesRuns = yield* HermesRunService.HermesRunService;
       const hermesPatches = yield* HermesPatchService.HermesPatchService;
       const hindsight = yield* HindsightService.HindsightService;
+      const hindsightAgentMemory = yield* HindsightAgentMemory.HindsightAgentMemory;
       const relayClient = yield* RelayClient.RelayClient;
       const authorizationError = (requiredScope: AuthEnvironmentScope) =>
         new EnvironmentAuthorizationError({
@@ -3036,6 +3038,14 @@ const makeWsRpcLayer = (
           }),
         [WS_METHODS.hindsightReflect]: (input) =>
           observeRpcEffect(WS_METHODS.hindsightReflect, hindsight.reflect(input), {
+            "rpc.aggregate": "server",
+          }),
+        [WS_METHODS.hindsightSubscribeAgentMemory]: (_input) =>
+          observeRpcStream(WS_METHODS.hindsightSubscribeAgentMemory, hindsightAgentMemory.changes, {
+            "rpc.aggregate": "server",
+          }),
+        [WS_METHODS.hindsightApplyAgentMemory]: (_input) =>
+          observeRpcEffect(WS_METHODS.hindsightApplyAgentMemory, hindsightAgentMemory.apply, {
             "rpc.aggregate": "server",
           }),
         [WS_METHODS.serverRefreshUsageRates]: (_input) =>

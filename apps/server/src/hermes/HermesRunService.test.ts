@@ -10,20 +10,30 @@ import {
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
-  type OrchestrationCommand,
   type OrchestrationProjectShell,
-  type OrchestrationThreadShell,
+  type OrchestrationV2AppThread,
+  type OrchestrationV2DomainEvent,
+  type OrchestrationV2ServerCommand,
+  type OrchestrationV2ThreadShell,
+  type OrchestrationV2TurnItem,
+  ThreadHermesRun,
   ThreadId,
 } from "@t3tools/contracts";
+import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
+import type * as SqlError from "effect/unstable/sql/SqlError";
 
 import { ServerConfig } from "../config.ts";
-import * as OrchestrationEngine from "../orchestration/Services/OrchestrationEngine.ts";
-import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
-import * as ProviderSessionDirectory from "../provider/Services/ProviderSessionDirectory.ts";
+import * as EventSink from "../orchestration-v2/EventSink.ts";
+import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
+import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
+import * as TurnItemPositionStore from "../orchestration-v2/TurnItemPositionStore.ts";
+import * as ProjectService from "../project/ProjectService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { HERMES_STATE_DDL, insertHermesMessage, insertHermesSession } from "./hermesRunFixtures.ts";
 import * as HermesRunService from "./HermesRunService.ts";
@@ -50,6 +60,26 @@ const project: OrchestrationProjectShell = {
   createdAt: "2026-09-01T00:00:00.000Z",
   updatedAt: "2026-09-01T00:00:00.000Z",
 };
+
+const liveRun = (sessionId: string): ThreadHermesRun => ({
+  profile: "upstream-sync",
+  sourceKey: "webhook:upstream-sync",
+  sourceLabel: "webhook/upstream-sync",
+  sessionId,
+  latestSessionId: sessionId,
+  live: true,
+});
+
+const encodeHermesRun = Schema.encodeSync(Schema.fromJsonString(ThreadHermesRun));
+
+const liveThread = (sessionId: string) =>
+  ({
+    id: ThreadId.make(`hermes-run:upstream-sync:${sessionId}`),
+    projectId: PROJECT_ID,
+    providerInstanceId: ProviderInstanceId.make("hermes"),
+    deletedAt: null,
+    hermesRun: liveRun(sessionId),
+  }) as unknown as OrchestrationV2AppThread;
 
 /** A Hermes home with the resolver's profile: its route, filter script, and state store. */
 function makeHermesHome() {
@@ -90,54 +120,87 @@ function makeLayer(
   root: string,
   options: {
     readonly hermesEnabled?: boolean;
-    readonly liveThreads?: ReadonlyArray<OrchestrationThreadShell>;
-    /** Rejects the first dispatch of this command type, as a transient failure would. */
-    readonly failOnce?: OrchestrationCommand["type"];
+    readonly liveThreads?: ReadonlyArray<OrchestrationV2AppThread>;
+    /** Items the threads already hold, as the projection would return them. */
+    readonly existingItems?: ReadonlyArray<OrchestrationV2TurnItem>;
+    /** Fails the first event sink write, as a transient failure would. */
+    readonly failFirstWrite?: boolean;
+    /** Seeds the database the service reads pre-V2 Hermes runs from. */
+    readonly seedSql?: Effect.Effect<void, SqlError.SqlError, SqlClient.SqlClient>;
   } = {},
 ) {
-  let failPending = options.failOnce;
-  const dispatched: OrchestrationCommand[] = [];
-  const bindings: Array<{ readonly resumeCursor: unknown }> = [];
+  let failWrite = options.failFirstWrite ?? false;
+  const dispatched: OrchestrationV2ServerCommand[] = [];
+  const written: OrchestrationV2DomainEvent[] = [];
+  const items = new Map((options.existingItems ?? []).map((item) => [item.id, item]));
+  const threads = new Map<ThreadId, OrchestrationV2AppThread>(
+    (options.liveThreads ?? []).map((thread) => [thread.id, thread]),
+  );
+  let ordinal = 0;
   const dependencies = Layer.mergeAll(
-    Layer.mock(OrchestrationEngine.OrchestrationEngineService)({
+    Layer.mock(Orchestrator.OrchestratorV2)({
       dispatch: (command) =>
+        Effect.sync(() => {
+          dispatched.push(command);
+          if (command.type === "thread.create") {
+            threads.set(command.threadId, {
+              id: command.threadId,
+              projectId: command.projectId,
+              providerInstanceId: command.modelSelection.instanceId,
+              deletedAt: null,
+            } as unknown as OrchestrationV2AppThread);
+          }
+          if (command.type === "thread.hermes-run.set") {
+            const thread = threads.get(command.threadId);
+            if (thread) threads.set(command.threadId, { ...thread, hermesRun: command.hermesRun });
+          }
+          return { sequence: dispatched.length, storedEvents: [] };
+        }),
+    }),
+    Layer.mock(ProjectionStore.ProjectionStoreV2)({
+      getThreadShell: (threadId) =>
+        Effect.sync(
+          () =>
+            (threads.get(threadId) as unknown as OrchestrationV2ThreadShell | undefined) ?? null,
+        ),
+      getThread: (threadId) => {
+        const thread = threads.get(threadId);
+        return thread
+          ? Effect.succeed(thread)
+          : Effect.fail(new ProjectionStore.ProjectionStoreThreadNotFoundError({ threadId }));
+      },
+      getLiveHermesRunThreads: () =>
+        Effect.sync(() => [...threads.values()].filter((thread) => thread.hermesRun?.live)),
+      getThreadRecords: (threadId) =>
+        Effect.sync(
+          () =>
+            ({
+              thread: threads.get(threadId),
+              turnItems: [...items.values()].filter((item) => item.threadId === threadId),
+            }) as never,
+        ),
+    }),
+    Layer.mock(EventSink.EventSinkV2)({
+      write: ({ events }) =>
         Effect.suspend(() => {
-          if (command.type === failPending) {
-            failPending = undefined;
+          if (failWrite) {
+            failWrite = false;
             return Effect.die(new Error("transient"));
           }
-          dispatched.push(command);
-          return Effect.succeed({ sequence: dispatched.length });
+          for (const event of events) {
+            written.push(event);
+            if (event.type === "turn-item.updated") items.set(event.payload.id, event.payload);
+          }
+          return Effect.succeed([]);
         }),
     }),
-    Layer.mock(ProjectionSnapshotQuery.ProjectionSnapshotQuery)({
-      getProjectShells: () => Effect.succeed([project]),
-      getProjectShellById: (projectId) =>
+    Layer.mock(TurnItemPositionStore.TurnItemPositionStoreV2)({
+      normalize: (item) => Effect.sync(() => ({ ...item, ordinal: (ordinal += 1) })),
+    }),
+    Layer.mock(ProjectService.ProjectService)({
+      listShells: () => Effect.succeed([project]),
+      getShell: (projectId) =>
         Effect.succeed(projectId === PROJECT_ID ? Option.some(project) : Option.none()),
-      getThreadShellById: (threadId) =>
-        Effect.succeed(
-          dispatched.some(
-            (command) => command.type === "thread.create" && command.threadId === threadId,
-          )
-            ? Option.some({
-                id: threadId,
-                projectId: PROJECT_ID,
-              } as unknown as OrchestrationThreadShell)
-            : Option.none(),
-        ),
-      getShellSnapshot: () =>
-        Effect.succeed({
-          snapshotSequence: 0,
-          projects: [project],
-          threads: options.liveThreads ?? [],
-          updatedAt: "2026-09-30T00:00:00.000Z",
-        }),
-    }),
-    Layer.mock(ProviderSessionDirectory.ProviderSessionDirectory)({
-      upsert: (binding) =>
-        Effect.sync(() => {
-          bindings.push({ resumeCursor: binding.resumeCursor });
-        }),
     }),
     ServerSettings.layerTest({
       providerInstances: {
@@ -150,11 +213,18 @@ function makeLayer(
     }),
     ServerConfig.layerTest(process.cwd(), { prefix: "t3-hermes-runs-" }),
   );
+  const sqlite = NodeSqliteClient.layer({ filename: ":memory:" });
+  const seeded = Layer.effectDiscard(options.seedSql ?? Effect.void).pipe(
+    Layer.provideMerge(sqlite),
+  );
   return {
     dispatched,
-    bindings,
+    written,
+    itemEvents: () =>
+      written.flatMap((event) => (event.type === "turn-item.updated" ? [event.payload] : [])),
     layer: HermesRunService.layer.pipe(
       Layer.provide(dependencies),
+      Layer.provide(seeded),
       Layer.provide(NodeServices.layer),
     ),
   };
@@ -187,7 +257,7 @@ describe("HermesRunService", () => {
 
   it.live("mirrors a switched-on source's run from start to finish, once", () => {
     const hermes = makeHermesHome();
-    const { layer, dispatched, bindings } = makeLayer(hermes.root);
+    const { layer, dispatched, written, itemEvents } = makeLayer(hermes.root);
     return Effect.gen(function* () {
       const service = yield* HermesRunService.HermesRunService;
       const switchedOn = yield* service.setSource({
@@ -236,21 +306,27 @@ describe("HermesRunService", () => {
       expect(dispatched.map((command) => command.type)).toEqual([
         "thread.create",
         "thread.hermes-run.set",
-        "thread.session.set",
-        "thread.message.user.append",
-        "thread.activity.append",
-        "thread.activity.append",
         "thread.pull-request.link",
       ]);
       expect(dispatched[0]).toMatchObject({
         modelSelection: { model: "openai-codex:gpt-5.6-sol" },
+        createdBy: "system",
       });
       expect(dispatched[1]).toMatchObject({
         hermesRun: { profile: "upstream-sync", sourceLabel: "webhook/upstream-sync", live: true },
       });
-      expect(dispatched[2]).toMatchObject({ session: { status: "running" } });
-      expect(dispatched[6]).toMatchObject({ repository: "nateweav/t3code-hermes", number: 72 });
-      expect(bindings[0]?.resumeCursor).toEqual({ schemaVersion: 1, hermesHome: hermes.home });
+      expect(dispatched[2]).toMatchObject({ repository: "nateweav/t3code-hermes", number: 72 });
+      expect(written.map((event) => event.type)).toEqual([
+        "message.updated",
+        "turn-item.updated",
+        "turn-item.updated",
+        "turn-item.updated",
+      ]);
+      expect(itemEvents().map((item) => [item.type, item.status, item.runId])).toEqual([
+        ["user_message", "completed", null],
+        ["command_execution", "running", null],
+        ["command_execution", "completed", null],
+      ]);
 
       hermes.withDb((db) => {
         insertHermesMessage(db, {
@@ -264,32 +340,24 @@ describe("HermesRunService", () => {
         ).run(startedAt + 4);
       });
       dispatched.length = 0;
+      written.length = 0;
       yield* service.sync;
-      expect(dispatched.map((command) => command.type)).toEqual([
-        "thread.message.assistant.delta",
-        "thread.message.assistant.complete",
-        "thread.session.set",
-        "thread.session.set",
-        "thread.hermes-run.set",
+      expect(itemEvents().map((item) => item.type)).toEqual(["assistant_message"]);
+      expect(dispatched).toMatchObject([
+        { type: "thread.hermes-run.set", hermesRun: { live: false } },
       ]);
-      expect(dispatched.slice(2, 4)).toMatchObject([
-        { session: { status: "ready" } },
-        { session: { status: "stopped" } },
-      ]);
-      expect(dispatched[4]).toMatchObject({ hermesRun: { live: false } });
-      const primer = (bindings.at(-1)?.resumeCursor as { primer?: string } | undefined)?.primer;
-      expect(primer).toContain("Blocked: ChatComposer.tsx needs your call.");
-      expect(primer).toContain("https://github.com/NateWeav/t3code-hermes/pull/72");
 
       dispatched.length = 0;
+      written.length = 0;
       yield* service.sync;
       expect(dispatched).toEqual([]);
+      expect(written).toEqual([]);
     }).pipe(Effect.provide(layer));
   });
 
   it.live("never creates a thread for a run that had nothing to report", () => {
     const hermes = makeHermesHome();
-    const { layer, dispatched } = makeLayer(hermes.root);
+    const { layer, dispatched, written } = makeLayer(hermes.root);
     return Effect.gen(function* () {
       const service = yield* HermesRunService.HermesRunService;
       yield* service.setSource({
@@ -323,25 +391,25 @@ describe("HermesRunService", () => {
       });
       yield* service.sync;
       expect(dispatched).toEqual([]);
+      expect(written).toEqual([]);
     }).pipe(Effect.provide(layer));
   });
 
-  it.live("finishes a run that was live across a restart, in its own project", () => {
+  it.live("finishes a run that was live across a restart without rewriting its transcript", () => {
     const hermes = makeHermesHome();
-    const liveThread = {
-      id: ThreadId.make("hermes-run:upstream-sync:run-restart"),
-      projectId: PROJECT_ID,
-      hermesRun: {
-        profile: "upstream-sync",
-        sourceKey: "webhook:upstream-sync",
-        sourceLabel: "webhook/upstream-sync",
-        sessionId: "run-restart",
-        latestSessionId: "run-restart",
-        live: true,
-      },
-    } as unknown as OrchestrationThreadShell;
+    const thread = liveThread("run-restart");
     // The source is no longer switched on: the run must still finish.
-    const { layer, dispatched } = makeLayer(hermes.root, { liveThreads: [liveThread] });
+    const { layer, dispatched, itemEvents } = makeLayer(hermes.root, {
+      liveThreads: [thread],
+      // The first message was mirrored before the restart.
+      existingItems: [
+        {
+          id: `${thread.id}:m1`,
+          threadId: thread.id,
+          status: "completed",
+        } as unknown as OrchestrationV2TurnItem,
+      ],
+    });
     return Effect.gen(function* () {
       const startedAt = (yield* nowSeconds) - 60;
       hermes.withDb((db) => {
@@ -357,20 +425,22 @@ describe("HermesRunService", () => {
         insertHermesMessage(db, {
           sessionId: "run-restart",
           role: "assistant",
+          content: "Looking at the conflict.",
+          timestamp: startedAt + 10,
+        });
+        insertHermesMessage(db, {
+          sessionId: "run-restart",
+          role: "assistant",
           content: "Needs your call on the composer.",
           timestamp: startedAt + 20,
         });
       });
       const service = yield* HermesRunService.HermesRunService;
       yield* service.sync;
-      expect(dispatched.map((command) => command.type)).toEqual([
-        "thread.message.assistant.delta",
-        "thread.message.assistant.complete",
-        "thread.session.set",
-        "thread.session.set",
-        "thread.hermes-run.set",
+      expect(itemEvents().map((item) => item.id)).toEqual([`${thread.id}:m2`]);
+      expect(dispatched).toMatchObject([
+        { type: "thread.hermes-run.set", threadId: thread.id, hermesRun: { live: false } },
       ]);
-      expect(dispatched.at(-1)).toMatchObject({ hermesRun: { live: false } });
     }).pipe(Effect.provide(layer));
   });
 
@@ -408,9 +478,7 @@ describe("HermesRunService", () => {
 
   it.live("retries a run after a transient failure instead of dropping it", () => {
     const hermes = makeHermesHome();
-    const { layer, dispatched } = makeLayer(hermes.root, {
-      failOnce: "thread.message.assistant.delta",
-    });
+    const { layer, dispatched, itemEvents } = makeLayer(hermes.root, { failFirstWrite: true });
     return Effect.gen(function* () {
       const service = yield* HermesRunService.HermesRunService;
       yield* service.setSource({
@@ -443,9 +511,16 @@ describe("HermesRunService", () => {
         });
       });
       yield* service.sync;
-      expect(dispatched.some((command) => command.type === "thread.hermes-run.set")).toBe(true);
-      expect(dispatched.at(-1)?.type).not.toBe("thread.hermes-run.set");
+      expect(dispatched.map((command) => command.type)).toEqual([
+        "thread.create",
+        "thread.hermes-run.set",
+      ]);
+      expect(itemEvents()).toEqual([]);
       yield* service.sync;
+      expect(itemEvents().map((item) => item.type)).toEqual([
+        "command_execution",
+        "assistant_message",
+      ]);
       expect(dispatched.at(-1)).toMatchObject({
         type: "thread.hermes-run.set",
         hermesRun: { live: false },
@@ -455,29 +530,17 @@ describe("HermesRunService", () => {
 
   it.live("ends a live run once Hermes is turned off, so replies unlock", () => {
     const hermes = makeHermesHome();
-    const liveThread = {
-      id: ThreadId.make("hermes-run:upstream-sync:run-off"),
-      projectId: PROJECT_ID,
-      modelSelection: { instanceId: ProviderInstanceId.make("hermes"), model: "hermes-4" },
-      session: null,
-      hermesRun: {
-        profile: "upstream-sync",
-        sourceKey: "webhook:upstream-sync",
-        sourceLabel: "webhook/upstream-sync",
-        sessionId: "run-off",
-        latestSessionId: "run-off",
-        live: true,
-      },
-    } as unknown as OrchestrationThreadShell;
-    const { layer, dispatched } = makeLayer(hermes.root, {
+    const { layer, dispatched, itemEvents } = makeLayer(hermes.root, {
       hermesEnabled: false,
-      liveThreads: [liveThread],
+      liveThreads: [liveThread("run-off")],
     });
     return Effect.gen(function* () {
       const service = yield* HermesRunService.HermesRunService;
       yield* service.sync;
+      expect(itemEvents()).toMatchObject([
+        { type: "system_notice", message: "Hermes was turned off before this run finished." },
+      ]);
       expect(dispatched).toMatchObject([
-        { type: "thread.session.set", session: { status: "error" } },
         { type: "thread.hermes-run.set", hermesRun: { live: false } },
       ]);
       // Once per off period: later passes read nothing and dispatch nothing.
@@ -489,7 +552,7 @@ describe("HermesRunService", () => {
 
   it.live("ends a run whose profile store disappears mid-run", () => {
     const hermes = makeHermesHome();
-    const { layer, dispatched } = makeLayer(hermes.root);
+    const { layer, dispatched, itemEvents } = makeLayer(hermes.root);
     return Effect.gen(function* () {
       const service = yield* HermesRunService.HermesRunService;
       yield* service.setSource({
@@ -518,10 +581,44 @@ describe("HermesRunService", () => {
       NodeFS.rmSync(NodePath.join(hermes.home, "state.db"));
       dispatched.length = 0;
       yield* service.sync;
+      expect(itemEvents().at(-1)).toMatchObject({
+        type: "system_notice",
+        message: "Its Hermes profile no longer exists.",
+      });
       expect(dispatched).toMatchObject([
-        { type: "thread.session.set", session: { status: "error" } },
         { type: "thread.hermes-run.set", hermesRun: { live: false } },
       ]);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.live("brings back the run of a thread mirrored before orchestration V2, finished", () => {
+    const hermes = makeHermesHome();
+    const threadId = ThreadId.make("hermes-run:upstream-sync:run-v1");
+    const { layer, dispatched } = makeLayer(hermes.root, {
+      hermesEnabled: false,
+      liveThreads: [
+        { id: threadId, projectId: PROJECT_ID, deletedAt: null } as OrchestrationV2AppThread,
+      ],
+      seedSql: Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`CREATE TABLE projection_threads (thread_id TEXT PRIMARY KEY, hermes_run_json TEXT)`;
+        yield* sql`INSERT INTO projection_threads VALUES (${threadId}, ${encodeHermesRun(liveRun("run-v1"))})`;
+        yield* sql`INSERT INTO projection_threads VALUES ('plain-thread', NULL)`;
+      }),
+    });
+    return Effect.gen(function* () {
+      const service = yield* HermesRunService.HermesRunService;
+      yield* service.sync;
+      expect(dispatched).toMatchObject([
+        {
+          type: "thread.hermes-run.set",
+          threadId,
+          hermesRun: { sessionId: "run-v1", live: false },
+        },
+      ]);
+      dispatched.length = 0;
+      yield* service.sync;
+      expect(dispatched).toEqual([]);
     }).pipe(Effect.provide(layer));
   });
 });

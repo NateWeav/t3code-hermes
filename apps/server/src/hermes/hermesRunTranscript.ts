@@ -1,49 +1,39 @@
 /**
- * Turns a Hermes background run's stored messages into thread commands.
+ * Turns a Hermes background run's stored messages into thread turn items.
  *
- * Every command id is derived from the run and the Hermes row it came from, so
- * replaying rows the engine has already seen is a no-op (command receipts make
- * dispatch exactly-once). That is what lets the watcher keep its cursors in
- * memory: after a restart it replays a live run from the start and only the
- * rows it had not yet mirrored land.
+ * A mirrored run has no T3 run of its own: Hermes already did the work, so its
+ * transcript lands as run-less turn items, like imported history. Every item id
+ * is derived from the run and the Hermes row it came from, so replaying rows
+ * re-derives the same items and the watcher can keep its cursors in memory:
+ * after a restart it replays a live run from the start and writes only the
+ * items whose state is new.
  *
- * Tool rows go through the same ACP tool-call model and activity mapping as a
- * live Hermes session, so a run reads exactly like a thread started in T3.
+ * Tool rows become the same item kinds a live Hermes session produces
+ * (commands, file changes, searches, generic tools).
  *
  * @module hermesRunTranscript
  */
 import {
-  CommandId,
-  EventId,
   MessageId,
-  ProviderDriverKind,
-  type OrchestrationCommand,
-  type OrchestrationThreadActivity,
+  TurnItemId,
+  type OrchestrationV2ConversationMessage,
+  type OrchestrationV2TurnItem,
   type ThreadId,
-  type TurnId,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 
-import { runtimeEventToActivities } from "../orchestration/Layers/ProviderRuntimeIngestion.ts";
-import { makeAcpToolCallEvent } from "../provider/acp/AcpCoreRuntimeEvents.ts";
-import { makeToolCallState } from "../provider/acp/AcpRuntimeModel.ts";
 import type { HermesMessageRow } from "./hermesRunState.ts";
-
-const HERMES = ProviderDriverKind.make("hermes");
 
 /** Longest message text mirrored. A webhook prompt can embed a whole payload. */
 const MAX_MESSAGE_CHARS = 20_000;
 /** Longest tool result mirrored, matching what live ACP tool calls keep. */
 const MAX_TOOL_RESULT_CHARS = 8_000;
-/** Longest final report carried into a reply's primer. */
-const MAX_PRIMER_REPORT_CHARS = 4_000;
 
 /** Hermes's final answer when a run has nothing to report. */
 const SILENT_MARKER = "[SILENT]";
 
 export interface HermesRunIds {
   readonly threadId: ThreadId;
-  readonly turnId: TurnId;
   /** `hermes-run:<profile>:<rootSessionId>`, the prefix of every derived id. */
   readonly prefix: string;
 }
@@ -51,6 +41,8 @@ export interface HermesRunIds {
 export interface HermesToolCall {
   readonly name: string;
   readonly args: Record<string, unknown>;
+  /** Unix seconds the call was made, so its finished item keeps its start. */
+  readonly startedAt?: number;
 }
 
 // Port of Hermes's `TOOL_KIND_MAP` (acp_adapter/tools.py).
@@ -147,69 +139,106 @@ function toolResultFailed(result: unknown): boolean {
   return Boolean(result["error"]) && !result["content"] && !result["output"];
 }
 
+type HermesItemStatus = "running" | "completed" | "failed";
+
+function runlessItem(
+  ids: HermesRunIds,
+  id: string,
+  fields: {
+    readonly status: HermesItemStatus;
+    readonly title: string | null;
+    readonly startedAt: DateTime.Utc;
+    readonly at: DateTime.Utc;
+  },
+) {
+  return {
+    id: TurnItemId.make(`${ids.prefix}:${id}`),
+    threadId: ids.threadId,
+    runId: null,
+    nodeId: null,
+    providerThreadId: null,
+    providerTurnId: null,
+    nativeItemRef: null,
+    parentItemId: null,
+    // Placed by the turn item position store when the item is written.
+    ordinal: 0,
+    status: fields.status,
+    title: fields.title,
+    startedAt: fields.startedAt,
+    completedAt: fields.status === "running" ? null : fields.at,
+    updatedAt: fields.at,
+  } as const;
+}
+
 /**
- * One tool call as a thread activity. `result` is undefined while the call is
- * still running, which renders as an in-progress row.
+ * One tool call as a turn item. `result` is undefined while the call is still
+ * running, which renders as an in-progress row.
  */
-function hermesToolActivity(input: {
+function hermesToolItem(input: {
   readonly ids: HermesRunIds;
   readonly toolCallId: string;
   readonly call: HermesToolCall;
   readonly result: string | undefined;
-  readonly createdAt: string;
-}): OrchestrationThreadActivity | undefined {
+  readonly at: DateTime.Utc;
+}): OrchestrationV2TurnItem {
   const { call, result } = input;
   const structured = result === undefined ? undefined : parseJson(result);
-  const status =
-    result === undefined ? "in_progress" : toolResultFailed(structured) ? "failed" : "completed";
-  // Only the usual `{output, exit_code}` shape becomes terminal output; a bare
-  // `{error}` falls through to content so its text stays visible.
-  const terminalOutput =
-    call.name === "terminal" &&
-    isRecord(structured) &&
-    (typeof structured["output"] === "string" || typeof structured["exit_code"] === "number")
-      ? {
-          ...(typeof structured["output"] === "string"
-            ? { stdout: clip(structured["output"], MAX_TOOL_RESULT_CHARS) }
-            : {}),
-          ...(typeof structured["exit_code"] === "number"
-            ? { exitCode: structured["exit_code"] }
-            : {}),
-        }
-      : undefined;
-  const state = makeToolCallState({
-    toolCallId: input.toolCallId,
-    title: toolTitle(call.name, call.args),
-    kind: TOOL_KINDS[call.name] ?? "other",
+  const status: HermesItemStatus =
+    result === undefined ? "running" : toolResultFailed(structured) ? "failed" : "completed";
+  const text =
+    result !== undefined && result.trim() ? clip(result, MAX_TOOL_RESULT_CHARS) : undefined;
+  const title = toolTitle(call.name, call.args);
+  const base = runlessItem(input.ids, `tool:${input.toolCallId}`, {
     status,
-    rawInput: call.args,
-    ...(terminalOutput !== undefined
-      ? { rawOutput: terminalOutput }
-      : result !== undefined && result.trim()
-        ? {
-            content: [
-              {
-                type: "content" as const,
-                content: { type: "text" as const, text: clip(result, MAX_TOOL_RESULT_CHARS) },
-              },
-            ],
-          }
+    title,
+    startedAt: call.startedAt === undefined ? input.at : utcFromSeconds(call.startedAt),
+    at: input.at,
+  });
+  const record = isRecord(structured) ? structured : undefined;
+  switch (TOOL_KINDS[call.name]) {
+    case "execute":
+      if (call.name === "terminal") {
+        // Only the usual `{output, exit_code}` shape becomes command output; a
+        // bare `{error}` keeps its whole text so the failure stays readable.
+        const output =
+          typeof record?.["output"] === "string"
+            ? clip(record["output"], MAX_TOOL_RESULT_CHARS)
+            : text;
+        const exitCode = record?.["exit_code"];
+        return {
+          ...base,
+          type: "command_execution",
+          input: arg(call.args, "command") || title,
+          ...(output === undefined ? {} : { output }),
+          ...(typeof exitCode === "number" && Number.isInteger(exitCode) ? { exitCode } : {}),
+          ...(status === "failed" ? { outputIndicatesFailure: true } : {}),
+        };
+      }
+      break;
+    case "edit": {
+      const path = arg(call.args, "path");
+      return { ...base, type: "file_change", fileName: path || title };
+    }
+    case "search": {
+      const pattern = arg(call.args, "pattern");
+      return { ...base, type: "file_search", ...(pattern ? { pattern } : {}) };
+    }
+    case "fetch": {
+      const target = arg(call.args, "query") || arg(call.args, "url");
+      return { ...base, type: "web_search", ...(target ? { patterns: [target] } : {}) };
+    }
+  }
+  return {
+    ...base,
+    type: "dynamic_tool",
+    toolName: call.name,
+    input: call.args,
+    ...(structured !== undefined
+      ? { output: structured }
+      : text !== undefined
+        ? { output: text }
         : {}),
-  });
-  if (state === undefined) return undefined;
-  const phase = result === undefined ? "start" : "end";
-  const event = makeAcpToolCallEvent({
-    stamp: {
-      eventId: EventId.make(`${input.ids.prefix}:tool:${input.toolCallId}:${phase}`),
-      createdAt: input.createdAt,
-    },
-    provider: HERMES,
-    threadId: input.ids.threadId,
-    turnId: input.ids.turnId,
-    toolCall: state,
-    rawPayload: null,
-  });
-  return runtimeEventToActivities(event)[0];
+  };
 }
 
 /** The tool calls an assistant row asked for, in OpenAI's `tool_calls` shape. */
@@ -230,108 +259,115 @@ function parseHermesToolCalls(
 
 /** Hermes stores Unix seconds as REAL; the read model wants ISO strings. */
 export function isoFromSeconds(value: number): string {
-  return DateTime.formatIso(DateTime.makeUnsafe(Math.round(value * 1000)));
+  return DateTime.formatIso(utcFromSeconds(value));
+}
+
+function utcFromSeconds(value: number): DateTime.Utc {
+  return DateTime.makeUnsafe(Math.round(value * 1000));
+}
+
+/** A turn item to write, with the conversation message it carries, if any. */
+export interface HermesRunEntry {
+  readonly item: OrchestrationV2TurnItem;
+  readonly message?: OrchestrationV2ConversationMessage;
 }
 
 export interface HermesRunBatch {
-  readonly commands: OrchestrationCommand[];
+  readonly entries: HermesRunEntry[];
   readonly pullRequestUrls: string[];
   /** Newest assistant text in the batch, the run's report once it ends. */
   readonly lastAssistantText: string | null;
 }
 
+function messageEntry(
+  ids: HermesRunIds,
+  row: HermesMessageRow,
+  role: "user" | "assistant",
+  text: string,
+): HermesRunEntry {
+  const at = utcFromSeconds(row.timestamp);
+  const messageId = MessageId.make(`${ids.prefix}:m${row.id}`);
+  const base = runlessItem(ids, `m${row.id}`, {
+    status: "completed",
+    title: null,
+    startedAt: at,
+    at,
+  });
+  return {
+    item:
+      role === "user"
+        ? {
+            ...base,
+            createdBy: "user",
+            creationSource: "server",
+            type: "user_message",
+            messageId,
+            inputIntent: "turn_start",
+            text,
+            attachments: [],
+          }
+        : { ...base, type: "assistant_message", messageId, text, streaming: false },
+    message: {
+      createdBy: role === "user" ? "user" : "agent",
+      creationSource: "server",
+      id: messageId,
+      threadId: ids.threadId,
+      runId: null,
+      nodeId: null,
+      role,
+      text,
+      attachments: [],
+      streaming: false,
+      createdAt: at,
+      updatedAt: at,
+    },
+  };
+}
+
 /**
- * Commands for a batch of rows. `toolCalls` carries calls whose result has not
- * arrived yet across batches, keyed by Hermes's tool call id.
+ * Turn items for a batch of rows. `toolCalls` carries calls whose result has
+ * not arrived yet across batches, keyed by Hermes's tool call id.
  */
-export function hermesRunCommandsFor(
+export function hermesRunItemsFor(
   ids: HermesRunIds,
   rows: readonly HermesMessageRow[],
   toolCalls: Map<string, HermesToolCall>,
 ): HermesRunBatch {
-  const commands: OrchestrationCommand[] = [];
+  const entries: HermesRunEntry[] = [];
   const pullRequestUrls = new Set<string>();
   let lastAssistantText: string | null = null;
-  const { threadId, turnId, prefix } = ids;
-  const commandId = (suffix: string) => CommandId.make(`${prefix}:${suffix}`);
   for (const row of rows) {
-    const createdAt = isoFromSeconds(row.timestamp);
+    const at = utcFromSeconds(row.timestamp);
     const text = clip(row.content.trim(), MAX_MESSAGE_CHARS);
     if (row.role === "user" && text) {
-      commands.push({
-        type: "thread.message.user.append",
-        commandId: commandId(`m${row.id}`),
-        threadId,
-        message: { messageId: MessageId.make(`${prefix}:m${row.id}`), text, attachments: [] },
-        createdAt,
-      });
+      entries.push(messageEntry(ids, row, "user", text));
       continue;
     }
     if (row.role === "assistant") {
       for (const url of pullRequestUrlsIn(row, undefined)) pullRequestUrls.add(url);
       if (text) lastAssistantText = text;
       if (row.reasoning) {
-        const messageId = MessageId.make(`${prefix}:r${row.id}`);
-        commands.push(
-          {
-            type: "thread.message.reasoning.delta",
-            commandId: commandId(`r${row.id}:delta`),
-            threadId,
-            messageId,
-            delta: clip(row.reasoning, MAX_MESSAGE_CHARS),
-            turnId,
-            createdAt,
+        entries.push({
+          item: {
+            ...runlessItem(ids, `r${row.id}`, {
+              status: "completed",
+              title: null,
+              startedAt: at,
+              at,
+            }),
+            type: "reasoning",
+            text: clip(row.reasoning, MAX_MESSAGE_CHARS),
+            streaming: false,
           },
-          {
-            type: "thread.message.reasoning.complete",
-            commandId: commandId(`r${row.id}:complete`),
-            threadId,
-            messageId,
-            turnId,
-            createdAt,
-          },
-        );
-      }
-      if (text) {
-        const messageId = MessageId.make(`${prefix}:m${row.id}`);
-        commands.push(
-          {
-            type: "thread.message.assistant.delta",
-            commandId: commandId(`m${row.id}:delta`),
-            threadId,
-            messageId,
-            delta: text,
-            turnId,
-            createdAt,
-          },
-          {
-            type: "thread.message.assistant.complete",
-            commandId: commandId(`m${row.id}:complete`),
-            threadId,
-            messageId,
-            turnId,
-            createdAt,
-          },
-        );
-      }
-      for (const call of parseHermesToolCalls(row.toolCalls)) {
-        toolCalls.set(call.id, call);
-        const activity = hermesToolActivity({
-          ids,
-          toolCallId: call.id,
-          call,
-          result: undefined,
-          createdAt,
         });
-        if (activity) {
-          commands.push({
-            type: "thread.activity.append",
-            commandId: commandId(`tool:${call.id}:start`),
-            threadId,
-            activity,
-            createdAt,
-          });
-        }
+      }
+      if (text) entries.push(messageEntry(ids, row, "assistant", text));
+      for (const call of parseHermesToolCalls(row.toolCalls)) {
+        const pending = { name: call.name, args: call.args, startedAt: row.timestamp };
+        toolCalls.set(call.id, pending);
+        entries.push({
+          item: hermesToolItem({ ids, toolCallId: call.id, call: pending, result: undefined, at }),
+        });
       }
       continue;
     }
@@ -339,25 +375,25 @@ export function hermesRunCommandsFor(
       const call = toolCalls.get(row.toolCallId) ?? { name: row.toolName ?? "tool", args: {} };
       toolCalls.delete(row.toolCallId);
       for (const url of pullRequestUrlsIn(row, call)) pullRequestUrls.add(url);
-      const activity = hermesToolActivity({
-        ids,
-        toolCallId: row.toolCallId,
-        call,
-        result: row.content,
-        createdAt,
+      entries.push({
+        item: hermesToolItem({ ids, toolCallId: row.toolCallId, call, result: row.content, at }),
       });
-      if (activity) {
-        commands.push({
-          type: "thread.activity.append",
-          commandId: commandId(`tool:${row.toolCallId}:end`),
-          threadId,
-          activity,
-          createdAt,
-        });
-      }
     }
   }
-  return { commands, pullRequestUrls: [...pullRequestUrls], lastAssistantText };
+  return { entries, pullRequestUrls: [...pullRequestUrls], lastAssistantText };
+}
+
+/** A notice that closes a run that could not finish normally. */
+export function hermesRunNoticeItem(
+  ids: HermesRunIds,
+  message: string,
+  at: DateTime.Utc,
+): OrchestrationV2TurnItem {
+  return {
+    ...runlessItem(ids, "notice:ended", { status: "completed", title: null, startedAt: at, at }),
+    type: "system_notice",
+    message,
+  };
 }
 
 /** A final answer of `[SILENT]` is Hermes's way of saying the run had nothing to report. */
@@ -383,36 +419,4 @@ function pullRequestUrlsIn(row: HermesMessageRow, call: HermesToolCall | undefin
     /\bgh\s+pr\s+create\b/.test(arg(call.args, "command"));
   if (row.role !== "assistant" && !fromTool) return [];
   return [...new Set(row.content.match(PULL_REQUEST_URL) ?? [])];
-}
-
-/**
- * Context for the first reply to a finished run. Hermes cannot reopen a
- * webhook or cron session over ACP, so a reply starts a fresh session and this
- * tells the agent what it is continuing and where to look for the rest.
- */
-export function buildHermesRunPrimer(input: {
-  readonly sourceLabel: string;
-  readonly profile: string;
-  readonly sessionIds: readonly string[];
-  readonly pullRequestUrls: readonly string[];
-  readonly finalReport: string | null;
-  readonly workspaceRoot: string;
-}): string {
-  const [root, ...rest] = input.sessionIds;
-  const lines = [
-    "<hermes_background_run>",
-    `This conversation continues a background run of ${input.sourceLabel} (Hermes profile "${input.profile}").`,
-    `The run was Hermes session ${root ?? "unknown"}${rest.length > 0 ? `, continued after compression as ${rest.join(", ")}` : ""}. Use session_search with that id to recall anything from it.`,
-  ];
-  if (input.pullRequestUrls.length > 0) {
-    lines.push(`Pull requests from the run: ${input.pullRequestUrls.join(", ")}`);
-  }
-  if (input.finalReport) {
-    lines.push("Its final report was:", clip(input.finalReport.trim(), MAX_PRIMER_REPORT_CHARS));
-  }
-  lines.push(
-    `This session runs in ${input.workspaceRoot}, not in the run's own working directory.`,
-    "</hermes_background_run>",
-  );
-  return lines.join("\n");
 }

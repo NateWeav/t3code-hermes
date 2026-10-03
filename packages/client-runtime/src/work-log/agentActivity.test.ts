@@ -80,17 +80,21 @@ describe("extractProviderToolTitle", () => {
 
 describe("annotateAgentActivity", () => {
   const skillRead = {
+    id: "skill-read",
+    createdAt: "2026-10-01T00:00:00.000Z",
     label: "Read file",
     tone: "tool" as const,
     toolTitle: "Read file",
     providerToolTitle: "skill view (t3-review)",
-    itemType: "dynamic_tool_call" as const,
+    itemType: "dynamic_tool" as const,
   };
   const memoryWrite = {
+    id: "memory-write",
+    createdAt: "2026-10-01T00:00:01.000Z",
     label: "memory add: user",
     tone: "tool" as const,
     toolTitle: "memory add: user",
-    itemType: "dynamic_tool_call" as const,
+    itemType: "dynamic_tool" as const,
   };
 
   it("returns the same entries when both kinds are off", () => {
@@ -117,8 +121,8 @@ describe("annotateAgentActivity", () => {
     expect(
       resolveWorkEntryToolPresentation({ ...annotated[0]!, toolLifecycleStatus: "completed" }),
     ).toEqual({ displayName: "Loaded skill t3-review", icon: "skill", action: "skill" });
-    expect(summarizeToolGroup(annotated)).toBe("Used 1 skill and used memory 2 times");
+    expect(summarizeToolGroup(annotated).summary).toBe("Used 1 skill and used memory 2 times");
     // Off, the same rows keep the stock grouping.
-    expect(summarizeToolGroup([skillRead])).toBe("Read 1 file");
+    expect(summarizeToolGroup([skillRead]).summary).toBe("Read 1 file");
   });
 });

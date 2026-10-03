@@ -12,19 +12,19 @@ Upstream is MIT licensed; that license is retained verbatim in [LICENSE](./LICEN
 | Change                                                                                        | Where                                                                                                                                                                                                   |
 | --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Separate install: T3 Hermes app, CLI, and data                                                | `t3-hermes` CLI, `~/.t3-hermes` / `T3HERMES_HOME` (`apps/server/src/os-jank.ts`), `apps/desktop/package.json`, `apps/mobile/app.config.ts`, `assets/hermes/`                                            |
-| `hermes` provider driver (ACP over stdio)                                                     | `apps/server/src/provider/{Drivers,Layers,Services,acp}/Hermes*.ts`                                                                                                                                     |
+| `hermes` provider (ACP over stdio)                                                            | `apps/server/src/provider/{Drivers,Layers,acp}/Hermes*.ts`, `apps/server/src/orchestration-v2/Adapters/HermesAdapterV2.ts`                                                                              |
 | Hermes delegated child agents                                                                 | `apps/server/src/provider/acp/HermesDelegation.ts`, optional live-progress patch in `infra/hermes/`                                                                                                     |
 | Hermes text generation (titles, commit messages, …)                                           | `apps/server/src/textGeneration/HermesTextGeneration.ts`                                                                                                                                                |
-| `HermesSettings` + driver registration                                                        | `packages/contracts/src/{settings,model}.ts`, `provider/builtInDrivers.ts`                                                                                                                              |
+| `HermesSettings` + driver registration                                                        | `packages/contracts/src/{settings,model}.ts`, `provider/builtInDrivers.ts`, `orchestration-v2/builtInProviderAdapterDrivers.ts`                                                                         |
 | Hermes provider icon in the clients                                                           | `apps/web/src/components/Icons.tsx`, `apps/mobile/src/components/ProviderIcon.tsx`                                                                                                                      |
 | Auto-bootstrap default provider is overridable                                                | `apps/server/src/serverRuntimeStartup.ts`                                                                                                                                                               |
 | Model picker falls back to a populated provider                                               | `apps/web/src/components/chat/ModelPickerContent.tsx`                                                                                                                                                   |
-| ACP `usage_update` and steering mid-prompt                                                    | `apps/server/src/provider/acp/{AcpRuntimeModel,AcpSessionRuntime}.ts`                                                                                                                                   |
+| ACP `usage_update` and advertised slash commands                                              | `apps/server/src/provider/acp/{AcpRuntimeModel,AcpSessionRuntime}.ts`                                                                                                                                   |
 | Shared slash-command dedupe (was Claude-private)                                              | `apps/server/src/provider/slashCommands.ts`                                                                                                                                                             |
 | Hermes panel on mobile                                                                        | `apps/mobile/src/features/hermes/`, `apps/mobile/src/state/hermes*.ts`                                                                                                                                  |
 | Hermes Skills panel ([guide](./docs/user/hermes-skills.md))                                   | `apps/server/src/hermes/HermesSkillsService.ts`, `packages/contracts/src/hermesSkills.ts`                                                                                                               |
 | Hermes Tasks and delivery notifications ([guide](./docs/user/hermes-tasks.md))                | `apps/server/src/hermes/{HermesCronService,hermesCron*}.ts`, `packages/contracts/src/hermesCron.ts`, `apps/web/src/components/hermes/`                                                                  |
-| Hermes runs mirrored as threads ([guide](./docs/user/hermes-tasks.md#follow-runs-as-threads)) | `apps/server/src/hermes/{HermesRunService,hermesRun*}.ts`, `packages/contracts/src/hermesRuns.ts`, `apps/web/src/components/settings/HermesRunsSettings.tsx`                                            |
+| Hermes runs mirrored as threads ([guide](./docs/user/hermes-tasks.md#follow-runs-as-threads)) | `apps/server/src/hermes/{HermesRunService,hermesRun*}.ts`, `packages/contracts/src/hermesRuns.ts`, `apps/web/src/components/settings/HermesRunsSettings.tsx` <!-- sync: fill after C -->                |
 | Hermes Memory: built-in notes and Hindsight ([guide](./docs/user/hermes-memory.md))           | `apps/server/src/hermes/HermesMemoryService.ts`, `apps/server/src/integrations/hindsight/`, `packages/contracts/src/{hermesMemory,hindsight}.ts`, `apps/web/src/components/settings/MemorySettings.tsx` |
 | Reasoning-effort selector ([guide](./docs/user/hermes-reasoning.md))                          | `apps/server/src/hermes/hermesReasoning*.ts`                                                                                                                                                            |
 | Hermes Patches tab ([guide](./docs/user/hermes-patches.md))                                   | `apps/server/src/hermes/{HermesPatchService,hermesPatches}.ts`, `infra/hermes/*.patch`, `scripts/generate-hermes-patches.ts`                                                                            |
@@ -41,11 +41,12 @@ a project wired to a provider with no models, and a picker that says "No models 
 that other providers are populated. Those two rows fix that for any single-provider host; set
 `T3CODE_BOOTSTRAP_PROVIDER_INSTANCE` and `T3CODE_BOOTSTRAP_MODEL` to choose the bootstrap pair.
 Headless `serve`, which the background service runs, never auto-bootstraps. The ACP
-and slash-command rows are not Hermes-specific either: Cursor and Grok pick them up for free.
+and slash-command rows are not Hermes-specific either: the other ACP agents pick them up for free.
 
-The Hermes driver reuses the existing ACP runtime (`apps/server/src/provider/acp/`) that already
-backs Cursor and Grok, so it inherits streaming, tool-call cards, approvals, session resume, and
-model switching. See [docs/internals/providers.md](./docs/internals/providers.md).
+The Hermes adapter builds on the shared ACP adapter (`orchestration-v2/Adapters/AcpAdapterV2.ts`
+over `apps/server/src/provider/acp/`) that also backs Grok, Antigravity, and ACP registry agents, so
+it inherits streaming, tool-call cards, approvals, steering, session resume, and model switching.
+See [docs/internals/providers.md](./docs/internals/providers.md).
 
 ## Requirements
 
@@ -223,10 +224,11 @@ Three kinds of issue come out of it:
   lacks. Until that PR merges, every sync retries the merge and comments on the issue again.
 - **`hermes-parity-review`**: advisory, filed once the sync PR is open. It fires when the incoming
   upstream commits touched two or more sibling provider adapters
-  (`Drivers/{Claude,Codex,Cursor,Grok,OpenCode}*.ts`) or anything under `provider/acp/`, because
+  (`{provider/Drivers,orchestration-v2/Adapters}/{Claude,Codex,Cursor,Grok,OpenCode}*.ts`), the
+  shared ACP adapter, or anything under `provider/acp/`, because
   upstream has fixed a bug across every sibling adapter in a commit that merged cleanly while
   leaving the Hermes copy broken. Git cannot see that kind of drift; a human has to check
-  `HermesDriver.ts`, `HermesAcpSupport.ts`, and `HermesTextGeneration.ts`.
+  `HermesAdapterV2.ts`, `HermesDriver.ts`, `HermesAcpSupport.ts`, and `HermesTextGeneration.ts`.
 - **`upstream-sync-failed`**: the run failed for any reason other than a conflict, such as a
   rejected push or a `gh` outage.
 

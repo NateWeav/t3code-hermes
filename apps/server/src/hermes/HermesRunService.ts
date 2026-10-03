@@ -9,14 +9,17 @@
  * tool calls, a running turn while Hermes works, the pull request the run
  * opened, and a finished turn when it ends.
  *
- * A run is mirrored with plain orchestration commands whose ids derive from
- * Hermes row ids, so replays are no-ops and cursors live in memory. Nothing is
- * checkpointed: the run worked in its own checkout, not the project's.
+ * A run has no T3 run of its own: Hermes already did the work. Its thread is
+ * created and stamped with `hermesRun` through orchestrator commands, and its
+ * transcript lands as run-less turn items written straight to the event sink,
+ * like imported history. Ids derive from Hermes row ids, so replays write
+ * nothing new and cursors live in memory. Nothing is checkpointed: the run
+ * worked in its own checkout, not the project's. `hermesRun.live` is the only
+ * liveness signal, so a live run is never interrupted by provider recovery.
  *
- * A mirrored thread is bound to the Hermes instance with a resume cursor that
- * names the run's profile and carries a primer, so the first reply starts a
- * fresh Hermes session in that profile that knows what it is continuing.
- * Hermes cannot reopen webhook or cron sessions over ACP.
+ * Replies start a fresh Hermes session in the instance's own Hermes home:
+ * Hermes cannot reopen webhook or cron sessions over ACP. The thread's history
+ * is marked imported, so V2 hands the mirrored transcript to that session.
  *
  * Cost: one settings read per tick with nothing switched on; otherwise a few
  * indexed reads per switched-on source every 30s, every 5s while a run is live.
@@ -28,21 +31,23 @@ import {
   DEFAULT_MODEL_BY_PROVIDER,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
+  EventId,
   HermesRunError,
   hermesRunIdPrefix,
   ProjectId,
   pullRequestHostOf,
   ProviderDriverKind,
+  ThreadHermesRun,
   ThreadId,
-  TurnId,
   type HermesRunSource,
   type HermesRunSourceSetInput,
   type HermesRunSourcesResult,
-  type OrchestrationCommand,
   type OrchestrationProjectShell,
+  type OrchestrationV2DomainEvent,
+  type OrchestrationV2ServerCommand,
+  type OrchestrationV2TurnItem,
   type ProviderInstanceId,
   type SourceControlProviderKind,
-  type ThreadHermesRun,
 } from "@t3tools/contracts";
 import { parseChangeRequestUrl } from "@t3tools/shared/changeRequestUrl";
 import { sourceControlRepositorySelector } from "@t3tools/shared/sourceControl";
@@ -60,13 +65,16 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { writeFileStringAtomically } from "../atomicWrite.ts";
 import * as ServerConfig from "../config.ts";
-import * as OrchestrationEngine from "../orchestration/Services/OrchestrationEngine.ts";
-import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as EventSink from "../orchestration-v2/EventSink.ts";
+import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
+import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
+import * as TurnItemPositionStore from "../orchestration-v2/TurnItemPositionStore.ts";
+import * as ProjectService from "../project/ProjectService.ts";
 import { mergeProviderInstanceEnvironment } from "../provider/ProviderInstanceEnvironment.ts";
-import * as ProviderSessionDirectory from "../provider/Services/ProviderSessionDirectory.ts";
 import { forkParked } from "../serverActivation.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { resolveEnabledHermesInstance, resolveHermesHome } from "./hermesCronState.ts";
@@ -86,10 +94,11 @@ import {
   type HermesSessionRow,
 } from "./hermesRunState.ts";
 import {
-  buildHermesRunPrimer,
-  hermesRunCommandsFor,
+  hermesRunItemsFor,
+  hermesRunNoticeItem,
   isoFromSeconds,
   isSilentReport,
+  type HermesRunEntry,
   type HermesRunIds,
   type HermesToolCall,
 } from "./hermesRunTranscript.ts";
@@ -101,6 +110,8 @@ const HERMES_OFF_REASON = "Hermes was turned off before this run finished.";
 const LIVE_INTERVAL = Duration.seconds(5);
 /** Window the settings list counts recent runs over. */
 const RECENT_RUN_WINDOW_SECONDS = 30 * 24 * 60 * 60;
+/** Turn items per event sink write when a run's backlog is mirrored. */
+const WRITE_BATCH_SIZE = 50;
 /** Scripts are read only to spot a repository name; anything larger is not a filter script. */
 const MAX_HINT_FILE_BYTES = 64 * 1024;
 /** "Sep 30, 14:05" — Hermes titles cron runs this way; webhook runs get the same shape. */
@@ -128,6 +139,7 @@ const PersistedStateJson = Schema.fromJsonString(PersistedState);
 const decodePersistedState = Schema.decodeUnknownEffect(PersistedStateJson);
 const encodePersistedState = Schema.encodeEffect(PersistedStateJson);
 const decodeJsonOption = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
+const decodeLegacyHermesRun = Schema.decodeUnknownOption(Schema.fromJsonString(ThreadHermesRun));
 
 interface TrackedRun {
   readonly ids: HermesRunIds;
@@ -145,6 +157,8 @@ interface TrackedRun {
   finalReport: string | null;
   readonly toolCalls: Map<string, HermesToolCall>;
   readonly pullRequestUrls: Set<string>;
+  /** Status of each item already in the thread; read from the thread on first write. */
+  written: Map<string, OrchestrationV2TurnItem["status"]> | null;
 }
 
 export class HermesRunService extends Context.Service<
@@ -203,9 +217,12 @@ const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const engine = yield* OrchestrationEngine.OrchestrationEngineService;
-  const snapshots = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
-  const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
+  const orchestrator = yield* Orchestrator.OrchestratorV2;
+  const projections = yield* ProjectionStore.ProjectionStoreV2;
+  const eventSink = yield* EventSink.EventSinkV2;
+  const positions = yield* TurnItemPositionStore.TurnItemPositionStoreV2;
+  const projectService = yield* ProjectService.ProjectService;
+  const sql = yield* SqlClient.SqlClient;
 
   const statePath = path.join(config.stateDir, STATE_FILENAME);
   const enabledRef = yield* Ref.make<ReadonlyArray<EnabledSource>>([]);
@@ -270,8 +287,8 @@ const make = Effect.gen(function* () {
         entry,
       ]),
     );
-    const projects = yield* snapshots
-      .getProjectShells()
+    const projects = yield* projectService
+      .listShells()
       .pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<OrchestrationProjectShell>));
     const nowSeconds = (yield* Clock.currentTimeMillis) / 1000;
     const sources: HermesRunSource[] = [];
@@ -374,8 +391,8 @@ const make = Effect.gen(function* () {
         }
       }
       if (input.projectId !== null) {
-        const project = yield* snapshots
-          .getProjectShellById(input.projectId)
+        const project = yield* projectService
+          .getShell(input.projectId)
           .pipe(Effect.orElseSucceed(() => Option.none()));
         if (Option.isNone(project)) {
           return yield* new HermesRunError({
@@ -427,30 +444,12 @@ const make = Effect.gen(function* () {
 
   // ── Watcher ────────────────────────────────────────────────────────────
 
-  const dispatch = (command: OrchestrationCommand) => engine.dispatch(command);
-
-  const sessionCommand = (
-    run: TrackedRun,
-    suffix: string,
-    status: "running" | "ready" | "stopped" | "error",
-    at: string,
-    lastError: string | null = null,
-  ): OrchestrationCommand => ({
-    type: "thread.session.set",
-    commandId: CommandId.make(`${run.ids.prefix}:${suffix}`),
-    threadId: run.ids.threadId,
-    session: {
-      threadId: run.ids.threadId,
-      status,
-      providerName: HERMES,
-      providerInstanceId: run.instanceId,
-      runtimeMode: DEFAULT_RUNTIME_MODE,
-      activeTurnId: status === "running" ? run.ids.turnId : null,
-      lastError,
-      updatedAt: at,
-    },
-    createdAt: at,
-  });
+  const dispatch = (command: OrchestrationV2ServerCommand) =>
+    orchestrator.dispatch(command).pipe(
+      // A rejected command stays rejected; replaying it can never apply it.
+      Effect.catchTag("OrchestratorCommandPreviouslyRejectedError", () => Effect.void),
+      Effect.asVoid,
+    );
 
   const hermesRunState = (run: TrackedRun, live: boolean): ThreadHermesRun => ({
     profile: run.profile.profile,
@@ -461,13 +460,57 @@ const make = Effect.gen(function* () {
     live,
   });
 
-  const setHermesRun = (run: TrackedRun, live: boolean, suffix: string, at: string) =>
+  const setHermesRun = (run: TrackedRun, live: boolean, suffix: string) =>
     dispatch({
       type: "thread.hermes-run.set",
       commandId: CommandId.make(`${run.ids.prefix}:${suffix}`),
       threadId: run.ids.threadId,
       hermesRun: hermesRunState(run, live),
-      createdAt: at,
+    });
+
+  /**
+   * Writes the entries whose item is new or has moved on from running. Event
+   * ids derive from the item and its status, and an item is only skipped once
+   * the thread holds it, so a failed write is retried next pass as it was.
+   */
+  const writeEntries = (run: TrackedRun, entries: ReadonlyArray<HermesRunEntry>) =>
+    Effect.gen(function* () {
+      if (run.written === null) {
+        const records = yield* projections.getThreadRecords(run.ids.threadId, ["turnItems"], {
+          turnItemRunIds: [null],
+        });
+        run.written = new Map(records.turnItems.map((item) => [item.id, item.status]));
+      }
+      const written = run.written;
+      const fresh = entries.filter(({ item }) => {
+        const previous = written.get(item.id);
+        return previous === undefined || (previous === "running" && item.status !== "running");
+      });
+      for (let index = 0; index < fresh.length; index += WRITE_BATCH_SIZE) {
+        const batch = fresh.slice(index, index + WRITE_BATCH_SIZE);
+        const events: OrchestrationV2DomainEvent[] = [];
+        for (const entry of batch) {
+          const item = yield* positions.normalize(entry.item);
+          if (entry.message !== undefined) {
+            events.push({
+              id: EventId.make(`${entry.message.id}:message`),
+              type: "message.updated",
+              threadId: run.ids.threadId,
+              occurredAt: entry.message.updatedAt,
+              payload: entry.message,
+            });
+          }
+          events.push({
+            id: EventId.make(`${item.id}:${item.status}`),
+            type: "turn-item.updated",
+            threadId: run.ids.threadId,
+            occurredAt: item.updatedAt,
+            payload: item,
+          });
+        }
+        yield* eventSink.write({ events });
+        for (const { item } of batch) written.set(item.id, item.status);
+      }
     });
 
   /**
@@ -476,29 +519,11 @@ const make = Effect.gen(function* () {
    */
   const closeRun = (run: TrackedRun, reason: string) =>
     Effect.gen(function* () {
-      const at = DateTime.formatIso(yield* DateTime.now);
-      yield* dispatch(sessionCommand(run, "error", "error", at, reason));
-      yield* setHermesRun(run, false, "ended", at);
+      yield* writeEntries(run, [
+        { item: hermesRunNoticeItem(run.ids, reason, yield* DateTime.now) },
+      ]);
+      yield* setHermesRun(run, false, "ended");
     });
-
-  const writeBinding = (run: TrackedRun, primer: string | null, workspaceRoot: string) =>
-    directory.upsert(
-      {
-        threadId: run.ids.threadId,
-        provider: HERMES,
-        providerInstanceId: run.instanceId,
-        status: "stopped",
-        runtimeMode: DEFAULT_RUNTIME_MODE,
-        resumeCursor: {
-          schemaVersion: 1,
-          hermesHome: run.profile.home,
-          ...(primer ? { primer } : {}),
-        },
-        runtimePayload: { cwd: workspaceRoot },
-      },
-      // The first write must not replace a session a reply already started.
-      primer === null ? { onConflict: "ignore" } : undefined,
-    );
 
   const createThread = (
     run: TrackedRun,
@@ -506,14 +531,16 @@ const make = Effect.gen(function* () {
     project: OrchestrationProjectShell,
   ) =>
     Effect.gen(function* () {
-      const startedAt = isoFromSeconds(root.startedAt);
-      yield* writeBinding(run, null, project.workspaceRoot);
       yield* dispatch({
         type: "thread.create",
+        createdBy: "system",
+        creationSource: "server",
         commandId: CommandId.make(`${run.ids.prefix}:create`),
         threadId: run.ids.threadId,
         projectId: project.id,
-        title: root.title ?? `${run.sourceLabel} · ${RUN_TITLE_DATE.format(root.startedAt * 1000)}`,
+        title:
+          root.title?.trim() ||
+          `${run.sourceLabel} · ${RUN_TITLE_DATE.format(root.startedAt * 1000)}`,
         modelSelection: {
           instanceId: run.instanceId,
           model: root.model ?? DEFAULT_MODEL_BY_PROVIDER[HERMES] ?? "hermes-4",
@@ -522,13 +549,8 @@ const make = Effect.gen(function* () {
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         branch: null,
         worktreePath: null,
-        createdAt: startedAt,
-        // Keeps the checkpoint reactor out of the project checkout: the run
-        // worked in its own.
-        historyImport: true,
       });
-      yield* setHermesRun(run, true, "live", startedAt);
-      yield* dispatch(sessionCommand(run, "running", "running", startedAt));
+      yield* setHermesRun(run, true, "live");
       run.created = true;
     });
 
@@ -559,6 +581,8 @@ const make = Effect.gen(function* () {
             run.pullRequestUrls.add(url);
             return;
           }
+          // Linking an already linked pull request changes nothing; any other
+          // failure fails the pass so the batch, link included, is retried.
           yield* dispatch({
             type: "thread.pull-request.link",
             commandId: CommandId.make(`${run.ids.prefix}:pr:${parsed.repository}#${parsed.number}`),
@@ -568,11 +592,7 @@ const make = Effect.gen(function* () {
             number: parsed.number,
             url,
             source: "agent",
-          }).pipe(
-            // Already linked is the decider saying the thread knew; anything
-            // else fails the pass so the batch, link included, is retried.
-            Effect.catchTags({ OrchestrationCommandInvariantError: () => Effect.void }),
-          );
+          });
           run.pullRequestUrls.add(url);
         }),
       { discard: true },
@@ -597,8 +617,8 @@ const make = Effect.gen(function* () {
       const root = chain[0]!;
       run.latestSessionId = chain.at(-1)!.id;
       const project = Option.getOrUndefined(
-        yield* snapshots
-          .getProjectShellById(run.projectId)
+        yield* projectService
+          .getShell(run.projectId)
           .pipe(Effect.orElseSucceed(() => Option.none())),
       );
       if (project === undefined) return true;
@@ -625,13 +645,15 @@ const make = Effect.gen(function* () {
         if (!usedTools) return over;
         if (over && isSilentReport(report?.content ?? null)) return true;
         yield* createThread(run, root, project);
+        // A thread this pass created holds nothing yet.
+        run.written ??= new Map();
       }
 
       // Tool calls still waiting on a result carry across passes; work on a
       // copy so a failed pass can replay this batch from the same state.
       const toolCalls = new Map(run.toolCalls);
-      const batch = hermesRunCommandsFor(run.ids, rows, toolCalls);
-      for (const command of batch.commands) yield* dispatch(command);
+      const batch = hermesRunItemsFor(run.ids, rows, toolCalls);
+      yield* writeEntries(run, batch.entries);
       yield* linkPullRequests(run, batch.pullRequestUrls, project);
       run.toolCalls.clear();
       for (const [id, call] of toolCalls) run.toolCalls.set(id, call);
@@ -640,13 +662,11 @@ const make = Effect.gen(function* () {
       if (batch.lastAssistantText !== null) run.finalReport = batch.lastAssistantText;
 
       if (!over) {
-        if (chain.length > 1)
-          yield* setHermesRun(run, true, `live:${run.latestSessionId}`, isoFromSeconds(nowSeconds));
+        if (chain.length > 1) yield* setHermesRun(run, true, `live:${run.latestSessionId}`);
         return false;
       }
 
       const tip = chain.at(-1)!;
-      const endedAt = isoFromSeconds(tip.endedAt ?? lastMessageAt ?? tip.startedAt);
       if (isSilentReport(run.finalReport)) {
         yield* dispatch({
           type: "thread.delete",
@@ -661,27 +681,13 @@ const make = Effect.gen(function* () {
           : tip.endReason === "cron_incomplete_no_output"
             ? "The run ended without a final answer."
             : null;
-      // The primed binding lands while replies are still locked, so it can
-      // never replace a session a reply has started.
-      yield* writeBinding(
-        run,
-        buildHermesRunPrimer({
-          sourceLabel: run.sourceLabel,
-          profile: run.profile.profile,
-          sessionIds,
-          pullRequestUrls: [...run.pullRequestUrls],
-          finalReport: run.finalReport,
-          workspaceRoot: project.workspaceRoot,
-        }),
-        project.workspaceRoot,
-      );
-      if (failure === null) {
-        yield* dispatch(sessionCommand(run, "ready", "ready", endedAt));
-        yield* dispatch(sessionCommand(run, "stopped", "stopped", endedAt));
-      } else {
-        yield* dispatch(sessionCommand(run, "error", "error", endedAt, failure));
+      if (failure !== null) {
+        const endedAt = DateTime.makeUnsafe(
+          Math.round((tip.endedAt ?? lastMessageAt ?? tip.startedAt) * 1000),
+        );
+        yield* writeEntries(run, [{ item: hermesRunNoticeItem(run.ids, failure, endedAt) }]);
       }
-      yield* setHermesRun(run, false, "ended", endedAt);
+      yield* setHermesRun(run, false, "ended");
       return true;
     });
 
@@ -722,29 +728,34 @@ const make = Effect.gen(function* () {
           const prefix = hermesRunIdPrefix({ profile: profile.profile, sessionId: root.id });
           if (runs.has(prefix) || settledRoots.has(prefix)) continue;
           const threadId = ThreadId.make(prefix);
-          const existing = yield* snapshots
-            .getThreadShellById(threadId)
-            .pipe(Effect.orElseSucceed(() => Option.none()));
-          // A thread from before a restart that already finished needs nothing.
-          if (Option.isSome(existing) && existing.value.hermesRun?.live !== true) {
+          const existing = yield* projections
+            .getThreadShell(threadId)
+            .pipe(Effect.orElseSucceed(() => null));
+          // A thread from before a restart that already finished, or that was
+          // deleted, needs nothing.
+          if (
+            existing !== null &&
+            (existing.deletedAt !== null || existing.hermesRun?.live !== true)
+          ) {
             settledRoots.add(prefix);
             continue;
           }
           runs.set(prefix, {
-            ids: { threadId, turnId: TurnId.make(prefix), prefix },
+            ids: { threadId, prefix },
             profile,
             instanceId: context.instanceId,
             sourceKey: source.sourceKey,
-            projectId: Option.isSome(existing) ? existing.value.projectId : source.projectId,
+            projectId: existing?.projectId ?? source.projectId,
             sourceLabel: yield* labelFor(source),
             rootSessionId: root.id,
-            created: Option.isSome(existing),
+            created: existing !== null,
             cursor: 0,
             lastMessageAt: null,
             latestSessionId: root.id,
             finalReport: null,
             toolCalls: new Map(),
             pullRequestUrls: new Set(),
+            written: null,
           });
         }
       }
@@ -764,20 +775,16 @@ const make = Effect.gen(function* () {
     } | null,
   ) =>
     Effect.gen(function* () {
-      const snapshot = yield* snapshots.getShellSnapshot({ unsettledOnly: true });
-      for (const thread of snapshot.threads) {
+      for (const thread of yield* projections.getLiveHermesRunThreads()) {
         const hermesRun = thread.hermesRun;
         if (hermesRun?.live !== true) continue;
         const prefix = hermesRunIdPrefix(hermesRun);
         if (runs.has(prefix)) continue;
         const profile = context?.profiles.find((entry) => entry.profile === hermesRun.profile);
         const run: TrackedRun = {
-          ids: { threadId: thread.id, turnId: TurnId.make(prefix), prefix },
+          ids: { threadId: thread.id, prefix },
           profile: profile ?? { profile: hermesRun.profile, home: "" },
-          instanceId:
-            context?.instanceId ??
-            thread.session?.providerInstanceId ??
-            thread.modelSelection.instanceId,
+          instanceId: context?.instanceId ?? thread.providerInstanceId,
           sourceKey: hermesRun.sourceKey,
           projectId: thread.projectId,
           sourceLabel: hermesRun.sourceLabel,
@@ -789,6 +796,7 @@ const make = Effect.gen(function* () {
           finalReport: null,
           toolCalls: new Map(),
           pullRequestUrls: new Set(),
+          written: null,
         };
         // A run that can never be read again is closed rather than left
         // holding its source's replies.
@@ -805,8 +813,61 @@ const make = Effect.gen(function* () {
       resumedLiveRuns = true;
     });
 
+  /**
+   * Threads mirrored before orchestration V2 keep their run. Their V1 rows,
+   * copied into this database, still carry it; the V2 import leaves it out.
+   * They come back finished: a run that was live across the upgrade is not
+   * followed further. Retried each pass until every thread has been imported.
+   */
+  let legacyRuns: Array<{
+    readonly threadId: ThreadId;
+    readonly hermesRun: ThreadHermesRun;
+  }> | null = null;
+  const importLegacyRuns = Effect.gen(function* () {
+    if (legacyRuns === null) {
+      const columns = yield* sql<{ readonly name: string }>`PRAGMA table_info(projection_threads)`;
+      const rows = columns.some((column) => column.name === "hermes_run_json")
+        ? yield* sql<{ readonly thread_id: string; readonly hermes_run_json: string }>`
+            SELECT thread_id, hermes_run_json FROM projection_threads
+            WHERE hermes_run_json IS NOT NULL
+          `
+        : [];
+      legacyRuns = rows.flatMap((row) =>
+        Option.match(decodeLegacyHermesRun(row.hermes_run_json), {
+          onNone: () => [],
+          onSome: (hermesRun) => [
+            { threadId: ThreadId.make(row.thread_id), hermesRun: { ...hermesRun, live: false } },
+          ],
+        }),
+      );
+    }
+    const waiting: typeof legacyRuns = [];
+    for (const entry of legacyRuns) {
+      const thread = yield* projections.getThread(entry.threadId).pipe(Effect.option);
+      if (Option.isNone(thread)) {
+        waiting.push(entry);
+        continue;
+      }
+      if (thread.value.hermesRun != null || thread.value.deletedAt !== null) continue;
+      yield* dispatch({
+        type: "thread.hermes-run.set",
+        commandId: CommandId.make(`hermes-run-import:${entry.threadId}`),
+        threadId: entry.threadId,
+        hermesRun: entry.hermesRun,
+      });
+    }
+    legacyRuns = waiting;
+  }).pipe(
+    Effect.catchCause((cause) =>
+      Effect.logWarning("Importing pre-V2 Hermes run threads failed").pipe(
+        Effect.annotateLogs({ cause }),
+      ),
+    ),
+  );
+
   /** One pass. Returns whether any followed run is still live. */
   const tick = Effect.gen(function* () {
+    if (legacyRuns === null || legacyRuns.length > 0) yield* importLegacyRuns;
     const context = yield* hermesContext;
     if (context === null) {
       // With Hermes off, its runs can't be followed: end them once per off
@@ -837,10 +898,10 @@ const make = Effect.gen(function* () {
             // go. Anything else is retried next tick: dropping a live run would
             // leave its source's replies locked.
             if (!run.created) return false;
-            const thread = yield* snapshots
-              .getThreadShellById(run.ids.threadId)
-              .pipe(Effect.orElseSucceed(() => Option.some(null)));
-            return Option.isNone(thread);
+            const thread = yield* projections
+              .getThreadShell(run.ids.threadId)
+              .pipe(Effect.orElseSucceed(() => undefined));
+            return thread === null || (thread !== undefined && thread.deletedAt !== null);
           }),
         ),
       );

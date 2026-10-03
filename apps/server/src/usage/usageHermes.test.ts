@@ -71,7 +71,7 @@ describe("readHermesUsageRecords", () => {
             outputTokens: 40,
             reasoningTokens: 15,
           },
-          fast: false,
+          speed: "standard",
           reportedCostUsd: 0.2,
           dedupeKey: null,
         },

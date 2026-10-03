@@ -1,4 +1,5 @@
 import type { ClientSettings } from "@t3tools/contracts/settings";
+import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import { act } from "react";
 import { create, type ReactTestRenderer } from "react-test-renderer";
@@ -17,9 +18,11 @@ const state = vi.hoisted(() => ({
   approval: false,
   sessionError: false,
   turnError: false,
-  backgroundLiveness: null as "working" | null,
+  limited: false,
+  subagent: false,
+  background: [] as Array<{ taskId: string; kind: "command" | "monitor" }>,
   hermesRun: null as { profile: string; sourceKey: string; sessionId: string } | null,
-  turnId: "turn-1",
+  latestRunId: "run-1" as string | null,
   add: vi.fn(
     (_toast: { title: string; description: string; actionProps: { onClick: () => void } }) =>
       "toast-1",
@@ -32,28 +35,65 @@ const state = vi.hoisted(() => ({
   }),
 }));
 
+const SHELL_NOW = DateTime.makeUnsafe("2026-09-13T09:00:00.000Z");
+
+function mockThreadShell() {
+  return {
+    id: "thread-1",
+    projectId: "project-1",
+    title: "Fix the login form",
+    providerInstanceId: "codex",
+    modelSelection: { instanceId: "codex", model: "gpt-5.4" },
+    runtimeMode: "full-access",
+    interactionMode: "default",
+    branch: null,
+    worktreePath: null,
+    activeProviderThreadId: null,
+    lineage: {
+      rootThreadId: "thread-1",
+      parentThreadId: state.subagent ? "parent" : null,
+      relationshipToParent: state.subagent ? "subagent" : null,
+    },
+    forkedFrom: null,
+    createdBy: "user",
+    creationSource: "web",
+    latestRunId: state.latestRunId,
+    activeRunId: null,
+    hermesRun: state.hermesRun,
+    status: state.completedAt
+      ? "completed"
+      : state.sessionError || state.turnError || state.limited
+        ? "failed"
+        : "running",
+    lastErrorClass: state.limited ? "usage_limit" : null,
+    pendingRuntimeRequest: state.input
+      ? { id: "request-1", kind: "user_input", createdAt: SHELL_NOW }
+      : state.approval
+        ? { id: "request-1", kind: "command", createdAt: SHELL_NOW }
+        : null,
+    latestVisibleMessage: null,
+    latestUserMessageAt: null,
+    hasActionableProposedPlan: false,
+    pendingBackgroundTasks: state.background,
+    itemCount: 0,
+    visibleItemCount: 0,
+    createdAt: SHELL_NOW,
+    updatedAt: SHELL_NOW,
+    latestRunRequestedAt: SHELL_NOW,
+    latestRunStartedAt: SHELL_NOW,
+    latestRunCompletedAt: state.completedAt ? DateTime.makeUnsafe(state.completedAt) : undefined,
+    archivedAt: state.archivedAt ? DateTime.makeUnsafe(state.archivedAt) : null,
+    settledOverride: null,
+    settledAt: null,
+    lastVisitedAt: null,
+    deletedAt: null,
+  };
+}
+
 vi.mock("@effect/atom-react", () => ({
   useAtomValue: () => ({
     status: state.live ? "live" : "disconnected",
-    snapshot: Option.some({
-      threads: [
-        {
-          id: "thread-1",
-          title: "Fix the login form",
-          archivedAt: state.archivedAt,
-          hermesRun: state.hermesRun,
-          hasPendingUserInput: state.input,
-          hasPendingApprovals: state.approval,
-          backgroundLiveness: state.backgroundLiveness,
-          session: state.sessionError ? { status: "error" } : null,
-          latestTurn: {
-            turnId: state.turnId,
-            state: state.turnError ? "error" : state.completedAt ? "completed" : "running",
-            completedAt: state.completedAt,
-          },
-        },
-      ],
-    }),
+    snapshot: Option.some({ threads: [mockThreadShell()] }),
   }),
 }));
 vi.mock("@tanstack/react-router", () => ({
@@ -69,7 +109,7 @@ vi.mock("../hooks/useSettings", () => ({
   getClientSettings: () => ({ notificationMode: state.mode }),
 }));
 vi.mock("../state/environments", () => ({
-  useEnvironments: () => ({ environments: [{ environmentId: "env-1" }] }),
+  useEnvironmentIds: () => ["env-1"],
 }));
 vi.mock("../state/shell", () => ({
   environmentShell: { stateValueAtom: vi.fn() },
@@ -116,9 +156,11 @@ beforeEach(() => {
     approval: false,
     sessionError: false,
     turnError: false,
-    backgroundLiveness: null,
+    limited: false,
+    subagent: false,
+    background: [],
     hermesRun: null,
-    turnId: "turn-1",
+    latestRunId: "run-1",
   });
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("window", new EventTarget());
@@ -140,26 +182,17 @@ afterEach(async () => {
 });
 
 describe("thread notifications", () => {
-  it("does not repeat completion alerts when background child activity settles later", async () => {
+  it.each([true, false])("keeps subagents silent with focus=%s", async (focused) => {
+    state.subagent = true;
+    state.focused = focused;
+    state.mode = "notifications-and-sound";
     await render();
     await complete();
-    expect(state.add).toHaveBeenCalledTimes(1);
-    state.backgroundLiveness = "working";
+    state.input = true;
     await render();
-    state.backgroundLiveness = null;
-    await render();
-    expect(state.add).toHaveBeenCalledTimes(1);
-  });
-
-  it("waits for live background children to finish before notifying once", async () => {
-    state.backgroundLiveness = "working";
-    await render();
-    await complete();
+    expect(state.sound).not.toHaveBeenCalled();
     expect(state.add).not.toHaveBeenCalled();
-    state.backgroundLiveness = null;
-    await render();
-    await render();
-    expect(state.add).toHaveBeenCalledTimes(1);
+    expect(state.notification).not.toHaveBeenCalled();
   });
 
   it("alerts once with system alerts off and opens the completed thread", async () => {
@@ -180,15 +213,13 @@ describe("thread notifications", () => {
   });
 
   it.each([
-    ["a default-profile cron run", "default", "cron:digest", "hermes-run:default:cron_1", 0],
-    ["a reply after a cron run", "default", "cron:digest", "turn-reply", 1],
-    ["a webhook run", "default", "webhook:pr", "hermes-run:default:cron_1", 1],
-    ["another profile's cron run", "work", "cron:digest", "hermes-run:work:cron_1", 1],
+    ["a default-profile cron run", "default", "cron:digest", null, 0],
+    ["a reply after a cron run", "default", "cron:digest", "run-reply", 1],
   ] as const)(
     "leaves %s's alert to Hermes Tasks only when Tasks announces it",
-    async (_case, profile, sourceKey, turnId, alerts) => {
+    async (_case, profile, sourceKey, latestRunId, alerts) => {
       state.hermesRun = { profile, sourceKey, sessionId: "cron_1" };
-      state.turnId = turnId;
+      state.latestRunId = latestRunId;
       await render();
       await complete();
       expect(state.add).toHaveBeenCalledTimes(alerts);
@@ -214,6 +245,7 @@ describe("thread notifications", () => {
     ["approval", "Approval needed"],
     ["sessionError", "Thread failed"],
     ["turnError", "Thread failed"],
+    ["limited", "Usage limit reached"],
   ] as const)("uses the same %s event for in-app and desktop alerts", async (event, title) => {
     state.mode = "notifications-and-sound";
     await render();
@@ -238,6 +270,19 @@ describe("thread notifications", () => {
       tag: "env-1:thread-1",
       silent: true,
     });
+  });
+
+  it("alerts when only a dev server is left running, not while a monitor can wake the agent", async () => {
+    await render();
+    state.background = [{ taskId: "watch", kind: "monitor" }];
+    await complete();
+    expect(state.add).not.toHaveBeenCalled();
+    state.background = [{ taskId: "dev", kind: "command" }];
+    await render();
+    expect(state.add).toHaveBeenCalledTimes(1);
+    expect(state.add).toHaveBeenLastCalledWith(
+      expect.objectContaining({ title: "Thread completed" }),
+    );
   });
 
   it("keeps background desktop alerts when in-app notifications are disabled", async () => {

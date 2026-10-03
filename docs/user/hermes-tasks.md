@@ -62,7 +62,8 @@ working directory or the route's config names one.
   stays in your active list with its final report as the last message.
 - You can reply once the run has finished. Replies wait while any run of the same job or route is
   still going, so you never race Hermes on the same work. Your first reply starts a new Hermes
-  conversation in the run's profile that is told what the run did and how to look up the rest.
+  conversation that is given the run's conversation as context. It runs in the Hermes home set on
+  your Hermes provider, not in the run's profile.
 
 Switching a source on also brings in its most recent run, so you can check the setup right away.
 Switching it off stops new runs from appearing; threads that already exist stay.

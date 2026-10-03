@@ -63,7 +63,7 @@ import {
   type AcpAdapterV2RuntimeInput,
 } from "./AcpAdapterV2.ts";
 
-export const HERMES_PROVIDER = ProviderDriverKind.make("hermes");
+const HERMES_PROVIDER = ProviderDriverKind.make("hermes");
 const DEFAULT_HERMES_SETTINGS = Schema.decodeSync(HermesSettings)({});
 
 export const HermesProviderCapabilitiesV2 = {

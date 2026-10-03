@@ -16,17 +16,13 @@ import {
   type OrchestrationV2ServerCommand,
   type OrchestrationV2ThreadShell,
   type OrchestrationV2TurnItem,
-  ThreadHermesRun,
+  type ThreadHermesRun,
   ThreadId,
 } from "@t3tools/contracts";
-import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type * as SqlError from "effect/unstable/sql/SqlError";
 
 import { ServerConfig } from "../config.ts";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
@@ -69,8 +65,6 @@ const liveRun = (sessionId: string): ThreadHermesRun => ({
   latestSessionId: sessionId,
   live: true,
 });
-
-const encodeHermesRun = Schema.encodeSync(Schema.fromJsonString(ThreadHermesRun));
 
 const liveThread = (sessionId: string) =>
   ({
@@ -125,8 +119,6 @@ function makeLayer(
     readonly existingItems?: ReadonlyArray<OrchestrationV2TurnItem>;
     /** Fails the first event sink write, as a transient failure would. */
     readonly failFirstWrite?: boolean;
-    /** Seeds the database the service reads pre-V2 Hermes runs from. */
-    readonly seedSql?: Effect.Effect<void, SqlError.SqlError, SqlClient.SqlClient>;
   } = {},
 ) {
   let failWrite = options.failFirstWrite ?? false;
@@ -213,10 +205,6 @@ function makeLayer(
     }),
     ServerConfig.layerTest(process.cwd(), { prefix: "t3-hermes-runs-" }),
   );
-  const sqlite = NodeSqliteClient.layer({ filename: ":memory:" });
-  const seeded = Layer.effectDiscard(options.seedSql ?? Effect.void).pipe(
-    Layer.provideMerge(sqlite),
-  );
   return {
     dispatched,
     written,
@@ -224,7 +212,6 @@ function makeLayer(
       written.flatMap((event) => (event.type === "turn-item.updated" ? [event.payload] : [])),
     layer: HermesRunService.layer.pipe(
       Layer.provide(dependencies),
-      Layer.provide(seeded),
       Layer.provide(NodeServices.layer),
     ),
   };
@@ -588,37 +575,6 @@ describe("HermesRunService", () => {
       expect(dispatched).toMatchObject([
         { type: "thread.hermes-run.set", hermesRun: { live: false } },
       ]);
-    }).pipe(Effect.provide(layer));
-  });
-
-  it.live("brings back the run of a thread mirrored before orchestration V2, finished", () => {
-    const hermes = makeHermesHome();
-    const threadId = ThreadId.make("hermes-run:upstream-sync:run-v1");
-    const { layer, dispatched } = makeLayer(hermes.root, {
-      hermesEnabled: false,
-      liveThreads: [
-        { id: threadId, projectId: PROJECT_ID, deletedAt: null } as OrchestrationV2AppThread,
-      ],
-      seedSql: Effect.gen(function* () {
-        const sql = yield* SqlClient.SqlClient;
-        yield* sql`CREATE TABLE projection_threads (thread_id TEXT PRIMARY KEY, hermes_run_json TEXT)`;
-        yield* sql`INSERT INTO projection_threads VALUES (${threadId}, ${encodeHermesRun(liveRun("run-v1"))})`;
-        yield* sql`INSERT INTO projection_threads VALUES ('plain-thread', NULL)`;
-      }),
-    });
-    return Effect.gen(function* () {
-      const service = yield* HermesRunService.HermesRunService;
-      yield* service.sync;
-      expect(dispatched).toMatchObject([
-        {
-          type: "thread.hermes-run.set",
-          threadId,
-          hermesRun: { sessionId: "run-v1", live: false },
-        },
-      ]);
-      dispatched.length = 0;
-      yield* service.sync;
-      expect(dispatched).toEqual([]);
     }).pipe(Effect.provide(layer));
   });
 });

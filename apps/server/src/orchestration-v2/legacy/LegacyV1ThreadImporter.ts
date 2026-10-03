@@ -16,6 +16,7 @@ import {
   type OrchestrationV2TurnItem,
   ProjectId,
   ProviderInstanceId,
+  ThreadHermesRun,
   ThreadId,
   ThreadLinkedPullRequest,
   ThreadPullRequestLink,
@@ -61,6 +62,8 @@ interface LegacyThreadRow {
   readonly branch_pull_request_json: string | null;
   readonly active_order_key: string | null;
   readonly deleted_at: string | null;
+  /** Fork: the mirrored Hermes run; only fork databases have the column. */
+  readonly hermes_run_json?: string | null;
 }
 
 interface LegacyRepairRow extends LegacyThreadRow {
@@ -123,6 +126,7 @@ const decodeModelSelection = Schema.decodeUnknownOption(ModelSelection);
 const decodeAttachments = Schema.decodeUnknownOption(Schema.Array(ChatAttachment));
 const decodePullRequests = Schema.decodeUnknownOption(Schema.Array(ThreadPullRequestLink));
 const decodeLinkedPullRequest = Schema.decodeUnknownOption(ThreadLinkedPullRequest);
+const decodeHermesRun = Schema.decodeUnknownOption(ThreadHermesRun);
 const decodeStoredThread = Schema.decodeUnknownOption(
   Schema.fromJsonString(OrchestrationV2AppThreadJson),
 );
@@ -161,6 +165,14 @@ function branchPullRequestFor(row: LegacyThreadRow) {
   return Option.getOrNull(decodeLinkedPullRequest(parseJson(row.branch_pull_request_json)));
 }
 
+// Fork: a run that was live across the upgrade is not followed further, so it
+// comes back finished and its source's replies stay open.
+function hermesRunFor(row: LegacyThreadRow) {
+  if (row.hermes_run_json == null) return undefined;
+  const run = Option.getOrUndefined(decodeHermesRun(parseJson(row.hermes_run_json)));
+  return run === undefined ? undefined : { ...run, live: false };
+}
+
 function runtimeModeFor(value: string): OrchestrationV2AppThread["runtimeMode"] {
   return value === "approval-required" ||
     value === "auto-accept-edits" ||
@@ -196,6 +208,7 @@ function importedThread(row: LegacyThreadRow): OrchestrationV2AppThread {
     () => [],
   );
   const linkedPullRequest = linkedPullRequestFor(row);
+  const hermesRun = hermesRunFor(row);
   const legacyLink = threadPullRequestsOf({ linkedPullRequest })[0];
   const importedPullRequests =
     legacyLink !== undefined &&
@@ -238,6 +251,7 @@ function importedThread(row: LegacyThreadRow): OrchestrationV2AppThread {
     autoSettleDisabledAt: nullableDateTime(row.auto_settle_disabled_at),
     pinOrderKey: row.pin_order_key?.trim() || null,
     lastVisitedAt: null,
+    ...(hermesRun === undefined ? {} : { hermesRun }),
     deletedAt: nullableDateTime(row.deleted_at),
   };
 }
@@ -442,6 +456,14 @@ const make = Effect.gen(function* () {
 
   const reconcileShellsBase = Effect.gen(function* () {
     const now = DateTime.formatIso(yield* DateTime.now);
+    // Fork: databases that ran the fork's V1 Hermes run migration carry the
+    // mirrored run in a column upstream's schema never had.
+    const threadColumns = yield* sql<{ readonly name: string }>`
+      SELECT name FROM pragma_table_info('projection_threads')
+    `;
+    const hermesRunColumn = threadColumns.some((column) => column.name === "hermes_run_json")
+      ? sql`thread.hermes_run_json`
+      : sql`NULL`;
     const repairRows = yield* sql<LegacyRepairRow>`
       SELECT
         thread.thread_id,
@@ -468,6 +490,7 @@ const make = Effect.gen(function* () {
         thread.branch_pull_request_json,
         thread.active_order_key,
         thread.deleted_at,
+        ${hermesRunColumn} AS hermes_run_json,
         projection.payload_json
       FROM orchestration_v2_legacy_imports AS legacy_import
       INNER JOIN projection_threads AS thread
@@ -483,6 +506,10 @@ const make = Effect.gen(function* () {
          OR json_type(projection.payload_json, '$.pullRequests') IS NULL
          OR json_type(projection.payload_json, '$.branchPullRequest') IS NULL
          OR json_type(projection.payload_json, '$.activeOrderKey') IS NULL
+         OR (
+           ${hermesRunColumn} IS NOT NULL
+           AND json_type(projection.payload_json, '$.hermesRun') IS NULL
+         )
       ORDER BY thread.created_at ASC, thread.thread_id ASC
     `;
     let repairedThreadCount = 0;
@@ -527,6 +554,9 @@ const make = Effect.gen(function* () {
             : current.branchPullRequest,
         activeOrderKey:
           current.activeOrderKey === undefined ? legacy.activeOrderKey : current.activeOrderKey,
+        ...(current.hermesRun == null && legacy.hermesRun !== undefined
+          ? { hermesRun: legacy.hermesRun }
+          : {}),
       };
       // Later schema additions can require another repair for the same thread.
       const repairId = yield* randomUuidV4;
@@ -571,7 +601,8 @@ const make = Effect.gen(function* () {
         thread.linked_pull_request_json,
         thread.branch_pull_request_json,
         thread.active_order_key,
-        thread.deleted_at
+        thread.deleted_at,
+        ${hermesRunColumn} AS hermes_run_json
       FROM projection_threads AS thread
       WHERE NOT EXISTS (
         SELECT 1

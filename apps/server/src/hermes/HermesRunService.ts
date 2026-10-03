@@ -37,8 +37,8 @@ import {
   ProjectId,
   pullRequestHostOf,
   ProviderDriverKind,
-  ThreadHermesRun,
   ThreadId,
+  type ThreadHermesRun,
   type HermesRunSource,
   type HermesRunSourceSetInput,
   type HermesRunSourcesResult,
@@ -65,7 +65,6 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { writeFileStringAtomically } from "../atomicWrite.ts";
 import * as ServerConfig from "../config.ts";
@@ -139,7 +138,6 @@ const PersistedStateJson = Schema.fromJsonString(PersistedState);
 const decodePersistedState = Schema.decodeUnknownEffect(PersistedStateJson);
 const encodePersistedState = Schema.encodeEffect(PersistedStateJson);
 const decodeJsonOption = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
-const decodeLegacyHermesRun = Schema.decodeUnknownOption(Schema.fromJsonString(ThreadHermesRun));
 
 interface TrackedRun {
   readonly ids: HermesRunIds;
@@ -222,7 +220,6 @@ const make = Effect.gen(function* () {
   const eventSink = yield* EventSink.EventSinkV2;
   const positions = yield* TurnItemPositionStore.TurnItemPositionStoreV2;
   const projectService = yield* ProjectService.ProjectService;
-  const sql = yield* SqlClient.SqlClient;
 
   const statePath = path.join(config.stateDir, STATE_FILENAME);
   const enabledRef = yield* Ref.make<ReadonlyArray<EnabledSource>>([]);
@@ -813,61 +810,8 @@ const make = Effect.gen(function* () {
       resumedLiveRuns = true;
     });
 
-  /**
-   * Threads mirrored before orchestration V2 keep their run. Their V1 rows,
-   * copied into this database, still carry it; the V2 import leaves it out.
-   * They come back finished: a run that was live across the upgrade is not
-   * followed further. Retried each pass until every thread has been imported.
-   */
-  let legacyRuns: Array<{
-    readonly threadId: ThreadId;
-    readonly hermesRun: ThreadHermesRun;
-  }> | null = null;
-  const importLegacyRuns = Effect.gen(function* () {
-    if (legacyRuns === null) {
-      const columns = yield* sql<{ readonly name: string }>`PRAGMA table_info(projection_threads)`;
-      const rows = columns.some((column) => column.name === "hermes_run_json")
-        ? yield* sql<{ readonly thread_id: string; readonly hermes_run_json: string }>`
-            SELECT thread_id, hermes_run_json FROM projection_threads
-            WHERE hermes_run_json IS NOT NULL
-          `
-        : [];
-      legacyRuns = rows.flatMap((row) =>
-        Option.match(decodeLegacyHermesRun(row.hermes_run_json), {
-          onNone: () => [],
-          onSome: (hermesRun) => [
-            { threadId: ThreadId.make(row.thread_id), hermesRun: { ...hermesRun, live: false } },
-          ],
-        }),
-      );
-    }
-    const waiting: typeof legacyRuns = [];
-    for (const entry of legacyRuns) {
-      const thread = yield* projections.getThread(entry.threadId).pipe(Effect.option);
-      if (Option.isNone(thread)) {
-        waiting.push(entry);
-        continue;
-      }
-      if (thread.value.hermesRun != null || thread.value.deletedAt !== null) continue;
-      yield* dispatch({
-        type: "thread.hermes-run.set",
-        commandId: CommandId.make(`hermes-run-import:${entry.threadId}`),
-        threadId: entry.threadId,
-        hermesRun: entry.hermesRun,
-      });
-    }
-    legacyRuns = waiting;
-  }).pipe(
-    Effect.catchCause((cause) =>
-      Effect.logWarning("Importing pre-V2 Hermes run threads failed").pipe(
-        Effect.annotateLogs({ cause }),
-      ),
-    ),
-  );
-
   /** One pass. Returns whether any followed run is still live. */
   const tick = Effect.gen(function* () {
-    if (legacyRuns === null || legacyRuns.length > 0) yield* importLegacyRuns;
     const context = yield* hermesContext;
     if (context === null) {
       // With Hermes off, its runs can't be followed: end them once per off
@@ -942,17 +886,3 @@ const make = Effect.gen(function* () {
 });
 
 export const layer = Layer.effect(HermesRunService, make);
-
-/** Inert service, for suites that only need the RPC surface and reactor wiring to resolve. */
-export const layerTest = Layer.succeed(
-  HermesRunService,
-  HermesRunService.of({
-    listSources: Effect.succeed({ hermesEnabled: false, sources: [] }),
-    sync: Effect.void,
-    setSource: () =>
-      Effect.fail(
-        new HermesRunError({ reason: "providerDisabled", detail: "Hermes is not enabled." }),
-      ),
-    start: () => Effect.void,
-  }),
-);

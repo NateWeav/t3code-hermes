@@ -6,11 +6,11 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
  * upstream has since assigned to its own migration.
  *
  * The migrator skips by id, so a database that recorded fork migration 55
- * (`ProjectionThreadsHermesRun`, which added `projection_threads.hermes_run_json`)
+ * (`ProjectionThreadsHermesRun`, which added `hermes_run_json` to the V1 threads table)
  * would never run upstream's 55 (`OrchestrationV2`) and would open without the
  * V2 schema. Forgetting the fork row lets upstream's 55 and later run. The
  * column it added stays: it is nullable, nothing upstream reads it, and
- * HermesRunService reads it once to bring pre-V2 run threads forward (V2 keeps
+ * the legacy V1 importer reads it to bring pre-V2 run threads forward (V2 keeps
  * `hermesRun` in the thread's event payload, outside the migrator).
  *
  * The fork keeps no rows in this ledger from here on, so this list only ever

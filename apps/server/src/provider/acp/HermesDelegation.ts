@@ -97,7 +97,7 @@ function isHermesDelegation(tool: AcpToolCallState): boolean {
 }
 
 /** A patched Hermes child lifecycle event, reported on its parent delegate_task call. */
-export function isHermesDelegationProgress(tool: AcpToolCallState): boolean {
+function isHermesDelegationProgress(tool: AcpToolCallState): boolean {
   return typeof record(record(tool.data.rawOutput).hermesDelegation).event === "string";
 }
 

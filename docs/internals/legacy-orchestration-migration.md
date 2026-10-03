@@ -51,6 +51,12 @@ differs from the manifest so the skipped schema change is diagnosable. There is 
 for a fork inside this ledger: any id at or below a future upstream id masks it forever, so fork
 schema changes belong in a separate migration table or outside the migrator entirely.
 
+The Hermes fork hit exactly this: it had recorded id 55 as `ProjectionThreadsHermesRun` before
+upstream assigned 55 to `OrchestrationV2`. `runMigrations` therefore calls
+[`reconcileForkMigrations`](../../apps/server/src/persistence/reconcileForkMigrations.ts) before the
+migrator so the fork row is removed and upstream's 55 and 56 run; the stray `hermes_run_json`
+column is left in place. Fork state now lives in V2 event payloads, never in the shared ledger.
+
 ## Recovery
 
 There is no supported whole-thread export API. Recovery uses an untouched copy of the environment's

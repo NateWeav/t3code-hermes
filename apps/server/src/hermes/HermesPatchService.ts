@@ -186,19 +186,3 @@ export const make = Effect.gen(function* () {
 });
 
 export const layer = Layer.effect(HermesPatchService, make);
-
-/** Empty service, for suites that only need the RPC surface to resolve. */
-export const layerTest = Layer.succeed(
-  HermesPatchService,
-  HermesPatchService.of({
-    list: Effect.succeed(unavailableSnapshot("providerDisabled")),
-    apply: () =>
-      Effect.fail(
-        new HermesPatchError({ reason: "unavailable", detail: "Hermes is not enabled." }),
-      ),
-    revert: () =>
-      Effect.fail(
-        new HermesPatchError({ reason: "unavailable", detail: "Hermes is not enabled." }),
-      ),
-  }),
-);

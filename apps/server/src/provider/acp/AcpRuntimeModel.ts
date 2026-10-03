@@ -867,7 +867,7 @@ export function canonicalItemTypeFromAcpToolKind(kind: string | undefined): Tool
   }
 }
 
-export function makeToolCallState(
+function makeToolCallState(
   input: {
     readonly toolCallId: string;
     readonly title?: string | null | undefined;

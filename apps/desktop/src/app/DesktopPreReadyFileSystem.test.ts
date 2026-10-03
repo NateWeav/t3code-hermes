@@ -23,7 +23,10 @@ it.layer(NodeServices.layer)("DesktopPreReadyFileSystem", (it) => {
       const path = yield* Path.Path;
       const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-pre-ready-fs-" });
       yield* fileSystem.makeDirectory(path.join(root, "T3 Hermes (Alpha)"));
-      yield* fileSystem.writeFileString(path.join(root, "T3 Hermes (Alpha)", "Local State"), "keys");
+      yield* fileSystem.writeFileString(
+        path.join(root, "T3 Hermes (Alpha)", "Local State"),
+        "keys",
+      );
 
       const userData = yield* resolveWindowsUserData(root);
 

@@ -11,7 +11,7 @@
  *
  * @module HindsightAgentMemorySettings
  */
-import { useAtomValue } from "@effect/atom-react";
+import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import {
   describeHindsightAgentMemory,
   describeHindsightKeyWait,
@@ -32,7 +32,7 @@ import {
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 import { RefreshCwIcon } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useContext, useMemo, useState } from "react";
 
 import { isElectron } from "../../env";
 import { primarySessionStateAtom } from "../../environments/primary/sessionState";
@@ -60,6 +60,8 @@ type HindsightPatch = { -readonly [K in keyof HindsightSettings]?: HindsightSett
 
 interface Machine extends HindsightHandoffMachine {
   readonly environment: EnvironmentPresentation;
+  /** Its connection is being read again; until then its server may be stale. */
+  readonly refreshing: boolean;
   readonly writable: boolean;
   readonly saved: HindsightSettings;
   /** Null until the machine has said whether it resolves a server. */
@@ -139,11 +141,8 @@ export function HindsightAgentMemorySettings() {
             const saved =
               get(serverEnvironment.settingsValueAtom(environmentId))?.integrations.hindsight ??
               environment.serverConfig!.settings.integrations.hindsight;
-            const banks = Option.getOrNull(
-              AsyncResult.value(
-                get(serverEnvironment.hindsightBanks({ environmentId, input: {} })),
-              ),
-            );
+            const banksResult = get(serverEnvironment.hindsightBanks({ environmentId, input: {} }));
+            const banks = Option.getOrNull(AsyncResult.value(banksResult));
             const memoryResult = get(
               serverEnvironment.hindsightAgentMemory({ environmentId, input: {} }),
             );
@@ -154,6 +153,7 @@ export function HindsightAgentMemorySettings() {
               writable: operate === "granted",
               saved,
               enabled: saved.agentMemory,
+              refreshing: banksResult.waiting,
               hasServer: connection === undefined ? null : connection !== null,
               serverUrl: connection?.baseUrl ?? null,
               savedUrl: saved.baseUrl ?? "",
@@ -175,6 +175,7 @@ export function HindsightAgentMemorySettings() {
   const apply = useAtomCommand(serverEnvironment.applyHindsightAgentMemory, {
     label: "apply Hindsight agent memory",
   });
+  const registry = useContext(RegistryContext);
   const [saving, setSaving] = useState(false);
   const [apiKeyDraft, setApiKeyDraft] = useState("");
 
@@ -197,7 +198,8 @@ export function HindsightAgentMemorySettings() {
   const keyWait = describeHindsightKeyWait(writable, handoff);
   const statusLabel = keyWait ?? overall.label;
   const statusTone = keyWait === null ? overall.tone : "attention";
-  const busy = saving || machines.some((machine) => machine.applying);
+  // Keys are routed by each machine's server, so nothing is written while one is stale.
+  const busy = saving || machines.some((machine) => machine.applying || machine.refreshing);
   const checking = writable.some((machine) => machine.hasServer === null);
 
   const writeAll = async (patchFor: (machine: Machine) => HindsightPatch | null) => {
@@ -216,6 +218,15 @@ export function HindsightAgentMemorySettings() {
               ];
         }),
       );
+      // The server answers from its new settings on the next read; read now.
+      for (const machine of writable) {
+        registry.refresh(
+          serverEnvironment.hindsightBanks({
+            environmentId: machine.environment.environmentId,
+            input: {},
+          }),
+        );
+      }
       setApiKeyDraft("");
     } finally {
       setSaving(false);
@@ -347,18 +358,26 @@ export function HindsightAgentMemorySettings() {
               size="sm"
               aria-label="Hindsight API key"
               disabled={!overall.canToggle || busy}
-              placeholder={hasSavedKey ? "Saved, enter a new key to replace" : "Not set"}
+              placeholder={
+                hasSavedKey
+                  ? "Saved, enter a new key to replace"
+                  : shared.keysElsewhere
+                    ? "Saved on some machines"
+                    : "Not set"
+              }
               value={apiKeyDraft}
               onChange={(event) => setApiKeyDraft(event.target.value)}
             />
-            {hasSavedKey && apiKeyDraft.length === 0 ? (
+            {(hasSavedKey || shared.keysElsewhere) && apiKeyDraft.length === 0 ? (
               <Button
                 size="sm"
                 variant="outline"
                 disabled={!overall.canToggle || busy}
-                onClick={() => void saveApiKey("")}
+                onClick={() =>
+                  void (shared.keysElsewhere ? writeShared({ kind: "clearKeys" }) : saveApiKey(""))
+                }
               >
-                Remove
+                {shared.keysElsewhere ? "Remove everywhere" : "Remove"}
               </Button>
             ) : (
               <Button

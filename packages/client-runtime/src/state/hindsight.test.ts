@@ -268,6 +268,7 @@ describe("handing a machine the shared server", () => {
       urlsDiffer: false,
       hasOverride: true,
       hasKey: true,
+      keysElsewhere: false,
     });
     expect(
       summarizeHindsightSharedSettings([
@@ -275,5 +276,19 @@ describe("handing a machine the shared server", () => {
         { ...overridden, savedUrl: "http://other:8888", serverUrl: "http://other:8888" },
       ]),
     ).toMatchObject({ url: "", urlsDiffer: true, hasOverride: true });
+  });
+
+  it("can reach a key saved on a machine that is on another server", () => {
+    const first = { ...keyedSource, serverUrl: "https://a.example" };
+    const second = { ...keyedSource, serverUrl: "https://b.example", hasSavedKey: true };
+    const shared = summarizeHindsightSharedSettings([first, second]);
+    expect(shared).toMatchObject({ hasKey: false, keysElsewhere: true });
+
+    const handoff = planHindsightServerHandoff({ url: shared.url, hasKey: shared.hasKey }, [
+      first,
+      second,
+    ]);
+    expect(hindsightSharedPatch(second, handoff, { kind: "clearKeys" })).toEqual({ apiKey: "" });
+    expect(hindsightSharedPatch(first, handoff, { kind: "clearKeys" })).toBeNull();
   });
 });

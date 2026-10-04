@@ -1,4 +1,4 @@
-import { useAtomValue } from "@effect/atom-react";
+import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import {
   describeHindsightAgentMemory,
   describeHindsightKeyWait,
@@ -13,7 +13,7 @@ import {
 import type { HindsightAgentMemoryState, HindsightSettings } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
-import { useMemo, useState } from "react";
+import { useContext, useMemo, useState } from "react";
 import { Pressable, View } from "react-native";
 
 import { AppText as Text, AppTextInput as TextInput } from "../../components/AppText";
@@ -32,6 +32,8 @@ const INPUT_CLASS = "min-h-11 rounded-xl bg-subtle px-3 py-2 text-base";
 
 interface Machine extends HindsightHandoffMachine {
   readonly environment: EnvironmentPresentation;
+  /** Its connection is being read again; until then its server may be stale. */
+  readonly refreshing: boolean;
   readonly writable: boolean;
   readonly saved: HindsightSettings;
   readonly hasServer: boolean | null;
@@ -77,11 +79,8 @@ export function EnvironmentAgentMemorySettings() {
             const saved =
               get(serverEnvironment.settingsValueAtom(environmentId))?.integrations.hindsight ??
               environment.serverConfig!.settings.integrations.hindsight;
-            const banks = Option.getOrNull(
-              AsyncResult.value(
-                get(serverEnvironment.hindsightBanks({ environmentId, input: {} })),
-              ),
-            );
+            const banksResult = get(serverEnvironment.hindsightBanks({ environmentId, input: {} }));
+            const banks = Option.getOrNull(AsyncResult.value(banksResult));
             const memoryResult = get(
               serverEnvironment.hindsightAgentMemory({ environmentId, input: {} }),
             );
@@ -97,6 +96,7 @@ export function EnvironmentAgentMemorySettings() {
                 ),
               saved,
               enabled: saved.agentMemory,
+              refreshing: banksResult.waiting,
               hasServer: connection === undefined ? null : connection !== null,
               serverUrl: connection?.baseUrl ?? null,
               savedUrl: saved.baseUrl ?? "",
@@ -117,6 +117,7 @@ export function EnvironmentAgentMemorySettings() {
   const apply = useAtomCommand(serverEnvironment.applyHindsightAgentMemory, {
     label: "apply Hindsight agent memory",
   });
+  const registry = useContext(RegistryContext);
   const [saving, setSaving] = useState(false);
   const [urlDraft, setUrlDraft] = useState<string | null>(null);
   const [apiKeyDraft, setApiKeyDraft] = useState("");
@@ -136,7 +137,9 @@ export function EnvironmentAgentMemorySettings() {
   const resolvedUrl = machines.find((machine) => machine.serverUrl !== null)?.serverUrl ?? null;
   const handoff = planHindsightServerHandoff({ url: savedUrl, hasKey: hasSavedKey }, machines);
   const statusLabel = describeHindsightKeyWait(writable, handoff) ?? overall.label;
-  const busy = saving || machines.some((machine) => machine.state?.applying === true);
+  // Keys are routed by each machine's server, so nothing is written while one is stale.
+  const busy =
+    saving || machines.some((machine) => machine.state?.applying === true || machine.refreshing);
   const checking = writable.some((machine) => machine.hasServer === null);
   const editable = overall.canToggle && !busy;
 
@@ -156,6 +159,15 @@ export function EnvironmentAgentMemorySettings() {
               ];
         }),
       );
+      // The server answers from its new settings on the next read; read now.
+      for (const machine of writable) {
+        registry.refresh(
+          serverEnvironment.hindsightBanks({
+            environmentId: machine.environment.environmentId,
+            input: {},
+          }),
+        );
+      }
       setUrlDraft(null);
       setApiKeyDraft("");
     } finally {
@@ -231,7 +243,13 @@ export function EnvironmentAgentMemorySettings() {
         <View className="flex-row items-center gap-3">
           <TextInput
             accessibilityLabel="Hindsight API key"
-            placeholder={hasSavedKey ? "Saved API key" : "API key (optional)"}
+            placeholder={
+              hasSavedKey
+                ? "Saved API key"
+                : shared.keysElsewhere
+                  ? "Saved on some machines"
+                  : "API key (optional)"
+            }
             value={apiKeyDraft}
             onChangeText={setApiKeyDraft}
             secureTextEntry
@@ -247,8 +265,14 @@ export function EnvironmentAgentMemorySettings() {
               disabled={!editable}
               onPress={() => void saveApiKey(apiKeyDraft.trim())}
             />
-          ) : hasSavedKey ? (
-            <MemoryButton label="Remove" disabled={!editable} onPress={() => void saveApiKey("")} />
+          ) : hasSavedKey || shared.keysElsewhere ? (
+            <MemoryButton
+              label={shared.keysElsewhere ? "Remove everywhere" : "Remove"}
+              disabled={!editable}
+              onPress={() =>
+                void (shared.keysElsewhere ? writeShared({ kind: "clearKeys" }) : saveApiKey(""))
+              }
+            />
           ) : null}
         </View>
       </View>

@@ -501,7 +501,9 @@ export type HindsightSharedWrite =
   /** An empty key removes it. */
   | { readonly kind: "apiKey"; readonly apiKey: string }
   /** An empty URL puts each machine back on its own server. */
-  | { readonly kind: "server"; readonly url: string };
+  | { readonly kind: "server"; readonly url: string }
+  /** Removes the key from every machine that has one, whatever its server. */
+  | { readonly kind: "clearKeys" };
 
 export interface HindsightSharedPatch {
   readonly agentMemory?: boolean;
@@ -544,6 +546,9 @@ export function hindsightSharedPatch(
         shouldHandOffHindsightServer(machine, handoff, { enabling: false, withKey: true })
         ? { baseUrl: handoff.url, apiKey: write.apiKey }
         : null;
+    case "clearKeys":
+      // Removing a key sends it nowhere, so it may reach every machine.
+      return machine.hasSavedKey ? { apiKey: "" } : null;
     case "server":
       if (write.url.length === 0) {
         return machine.savedUrl.length > 0 ? { baseUrl: "", apiKey: "" } : null;
@@ -564,6 +569,11 @@ export interface HindsightSharedSettings {
   readonly hasOverride: boolean;
   /** Some machine on the shared server has a key saved, which Remove clears. */
   readonly hasKey: boolean;
+  /**
+   * Some machine on another server has a key saved, which only a
+   * remove-everywhere reaches.
+   */
+  readonly keysElsewhere: boolean;
 }
 
 /**
@@ -586,5 +596,8 @@ export function summarizeHindsightSharedSettings(
     urlsDiffer: distinct.size > 1,
     hasOverride: overrides.length > 0,
     hasKey: machines.some((machine) => machine.hasSavedKey && isOnHindsightServer(machine, target)),
+    keysElsewhere: machines.some(
+      (machine) => machine.hasSavedKey && !isOnHindsightServer(machine, target),
+    ),
   };
 }

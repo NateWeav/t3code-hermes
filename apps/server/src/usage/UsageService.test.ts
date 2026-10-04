@@ -154,6 +154,32 @@ const replaceFile = (path: string, content: string) =>
     await NodeFSP.rename(path + ".next", path);
   });
 
+/** A Hermes home whose state.db holds one session with `outputTokens`. */
+const writeHermesSession = (hermesHome: string, sessionId: string, outputTokens: number) =>
+  Effect.promise(async () => {
+    await NodeFSP.mkdir(hermesHome, { recursive: true });
+    const db = new NodeSqlite.DatabaseSync(NodePath.join(hermesHome, "state.db"));
+    try {
+      db.exec(`
+        CREATE TABLE sessions (
+          id TEXT PRIMARY KEY, model TEXT, started_at REAL, ended_at REAL,
+          input_tokens INTEGER, output_tokens INTEGER, cache_read_tokens INTEGER,
+          cache_write_tokens INTEGER, reasoning_tokens INTEGER,
+          estimated_cost_usd REAL, actual_cost_usd REAL
+        );
+        CREATE TABLE messages (session_id TEXT, timestamp REAL);
+      `);
+      db.prepare("INSERT INTO sessions VALUES (?, ?, ?, NULL, 10, ?, 0, 0, 0, NULL, NULL)").run(
+        sessionId,
+        "custom/model",
+        Date.parse("2026-08-01T10:00:00Z") / 1000,
+        outputTokens,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
 function totalOutputTokens(summary: { buckets: readonly { totals: { outputTokens: number } }[] }) {
   return summary.buckets.reduce((sum, bucket) => sum + bucket.totals.outputTokens, 0);
 }
@@ -163,31 +189,8 @@ describe("UsageService", () => {
     Effect.gen(function* () {
       const { transcript, settings, home } = yield* setup;
       const hermesHome = NodePath.join(home, "hermes");
-      yield* Effect.promise(async () => {
-        await NodeFSP.writeFile(transcript, claudeLine(1, 5));
-        await NodeFSP.mkdir(hermesHome);
-      });
-      yield* Effect.sync(() => {
-        const db = new NodeSqlite.DatabaseSync(NodePath.join(hermesHome, "state.db"));
-        try {
-          db.exec(`
-            CREATE TABLE sessions (
-              id TEXT PRIMARY KEY, model TEXT, started_at REAL, ended_at REAL,
-              input_tokens INTEGER, output_tokens INTEGER, cache_read_tokens INTEGER,
-              cache_write_tokens INTEGER, reasoning_tokens INTEGER,
-              estimated_cost_usd REAL, actual_cost_usd REAL
-            );
-            CREATE TABLE messages (session_id TEXT, timestamp REAL);
-          `);
-          db.prepare("INSERT INTO sessions VALUES (?, ?, ?, NULL, 10, 7, 0, 0, 0, NULL, NULL)").run(
-            "hermes-session",
-            "custom/model",
-            Date.parse("2026-08-01T10:00:00Z") / 1000,
-          );
-        } finally {
-          db.close();
-        }
-      });
+      yield* Effect.promise(() => NodeFSP.writeFile(transcript, claudeLine(1, 5)));
+      yield* writeHermesSession(hermesHome, "hermes-session", 7);
       const service = yield* UsageService.make.pipe(
         Effect.provide(serviceLayers({ prefix: "usage-hermes-retention-test", home, settings })),
       );
@@ -206,6 +209,37 @@ describe("UsageService", () => {
       assert.strictEqual(
         missingDatabase.sources.find((source) => source.fingerprint.provider === "hermes")?.status,
         "missing",
+      );
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("counts every Hermes profile's sessions alongside the default home", () =>
+    Effect.gen(function* () {
+      const { settings, home } = yield* setup;
+      const hermesHome = NodePath.join(home, "hermes");
+      yield* writeHermesSession(hermesHome, "default-session", 7);
+      yield* writeHermesSession(NodePath.join(hermesHome, "profiles", "work"), "work-session", 11);
+      // A profile that never ran, and Hermes's deleted-profile tombstones.
+      yield* Effect.promise(async () => {
+        await NodeFSP.mkdir(NodePath.join(hermesHome, "profiles", "unused"));
+        await NodeFSP.mkdir(NodePath.join(hermesHome, "profiles", ".deleted"));
+      });
+      const service = yield* UsageService.make.pipe(
+        Effect.provide(serviceLayers({ prefix: "usage-hermes-profiles-test", home, settings })),
+      );
+      const summary = yield* service.readSummary(WINDOW);
+      assert.strictEqual(totalOutputTokens(summary), 18);
+      assert.deepStrictEqual(
+        summary.sources
+          .filter((source) => source.fingerprint.provider === "hermes")
+          .map((source) => [
+            NodePath.relative(hermesHome, source.fingerprint.resolvedHomePath),
+            source.status,
+          ]),
+        [
+          ["state.db", "ok"],
+          [NodePath.join("profiles", "work", "state.db"), "ok"],
+        ],
       );
     }).pipe(Effect.scoped),
   );

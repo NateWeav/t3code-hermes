@@ -155,7 +155,9 @@ export async function readOpenCodeUsage(
   }
 
   // Do not follow symlinks, including cycles. Database records win over their
-  // old JSON copies when OpenCode has migrated a store in place.
+  // old JSON copies when OpenCode has migrated a store in place. A file last
+  // written before the window cannot hold a message created inside it, so it
+  // is skipped unread: a migrated store keeps thousands of these forever.
   const directories = [NodePath.join(root, "storage", "message")];
   while (directories.length > 0) {
     const directory = directories.pop()!;
@@ -169,8 +171,9 @@ export async function readOpenCodeUsage(
           const id = entry.name.slice(0, -5);
           if (seen.has(`opencode:${id}`)) continue;
           const file = { path, records: [] as UsageRecord[] };
-          files.push(file);
           try {
+            if ((await NodeFSP.stat(path)).mtimeMs < sinceMs) continue;
+            files.push(file);
             append(
               file.records,
               parseOpenCodeMessage(await NodeFSP.readFile(path, "utf8"), { id }),

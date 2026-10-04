@@ -512,7 +512,10 @@ describe("hasUnseenCompletion", () => {
         interactionMode: "default",
         latestRun: makeLatestRun(),
         lastVisitedAt: "2026-03-09T10:04:00.000Z",
+        pullRequests: [],
         runtime: null,
+        settledAt: null,
+        settledOverride: null,
       }),
     ).toBe(true);
   });
@@ -526,7 +529,10 @@ describe("hasUnseenCompletion", () => {
         interactionMode: "default",
         latestRun: makeLatestRun(),
         lastVisitedAt: undefined,
+        pullRequests: [],
         runtime: null,
+        settledAt: null,
+        settledOverride: null,
       }),
     ).toBe(false);
   });
@@ -898,7 +904,17 @@ describe("resolveSidebarThreadStatus", () => {
     updatedAt: "2026-03-09T10:00:00.000Z",
   };
 
-  const idle = { hasPendingApprovals: false, hasPendingUserInput: false, runtime: null };
+  const idle = {
+    hasActionableProposedPlan: false,
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    interactionMode: "default" as const,
+    pendingBackgroundTasks: [],
+    pullRequests: [],
+    runtime: null,
+    settledAt: null,
+    settledOverride: null,
+  };
 
   it("prioritizes approval over a running runtime", () => {
     expect(resolveSidebarThreadStatus({ ...idle, hasPendingApprovals: true, runtime })).toBe(
@@ -1250,6 +1266,9 @@ describe("resolveThreadStatusPill", () => {
     interactionMode: "plan" as const,
     latestRun: null,
     lastVisitedAt: undefined,
+    pullRequests: [],
+    settledAt: null,
+    settledOverride: null,
     runtime: {
       status: "running" as const,
       providerName: "Codex",
@@ -1296,7 +1315,7 @@ describe("resolveThreadStatusPill", () => {
       resolveThreadStatusPill({
         thread: {
           ...baseThread,
-          pendingBackgroundTasks: [{ taskId: "bg-1", description: "Watch build", kind: "monitor" }],
+          pendingBackgroundTasks: [{ taskId: "bg-1", description: "Review", kind: "subagent" }],
           runtime: {
             ...baseThread.runtime,
             status: "idle",
@@ -2114,7 +2133,14 @@ describe("navigation after parking a thread", () => {
 describe("unseen completion with background work", () => {
   it.each([
     { kind: "command", status: "ready", topStatus: "done", receded: false, pill: "Completed" },
-    { kind: "monitor", status: "waiting", topStatus: "waiting", receded: true, pill: "Waiting" },
+    {
+      kind: "monitor",
+      status: "monitoring",
+      topStatus: "monitoring",
+      receded: true,
+      pill: "Monitoring",
+    },
+    { kind: "subagent", status: "waiting", topStatus: "waiting", receded: true, pill: "Waiting" },
   ] as const)("presents a completed thread with a $kind roster", (expected) => {
     const thread = presentThreadShell(localEnvironmentId, {
       ...makeThreadFixture().source,
@@ -2144,6 +2170,68 @@ describe("unseen completion with background work", () => {
   });
 });
 
+describe("pull request watch", () => {
+  const watchedPullRequest = {
+    host: "github.com",
+    repository: "pingdotgg/t3code",
+    number: 1,
+    url: "https://github.com/pingdotgg/t3code/pull/1",
+    source: "agent" as const,
+    linkedAt: "2026-06-20T00:00:00.000Z",
+    snapshot: null,
+    stack: null,
+    watch: {
+      startedAt: "2026-06-20T00:00:00.000Z",
+      headSha: null,
+      failedChecks: [],
+      passed: false,
+      remarksThrough: "2026-06-20T00:00:00.000Z",
+      remarkIds: [],
+      conflicting: false,
+      wakes: 0,
+    },
+  };
+  const watchingThread = (
+    overrides: Partial<ReturnType<typeof makeThreadFixture>["source"]> = {},
+  ) =>
+    presentThreadShell(localEnvironmentId, {
+      ...makeThreadFixture().source,
+      latestRunId: RunId.make("run-watching"),
+      status: "completed",
+      latestRunCompletedAt: DateTime.makeUnsafe("2026-06-20T01:00:00.000Z"),
+      lastVisitedAt: DateTime.makeUnsafe("2026-06-20T00:59:00.000Z"),
+      pullRequests: [watchedPullRequest],
+      ...overrides,
+    });
+
+  it("presents a settled thread watching a pull request as Monitoring", () => {
+    const thread = watchingThread();
+    const status = resolveSidebarThreadStatus(thread);
+    expect(status).toBe("monitoring");
+    expect(resolveThreadStatusPill({ thread })).toMatchObject({ label: "Monitoring" });
+    expect(isSidebarThreadWorking(thread)).toBe(true);
+  });
+
+  it("keeps a ready plan ahead of Monitoring", () => {
+    const thread = watchingThread({ interactionMode: "plan", hasActionableProposedPlan: true });
+    expect(resolveSidebarThreadStatus(thread)).toBe("ready");
+    expect(resolveThreadStatusPill({ thread })).toMatchObject({ label: "Plan Ready" });
+    expect(isSidebarThreadWorking(thread)).toBe(false);
+  });
+
+  it("does not present a settled thread as Monitoring", () => {
+    const thread = watchingThread({ settledAt: DateTime.makeUnsafe("2026-06-20T01:01:00.000Z") });
+    expect(resolveSidebarThreadStatus(thread)).toBe("ready");
+  });
+
+  it("reads as ready again once the watch ends", () => {
+    const { watch: _ended, ...unwatched } = watchedPullRequest;
+    const thread = watchingThread({ pullRequests: [unwatched] });
+    expect(resolveSidebarThreadStatus(thread)).toBe("ready");
+    expect(resolveThreadStatusPill({ thread })).toMatchObject({ label: "Completed" });
+  });
+});
+
 describe("Working shelf (beta)", () => {
   const runtime = {
     status: "running" as const,
@@ -2153,14 +2241,18 @@ describe("Working shelf (beta)", () => {
     lastError: null,
     updatedAt: "2026-03-09T10:00:00.000Z",
   };
-  const backgroundTask = { taskId: "bg-1", description: "Watch build", kind: "monitor" as const };
+  const backgroundTask = { taskId: "bg-1", description: "Review", kind: "subagent" as const };
   const idle = {
     hasActionableProposedPlan: false,
     hasPendingApprovals: false,
     hasPendingUserInput: false,
     interactionMode: "default" as const,
     latestRun: makeLatestRun(),
+    pendingBackgroundTasks: [],
+    pullRequests: [],
     runtime: null,
+    settledAt: null,
+    settledOverride: null,
   };
   // Stopped with background tasks still open: V2's "waiting" sidebar status.
   const waiting = {

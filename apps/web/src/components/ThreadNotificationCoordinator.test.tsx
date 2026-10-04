@@ -21,6 +21,7 @@ const state = vi.hoisted(() => ({
   limited: false,
   subagent: false,
   background: [] as Array<{ taskId: string; kind: "command" | "monitor" }>,
+  watchingPullRequest: false,
   hermesRun: null as { profile: string; sourceKey: string; sessionId: string } | null,
   latestRunId: "run-1" as string | null,
   add: vi.fn(
@@ -36,6 +37,27 @@ const state = vi.hoisted(() => ({
 }));
 
 const SHELL_NOW = DateTime.makeUnsafe("2026-09-13T09:00:00.000Z");
+
+const watchedPullRequest = {
+  host: "github.com",
+  repository: "pingdotgg/t3code",
+  number: 1,
+  url: "https://github.com/pingdotgg/t3code/pull/1",
+  source: "agent",
+  linkedAt: "2026-09-13T09:00:00.000Z",
+  snapshot: null,
+  stack: null,
+  watch: {
+    startedAt: "2026-09-13T09:00:00.000Z",
+    headSha: null,
+    failedChecks: [],
+    passed: false,
+    remarksThrough: "2026-09-13T09:00:00.000Z",
+    remarkIds: [],
+    conflicting: false,
+    wakes: 0,
+  },
+};
 
 function mockThreadShell() {
   return {
@@ -75,6 +97,7 @@ function mockThreadShell() {
     latestUserMessageAt: null,
     hasActionableProposedPlan: false,
     pendingBackgroundTasks: state.background,
+    pullRequests: state.watchingPullRequest ? [watchedPullRequest] : [],
     itemCount: 0,
     visibleItemCount: 0,
     createdAt: SHELL_NOW,
@@ -159,6 +182,7 @@ beforeEach(() => {
     limited: false,
     subagent: false,
     background: [],
+    watchingPullRequest: false,
     hermesRun: null,
     latestRunId: "run-1",
   });
@@ -279,6 +303,16 @@ describe("thread notifications", () => {
     expect(state.add).not.toHaveBeenCalled();
     state.background = [{ taskId: "dev", kind: "command" }];
     await render();
+    expect(state.add).toHaveBeenCalledTimes(1);
+    expect(state.add).toHaveBeenLastCalledWith(
+      expect.objectContaining({ title: "Thread completed" }),
+    );
+  });
+
+  it("announces a finished turn while the agent watches a pull request", async () => {
+    state.watchingPullRequest = true;
+    await render();
+    await complete();
     expect(state.add).toHaveBeenCalledTimes(1);
     expect(state.add).toHaveBeenLastCalledWith(
       expect.objectContaining({ title: "Thread completed" }),

@@ -269,6 +269,40 @@ describe("hermes patches", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("removes the applied version beside another patch with versions of its own", () =>
+    Effect.gen(function* () {
+      // Both patches are built like the one above, in separate halves of one
+      // file, and the older version of each is applied. Taking the other
+      // patch out by its newer version would leave the wrong text behind.
+      const fileSystem = yield* FileSystem.FileSystem;
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hermes-checkout-" });
+      git(root, "init", "--quiet");
+      const file = NodePath.join(root, "session.py");
+      const half = (name: string, first: string, second: string) => {
+        const block = `${name} = 0\n${name} = 1\n${name} = 2\n`;
+        return `${block}${name}v = ${first}\n${block}${name}v = ${second}\n${block}`;
+      };
+      const padding = "p = 0\np = 1\np = 2\np = 3\n";
+      const lines = (target: [string, string], other: [string, string]) =>
+        `${half("k", ...target)}${padding}${half("q", ...other)}`;
+      NodeFS.writeFileSync(file, lines(["1", "3"], ["1", "3"]));
+      const base = commit(root, "base");
+      const at = (target: [string, string], other: [string, string]) =>
+        diffAt(root, "session.py", lines(target, other), base);
+      const patch = definition([at(["1", "2"], ["1", "3"]), at(["2", "3"], ["1", "3"])]);
+      const other: HermesPatchDefinition = {
+        id: HermesPatchId.make("other-patch"),
+        title: "Other",
+        neededFor: "Tests.",
+        versions: [at(["1", "3"], ["1", "2"]), at(["1", "3"], ["2", "3"])],
+      };
+
+      NodeFS.writeFileSync(file, lines(["2", "3"], ["2", "3"]));
+      assert.isTrue((yield* changeHermesPatch(root, patch, "reverse", [patch, other])).ok);
+      assert.strictEqual(NodeFS.readFileSync(file, "utf8"), lines(["1", "3"], ["2", "3"]));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("removes every file of the applied version when another touches fewer", () =>
     Effect.gen(function* () {
       // The older version changes two files, the newer only one of them the

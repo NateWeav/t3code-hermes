@@ -242,7 +242,7 @@ export function EnvironmentAgentMemorySettings() {
       </View>
       {writable
         // Also while switched off: cleanup that failed is retried the same way.
-        .filter((machine) => machine.summary.tone === "attention")
+        .filter((machine) => machine.summary.retryable)
         .map((machine) => (
           <SettingsActionRow
             key={machine.environment.environmentId}

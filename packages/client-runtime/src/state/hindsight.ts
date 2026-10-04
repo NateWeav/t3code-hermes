@@ -271,6 +271,11 @@ export interface HindsightAgentMemorySummary {
   readonly label: string | null;
   readonly detail: string | null;
   readonly agents: ReadonlyArray<HindsightAgentMemoryRow>;
+  /**
+   * Running the pass again could change the answer: something failed or is
+   * blocked. A coverage gap needs attention but not a retry.
+   */
+  readonly retryable: boolean;
 }
 
 /**
@@ -282,7 +287,9 @@ export function describeHindsightAgentMemory(
   state: HindsightAgentMemoryState | null,
   options: { readonly enabled: boolean },
 ): HindsightAgentMemorySummary {
-  if (state === null) return { tone: "idle", label: "Checking…", detail: null, agents: [] };
+  if (state === null) {
+    return { tone: "idle", label: "Checking…", detail: null, agents: [], retryable: false };
+  }
   const agents = state.agents.map((agent): HindsightAgentMemoryRow => {
     const label = HINDSIGHT_AGENT_LABELS[agent.target];
     const status = agent.state === "failed" ? "Failed" : null;
@@ -291,16 +298,30 @@ export function describeHindsightAgentMemory(
       target: agent.target,
       label,
       status,
-      tone: agent.state === "installed" ? "ready" : agent.state === "failed" ? "attention" : "idle",
+      // Wired with a detail means wired somewhere the agent does not look:
+      // the detail names what is not covered.
+      tone:
+        agent.state === "installed"
+          ? agent.detail === null
+            ? "ready"
+            : "attention"
+          : agent.state === "failed"
+            ? "attention"
+            : "idle",
       detail: agent.detail,
       text: agent.detail === null ? name : `${name} · ${agent.detail}`,
     };
   });
+  const retryable =
+    !state.applying &&
+    (state.blocker !== null ||
+      state.detail !== null ||
+      state.agents.some((agent) => agent.state === "failed"));
   const headline = (
     tone: HindsightAgentMemorySummary["tone"],
     label: string | null,
     detail: string | null,
-  ): HindsightAgentMemorySummary => ({ tone, label, detail, agents });
+  ): HindsightAgentMemorySummary => ({ tone, label, detail, agents, retryable });
 
   if (state.applying) return headline("idle", "Applying…", null);
   if (state.blocker === "notConfigured") {
@@ -334,9 +355,12 @@ export function describeHindsightAgentMemory(
       "Claude Code, Codex, and Hermes aren't set up on this environment.",
     );
   }
-  return agents.every((agent) => agent.tone === "ready")
-    ? headline("ready", null, null)
-    : headline("attention", "Needs attention", null);
+  // The rows say what needs attention; a headline would only hide them.
+  return headline(
+    agents.every((agent) => agent.tone === "ready") ? "ready" : "attention",
+    null,
+    null,
+  );
 }
 
 /** One connected machine, as the all-machines switch needs to see it. */

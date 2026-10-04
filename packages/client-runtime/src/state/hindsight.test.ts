@@ -67,7 +67,7 @@ describe("describeHindsightAgentMemory", () => {
       { ...base, agents: [{ target: "codex", state: "failed", detail: "npx exited 1" }] },
       { enabled: false },
     );
-    expect(failed).toMatchObject({ tone: "attention", label: null });
+    expect(failed).toMatchObject({ tone: "attention", label: null, retryable: true });
     expect(failed.agents[0]?.text).toBe("Codex failed · npx exited 1");
     expect(
       describeHindsightAgentMemory(
@@ -75,6 +75,25 @@ describe("describeHindsightAgentMemory", () => {
         { enabled: false },
       ).tone,
     ).toBe("idle");
+  });
+
+  it("does not read as healthy while a wired agent misses the home it runs from", () => {
+    const summary = describeHindsightAgentMemory(
+      {
+        ...base,
+        agents: [
+          {
+            target: "claudeCode",
+            state: "installed",
+            detail: "Not covered: work (own config home).",
+          },
+        ],
+      },
+      { enabled: true },
+    );
+    // No headline: the row itself says what is not covered. Retrying would not change it.
+    expect(summary).toMatchObject({ tone: "attention", label: null, retryable: false });
+    expect(summary.agents[0]?.tone).toBe("attention");
   });
 
   it("reports an in-flight pass instead of a stale verdict", () => {

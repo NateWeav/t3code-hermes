@@ -108,6 +108,8 @@ function setup(options: Options) {
   if (options.preinstalled)
     fakeInstaller(home, ["install", "claude-code", "codex", "--api-url", BASE_URL]);
   const calls: Array<ReadonlyArray<string>> = [];
+  // A Hindsight config Hermes finds elsewhere (legacy file or variables).
+  let hermesFallback = options.hermesHasHindsight === true;
   let connection =
     options.connection === undefined ? { baseUrl: BASE_URL, apiKey: null } : options.connection;
   const missing = new Set(options.missing ?? []);
@@ -143,8 +145,7 @@ function setup(options: Options) {
         resolveConnection: Effect.sync(() => {
           // Like the real one, a file that does not parse resolves nothing.
           const pluginConfig = NodePath.join(hermesHome, "hindsight", "config.json");
-          const hermesConfigured =
-            options.hermesHasHindsight === true || parsesAsJson(pluginConfig);
+          const hermesConfigured = hermesFallback || parsesAsJson(pluginConfig);
           return {
             enabled: true,
             connection:
@@ -249,19 +250,24 @@ function setup(options: Options) {
     connection = next;
   };
 
-  /** Points the Hermes instance at another `HERMES_HOME`. */
-  const setHermesHome = (hermesHomePath: string) =>
+  /** Sets one variable in the Hermes instance's environment. */
+  const setHermesEnv = (name: string, value: string) =>
     Effect.flatMap(ServerSettings.ServerSettingsService, (service) =>
       service.updateSettings({
         providerInstances: {
           [ProviderInstanceId.make("hermes")]: {
             driver: ProviderDriverKind.make("hermes"),
             enabled: true,
-            environment: [{ name: "HERMES_HOME", value: hermesHomePath, sensitive: false }],
+            environment: [{ name, value, sensitive: false }],
           },
         },
       }),
     );
+  /** Points the Hermes instance at another `HERMES_HOME`. */
+  const setHermesHome = (hermesHomePath: string) => setHermesEnv("HERMES_HOME", hermesHomePath);
+  const setHermesFallback = (present: boolean) => {
+    hermesFallback = present;
+  };
 
   return {
     home,
@@ -273,6 +279,8 @@ function setup(options: Options) {
     setAgentMemory,
     setConnection,
     setHermesHome,
+    setHermesEnv,
+    setHermesFallback,
     apply,
   };
 }
@@ -905,6 +913,42 @@ describe("HindsightAgentMemory", () => {
       const state = yield* harness.apply;
 
       expect(state.agents[0]?.detail).toBe("Not covered: uses its own API key for this server.");
+    }).pipe(Effect.provide(harness.layer));
+  });
+  it.effect("follows a Hermes instance's own HOME to its config", () => {
+    const harness = setup({ agentMemory: true, missing: ["claude", "codex"] });
+    const instanceHome = NodePath.join(harness.home, "hermes-user");
+    const instanceHermes = NodePath.join(instanceHome, ".hermes");
+    NodeFS.mkdirSync(instanceHermes, { recursive: true });
+    NodeFS.writeFileSync(
+      NodePath.join(instanceHermes, "config.yaml"),
+      "memory:\n  provider: holographic\n",
+    );
+    return Effect.gen(function* () {
+      yield* harness.setHermesEnv("HOME", instanceHome);
+      yield* harness.apply;
+
+      expect(hermesProvider(instanceHermes)).toBe("hindsight");
+      // The server account's own Hermes is not the one this instance runs.
+      expect(NodeFS.existsSync(NodePath.join(harness.hermesHome, "config.yaml"))).toBe(false);
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("lets go of a Hermes config it created once someone deletes it", () => {
+    const harness = setup({ agentMemory: true, missing: ["claude", "codex"] });
+    const pluginConfig = NodePath.join(harness.hermesHome, "hindsight", "config.json");
+    return Effect.gen(function* () {
+      harness.setConnection({ baseUrl: "http://shared-host:8888", apiKey: null });
+      yield* harness.apply;
+      NodeFS.rmSync(pluginConfig);
+      harness.setHermesFallback(true);
+      const state = yield* harness.apply;
+
+      // Hermes now runs on its fallback, which is its own and not recreated over.
+      expect(NodeFS.existsSync(pluginConfig)).toBe(false);
+      expect(state.agents[0]?.detail).toBe(
+        "Not covered: uses its own Hindsight server at 100.64.0.1:8888.",
+      );
     }).pipe(Effect.provide(harness.layer));
   });
 });

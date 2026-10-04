@@ -265,7 +265,7 @@ export function HindsightAgentMemorySettings() {
               const status = machineStatus(machine);
               // Also while switched off: cleanup that failed is retried the same way.
               const canRetry =
-                machine.writable && !machine.unsupported && machine.summary.tone === "attention";
+                machine.writable && !machine.unsupported && machine.summary.retryable;
               return (
                 <li
                   key={machine.environment.environmentId}

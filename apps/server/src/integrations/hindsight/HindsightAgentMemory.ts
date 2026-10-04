@@ -525,6 +525,13 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
         }
         if (found) present.push({ target: agent.target, customHomeInstances, hermesHome: null });
       }
+      // Hermes, like Python's `Path.home()`, takes `~` from the instance's own
+      // HOME (USERPROFILE on Windows) when it sets one.
+      const hermesHomeOf = (env: NodeJS.ProcessEnv) =>
+        resolveHermesHome(
+          env,
+          nonEmptyString(env["HOME"]) ?? nonEmptyString(env["USERPROFILE"]) ?? homeDir,
+        );
       // Like Memory, Skills and Tasks, this follows one Hermes instance; another
       // enabled one with a home of its own is named, not wired.
       const hermes = resolveEnabledHermesInstance(settings);
@@ -532,14 +539,13 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
         const env = mergeProviderInstanceEnvironment(hermes.environment, hostEnvironment);
         const binary = nonEmptyString(hermes.settings.binaryPath) ?? "hermes";
         if (yield* isAvailable(binary, env)) {
-          const hermesHome = resolveHermesHome(env, homeDir);
+          const hermesHome = hermesHomeOf(env);
           const otherHomes = instances.flatMap(([instanceId, instance]) =>
             instanceId !== hermes.instanceId &&
             instance.driver === "hermes" &&
             resolveProviderInstanceEnabled(instance) &&
-            resolveHermesHome(
+            hermesHomeOf(
               mergeProviderInstanceEnvironment(instance.environment, hostEnvironment),
-              homeDir,
             ) !== hermesHome
               ? [instanceId]
               : [],
@@ -904,9 +910,15 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
         // A config T3 Code created follows the connection, in its connection
         // fields only. Hermes' own is never written, and one that does not read
         // (or no longer parses) is left alone with Hermes not switched onto it.
-        const ownsConfig = owned?.wroteConfig === true;
         const configFile = hermesHindsightFile(home);
         const configExists = yield* fs.exists(configFile).pipe(Effect.orElseSucceed(() => true));
+        // A config T3 Code created and someone has since deleted is no longer
+        // its own: whatever Hermes falls back to is Hermes'.
+        if (owned !== null && owned.wroteConfig && !configExists) {
+          owned = owned.changedProvider ? { ...owned, wroteConfig: false } : null;
+          nextLedger = { ...nextLedger, hermes: owned };
+        }
+        const ownsConfig = owned?.wroteConfig === true;
         const current = configExists ? asRecord(yield* readJson(configFile)) : null;
         const unusable =
           configExists && (current === null || (!ownsConfig && resolved.hermes === null));

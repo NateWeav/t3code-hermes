@@ -221,10 +221,14 @@ const pickAppliedVersion = Effect.fn("pickHermesAppliedVersion")(function* (
   const choices: ReadonlyArray<string | null>[] = [];
   for (const versionFiles of allOthers) {
     const options: (string | null)[] = [null];
+    // Only versions that share a file and reverse from the working tree can
+    // be the applied one, so only those count toward the cap below.
+    const sharing: string[] = [];
     for (const file of versionFiles) {
       const touched = yield* pathsOf([file]);
-      if (touched.some((path) => candidatePaths.has(path))) options.push(file);
+      if (touched.some((path) => candidatePaths.has(path))) sharing.push(file);
     }
+    options.push(...(yield* fitting(checkoutRoot, sharing, ["apply", "--check", "-R"])));
     if (options.length > 1) choices.push(options);
   }
   const combinations = choices.reduce<ReadonlyArray<ReadonlyArray<string>>>(

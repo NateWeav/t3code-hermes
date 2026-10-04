@@ -655,6 +655,8 @@ type ThreadStatusInput = Pick<
   | "latestRun"
   | "pullRequests"
   | "runtime"
+  | "settledAt"
+  | "settledOverride"
 > & {
   lastVisitedAt?: string | null | undefined;
   pendingBackgroundTasks?: SidebarThreadSummary["pendingBackgroundTasks"] | undefined;
@@ -982,11 +984,15 @@ export function shouldRecedeSidebarThread(input: {
 
 type SidebarThreadStatusInput = Pick<
   SidebarThreadSummary,
+  | "hasActionableProposedPlan"
   | "hasPendingApprovals"
   | "hasPendingUserInput"
+  | "interactionMode"
   | "pendingBackgroundTasks"
   | "pullRequests"
   | "runtime"
+  | "settledAt"
+  | "settledOverride"
 >;
 
 export function resolveSidebarThreadStatus(thread: SidebarThreadStatusInput): SidebarThreadStatus {
@@ -1293,9 +1299,8 @@ export function resolveThreadStatusPill(input: {
   }
 
   const monitoring = threadIsMonitoring({
+    ...thread,
     pendingBackgroundTasks: thread.pendingBackgroundTasks ?? [],
-    pullRequests: thread.pullRequests,
-    runtime: thread.runtime,
   });
   if (!monitoring && backgroundWorkHoldsCompletion(thread.pendingBackgroundTasks ?? [])) {
     return {

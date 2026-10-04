@@ -18,6 +18,8 @@ type WorkingThreadInput = Pick<
   | "pendingBackgroundTasks"
   | "pullRequests"
   | "runtime"
+  | "settledAt"
+  | "settledOverride"
 >;
 
 /** Threads busy with work that does not need the user fold into the Working

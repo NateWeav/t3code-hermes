@@ -514,6 +514,8 @@ describe("hasUnseenCompletion", () => {
         lastVisitedAt: "2026-03-09T10:04:00.000Z",
         pullRequests: [],
         runtime: null,
+        settledAt: null,
+        settledOverride: null,
       }),
     ).toBe(true);
   });
@@ -529,6 +531,8 @@ describe("hasUnseenCompletion", () => {
         lastVisitedAt: undefined,
         pullRequests: [],
         runtime: null,
+        settledAt: null,
+        settledOverride: null,
       }),
     ).toBe(false);
   });
@@ -901,11 +905,15 @@ describe("resolveSidebarThreadStatus", () => {
   };
 
   const idle = {
+    hasActionableProposedPlan: false,
     hasPendingApprovals: false,
     hasPendingUserInput: false,
+    interactionMode: "default" as const,
     pendingBackgroundTasks: [],
     pullRequests: [],
     runtime: null,
+    settledAt: null,
+    settledOverride: null,
   };
 
   it("prioritizes approval over a running runtime", () => {
@@ -1259,6 +1267,8 @@ describe("resolveThreadStatusPill", () => {
     latestRun: null,
     lastVisitedAt: undefined,
     pullRequests: [],
+    settledAt: null,
+    settledOverride: null,
     runtime: {
       status: "running" as const,
       providerName: "Codex",
@@ -2204,8 +2214,14 @@ describe("pull request watch", () => {
 
   it("keeps a ready plan ahead of Monitoring", () => {
     const thread = watchingThread({ interactionMode: "plan", hasActionableProposedPlan: true });
+    expect(resolveSidebarThreadStatus(thread)).toBe("ready");
     expect(resolveThreadStatusPill({ thread })).toMatchObject({ label: "Plan Ready" });
     expect(isSidebarThreadWorking(thread)).toBe(false);
+  });
+
+  it("does not present a settled thread as Monitoring", () => {
+    const thread = watchingThread({ settledAt: DateTime.makeUnsafe("2026-06-20T01:01:00.000Z") });
+    expect(resolveSidebarThreadStatus(thread)).toBe("ready");
   });
 
   it("reads as ready again once the watch ends", () => {
@@ -2235,6 +2251,8 @@ describe("Working shelf (beta)", () => {
     pendingBackgroundTasks: [],
     pullRequests: [],
     runtime: null,
+    settledAt: null,
+    settledOverride: null,
   };
   // Stopped with background tasks still open: V2's "waiting" sidebar status.
   const waiting = {

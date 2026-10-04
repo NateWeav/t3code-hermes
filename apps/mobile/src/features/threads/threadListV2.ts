@@ -191,11 +191,15 @@ export function threadHasUnseenCompletion(
 export function resolveThreadListV2Status(
   thread: Pick<
     EnvironmentThreadShell,
+    | "hasActionableProposedPlan"
     | "hasPendingApprovals"
     | "hasPendingUserInput"
+    | "interactionMode"
     | "pendingBackgroundTasks"
     | "pullRequests"
     | "runtime"
+    | "settledAt"
+    | "settledOverride"
   >,
 ): ThreadListV2Status {
   if (thread.hasPendingApprovals) {

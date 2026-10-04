@@ -23,6 +23,8 @@ function thread(id: string, working: boolean) {
     interactionMode: "default" as const,
     pendingBackgroundTasks: [],
     pullRequests: [],
+    settledAt: null,
+    settledOverride: null,
     runtime: working
       ? {
           status: "running" as const,
@@ -134,6 +136,23 @@ describe("threadIsMonitoring", () => {
   it("lets a running or failed run outrank the watch", () => {
     expect(threadIsMonitoring({ ...watching, runtime: runtime("running") })).toBe(false);
     expect(threadIsMonitoring({ ...watching, runtime: runtime("failed") })).toBe(false);
+  });
+
+  it("lets a plan waiting on the user outrank the watch", () => {
+    const planReady = {
+      ...watching,
+      runtime: runtime("completed"),
+      interactionMode: "plan" as const,
+      hasActionableProposedPlan: true,
+    };
+    expect(threadIsMonitoring(planReady)).toBe(false);
+    expect(isThreadWorking(planReady)).toBe(false);
+  });
+
+  it("does not monitor a settled thread, whose watch the server holds", () => {
+    const settled = { ...watching, runtime: runtime("completed") };
+    expect(threadIsMonitoring({ ...settled, settledAt: "2026-06-01T01:00:00.000Z" })).toBe(false);
+    expect(threadIsMonitoring({ ...settled, settledOverride: "settled" as const })).toBe(false);
   });
 
   it("monitors provider monitors only when nothing else holds the thread", () => {

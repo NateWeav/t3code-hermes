@@ -748,6 +748,65 @@ describe("orchestration V2 contracts", () => {
     expect(() => decode({ ...appOwnedSubagent, completionWake: "sometimes" })).toThrow();
   });
 
+  it("decodes subagent role and usage, and older events without them", () => {
+    const legacy = {
+      id: "node-subagent-3",
+      threadId: "thread-1",
+      runId: "run-1",
+      parentNodeId: "node-root-1",
+      origin: "provider_native",
+      createdBy: "agent",
+      driver: "hermes",
+      providerInstanceId: "hermes",
+      providerThreadId: null,
+      childThreadId: "thread-child-1",
+      nativeTaskRef: null,
+      prompt: "Review the parser",
+      title: "Review the parser",
+      model: "test/reviewer",
+      status: "completed",
+      result: "Parser reviewed.",
+      startedAt: now,
+      completedAt: now,
+      updatedAt: now,
+    };
+    const event = (payload: Record<string, unknown>) =>
+      decodeOrchestrationV2DomainEvent({
+        id: "event-subagent-3",
+        type: "subagent.updated",
+        threadId: "thread-1",
+        runId: "run-1",
+        occurredAt: now,
+        payload,
+      });
+
+    const old = event(legacy);
+    if (old.type !== "subagent.updated") throw new Error("expected subagent event");
+    expect(old.payload.role).toBeUndefined();
+    expect(old.payload.usage).toBeUndefined();
+
+    const reported = event({
+      ...legacy,
+      role: "leaf",
+      usage: { totalTokens: 1_500, inputTokens: 1_200, outputTokens: 300, durationMs: 2_500 },
+    });
+    if (reported.type !== "subagent.updated") throw new Error("expected subagent event");
+    expect(reported.payload.role).toBe("leaf");
+    expect(reported.payload.usage).toEqual({
+      totalTokens: 1_500,
+      inputTokens: 1_200,
+      outputTokens: 300,
+      durationMs: 2_500,
+    });
+    // Duration alone is a valid report; negative counts are not.
+    expect(
+      decodeOrchestrationV2Subagent({ ...legacy, usage: { durationMs: 1_500 } }).usage,
+    ).toEqual({ durationMs: 1_500 });
+    expect(() =>
+      decodeOrchestrationV2Subagent({ ...legacy, usage: { totalTokens: -1 } }),
+    ).toThrow();
+  });
+
   it("decodes thread projections with an ordered turn item rendering stream", () => {
     const projection = decodeOrchestrationV2ThreadProjection({
       thread: {

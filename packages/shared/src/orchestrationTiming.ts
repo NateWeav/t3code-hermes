@@ -1,14 +1,21 @@
 import { isOrchestrationV2WorkActive, type OrchestrationV2Subagent } from "@t3tools/contracts";
 
-/** Unknown settled timing must not turn a task's age into its work duration. */
+/**
+ * Unknown settled timing must not turn a task's age into its work duration.
+ * A settled task's provider-reported duration wins over the observed window,
+ * which also counts the wait before the child actually started.
+ */
 export function deriveSubagentElapsedMs(
   agent: {
     readonly status: OrchestrationV2Subagent["status"];
     readonly startedAt: string | null;
     readonly completedAt: string | null;
+    readonly usage?: OrchestrationV2Subagent["usage"];
   },
   nowMs: number,
 ): number | null {
+  const reportedMs = agent.usage?.durationMs;
+  if (reportedMs !== undefined && !isOrchestrationV2WorkActive(agent.status)) return reportedMs;
   if (agent.startedAt === null) return null;
   const end = isOrchestrationV2WorkActive(agent.status)
     ? nowMs

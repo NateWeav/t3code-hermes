@@ -92,6 +92,8 @@ describe("Hermes delegate_task ACP boundary", () => {
         status: "running",
         childSessionId: null,
         result: null,
+        role: "orchestrator",
+        usage: null,
       },
       {
         nativeTaskId: "tc-fixture-batch:task:1",
@@ -101,6 +103,8 @@ describe("Hermes delegate_task ACP boundary", () => {
         status: "running",
         childSessionId: null,
         result: null,
+        role: "leaf",
+        usage: null,
       },
     ]);
   });
@@ -112,12 +116,29 @@ describe("Hermes delegate_task ACP boundary", () => {
       const completed = updates(tool(scenario.complete, start));
       if (scenario.name === "single") {
         expect(completed).toMatchObject([
-          { status: "completed", model: "test/reviewer", result: "Parser reviewed." },
+          {
+            status: "completed",
+            model: "test/reviewer",
+            role: "leaf",
+            result: "Parser reviewed.",
+            usage: { durationMs: 2_500 },
+          },
         ]);
       } else if (scenario.name === "batch") {
         expect(completed).toMatchObject([
-          { status: "completed", result: "Routing inspected." },
-          { status: "failed", model: "test/tester", result: "Test process failed." },
+          {
+            status: "completed",
+            role: "orchestrator",
+            result: "Routing inspected.",
+            usage: { durationMs: 1_500 },
+          },
+          {
+            status: "failed",
+            model: "test/tester",
+            role: "leaf",
+            result: "Test process failed.",
+            usage: { durationMs: 2_000 },
+          },
         ]);
       } else {
         expect(completed).toMatchObject([{ status: "failed", result: "Delegation unavailable." }]);
@@ -127,11 +148,51 @@ describe("Hermes delegate_task ACP boundary", () => {
 
   it("prefers structured args/results over clipped display content", () => {
     const start = tool({ ...batch.start, rawInput: batch.args });
-    expect(updates(start)[0]).toMatchObject({ model: "test/researcher" });
+    expect(updates(start)[0]).toMatchObject({ model: "test/researcher", role: "orchestrator" });
     const completed = updates(
       tool({ ...batch.complete, content: [], rawOutput: batch.result }, start),
     );
-    expect(completed.map((update) => update.status)).toEqual(["completed", "failed"]);
+    expect(completed).toMatchObject([
+      { status: "completed", role: "orchestrator", usage: { durationMs: 1_500 } },
+      { status: "failed", role: "leaf", usage: { durationMs: 2_000 } },
+    ]);
+  });
+
+  it("reads a single spawn's role from its args", () => {
+    const single = fixture.cases.find((item) => item.name === "single")!;
+    expect(updates(tool({ ...single.start, rawInput: single.args }))).toMatchObject([
+      { role: "leaf", model: "test/reviewer", usage: null },
+    ]);
+  });
+
+  it("counts a result entry's nested tokens, without double-counting reasoning", () => {
+    const start = tool({ ...batch.start, rawInput: batch.args });
+    const [first] = updates(
+      tool(
+        {
+          ...batch.complete,
+          content: [],
+          rawOutput: {
+            results: [
+              {
+                task_index: 0,
+                status: "completed",
+                summary: "Routing inspected.",
+                duration_seconds: 1.5,
+                tokens: { input: 1_200, output: 340.4 },
+              },
+            ],
+          },
+        },
+        start,
+      ),
+    );
+    expect(first!.usage).toEqual({
+      totalTokens: 1_540,
+      inputTokens: 1_200,
+      outputTokens: 340,
+      durationMs: 1_500,
+    });
   });
 
   it("moves only the child a progress event names", () => {
@@ -149,9 +210,27 @@ describe("Hermes delegate_task ACP boundary", () => {
           task_index: 0,
           status: "completed",
           summary: "Done",
+          input_tokens: 9_000,
+          output_tokens: 3_400,
+          reasoning_tokens: 1_200,
+          duration_seconds: 12.34,
         }),
       ),
-    ).toMatchObject([{ status: "completed", result: "Done", title: "Inspect routing" }]);
+    ).toMatchObject([
+      {
+        status: "completed",
+        result: "Done",
+        title: "Inspect routing",
+        role: "orchestrator",
+        usage: {
+          totalTokens: 12_400,
+          inputTokens: 9_000,
+          outputTokens: 3_400,
+          reasoningOutputTokens: 1_200,
+          durationMs: 12_340,
+        },
+      },
+    ]);
   });
 
   it("claims spinner frames and grandchildren without moving any child", () => {
@@ -197,6 +276,8 @@ describe("Hermes delegate_task ACP boundary", () => {
           task_index: 0,
           status: "completed",
           summary: "Background done.",
+          output_tokens: 800,
+          duration_seconds: 4,
         }),
       )!,
     ).toMatchObject([
@@ -204,6 +285,9 @@ describe("Hermes delegate_task ACP boundary", () => {
         nativeTaskId: "tc-fixture-dispatched:task:0",
         status: "completed",
         result: "Background done.",
+        // The adapter keeps the role it saw at launch; the late report carries usage.
+        role: null,
+        usage: { totalTokens: 800, outputTokens: 800, durationMs: 4_000 },
       },
     ]);
   });

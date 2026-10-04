@@ -5,6 +5,7 @@ import type {
   ServerProvider,
 } from "@t3tools/contracts";
 import { formatModelSlugName, resolveSelectableModel } from "@t3tools/shared/model";
+import { formatTokens } from "@t3tools/shared/usageFormat";
 import { fileBasename } from "../markdownLinks.ts";
 import { isTerminalSubagentStatus } from "./subagentRuntime.ts";
 
@@ -115,6 +116,13 @@ export function resolveSubagentMetadata(input: {
       : []),
   ];
   return { modelLabel, workspace };
+}
+
+/** "12.4K tokens" once a provider reports a subagent's token count. */
+export function subagentTokensLabel(
+  usage: { readonly totalTokens?: number | undefined } | null | undefined,
+): string | null {
+  return usage?.totalTokens === undefined ? null : `${formatTokens(usage.totalTokens)} tokens`;
 }
 
 /** Live work leads with progress; settled work leads with its result. */

@@ -41,4 +41,11 @@ describe("subagent card", () => {
       subagentCardElapsed([{ ...done, startedAt: null }], DateTime.toEpochMillis(later)),
     ).toBeNull();
   });
+
+  it("shows a lone settled agent's reported duration, not its wait to start", () => {
+    const reported = { ...done, usage: { totalTokens: 1_200, durationMs: 2_500 } };
+    expect(subagentCardElapsed([reported], DateTime.toEpochMillis(later))).toBe("2.5s");
+    // A group still spans wall time; per-child durations cannot be placed in it.
+    expect(subagentCardElapsed([reported, done], DateTime.toEpochMillis(later))).toBe("1m");
+  });
 });

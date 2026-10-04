@@ -23,12 +23,14 @@ function formatElapsedSeconds(totalSeconds: number): string {
 export function AgentElapsed({
   agent,
 }: {
-  agent: Pick<RuntimeSubagent, "status" | "startedAt" | "completedAt">;
+  agent: Pick<RuntimeSubagent, "status" | "startedAt" | "completedAt"> &
+    Partial<Pick<RuntimeSubagent, "usage">>;
 }) {
   const textRef = useRef<HTMLSpanElement>(null);
   const live = isOrchestrationV2WorkActive(agent.status);
   const startedAt = agent.startedAt;
   const completedAt = agent.completedAt;
+  const usage = agent.usage;
 
   useEffect(() => {
     if (!startedAt) {
@@ -37,7 +39,7 @@ export function AgentElapsed({
     const update = () => {
       if (textRef.current) {
         const elapsedMs = deriveSubagentElapsedMs(
-          { status: agent.status, startedAt, completedAt },
+          { status: agent.status, startedAt, completedAt, usage },
           Date.now(),
         );
         textRef.current.textContent =
@@ -48,7 +50,7 @@ export function AgentElapsed({
     if (!live) return;
     const id = setInterval(update, 1000);
     return () => clearInterval(id);
-  }, [live, startedAt, completedAt, agent.status]);
+  }, [live, startedAt, completedAt, usage, agent.status]);
 
   const elapsedMs = deriveSubagentElapsedMs(agent, 0);
   if (elapsedMs === null) {

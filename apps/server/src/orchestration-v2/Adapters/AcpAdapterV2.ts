@@ -17,6 +17,7 @@ import {
   type OrchestrationV2ProviderTurn,
   type OrchestrationV2RuntimeRequest,
   type OrchestrationV2Subagent,
+  type OrchestrationV2SubagentUsage,
   type OrchestrationV2TurnItem,
   type OrchestrationV2UserInputQuestion,
   type ProviderApprovalDecision,
@@ -490,6 +491,9 @@ export interface AcpAdapterV2SubagentUpdate {
     | "cancelled";
   readonly childSessionId: string | null;
   readonly result: string | null;
+  /** Provider-named role and finished-child usage; flavors that never report them omit both. */
+  readonly role?: string | null;
+  readonly usage?: OrchestrationV2SubagentUsage | null;
   /**
    * When false, still project a normal tool turn item after the subagent update
    * (hydration tools like get_command_or_subagent_output). Defaults to true.
@@ -2696,6 +2700,9 @@ export function makeAcpAdapterV2(
           const turnItemOrdinal =
             existing?.turnItemOrdinal ?? (yield* resolveItemOrdinal(context, nativeTaskId));
           const taskStatus = update.status;
+          // Kept across updates that omit them, so a terminal report's usage sticks.
+          const role = update.role ?? existing?.task.role;
+          const usage = update.usage ?? existing?.task.usage;
           const task: OrchestrationV2Subagent = {
             ...(existing?.task ?? {
               id: nodeId,
@@ -2715,6 +2722,8 @@ export function makeAcpAdapterV2(
               result: null,
               startedAt: now,
             }),
+            ...(role ? { role } : {}),
+            ...(usage ? { usage } : {}),
             status: taskStatus,
             result: update.result ?? existing?.task.result ?? null,
             completedAt: acpSubagentStatusIsTerminal(taskStatus) ? now : null,

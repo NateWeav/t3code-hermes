@@ -1,5 +1,8 @@
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { resolveSubagentMetadata } from "@t3tools/client-runtime/state/subagent-display";
+import {
+  resolveSubagentMetadata,
+  subagentTokensLabel,
+} from "@t3tools/client-runtime/state/subagent-display";
 import type { EnvironmentId, OrchestrationV2Subagent } from "@t3tools/contracts";
 import type { ReactNode } from "react";
 import { View } from "react-native";
@@ -18,6 +21,8 @@ type SubagentRowSubagent = Pick<
   | "threadId"
   | "childThreadId"
   | "model"
+  | "role"
+  | "usage"
   | "driver"
   | "providerInstanceId"
   | "title"
@@ -39,6 +44,7 @@ export function SubagentRow(props: {
 }) {
   const presentation = resolveSubagentRowPresentation(props.subagent);
   const detail = subagentCardDetail(presentation.detail);
+  const tokens = subagentTokensLabel(props.subagent.usage);
   return (
     <View className="flex-row gap-3">
       <View className="h-5 justify-center">
@@ -69,6 +75,9 @@ export function SubagentRow(props: {
               {presentation.statusLabel}
             </Text>
           </View>
+          {tokens ? (
+            <Text className="shrink-0 text-xs tabular-nums text-foreground-muted">{tokens}</Text>
+          ) : null}
           {props.elapsed}
           {presentation.canOpenThread ? (
             <SymbolView name="chevron.right" size={12} tintColorClassName="accent-icon-subtle" />
@@ -126,6 +135,7 @@ function SubagentMetadata(props: {
       />
       <Text className="min-w-0 shrink text-xs text-foreground-muted" numberOfLines={1}>
         {provider?.displayName ? `${provider.displayName} · ` : ""}
+        {subagent.role ? `${subagent.role} · ` : ""}
         {modelLabel}
       </Text>
       {workspace.map(({ label, value }) => (

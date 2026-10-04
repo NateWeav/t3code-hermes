@@ -1221,6 +1221,124 @@ describe("AcpAdapterV2", () => {
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 
+  it.effect("carries a subagent's role and usage across updates that omit them", () =>
+    Effect.gen(function* () {
+      const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const path = yield* Path.Path;
+      const mockAgentPath = yield* path.fromFileUrl(
+        new URL("../../../scripts/acp-mock-agent.ts", import.meta.url),
+      );
+      type Runtime = AcpSessionRuntime.AcpSessionRuntime["Service"];
+      let handler: Parameters<Runtime["handleSessionUpdate"]>[0] | undefined;
+      const instanceId = ProviderInstanceId.make("acp-subagent-usage");
+      const adapter = makeAcpAdapterV2({
+        instanceId,
+        crypto: yield* Crypto.Crypto,
+        fileSystem: yield* FileSystem.FileSystem,
+        idAllocator: yield* IdAllocator.IdAllocatorV2,
+        serverConfig: yield* ServerConfig.ServerConfig,
+        selfInvocation: yield* resolveSelfInvocation(),
+        flavor: {
+          driver: ACP_TEST_DRIVER,
+          capabilities: AcpProviderCapabilitiesV2,
+          // Only the launch names the role and only the end reports usage, as
+          // Hermes does; a flavor that reports neither leaves both absent.
+          extractSubagentUpdate: (toolCall) => {
+            const reports = toolCall.toolCallId === "spawn-reported";
+            const done = toolCall.status === "completed";
+            return {
+              nativeTaskId: toolCall.toolCallId,
+              prompt: "Review the parser",
+              title: "Review the parser",
+              model: null,
+              status: done ? "completed" : "running",
+              childSessionId: null,
+              result: done ? "Reviewed." : null,
+              ...(reports && toolCall.status === "pending" ? { role: "reviewer" } : {}),
+              ...(reports && done ? { usage: { totalTokens: 1_200, durationMs: 1_500 } } : {}),
+            };
+          },
+          makeRuntime: makeMockRuntime({
+            childProcessSpawner,
+            mockAgentPath,
+            wrapRuntime: (runtime) => ({
+              ...runtime,
+              handleSessionUpdate: (next) =>
+                Effect.sync(() => {
+                  handler = next;
+                }).pipe(Effect.andThen(runtime.handleSessionUpdate(next))),
+              prompt: () =>
+                Effect.gen(function* () {
+                  assert.isDefined(handler);
+                  for (const toolCallId of ["spawn-reported", "spawn-silent"]) {
+                    const updates = [
+                      { sessionUpdate: "tool_call", toolCallId, title: "spawn", status: "pending" },
+                      { sessionUpdate: "tool_call_update", toolCallId, status: "in_progress" },
+                      { sessionUpdate: "tool_call_update", toolCallId, status: "completed" },
+                    ] satisfies Array<EffectAcpSchema.SessionUpdate>;
+                    for (const update of updates)
+                      yield* handler!({ sessionId: "mock-session-1", update });
+                  }
+                  return { stopReason: "end_turn" as const };
+                }),
+            }),
+          }),
+        },
+      });
+      const threadId = ThreadId.make("acp-subagent-usage-parent");
+      const modelSelection = { instanceId, model: "default" };
+      const runtimePolicy = ProviderAdapterV2RuntimePolicy.make({
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        cwd: process.cwd(),
+      });
+      const runtime = yield* adapter.openSession({
+        threadId,
+        providerSessionId: ProviderSessionId.make("acp-subagent-usage-session"),
+        modelSelection,
+        runtimePolicy,
+      });
+      const providerThread = yield* runtime.ensureThread({
+        threadId,
+        modelSelection,
+        runtimePolicy,
+      });
+      yield* runtime.startTurn(
+        makeTurnInput({
+          threadId,
+          providerThread,
+          instanceId,
+          runtimePolicy,
+          now: yield* DateTime.now,
+        }),
+      );
+      const events = Array.from(
+        yield* runtime.events.pipe(
+          Stream.takeUntil((event) => event.type === "turn.terminal"),
+          Stream.runCollect,
+        ),
+      );
+      const tasks = events.flatMap((event) =>
+        event.type === "subagent.updated" ? [event.subagent] : [],
+      );
+      const reported = tasks.filter((task) => task.nativeTaskRef?.nativeId === "spawn-reported");
+      assert.deepEqual(
+        reported.map(({ status, role, usage }) => [status, role, usage]),
+        [
+          ["running", "reviewer", undefined],
+          ["running", "reviewer", undefined],
+          ["completed", "reviewer", { totalTokens: 1_200, durationMs: 1_500 }],
+        ],
+      );
+      const silent = tasks.filter((task) => task.nativeTaskRef?.nativeId === "spawn-silent");
+      assert.isNotEmpty(silent);
+      for (const task of silent) {
+        assert.notProperty(task, "role");
+        assert.notProperty(task, "usage");
+      }
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+
   it.effect("projects ACP v2 fidelity updates into first-class orchestration items", () =>
     Effect.gen(function* () {
       const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;

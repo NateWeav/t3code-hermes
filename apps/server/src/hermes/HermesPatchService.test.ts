@@ -170,7 +170,10 @@ describe("HermesPatchService", () => {
       );
       // The restart command returns while the old process still answers.
       gateway.answerPid(4242);
-      setTimeout(() => gateway.answerPid(null), 1_500);
+      yield* Effect.sleep("1500 millis").pipe(
+        Effect.andThen(() => gateway.answerPid(null)),
+        Effect.forkScoped,
+      );
 
       yield* Effect.gen(function* () {
         const service = yield* HermesPatchService;

@@ -549,7 +549,16 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
         updateFailed: !update.ok,
         failureOutput: update.ok ? null : outputTail(update.output),
       } satisfies HermesPatchUpdateHermesResult;
-    }).pipe(Effect.onInterrupt(() => reapply(checkout, removed).pipe(Effect.ignore)));
+    }).pipe(
+      Effect.onInterrupt(() =>
+        reapply(checkout, removed).pipe(
+          Effect.ignore,
+          // The update may already have moved HEAD, so provider snapshots
+          // re-probe here too.
+          Effect.andThen(PubSub.publish(changesPubSub, undefined)),
+        ),
+      ),
+    );
   }).pipe(changeLock.withPermits(1));
 
   /** The gateway answering once one other than `previousPid` does, or the last read. */

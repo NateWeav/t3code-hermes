@@ -13,6 +13,7 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Stream from "effect/Stream";
 import { FetchHttpClient } from "effect/unstable/http";
 
 import { providerUpdateLock } from "../provider/providerMaintenanceCommandCoordinator.ts";
@@ -401,6 +402,12 @@ describe("HermesPatchService.updateHermes", () => {
         yield* service.apply({ patchId: patch.id });
         const patched = hermes.read();
 
+        // Provider snapshots re-probe on this stream, even after an interrupt.
+        const changed = yield* service.changes.pipe(
+          Stream.take(1),
+          Stream.runDrain,
+          Effect.forkChild,
+        );
         const update = yield* service.updateHermes.pipe(Effect.forkChild);
         // Resolves once the fake `hermes update` is running, patches off.
         yield* Effect.promise(() => NodeFSP.readFile(started, "utf8"));
@@ -409,6 +416,7 @@ describe("HermesPatchService.updateHermes", () => {
 
         assert.strictEqual(hermes.read(), patched);
         assert.strictEqual(hermes.head(), hermes.older);
+        yield* Fiber.join(changed);
       }).pipe(withService(hermes.binaryPath, [patch]));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );

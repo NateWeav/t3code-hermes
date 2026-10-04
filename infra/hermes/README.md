@@ -45,13 +45,20 @@ needs its id, title, and `neededFor` text there; patch order is the order the ta
 order the patches stack in. Then run `node scripts/generate-hermes-patches.ts`, which rejects an
 inconsistent manifest; a server test fails until the generated file matches.
 
-To apply one by hand, use the version listed first that fits:
+The Patches tab picks the version for you, and is the easier way. To apply one by hand, use the
+first version listed in `patches.json` whose `hermesCommit` your checkout already contains, and
+check that it fits:
 
 ```bash
 cd ~/.hermes/hermes-agent
+git merge-base --is-ancestor <hermesCommit> HEAD && echo contained
 git apply --check /path/to/t3code/infra/hermes/<patch-id>/<version>.patch
 git apply /path/to/t3code/infra/hermes/<patch-id>/<version>.patch
 ```
+
+If no listed commit is in your checkout, apply a version only when it is the one version that
+passes `--check`. When several pass, they can be changing different code, so use the Patches tab,
+which refuses when it can't tell them apart.
 
 ## `acp-central-ssh-execution`
 

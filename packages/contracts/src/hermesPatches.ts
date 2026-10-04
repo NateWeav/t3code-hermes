@@ -12,6 +12,7 @@
  *
  * @module hermesPatches
  */
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import { ForwardCompatibleArray, TrimmedNonEmptyString } from "./baseSchemas.ts";
@@ -52,6 +53,29 @@ export const HermesPatchesAvailability = Schema.Literals([
 ]);
 export type HermesPatchesAvailability = typeof HermesPatchesAvailability.Type;
 
+/**
+ * The Hermes gateway serving the environment's Hermes home. A gateway is a
+ * long-running process: it keeps the code it imported at startup, so patches
+ * reach it only after a restart.
+ *
+ * - `upToDate`: started after the patched files last changed.
+ * - `outdated`: started before, so it still runs the code from then.
+ * - `restarting`: this server is restarting it now.
+ */
+export const HermesGatewayState = Schema.Literals(["upToDate", "outdated", "restarting"]);
+export type HermesGatewayState = typeof HermesGatewayState.Type;
+
+export const HermesGatewayStatus = Schema.Struct({
+  state: HermesGatewayState,
+  /**
+   * False when nothing would bring the gateway back after it stops, such as
+   * one started with `hermes gateway run` in a terminal. It has to be
+   * restarted where it was started.
+   */
+  canRestart: Schema.Boolean,
+});
+export type HermesGatewayStatus = typeof HermesGatewayStatus.Type;
+
 export const HermesPatchesSnapshot = Schema.Struct({
   availability: HermesPatchesAvailability,
   /** The checkout the states describe; null unless `ready`. */
@@ -62,6 +86,17 @@ export const HermesPatchesSnapshot = Schema.Struct({
    */
   detachedHead: Schema.Boolean,
   patches: ForwardCompatibleArray(HermesPatch),
+  /** Null when no gateway is running, and from servers that predate this field. */
+  gateway: Schema.NullOr(HermesGatewayStatus).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  /**
+   * Why the last gateway restart from T3 Code failed, until the next one
+   * starts. Null when it succeeded or none was attempted.
+   */
+  gatewayRestartFailure: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
 });
 export type HermesPatchesSnapshot = typeof HermesPatchesSnapshot.Type;
 
@@ -72,6 +107,9 @@ export const HermesPatchChangeInput = Schema.Struct({
   patchId: HermesPatchId,
 });
 export type HermesPatchChangeInput = typeof HermesPatchChangeInput.Type;
+
+export const HermesGatewayRestartInput = Schema.Struct({});
+export type HermesGatewayRestartInput = typeof HermesGatewayRestartInput.Type;
 
 export class HermesPatchError extends Schema.TaggedError<HermesPatchError>()("HermesPatchError", {
   reason: Schema.Literals(["unavailable", "unknownPatch", "wrongState", "commandFailed"]),

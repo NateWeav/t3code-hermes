@@ -14,9 +14,13 @@ Each patch shows one of three states:
   rebased one.
 
 **Remove** takes an applied patch back out. Applying or removing affects new Hermes sessions; a
-chat that is already running keeps the Hermes it started with. A patch to the Hermes gateway, such
-as the one for webhook runs in profiles, takes effect once you restart the gateway with
-`hermes gateway restart`.
+chat that is already running keeps the Hermes it started with.
+
+The Hermes gateway, which serves messaging platforms, scheduled tasks, and webhooks, keeps running
+the code it started with. When it started before your latest patch change, the tab says so and
+offers **Restart gateway**. Apply or remove everything you want first, then restart once: the
+gateway finishes the chats, tasks, and webhook runs it is working on before it restarts. A gateway
+started with `hermes gateway run` in a terminal does not run as a service, so restart it there.
 
 ## Things to know
 

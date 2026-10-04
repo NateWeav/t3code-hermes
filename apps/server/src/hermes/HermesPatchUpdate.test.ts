@@ -8,6 +8,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import { HermesPatchId } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
+import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
@@ -113,6 +114,7 @@ const makeHermesWith = (options: { readonly updateHelp: string }) =>
       binaryPath,
       [
         "#!/bin/sh",
+        `if [ "$2" = "--help" ] && [ -f "${NodePath.join(base, "help-hangs")}" ]; then exec sleep 60; fi`,
         `if [ "$2" = "--help" ]; then echo "${options.updateHelp}"; exit 0; fi`,
         `echo "$@" >> "${log}"`,
         // Signals through a FIFO that the update is underway, then hangs.
@@ -159,9 +161,13 @@ const makeHermesWith = (options: { readonly updateHelp: string }) =>
 
 const makeHermes = makeHermesWith({ updateHelp: CURRENT_UPDATE_HELP });
 
-const withService = (binaryPath: string, patches: ReadonlyArray<HermesPatchDefinition>) =>
+const withService = (
+  binaryPath: string,
+  patches: ReadonlyArray<HermesPatchDefinition>,
+  options: { readonly updateTimeout?: Duration.Input } = {},
+) =>
   Effect.provide(
-    Layer.effect(HermesPatchService, makeWith({ patches })).pipe(
+    Layer.effect(HermesPatchService, makeWith({ patches, ...options })).pipe(
       Layer.provide(
         ServerSettings.layerTest({ providers: { hermes: { enabled: true, binaryPath } } }),
       ),
@@ -371,6 +377,24 @@ describe("HermesPatchService.updateHermes", () => {
         assert.strictEqual(hermes.read(), patched);
         assert.strictEqual(hermes.head(), hermes.older);
       }).pipe(withService(hermes.binaryPath, [patch]));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.live("gives up on an update whose help probe hangs, and puts the patches back", () =>
+    Effect.gen(function* () {
+      const hermes = yield* makeHermes;
+      const patch = hermes.patch([hermes.newerVersion, hermes.olderVersion]);
+      NodeFS.writeFileSync(NodePath.join(hermes.base, "help-hangs"), "");
+      yield* Effect.gen(function* () {
+        const service = yield* HermesPatchService;
+        yield* service.apply({ patchId: patch.id });
+        const patched = hermes.read();
+        const result = yield* service.updateHermes;
+        assert.isTrue(result.updateFailed);
+        assert.include(result.failureOutput ?? "", "did not finish in time");
+        assert.strictEqual(hermes.read(), patched);
+        assert.isFalse(NodeFS.existsSync(hermes.log));
+      }).pipe(withService(hermes.binaryPath, [patch], { updateTimeout: "1 second" }));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 

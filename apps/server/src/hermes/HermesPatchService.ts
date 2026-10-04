@@ -410,6 +410,8 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
     readonly env: NodeJS.ProcessEnv;
   }) =>
     Effect.gen(function* () {
+      // Bounded with the update itself: by now the patches are off, so a
+      // stalled probe must not leave the checkout unpatched indefinitely.
       const help = yield* runHermes(checkout, ["update", "--help"]).pipe(
         Effect.map((result) => `${result.stdout}${result.stderr}`),
         Effect.orElseSucceed(() => ""),
@@ -423,13 +425,16 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
           new RegExp(`(^|[\\s\\[,])${flag}(?![\\w-])`, "m").test(help),
         ),
       ];
-      const result = yield* runHermes(checkout, args).pipe(Effect.timeoutOption(updateTimeout));
-      if (Option.isNone(result)) {
-        return { ok: false, output: "hermes update did not finish in time and was stopped." };
-      }
-      const output = `${result.value.stdout}${result.value.stderr}`;
-      return { ok: result.value.code === 0, output };
+      const result = yield* runHermes(checkout, args);
+      return { ok: result.code === 0, output: `${result.stdout}${result.stderr}` };
     }).pipe(
+      Effect.timeoutOption(updateTimeout),
+      Effect.map((result) =>
+        Option.getOrElse(result, () => ({
+          ok: false,
+          output: "hermes update did not finish in time and was stopped.",
+        })),
+      ),
       Effect.catch((cause) =>
         Effect.succeed({ ok: false, output: `Could not run hermes update: ${String(cause)}` }),
       ),

@@ -13,7 +13,7 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import type { HermesPatchId } from "@t3tools/contracts";
+import type { EnvironmentId, HermesPatchId } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
 
 import { toastManager } from "../components/ui/toast";
@@ -34,7 +34,13 @@ export function useHermesPatches() {
   const updateCommand = useAtomCommand(serverEnvironment.hermesPatchUpdateHermes);
   const [changingPatchId, setChangingPatchId] = useState<HermesPatchId | null>(null);
   const [updating, setUpdating] = useState(false);
-  const [updateSummary, setUpdateSummary] = useState<string | null>(null);
+  // Kept with the environment it describes, so switching environments, even
+  // mid-update, never shows one environment's result against another's.
+  const [summary, setSummary] = useState<{
+    readonly environmentId: EnvironmentId;
+    readonly text: string;
+  } | null>(null);
+  const updateSummary = summary?.environmentId === environmentId ? summary.text : null;
   const refresh = query.refresh;
   const busy = changingPatchId !== null || updating;
   const restartCommand = useAtomCommand(serverEnvironment.hermesGatewayRestart);
@@ -102,11 +108,11 @@ export function useHermesPatches() {
   const updateHermes = async () => {
     if (environmentId === null || busy) return;
     setUpdating(true);
-    setUpdateSummary(null);
+    setSummary(null);
     try {
       const result = await updateCommand({ environmentId, input: {} });
       if (result._tag === "Success") {
-        setUpdateSummary(describeHermesUpdateResult(result.value));
+        setSummary({ environmentId, text: describeHermesUpdateResult(result.value) });
       } else if (!isAtomCommandInterrupted(result)) {
         toastManager.add({
           type: "error",

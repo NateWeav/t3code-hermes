@@ -36,7 +36,13 @@ export function useHermesPatches(environmentId: EnvironmentId | null) {
   });
   const [changingPatchId, setChangingPatchId] = useState<HermesPatchId | null>(null);
   const [updating, setUpdating] = useState(false);
-  const [updateSummary, setUpdateSummary] = useState<string | null>(null);
+  // Kept with the environment it describes, so switching environments, even
+  // mid-update, never shows one environment's result against another's.
+  const [summary, setSummary] = useState<{
+    readonly environmentId: EnvironmentId;
+    readonly text: string;
+  } | null>(null);
+  const updateSummary = summary?.environmentId === environmentId ? summary.text : null;
   const refresh = query.refresh;
   const busy = changingPatchId !== null || updating;
   const restartCommand = useAtomCommand(serverEnvironment.hermesGatewayRestart, {
@@ -93,11 +99,11 @@ export function useHermesPatches(environmentId: EnvironmentId | null) {
   const updateHermes = async (): Promise<string | null> => {
     if (environmentId === null || busy) return null;
     setUpdating(true);
-    setUpdateSummary(null);
+    setSummary(null);
     try {
       const result = await updateCommand({ environmentId, input: {} });
       if (result._tag === "Success") {
-        setUpdateSummary(describeHermesUpdateResult(result.value));
+        setSummary({ environmentId, text: describeHermesUpdateResult(result.value) });
         return null;
       }
       if (isAtomCommandInterrupted(result)) return null;

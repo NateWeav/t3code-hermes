@@ -19,8 +19,10 @@
  * by a ledger of what T3 Code itself changed, so an agent someone wired by
  * hand — or a Hermes install that already used Hindsight — is never torn down
  * by switching this off; it is only pointed back at the server it used before.
- * A ledger entry is cleared only once its undo succeeds, so a failed one is
- * retried by the next pass.
+ * The ledger is saved before anything it covers is changed, and an entry is
+ * cleared only once its undo succeeds, so a failed one is retried by the next
+ * pass. Agents follow the connection: with Memory off or no server left, what
+ * T3 Code wired is taken out, and the switch puts it back once there is one.
  *
  * @module HindsightAgentMemory
  */
@@ -331,8 +333,11 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
       Effect.andThen(fs.chmod(ledgerPath, 0o600)),
       Effect.provideService(FileSystem.FileSystem, fs),
       Effect.provideService(Path.Path, path),
+      Effect.as(true),
       Effect.catchCause((cause) =>
-        Effect.logWarning("could not save the agent memory ledger", { cause }),
+        Effect.logWarning("could not save the agent memory ledger", { cause }).pipe(
+          Effect.as(false),
+        ),
       ),
     );
 
@@ -506,17 +511,37 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
     const agents = yield* presentAgents(settings);
     const ledger = yield* readLedger;
     let nextLedger = ledger;
-    let blocker: HindsightAgentMemoryBlocker | null = null;
+    let blocker: HindsightAgentMemoryBlocker | null =
+      desired && connection === null ? "notConfigured" : null;
+    let detail: string | null = null;
     const failures = new Map<HindsightAgentTarget, string>();
+    // Wired only while there is a server to point them at.
+    const wire = desired && connection !== null;
+
+    /**
+     * Saves the ledger. Called with what is about to change before changing
+     * it, so a crash or a failed write never leaves a change T3 Code cannot
+     * find to undo; on `false` the change must not be made.
+     */
+    let persisted = ledger;
+    const persist = (next: AgentMemoryLedger) =>
+      Effect.gen(function* () {
+        if (next === persisted) return true;
+        if (!(yield* writeLedger(next))) {
+          detail =
+            "T3 Code could not save what it changes, so it changed nothing. The server log has the details.";
+          return false;
+        }
+        persisted = next;
+        return true;
+      });
 
     const coding = agents.flatMap((agent) =>
       agent.target === "claudeCode" || agent.target === "codex" ? [agent.target] : [],
     );
 
-    if (desired) {
-      if (connection === null) {
-        blocker = "notConfigured";
-      } else if (coding.length > 0) {
+    if (desired && connection !== null) {
+      if (coding.length > 0) {
         const wiredBefore = new Set<CodingAgentTarget>();
         for (const target of coding) {
           if (yield* codingAgentInstalled(target)) wiredBefore.add(target);
@@ -530,19 +555,24 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
             blocker = "nodeMissing";
           } else {
             yield* markApplying;
-            if (nextLedger.installerConfig === undefined) {
-              nextLedger = {
-                ...nextLedger,
-                installerConfig: { previous: yield* readText(installerConfigPath) },
-              };
-            }
-            const failure = yield* runInstaller("install", coding, connection);
+            // Claimed before the installer runs; uninstalling an agent a failed
+            // install never reached is harmless.
+            const ownedByT3 = new Set([
+              ...ledger.codingAgents,
+              ...coding.filter((target) => !wiredBefore.has(target)),
+            ]);
+            const claimed: AgentMemoryLedger = {
+              ...nextLedger,
+              codingAgents: [...ownedByT3],
+              installerConfig: nextLedger.installerConfig ?? {
+                previous: yield* readText(installerConfigPath),
+              },
+            };
+            const failure = (yield* persist(claimed))
+              ? yield* runInstaller("install", coding, connection)
+              : "T3 Code could not save what it changes, so the installer was not run.";
+            if (persisted === claimed) nextLedger = claimed;
             if (failure === null) {
-              const ownedByT3 = new Set([
-                ...ledger.codingAgents,
-                ...coding.filter((target) => !wiredBefore.has(target)),
-              ]);
-              nextLedger = { ...nextLedger, codingAgents: [...ownedByT3] };
               if (connection.apiKey === null && !(yield* clearInstallerToken)) {
                 for (const target of coding) {
                   failures.set(
@@ -609,14 +639,28 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
         const configStale =
           resolved.hermes === null ||
           (ownsConfig && (yield* readText(hermesHindsightFile(home))) !== configText);
-        const wroteConfig = configStale
-          ? yield* writeHermesHindsightConfig(home, configText)
-          : false;
+        const previousProvider = owned?.changedProvider ? owned.previousProvider : provider;
+        const claimed =
+          configStale || provider !== "hindsight"
+            ? yield* persist({
+                ...nextLedger,
+                hermes: {
+                  home,
+                  previousProvider,
+                  changedProvider: provider !== "hindsight" || (owned?.changedProvider ?? false),
+                  wroteConfig: configStale || ownsConfig,
+                },
+              })
+            : true;
+        const wroteConfig =
+          claimed && configStale ? yield* writeHermesHindsightConfig(home, configText) : false;
         if (configStale && !wroteConfig) {
           failures.set("hermes", "Hermes' Hindsight config could not be written.");
         }
         const changedProvider =
-          provider !== "hindsight" ? yield* writeHermesProvider(home, "hindsight") : false;
+          claimed && provider !== "hindsight"
+            ? yield* writeHermesProvider(home, "hindsight")
+            : false;
         if (provider !== "hindsight" && !changedProvider) {
           failures.set("hermes", "Hermes' config.yaml could not be updated.");
         }
@@ -625,14 +669,14 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
             ...nextLedger,
             hermes: {
               home,
-              previousProvider: owned?.changedProvider ? owned.previousProvider : provider,
+              previousProvider,
               changedProvider: changedProvider || (owned?.changedProvider ?? false),
               wroteConfig: wroteConfig || ownsConfig,
             },
           };
         }
       }
-    } else if (!desired && ledger.hermes !== null) {
+    } else if (!wire && ledger.hermes !== null) {
       const remaining = yield* undoHermes(ledger.hermes);
       nextLedger = { ...nextLedger, hermes: remaining };
       if (remaining !== null) {
@@ -640,7 +684,8 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
       }
     }
 
-    if (nextLedger !== ledger) yield* writeLedger(nextLedger);
+    // What actually changed; drops a claim whose change did not happen.
+    yield* persist(nextLedger);
 
     const after =
       nextLedger.hermes !== ledger.hermes ? yield* hindsight.resolveConnection : resolved;
@@ -667,7 +712,7 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
       applying: false,
       blocker,
       agents: statuses,
-      detail: null,
+      detail,
     } satisfies HindsightAgentMemoryState;
   });
 

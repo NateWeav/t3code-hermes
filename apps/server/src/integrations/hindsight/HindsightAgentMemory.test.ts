@@ -34,6 +34,8 @@ interface Options {
   readonly hermesYaml?: string;
   readonly hermesHasHindsight?: boolean;
   readonly preinstalled?: boolean;
+  /** Puts a non-empty directory where the ledger goes, so saving it fails. */
+  readonly unsavableLedger?: boolean;
 }
 
 const writeJson = (file: string, value: unknown) => {
@@ -76,6 +78,12 @@ function setup(options: Options) {
   NodeFS.mkdirSync(hermesHome, { recursive: true });
   if (options.hermesYaml !== undefined) {
     NodeFS.writeFileSync(NodePath.join(hermesHome, "config.yaml"), options.hermesYaml);
+  }
+  const stateBase = NodePath.join(home, "t3");
+  if (options.unsavableLedger) {
+    const blocked = NodePath.join(stateBase, "userdata", "hindsight-agent-memory.json");
+    NodeFS.mkdirSync(blocked, { recursive: true });
+    NodeFS.writeFileSync(NodePath.join(blocked, "keep"), "");
   }
   if (options.preinstalled)
     fakeInstaller(home, ["install", "claude-code", "codex", "--api-url", BASE_URL]);
@@ -143,7 +151,7 @@ function setup(options: Options) {
     Layer.provideMerge(settings),
     Layer.provide(hindsight),
     Layer.provide(runner),
-    Layer.provide(ServerConfig.layerTest(home, { prefix: "t3-agent-memory-state-" })),
+    Layer.provide(ServerConfig.layerTest(home, stateBase)),
     Layer.provide(
       Layer.succeed(CommandAvailability, (command) => Effect.succeed(!missing.has(command))),
     ),
@@ -161,7 +169,9 @@ function setup(options: Options) {
     (service) => service.apply,
   );
 
-  const setConnection = (next: { readonly baseUrl: string; readonly apiKey: string | null }) => {
+  const setConnection = (
+    next: { readonly baseUrl: string; readonly apiKey: string | null } | null,
+  ) => {
     connection = next;
   };
 
@@ -499,6 +509,39 @@ describe("HindsightAgentMemory", () => {
       yield* harness.setAgentMemory(false);
       yield* harness.apply;
       expect(hermesProvider(newHome)).toBeUndefined();
+    }).pipe(Effect.provide(harness.layer));
+  });
+  it.effect("takes its wiring out while there is no server, and puts it back after", () => {
+    const harness = setup({ agentMemory: true, hermesYaml: "memory:\n  provider: holographic\n" });
+    return Effect.gen(function* () {
+      yield* harness.apply;
+      harness.setConnection(null);
+      const off = yield* harness.apply;
+
+      expect(off.blocker).toBe("notConfigured");
+      expect(harness.calls.at(-1)?.slice(2)).toEqual(["uninstall", "claude-code", "codex"]);
+      expect(hermesProvider(harness.hermesHome)).toBe("holographic");
+
+      harness.setConnection({ baseUrl: BASE_URL, apiKey: null });
+      const on = yield* harness.apply;
+
+      expect(harness.calls.at(-1)?.[2]).toBe("install");
+      expect(on.agents.every((agent) => agent.state === "installed")).toBe(true);
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("changes nothing it could not record first", () => {
+    const harness = setup({
+      agentMemory: true,
+      unsavableLedger: true,
+      hermesYaml: "memory:\n  provider: holographic\n",
+    });
+    return Effect.gen(function* () {
+      const state = yield* harness.apply;
+
+      expect(harness.calls).toEqual([]);
+      expect(hermesProvider(harness.hermesHome)).toBe("holographic");
+      expect(state.detail).toContain("could not save");
     }).pipe(Effect.provide(harness.layer));
   });
 });

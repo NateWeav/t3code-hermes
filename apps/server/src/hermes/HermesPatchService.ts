@@ -317,7 +317,7 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
         });
       }
       const result = yield* provide(
-        changeHermesPatch(checkout.checkoutRoot, patch, direction),
+        changeHermesPatch(checkout.checkoutRoot, patch, direction, shippedPatches),
       ).pipe(
         Effect.mapError(
           (cause) =>
@@ -369,9 +369,9 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
       const reapplied: HermesPatchId[] = [];
       const failed: HermesPatchId[] = [];
       for (const patch of patches) {
-        const result = yield* provide(changeHermesPatch(checkoutRoot, patch, "forward")).pipe(
-          Effect.orElseSucceed(() => ({ ok: false }) as const),
-        );
+        const result = yield* provide(
+          changeHermesPatch(checkoutRoot, patch, "forward", shippedPatches),
+        ).pipe(Effect.orElseSucceed(() => ({ ok: false }) as const));
         (result.ok ? reapplied : failed).push(patch.id);
       }
       const snapshot = yield* readSnapshot(checkout);
@@ -510,9 +510,9 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
     // already went back, so the normal path running it first is harmless.
     return yield* Effect.gen(function* () {
       for (const patch of applied) {
-        const result = yield* provide(changeHermesPatch(checkoutRoot, patch, "reverse")).pipe(
-          Effect.orElseSucceed(() => ({ ok: false }) as const),
-        );
+        const result = yield* provide(
+          changeHermesPatch(checkoutRoot, patch, "reverse", shippedPatches),
+        ).pipe(Effect.orElseSucceed(() => ({ ok: false }) as const));
         if (!result.ok) {
           yield* reapply(checkout, removed);
           return yield* new HermesPatchError({

@@ -32,8 +32,15 @@ export function useHermesPatches() {
   const applyCommand = useAtomCommand(serverEnvironment.hermesPatchApply);
   const revertCommand = useAtomCommand(serverEnvironment.hermesPatchRevert);
   const updateCommand = useAtomCommand(serverEnvironment.hermesPatchUpdateHermes);
-  const [changingPatchId, setChangingPatchId] = useState<HermesPatchId | null>(null);
-  const [updating, setUpdating] = useState(false);
+  // In-flight work is kept with the environment it runs against, so switching
+  // environments mid-change never shows, or blocks on, another's progress.
+  const [changing, setChanging] = useState<{
+    readonly environmentId: EnvironmentId;
+    readonly patchId: HermesPatchId;
+  } | null>(null);
+  const [updatingIn, setUpdatingIn] = useState<EnvironmentId | null>(null);
+  const changingPatchId = changing?.environmentId === environmentId ? changing.patchId : null;
+  const updating = updatingIn !== null && updatingIn === environmentId;
   // Kept with the environment it describes, so switching environments, even
   // mid-update, never shows one environment's result against another's.
   const [summary, setSummary] = useState<{
@@ -77,7 +84,7 @@ export function useHermesPatches() {
 
   const change = async (patchId: HermesPatchId, direction: "apply" | "remove") => {
     if (environmentId === null || busy) return;
-    setChangingPatchId(patchId);
+    setChanging({ environmentId, patchId });
     try {
       const command = direction === "apply" ? applyCommand : revertCommand;
       const result = await command({ environmentId, input: { patchId } });
@@ -98,7 +105,7 @@ export function useHermesPatches() {
         });
       }
     } finally {
-      setChangingPatchId(null);
+      setChanging(null);
       // Success or not, the checkout is the source of truth: read it again.
       refresh();
     }
@@ -107,7 +114,7 @@ export function useHermesPatches() {
   /** Removes the patches, updates Hermes, and reapplies; the outcome stays as a line in the tab. */
   const updateHermes = async () => {
     if (environmentId === null || busy) return;
-    setUpdating(true);
+    setUpdatingIn(environmentId);
     setSummary(null);
     try {
       const result = await updateCommand({ environmentId, input: {} });
@@ -124,7 +131,7 @@ export function useHermesPatches() {
         });
       }
     } finally {
-      setUpdating(false);
+      setUpdatingIn(null);
       refresh();
     }
   };

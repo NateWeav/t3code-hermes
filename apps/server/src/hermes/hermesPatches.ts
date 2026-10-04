@@ -191,7 +191,7 @@ const patchFilePaths = (content: string): ReadonlySet<string> => {
 const pickAppliedVersion = Effect.fn("pickHermesAppliedVersion")(function* (
   checkoutRoot: string,
   candidates: ReadonlyArray<string>,
-  others: ReadonlyArray<ReadonlyArray<string>>,
+  allOthers: ReadonlyArray<ReadonlyArray<string>>,
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -202,11 +202,20 @@ const pickAppliedVersion = Effect.fn("pickHermesAppliedVersion")(function* (
     ).pipe(Effect.map((sets) => sets.flatMap((set) => [...set])));
   // Compared over every path any candidate touches, both sides of a rename
   // included: a version that changes fewer files would otherwise match while
-  // another's change sits elsewhere. The other patches' paths are taken too,
-  // so they can be reversed out of the snapshot whole.
-  const candidatePaths = yield* pathsOf(candidates);
-  if (candidatePaths.length === 0) return null;
-  const paths = new Set([...candidatePaths, ...(yield* pathsOf(others.flat()))]);
+  // another's change sits elsewhere. Only other patches sharing one of those
+  // files matter, and their paths are taken too so they come out whole; the
+  // rest, and any edit in their files, have no bearing on this patch.
+  const candidatePaths = new Set(yield* pathsOf(candidates));
+  if (candidatePaths.size === 0) return null;
+  const overlapping: ReadonlyArray<string>[] = [];
+  const paths = new Set(candidatePaths);
+  for (const versionFiles of allOthers) {
+    const otherPaths = yield* pathsOf(versionFiles);
+    if (!otherPaths.some((touched) => candidatePaths.has(touched))) continue;
+    overlapping.push(versionFiles);
+    for (const touched of otherPaths) paths.add(touched);
+  }
+  const others = overlapping;
   // The working tree over those paths, as a tree. Built through its own
   // scratch index so files a patch added, which `git apply` leaves
   // untracked, count too; a plain `git diff` would skip them.

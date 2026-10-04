@@ -394,8 +394,6 @@ export interface HindsightHandoffMachine {
   readonly enabled: boolean;
   /** It resolves a server of its own; null until it has answered. */
   readonly hasServer: boolean | null;
-  /** It has an API key saved in its settings. */
-  readonly hasSavedKey: boolean;
   /** The server it resolves, if any. */
   readonly serverUrl: string | null;
   /** That server is reached with an API key. */
@@ -406,9 +404,9 @@ export interface HindsightServerHandoff {
   /** What a machine with no server of its own is handed, or null when there is nothing to hand. */
   readonly url: string | null;
   /**
-   * That server takes an API key. Clients never see a saved key, so it can
-   * only be handed on together with a key entered here, or to a machine that
-   * already has one saved.
+   * That server takes an API key. Clients never see a saved key, so it is
+   * only handed on together with a key entered here: a key a machine already
+   * has may belong to some other server.
    */
   readonly needsKey: boolean;
 }
@@ -440,7 +438,7 @@ export function shouldHandOffHindsightServer(
     (options.enabling || machine.enabled) &&
     machine.hasServer === false &&
     handoff.url !== null &&
-    (!handoff.needsKey || options.withKey || machine.hasSavedKey)
+    (!handoff.needsKey || options.withKey)
   );
 }
 
@@ -451,11 +449,7 @@ export function describeHindsightKeyWait(
 ): string | null {
   const waiting = machines.filter(
     (machine) =>
-      machine.enabled &&
-      machine.hasServer === false &&
-      handoff.url !== null &&
-      handoff.needsKey &&
-      !machine.hasSavedKey,
+      machine.enabled && machine.hasServer === false && handoff.url !== null && handoff.needsKey,
   ).length;
   if (waiting === 0) return null;
   return `Enter the API key below to finish ${waiting === 1 ? "1 machine" : `${waiting} machines`}`;

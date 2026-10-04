@@ -16,7 +16,9 @@ import { ProviderDriverKind, ProviderInstanceId } from "@t3tools/contracts";
 import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 import { CommandAvailability } from "@t3tools/shared/shell";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as PlatformError from "effect/PlatformError";
 import { parse as parseYaml } from "yaml";
 
 import * as ServerConfig from "../../config.ts";
@@ -36,6 +38,8 @@ interface Options {
   readonly preinstalled?: boolean;
   /** T3 Code's own environment, which provider instances inherit. */
   readonly hostEnv?: Record<string, string>;
+  /** Makes `chmod` fail on Hermes' Hindsight config, as on a filesystem without modes. */
+  readonly failConfigChmod?: boolean;
   /** Puts a non-empty directory where the ledger goes, so saving it fails. */
   readonly unsavableLedger?: boolean;
 }
@@ -141,6 +145,27 @@ function setup(options: Options) {
     }),
   ).pipe(Layer.provide(HindsightService.layerTest));
 
+  const fileSystem = Layer.effect(
+    FileSystem.FileSystem,
+    Effect.map(FileSystem.FileSystem, (fs) =>
+      FileSystem.FileSystem.of({
+        ...fs,
+        chmod: (file, mode) =>
+          options.failConfigChmod === true &&
+          file.endsWith(NodePath.join("hindsight", "config.json"))
+            ? Effect.fail(
+                PlatformError.systemError({
+                  _tag: "PermissionDenied",
+                  module: "FileSystem",
+                  method: "chmod",
+                  description: "Forced chmod failure.",
+                }),
+              )
+            : fs.chmod(file, mode),
+      }),
+    ),
+  );
+
   const settings = ServerSettings.layerTest({
     integrations: { hindsight: { agentMemory: options.agentMemory } },
     providers: { hermes: { enabled: true } },
@@ -158,6 +183,7 @@ function setup(options: Options) {
       Layer.succeed(CommandAvailability, (command) => Effect.succeed(!missing.has(command))),
     ),
     Layer.provide(Layer.succeed(HostProcessEnvironment, options.hostEnv ?? {})),
+    Layer.provide(fileSystem),
     Layer.provideMerge(NodeServices.layer),
   );
 
@@ -303,6 +329,10 @@ describe("HindsightAgentMemory", () => {
       expect(state.agents.find((agent) => agent.target === "claudeCode")?.state).toBe(
         "notInstalled",
       );
+      // T3 Code created the installer config, and nothing else was put in it.
+      expect(
+        NodeFS.existsSync(NodePath.join(harness.home, ".hindsight", "coding-agent.json")),
+      ).toBe(false);
       // Hermes already used Hindsight before T3 Code touched it.
       expect(hermesProvider(harness.hermesHome)).toBe("hindsight");
     }).pipe(Effect.provide(harness.layer));
@@ -572,6 +602,36 @@ describe("HindsightAgentMemory", () => {
       const state = yield* harness.apply;
 
       expect(state.agents[0]?.detail).toContain("Not covered");
+    }).pipe(Effect.provide(harness.layer));
+  });
+  it.effect("keeps edits made to the installer config while it was on", () => {
+    const harness = setup({ agentMemory: true, missing: ["hermes"] });
+    const installerConfig = NodePath.join(harness.home, ".hindsight", "coding-agent.json");
+    return Effect.gen(function* () {
+      yield* harness.apply;
+      writeJson(installerConfig, { ...(readJson(installerConfig) as object), bank: "work" });
+
+      yield* harness.setAgentMemory(false);
+      yield* harness.apply;
+
+      // Only the connection T3 Code set is taken back out.
+      expect(readJson(installerConfig)).toEqual({ bank: "work" });
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("never leaves a Hermes config behind that it could not make private", () => {
+    const harness = setup({
+      agentMemory: true,
+      missing: ["claude", "codex"],
+      failConfigChmod: true,
+    });
+    return Effect.gen(function* () {
+      const state = yield* harness.apply;
+
+      expect(state.agents[0]?.state).toBe("failed");
+      expect(NodeFS.existsSync(NodePath.join(harness.hermesHome, "hindsight", "config.json"))).toBe(
+        false,
+      );
     }).pipe(Effect.provide(harness.layer));
   });
 });

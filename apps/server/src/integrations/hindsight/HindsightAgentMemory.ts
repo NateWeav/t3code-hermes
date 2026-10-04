@@ -115,12 +115,18 @@ const INITIAL_STATE: HindsightAgentMemoryState = {
 const AgentMemoryLedger = Schema.Struct({
   codingAgents: Schema.Array(Schema.Literals(["claudeCode", "codex"])),
   /**
-   * The installer's config as it was before T3 Code first ran the installer:
-   * its text, or null when there was none. The installer keeps the server and
-   * token only there, so putting it back returns a hand-made install to its
-   * own server. Absent while T3 Code has not touched it.
+   * The installer config's connection fields as they were before T3 Code
+   * first ran the installer, and whether the file existed. The installer keeps
+   * the server and token only there, so putting them back returns a hand-made
+   * install to its own server; every other field is left as it is by then.
+   * Absent while T3 Code has not touched it.
    */
-  installerConfig: Schema.optionalKey(Schema.Struct({ previous: Schema.NullOr(Schema.String) })),
+  installerConnection: Schema.optionalKey(
+    Schema.Struct({
+      existed: Schema.Boolean,
+      fields: Schema.Record(Schema.String, Schema.Unknown),
+    }),
+  ),
   hermes: Schema.NullOr(
     Schema.Struct({
       home: Schema.String,
@@ -133,6 +139,7 @@ const AgentMemoryLedger = Schema.Struct({
 });
 type AgentMemoryLedger = typeof AgentMemoryLedger.Type;
 type HermesLedger = NonNullable<AgentMemoryLedger["hermes"]>;
+type InstallerConnection = NonNullable<AgentMemoryLedger["installerConnection"]>;
 
 const EMPTY_LEDGER: AgentMemoryLedger = { codingAgents: [], hermes: null };
 
@@ -211,6 +218,36 @@ function hermesHindsightConfigText(
     ...(connection.apiKey === null ? {} : { api_key: connection.apiKey }),
   };
   return `${JSON.stringify(contents, null, 2)}\n`;
+}
+
+/** The installer config fields that say where memory goes; the only ones the pass changes. */
+const INSTALLER_CONNECTION_FIELDS = ["serverMode", "apiUrl", "apiToken"] as const;
+
+/** Those fields as `record` has them; a missing one stays missing. */
+function installerConnectionFields(
+  record: Record<string, unknown> | null,
+): Record<string, unknown> {
+  const fields: Record<string, unknown> = {};
+  for (const key of INSTALLER_CONNECTION_FIELDS) {
+    if (record !== null && key in record) fields[key] = record[key];
+  }
+  return fields;
+}
+
+/**
+ * The installer config with its connection fields put back as they were and
+ * every other field as it is now, or null when T3 Code created the file and
+ * nothing else has been put in it since.
+ */
+function restoredInstallerConfigText(
+  current: Record<string, unknown>,
+  previous: InstallerConnection,
+): string | null {
+  const next: Record<string, unknown> = { ...current };
+  for (const key of INSTALLER_CONNECTION_FIELDS) delete next[key];
+  Object.assign(next, previous.fields);
+  if (!previous.existed && Object.keys(next).length === 0) return null;
+  return `${JSON.stringify(next, null, 2)}\n`;
 }
 
 /** The installer's config text without its `apiToken`. */
@@ -423,9 +460,27 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
     return yield* writeText(installerConfigPath, withoutApiToken(record));
   });
 
-  /** Puts the installer's config back as it was before T3 Code first ran it. */
-  const restoreInstallerConfig = (previous: string | null) =>
-    previous === null ? removeFile(installerConfigPath) : writeText(installerConfigPath, previous);
+  /** What the installer config's connection is before T3 Code changes it. */
+  const snapshotInstallerConnection = Effect.gen(function* () {
+    const existed = (yield* readText(installerConfigPath)) !== null;
+    const fields = installerConnectionFields(asRecord(yield* readJson(installerConfigPath)));
+    return { existed, fields } satisfies InstallerConnection;
+  });
+
+  /**
+   * Puts the installer config's connection back; whether that is done. A file
+   * that no longer parses is left for its owner to fix, and retried later.
+   */
+  const restoreInstallerConnection = (previous: InstallerConnection) =>
+    Effect.gen(function* () {
+      const text = yield* readText(installerConfigPath);
+      const current = text === null ? {} : asRecord(yield* readJson(installerConfigPath));
+      if (current === null) return false;
+      const restored = restoredInstallerConfigText(current, previous);
+      return restored === null
+        ? yield* removeFile(installerConfigPath)
+        : yield* writeText(installerConfigPath, restored);
+    });
 
   const hermesConfigFile = (home: string) => path.join(home, "config.yaml");
   const hermesHindsightFile = (home: string) => path.join(home, "hindsight", "config.json");
@@ -460,20 +515,22 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
       return yield* writeText(hermesConfigFile(home), emptied ? "" : document.toString());
     });
 
-  /** Owner-only, because a Hindsight Cloud key may ride in it. */
-  const writeHermesHindsightConfig = (home: string, contents: string) => {
-    const file = hermesHindsightFile(home);
-    return writeText(file, contents).pipe(
-      Effect.flatMap((written) =>
-        written
-          ? fs.chmod(file, 0o600).pipe(
-              Effect.as(true),
-              Effect.orElseSucceed(() => false),
-            )
-          : Effect.succeed(false),
-      ),
-    );
-  };
+  /**
+   * Owner-only, because a Hindsight Cloud key may ride in it. One that cannot
+   * be made owner-only is removed again; `unhardened` means even that failed,
+   * so the file is there and still T3 Code's to take out.
+   */
+  const writeHermesHindsightConfig = (home: string, contents: string) =>
+    Effect.gen(function* () {
+      const file = hermesHindsightFile(home);
+      if (!(yield* writeText(file, contents))) return "failed" as const;
+      const hardened = yield* fs.chmod(file, 0o600).pipe(
+        Effect.as(true),
+        Effect.orElseSucceed(() => false),
+      );
+      if (hardened) return "written" as const;
+      return (yield* removeFile(file)) ? ("failed" as const) : ("unhardened" as const);
+    });
 
   const state = yield* SubscriptionRef.make<HindsightAgentMemoryState>(INITIAL_STATE);
   const lock = yield* Semaphore.make(1);
@@ -563,9 +620,8 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
           const claimed: AgentMemoryLedger = {
             ...nextLedger,
             codingAgents: [...ownedByT3],
-            installerConfig: nextLedger.installerConfig ?? {
-              previous: yield* readText(installerConfigPath),
-            },
+            installerConnection:
+              nextLedger.installerConnection ?? (yield* snapshotInstallerConnection),
           };
           const failure = (yield* persist(claimed))
             ? yield* runInstaller("install", coding, connection)
@@ -614,9 +670,9 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
     if (
       wanted.length === 0 &&
       nextLedger.codingAgents.length === 0 &&
-      nextLedger.installerConfig !== undefined
+      nextLedger.installerConnection !== undefined
     ) {
-      if (yield* restoreInstallerConfig(nextLedger.installerConfig.previous)) {
+      if (yield* restoreInstallerConnection(nextLedger.installerConnection)) {
         nextLedger = { codingAgents: nextLedger.codingAgents, hermes: nextLedger.hermes };
       } else {
         for (const target of coding) {
@@ -662,10 +718,16 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
                 },
               })
             : true;
-        const wroteConfig =
-          claimed && configStale ? yield* writeHermesHindsightConfig(home, configText) : false;
-        if (configStale && !wroteConfig) {
-          failures.set("hermes", "Hermes' Hindsight config could not be written.");
+        const configWrite =
+          claimed && configStale ? yield* writeHermesHindsightConfig(home, configText) : "failed";
+        const wroteConfig = configWrite !== "failed";
+        if (configStale && configWrite !== "written") {
+          failures.set(
+            "hermes",
+            configWrite === "unhardened"
+              ? "Hermes' Hindsight config could not be made private to its owner."
+              : "Hermes' Hindsight config could not be written.",
+          );
         }
         const changedProvider =
           claimed && provider !== "hindsight"

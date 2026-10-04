@@ -96,7 +96,6 @@ export function EnvironmentAgentMemorySettings() {
               saved,
               enabled: saved.agentMemory,
               hasServer: connection === undefined ? null : connection !== null,
-              hasSavedKey: (saved.apiKey ?? "").length > 0,
               serverUrl: connection?.baseUrl ?? null,
               serverHasKey: connection?.hasApiKey === true,
               state,

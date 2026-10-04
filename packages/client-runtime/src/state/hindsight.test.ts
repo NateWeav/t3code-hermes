@@ -107,14 +107,12 @@ describe("handing a machine the shared server", () => {
   const keyedSource = {
     enabled: true,
     hasServer: true,
-    hasSavedKey: false,
     serverUrl: "https://hs.example",
     serverHasKey: true,
   };
   const bare = {
     enabled: true,
     hasServer: false,
-    hasSavedKey: false,
     serverUrl: null,
     serverHasKey: false,
   };
@@ -134,19 +132,21 @@ describe("handing a machine the shared server", () => {
     );
   });
 
-  it("hands an open server, or a keyed one to a machine that has its key, in one click", () => {
+  it("hands an open server on in one click", () => {
     const open = planHindsightServerHandoff({ url: "", hasKey: false }, [
       { ...keyedSource, serverHasKey: false },
       bare,
     ]);
     expect(shouldHandOffHindsightServer(bare, open, { enabling: true, withKey: false })).toBe(true);
+    expect(describeHindsightKeyWait([bare], open)).toBeNull();
+  });
+
+  it("never pairs a keyed server with a key the machine saved for some other server", () => {
     const keyed = planHindsightServerHandoff({ url: "https://hs.example", hasKey: true }, []);
-    expect(
-      shouldHandOffHindsightServer({ ...bare, hasSavedKey: true }, keyed, {
-        enabling: true,
-        withKey: false,
-      }),
-    ).toBe(true);
-    expect(describeHindsightKeyWait([{ ...bare, hasSavedKey: true }], keyed)).toBeNull();
+    // `bare` may well have an old key saved; only a key entered here goes with the URL.
+    expect(shouldHandOffHindsightServer(bare, keyed, { enabling: true, withKey: false })).toBe(
+      false,
+    );
+    expect(shouldHandOffHindsightServer(bare, keyed, { enabling: true, withKey: true })).toBe(true);
   });
 });

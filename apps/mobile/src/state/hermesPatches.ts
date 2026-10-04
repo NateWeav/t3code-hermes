@@ -15,6 +15,16 @@ import { useAtomCommand } from "./use-atom-command";
 
 const GATEWAY_RESTART_POLL_MS = 2_000;
 
+/** The record minus one environment's entry. */
+const without = <V>(
+  record: Partial<Record<EnvironmentId, V>>,
+  environmentId: EnvironmentId,
+): Partial<Record<EnvironmentId, V>> => {
+  const next = { ...record };
+  delete next[environmentId];
+  return next;
+};
+
 /**
  * The Patches tab's read of one environment's Hermes checkout. `change`,
  * `updateHermes` and `restartGateway` resolve to null on success, or the
@@ -34,22 +44,14 @@ export function useHermesPatches(environmentId: EnvironmentId | null) {
   const updateCommand = useAtomCommand(serverEnvironment.hermesPatchUpdateHermes, {
     reportFailure: false,
   });
-  // In-flight work is kept with the environment it runs against, so switching
-  // environments mid-change never shows, or blocks on, another's progress.
-  const [changing, setChanging] = useState<{
-    readonly environmentId: EnvironmentId;
-    readonly patchId: HermesPatchId;
-  } | null>(null);
-  const [updatingIn, setUpdatingIn] = useState<EnvironmentId | null>(null);
-  const changingPatchId = changing?.environmentId === environmentId ? changing.patchId : null;
-  const updating = updatingIn !== null && updatingIn === environmentId;
-  // Kept with the environment it describes, so switching environments, even
-  // mid-update, never shows one environment's result against another's.
-  const [summary, setSummary] = useState<{
-    readonly environmentId: EnvironmentId;
-    readonly text: string;
-  } | null>(null);
-  const updateSummary = summary?.environmentId === environmentId ? summary.text : null;
+  // Per environment: work can be running in several at once, and switching
+  // environments must neither show nor clear another's progress or result.
+  const [changing, setChanging] = useState<Partial<Record<EnvironmentId, HermesPatchId>>>({});
+  const [updatingIn, setUpdatingIn] = useState<ReadonlySet<EnvironmentId>>(new Set());
+  const [summaries, setSummaries] = useState<Partial<Record<EnvironmentId, string>>>({});
+  const changingPatchId = environmentId === null ? null : (changing[environmentId] ?? null);
+  const updating = environmentId !== null && updatingIn.has(environmentId);
+  const updateSummary = environmentId === null ? null : (summaries[environmentId] ?? null);
   const refresh = query.refresh;
   const busy = changingPatchId !== null || updating;
   const restartCommand = useAtomCommand(serverEnvironment.hermesGatewayRestart, {
@@ -87,7 +89,7 @@ export function useHermesPatches(environmentId: EnvironmentId | null) {
     direction: "apply" | "remove",
   ): Promise<string | null> => {
     if (environmentId === null || busy) return null;
-    setChanging({ environmentId, patchId });
+    setChanging((current) => ({ ...current, [environmentId]: patchId }));
     try {
       const command = direction === "apply" ? applyCommand : revertCommand;
       const result = await command({ environmentId, input: { patchId } });
@@ -97,7 +99,7 @@ export function useHermesPatches(environmentId: EnvironmentId | null) {
         "The Hermes checkout could not be changed.",
       );
     } finally {
-      setChanging(null);
+      setChanging((current) => without(current, environmentId));
       // Success or not, the checkout is the source of truth: read it again.
       refresh();
     }
@@ -105,12 +107,13 @@ export function useHermesPatches(environmentId: EnvironmentId | null) {
 
   const updateHermes = async (): Promise<string | null> => {
     if (environmentId === null || busy) return null;
-    setUpdatingIn(environmentId);
-    setSummary(null);
+    setUpdatingIn((current) => new Set(current).add(environmentId));
+    setSummaries((current) => without(current, environmentId));
     try {
       const result = await updateCommand({ environmentId, input: {} });
       if (result._tag === "Success") {
-        setSummary({ environmentId, text: describeHermesUpdateResult(result.value) });
+        const text = describeHermesUpdateResult(result.value);
+        setSummaries((current) => ({ ...current, [environmentId]: text }));
         return null;
       }
       if (isAtomCommandInterrupted(result)) return null;
@@ -119,7 +122,11 @@ export function useHermesPatches(environmentId: EnvironmentId | null) {
         "Hermes could not be updated.",
       );
     } finally {
-      setUpdatingIn(null);
+      setUpdatingIn((current) => {
+        const next = new Set(current);
+        next.delete(environmentId);
+        return next;
+      });
       refresh();
     }
   };

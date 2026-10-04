@@ -1194,6 +1194,10 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:hermes-patch-update-hermes",
       tag: WS_METHODS.hermesPatchUpdateHermes,
     }),
+    hermesGatewayRestart: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:hermes-gateway-restart",
+      tag: WS_METHODS.hermesGatewayRestart,
+    }),
     /**
      * Hindsight memory. Queries rather than a subscription: Hindsight has no
      * change feed, and the panel only wants an answer when the user asks a

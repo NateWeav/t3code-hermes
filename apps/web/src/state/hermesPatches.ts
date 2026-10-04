@@ -14,13 +14,15 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import type { HermesPatchId } from "@t3tools/contracts";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { toastManager } from "../components/ui/toast";
 import { useHermesEnvironmentId } from "./hermesCron";
 import { useEnvironmentQuery } from "./query";
 import { serverEnvironment } from "./server";
 import { useAtomCommand } from "./use-atom-command";
+
+const GATEWAY_RESTART_POLL_MS = 2_000;
 
 export function useHermesPatches() {
   const environmentId = useHermesEnvironmentId();
@@ -35,6 +37,37 @@ export function useHermesPatches() {
   const [updateSummary, setUpdateSummary] = useState<string | null>(null);
   const refresh = query.refresh;
   const busy = changingPatchId !== null || updating;
+  const restartCommand = useAtomCommand(serverEnvironment.hermesGatewayRestart);
+  const [requestingRestart, setRequestingRestart] = useState(false);
+  const restarting = query.data?.gateway?.state === "restarting";
+
+  // The restart runs on the server after the request returns; re-read until it is done.
+  useEffect(() => {
+    if (!restarting) return;
+    const timer = window.setInterval(refresh, GATEWAY_RESTART_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [restarting, refresh]);
+
+  const restartGateway = async () => {
+    if (environmentId === null || busy || requestingRestart || restarting) return;
+    setRequestingRestart(true);
+    try {
+      const result = await restartCommand({ environmentId, input: {} });
+      if (result._tag !== "Success" && !isAtomCommandInterrupted(result)) {
+        toastManager.add({
+          type: "error",
+          title: "Gateway not restarted",
+          description: describeHermesPatchFailure(
+            squashAtomCommandFailure(result),
+            "The Hermes gateway could not be restarted.",
+          ),
+        });
+      }
+    } finally {
+      setRequestingRestart(false);
+      refresh();
+    }
+  };
 
   const change = async (patchId: HermesPatchId, direction: "apply" | "remove") => {
     if (environmentId === null || busy) return;
@@ -103,5 +136,7 @@ export function useHermesPatches() {
     updateHermes: () => void updateHermes(),
     apply: (patchId: HermesPatchId) => void change(patchId, "apply"),
     remove: (patchId: HermesPatchId) => void change(patchId, "remove"),
+    requestingRestart,
+    restartGateway: () => void restartGateway(),
   };
 }

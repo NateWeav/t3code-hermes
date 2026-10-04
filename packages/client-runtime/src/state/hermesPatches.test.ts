@@ -2,6 +2,7 @@ import type { HermesPatch, HermesPatchesSnapshot, HermesPatchId } from "@t3tools
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  describeHermesGateway,
   describeHermesPatchHint,
   describeHermesUpdateResult,
   HERMES_PATCH_STATE_HINTS,
@@ -23,6 +24,8 @@ const snapshot = (overrides: Partial<HermesPatchesSnapshot> = {}): HermesPatches
   headCommit: "bbbbbbb",
   canUpdateHermes: true,
   patches: [],
+  gateway: null,
+  gatewayRestartFailure: null,
   ...overrides,
 });
 
@@ -86,5 +89,46 @@ describe("Hermes patch wording", () => {
         awaitingPatchUpdate: [],
       }),
     ).toBe("Hermes could not be updated: network unreachable. Reapplied: Title a.");
+  });
+});
+
+describe("describeHermesGateway", () => {
+  it("stays quiet when no gateway runs or it already has the changes", () => {
+    expect(describeHermesGateway(null, null)).toBeNull();
+    expect(describeHermesGateway({ state: "upToDate", canRestart: true }, null)).toBeNull();
+  });
+
+  it("offers a restart only for an outdated gateway that runs as a service", () => {
+    expect(describeHermesGateway({ state: "outdated", canRestart: true }, null)?.restart).toBe(
+      true,
+    );
+    expect(describeHermesGateway({ state: "outdated", canRestart: false }, null)?.restart).toBe(
+      false,
+    );
+  });
+
+  it("shows a running restart without a button, and a failed one with a retry", () => {
+    expect(describeHermesGateway({ state: "restarting", canRestart: true }, null)).toMatchObject({
+      tone: "info",
+      restart: false,
+    });
+    // The old gateway still answers after a failed restart, however its age compares.
+    expect(
+      describeHermesGateway({ state: "upToDate", canRestart: true }, "exited with code 1."),
+    ).toMatchObject({
+      tone: "warning",
+      text: "The gateway restart failed: exited with code 1.",
+      restart: true,
+    });
+  });
+
+  it("keeps a failed restart visible after the gateway stopped and did not come back", () => {
+    expect(describeHermesGateway(null, "The gateway stopped and did not come back.")).toMatchObject(
+      {
+        tone: "warning",
+        text: "The gateway restart failed: The gateway stopped and did not come back.",
+        restart: false,
+      },
+    );
   });
 });

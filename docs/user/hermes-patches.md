@@ -17,9 +17,13 @@ Each patch shows one of three states:
     goes. Commit or discard them in the Hermes checkout first.
 
 **Remove** takes an applied patch back out. Applying or removing affects new Hermes sessions; a
-chat that is already running keeps the Hermes it started with. A patch to the Hermes gateway, such
-as the one for webhook runs in profiles, takes effect once you restart the gateway with
-`hermes gateway restart`.
+chat that is already running keeps the Hermes it started with.
+
+The Hermes gateway, which serves messaging platforms, scheduled tasks, and webhooks, keeps running
+the code it started with. When it started before your latest patch change, the tab says so and
+offers **Restart gateway**. Apply or remove everything you want first, then restart once: the
+gateway finishes the chats, tasks, and webhook runs it is working on before it restarts. A gateway
+started with `hermes gateway run` in a terminal does not run as a service, so restart it there.
 
 ## Update Hermes
 
@@ -30,8 +34,8 @@ the update fails, the patches you had are put back.
 
 It refuses to run while the checkout has uncommitted edits of your own, because updating would park
 them in a git stash where they are easy to lose track of. Commit or discard them first. It leaves a
-running Hermes gateway alone, so it never restarts without its patches; restart it with
-`hermes gateway restart` afterwards.
+running Hermes gateway alone, so it never restarts without its patches; restart it afterwards with
+**Restart gateway**, as after any patch change.
 
 ## Things to know
 

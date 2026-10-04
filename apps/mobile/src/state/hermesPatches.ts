@@ -7,16 +7,19 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId, HermesPatchId } from "@t3tools/contracts";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { useEnvironmentQuery } from "./query";
 import { serverEnvironment } from "./server";
 import { useAtomCommand } from "./use-atom-command";
 
+const GATEWAY_RESTART_POLL_MS = 2_000;
+
 /**
- * The Patches tab's read of one environment's Hermes checkout. `change` and
- * `updateHermes` resolve to null on success, or the reason to show when they
- * failed; a finished update leaves its outcome in `updateSummary`.
+ * The Patches tab's read of one environment's Hermes checkout. `change`,
+ * `updateHermes` and `restartGateway` resolve to null on success, or the
+ * reason to show when they failed; a finished update leaves its outcome in
+ * `updateSummary`.
  */
 export function useHermesPatches(environmentId: EnvironmentId | null) {
   const query = useEnvironmentQuery(
@@ -36,6 +39,35 @@ export function useHermesPatches(environmentId: EnvironmentId | null) {
   const [updateSummary, setUpdateSummary] = useState<string | null>(null);
   const refresh = query.refresh;
   const busy = changingPatchId !== null || updating;
+  const restartCommand = useAtomCommand(serverEnvironment.hermesGatewayRestart, {
+    reportFailure: false,
+  });
+  const [requestingRestart, setRequestingRestart] = useState(false);
+  const restarting = query.data?.gateway?.state === "restarting";
+
+  // The restart runs on the server after the request returns; re-read until it is done.
+  useEffect(() => {
+    if (!restarting) return;
+    const timer = setInterval(refresh, GATEWAY_RESTART_POLL_MS);
+    return () => clearInterval(timer);
+  }, [restarting, refresh]);
+
+  /** Resolves to null once the restart started, or the reason it did not. */
+  const restartGateway = async (): Promise<string | null> => {
+    if (environmentId === null || busy || requestingRestart || restarting) return null;
+    setRequestingRestart(true);
+    try {
+      const result = await restartCommand({ environmentId, input: {} });
+      if (result._tag === "Success" || isAtomCommandInterrupted(result)) return null;
+      return describeHermesPatchFailure(
+        squashAtomCommandFailure(result),
+        "The Hermes gateway could not be restarted.",
+      );
+    } finally {
+      setRequestingRestart(false);
+      refresh();
+    }
+  };
 
   const change = async (
     patchId: HermesPatchId,
@@ -90,5 +122,7 @@ export function useHermesPatches(environmentId: EnvironmentId | null) {
     refresh,
     change,
     updateHermes,
+    requestingRestart,
+    restartGateway,
   };
 }

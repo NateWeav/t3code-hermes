@@ -1,4 +1,6 @@
 import type { SubagentPillSegment } from "@t3tools/client-runtime/state/thread-subagents";
+import { readTurnThroughput } from "@t3tools/client-runtime/state/turn-throughput";
+import type { RunId, ScopedThreadRef } from "@t3tools/contracts";
 import { formatDuration } from "@t3tools/shared/orchestrationTiming";
 import { GlassContainer, GlassView } from "expo-glass-effect";
 import { type ReactNode, useEffect, useRef, useState } from "react";
@@ -434,7 +436,13 @@ function FloatingStatusLabel(props: {
     );
   }
   return (
-    <WorkingDuration key="working" startedAt={props.status.startedAt} onLayout={props.onLayout} />
+    <WorkingDuration
+      key="working"
+      startedAt={props.status.startedAt}
+      threadRef={props.status.threadRef}
+      runId={props.status.runId}
+      onLayout={props.onLayout}
+    />
   );
 }
 
@@ -475,21 +483,31 @@ function StatusLabelRow(props: {
 
 function WorkingDuration(props: {
   readonly startedAt: string;
+  readonly threadRef: ScopedThreadRef;
+  readonly runId: RunId | null;
   readonly onLayout: (event: LayoutChangeEvent) => void;
 }) {
   return (
     <StatusLabelRow onLayout={props.onLayout}>
-      <WorkingTimer startedAt={props.startedAt} />
+      <WorkingTimer startedAt={props.startedAt} threadRef={props.threadRef} runId={props.runId} />
     </StatusLabelRow>
   );
 }
 
-export function WorkingTimer(props: { readonly startedAt: string }) {
+export function WorkingTimer(props: {
+  readonly startedAt: string;
+  /** The run whose output rate follows the timer, when there is one. */
+  readonly threadRef?: ScopedThreadRef;
+  readonly runId?: RunId | null;
+}) {
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
     const intervalId = setInterval(() => setNowMs(Date.now()), 1_000);
     return () => clearInterval(intervalId);
   }, []);
+  // Same once-a-second tick as the timer; the tracker is only ever polled.
+  const throughput =
+    props.threadRef && props.runId ? readTurnThroughput(props.threadRef, props.runId, nowMs) : null;
   return (
     <SystemText
       className="shrink text-xs text-foreground"
@@ -497,8 +515,21 @@ export function WorkingTimer(props: { readonly startedAt: string }) {
       style={{ fontVariant: ["tabular-nums"], fontWeight: "500" }}
     >
       Working {formatWorkingDuration(props.startedAt, nowMs)}
+      {throughput === null ? null : (
+        <SystemText
+          className="font-mono text-2xs text-foreground-muted"
+          style={{ fontWeight: "400" }}
+        >
+          {` · ${formatTokensPerSecond(throughput.tokensPerSecond)}`}
+        </SystemText>
+      )}
     </SystemText>
   );
+}
+
+/** Shown as "—" while the turn is live but no text has arrived for a while. */
+function formatTokensPerSecond(tokensPerSecond: number | null): string {
+  return tokensPerSecond === null ? "— tok/s" : `${Math.round(tokensPerSecond)} tok/s`;
 }
 
 function formatWorkingDuration(startedAt: string, nowMs: number): string {

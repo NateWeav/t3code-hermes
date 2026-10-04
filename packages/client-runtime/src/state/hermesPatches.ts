@@ -4,6 +4,7 @@
  * @module state/hermesPatches
  */
 import type {
+  HermesGatewayStatus,
   HermesPatch,
   HermesPatchMisfitReason,
   HermesPatchState,
@@ -114,6 +115,51 @@ export function describeHermesPatchesUnavailable(
           "Patches apply to a git checkout of Hermes. This install came from a package manager or image, so its patches have to come from there.",
       };
   }
+}
+
+/**
+ * What to say about the Hermes gateway, or null when there is nothing to do:
+ * no gateway is running, or it already runs the current code. `restart` says
+ * whether to offer the restart button.
+ */
+export function describeHermesGateway(
+  gateway: HermesGatewayStatus | null,
+  restartFailure: string | null,
+): { readonly tone: "warning" | "info"; readonly text: string; readonly restart: boolean } | null {
+  if (gateway === null) {
+    // A restart that stopped the gateway and never brought it back. There is
+    // nothing left to restart, so the failure itself says how to start it.
+    return restartFailure === null
+      ? null
+      : { tone: "warning", text: `The gateway restart failed: ${restartFailure}`, restart: false };
+  }
+  if (gateway.state === "restarting") {
+    return {
+      tone: "info",
+      text: "Restarting the Hermes gateway. It finishes the chats, tasks, and webhook runs it is working on first.",
+      restart: false,
+    };
+  }
+  if (restartFailure !== null) {
+    return {
+      tone: "warning",
+      text: `The gateway restart failed: ${restartFailure}`,
+      restart: gateway.canRestart,
+    };
+  }
+  if (gateway.state === "upToDate") return null;
+  if (!gateway.canRestart) {
+    return {
+      tone: "warning",
+      text: "The Hermes gateway is running code from before these changes. It does not run as a service, so restart it where it was started.",
+      restart: false,
+    };
+  }
+  return {
+    tone: "warning",
+    text: "The Hermes gateway is running code from before these changes. Restart it so messaging, scheduled tasks, and webhooks use them.",
+    restart: true,
+  };
 }
 
 // Plain text on both clients, so no markdown quoting.

@@ -156,7 +156,8 @@ const fitting = (
  * reversing the wrong one would write the other commit's original text back.
  * The applied one is the version that applies to HEAD itself, checked in a
  * scratch index so the checkout's own index is untouched. When none does (the
- * user has committed on top, say), the newest is the best guess.
+ * user committed the patch, say), there is no telling, so null: the patch
+ * still reads as applied, and Remove refuses rather than guess.
  */
 const pickAppliedVersion = Effect.fn("pickHermesAppliedVersion")(function* (
   checkoutRoot: string,
@@ -166,9 +167,9 @@ const pickAppliedVersion = Effect.fn("pickHermesAppliedVersion")(function* (
   const path = yield* Path.Path;
   const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-hermes-index-" });
   const env = { GIT_INDEX_FILE: path.join(directory, "index") };
-  if ((yield* runGit(checkoutRoot, ["read-tree", "HEAD"], env)).code !== 0) return candidates[0];
+  if ((yield* runGit(checkoutRoot, ["read-tree", "HEAD"], env)).code !== 0) return null;
   const onHead = yield* fitting(checkoutRoot, candidates, ["apply", "--check", "--cached"], env);
-  return onHead[0] ?? candidates[0];
+  return onHead[0] ?? null;
 }, Effect.scoped);
 
 /**
@@ -185,7 +186,7 @@ const resolvePatchState = Effect.fn("resolveHermesPatchState")(function* (
   const reverse = yield* fitting(checkoutRoot, versionFiles, ["apply", "--check", "-R"]);
   if (reverse.length === 1) return result("applied", reverse[0]!);
   if (reverse.length > 1) {
-    return result("applied", (yield* pickAppliedVersion(checkoutRoot, reverse)) ?? reverse[0]!);
+    return result("applied", yield* pickAppliedVersion(checkoutRoot, reverse));
   }
   const [forward] = yield* fitting(checkoutRoot, versionFiles, ["apply", "--check"]);
   if (forward !== undefined) return result("notApplied", forward);

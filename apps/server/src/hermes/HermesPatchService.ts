@@ -596,7 +596,11 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
           return [true, { running: true, failure: null, fiber: null }];
         });
         if (!claimed || gateway === null) return false;
+        // Under the change lock, so a gateway never comes back up on code an
+        // Update Hermes or a patch change is halfway through rewriting. The
+        // claim above is immediate, so the tab reads "restarting" meanwhile.
         const fiber = yield* provide(runRestart(checkout, gateway.pid)).pipe(
+          changeLock.withPermits(1),
           Effect.forkIn(restartScope),
         );
         yield* Ref.update(restartRef, (current) => ({ ...current, fiber }));

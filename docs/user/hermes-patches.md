@@ -35,7 +35,8 @@ the update fails, the patches you had are put back.
 It refuses to run while the checkout has uncommitted edits of your own, because updating would park
 them in a git stash where they are easy to lose track of. Commit or discard them first. It leaves a
 running Hermes gateway alone, so it never restarts without its patches; restart it afterwards with
-**Restart gateway**, as after any patch change.
+**Restart gateway**, as after any patch change. Hermes from before September 2026 always restarts
+its gateway while updating, before the patches are back, so restart it once more afterwards.
 
 ## Things to know
 

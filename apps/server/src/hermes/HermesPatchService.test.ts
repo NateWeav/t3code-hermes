@@ -6,14 +6,17 @@ import * as NodePath from "node:path";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import { HermesPatchId } from "@t3tools/contracts";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 
+import { providerUpdateLock } from "../provider/providerMaintenanceCommandCoordinator.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { writeFakeCli } from "../testUtils/fakeCli.ts";
 import { startFakeGateway } from "./hermesGatewayFixtures.ts";
-import { HERMES_PATCHES } from "./hermesPatches.ts";
+import { HERMES_PATCHES, HERMES_UPDATE_LOCK_KEY } from "./hermesPatches.ts";
 import { HermesPatchService, make } from "./HermesPatchService.ts";
 
 const git = (cwd: string, ...args: string[]) =>
@@ -161,6 +164,39 @@ describe("HermesPatchService", () => {
         const after = yield* service.list;
         assert.deepStrictEqual(after.gateway, { state: "upToDate", canRestart: true });
         assert.isNull(after.gatewayRestartFailure);
+      }).pipe(withInstance(binaryPath, home));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("holds a gateway restart until an update or patch change finishes", () =>
+    Effect.gen(function* () {
+      const { binaryPath, home } = yield* makeRestartableCheckout({ exitCode: 0 });
+      yield* Effect.acquireRelease(
+        Effect.promise(() => startFakeGateway({ home, pid: 4242 })),
+        (fake) => Effect.promise(fake.close),
+      );
+      const pidFile = NodePath.join(home, "gateway.pid");
+      yield* Effect.gen(function* () {
+        const service = yield* HermesPatchService;
+        const release = yield* Deferred.make<void>();
+        const held = yield* Deferred.make<void>();
+        // Stands in for Update Hermes holding the lock with the patches off.
+        const update = yield* providerUpdateLock(HERMES_UPDATE_LOCK_KEY)
+          .withPermits(1)(
+            Deferred.succeed(held, undefined).pipe(Effect.andThen(Deferred.await(release))),
+          )
+          .pipe(Effect.forkChild);
+        yield* Deferred.await(held);
+
+        const started = yield* service.restartGateway;
+        assert.strictEqual(started.gateway?.state, "restarting");
+        yield* Effect.yieldNow;
+        assert.include(NodeFS.readFileSync(pidFile, "utf8"), "4242");
+
+        yield* Deferred.succeed(release, undefined);
+        yield* Fiber.join(update);
+        yield* service.awaitGatewayRestart;
+        assert.include(NodeFS.readFileSync(pidFile, "utf8"), "5151");
       }).pipe(withInstance(binaryPath, home));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );

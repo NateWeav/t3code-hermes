@@ -1,29 +1,28 @@
-import { describe, expect, it } from "vite-plus/test";
+import { beforeEach, describe, expect, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
+import type * as EffectAcpCompat from "effect-acp/compat";
 import * as AcpSchema from "effect-acp/schema";
-import { EventId, ProviderDriverKind, ThreadId, TurnId } from "@t3tools/contracts";
-import { foldSubagentActivities } from "../../../../../packages/client-runtime/src/state/subagentRuntime.ts";
-import { runtimeEventToActivities } from "../../orchestration/Layers/ProviderRuntimeIngestion.ts";
-import * as ThreadBackgroundLiveness from "../../orchestration/ThreadBackgroundLiveness.ts";
+
 import {
   mergeToolCallState,
   parseSessionUpdateEvent,
   type AcpToolCallState,
 } from "./AcpRuntimeModel.ts";
-import { HermesDelegations, isHermesDelegationProgress } from "./HermesDelegation.ts";
+import { makeHermesSubagentExtractor } from "./HermesDelegation.ts";
 import fixture from "./fixtures/hermes-delegation.json" with { type: "json" };
 import olderFixture from "./fixtures/hermes-delegation-08b140d1.json" with { type: "json" };
 
 const decodeNotification = Schema.decodeUnknownSync(AcpSchema.SessionNotification);
-const turnId = TurnId.make("hermes-turn-1");
 const batch = fixture.cases.find((item) => item.name === "batch")!;
 const dispatched = fixture.cases.find((item) => item.name === "dispatched")!;
 
+/** The merged tool state the adapter hands the extractor, as it does in a live turn. */
 function tool(update: unknown, previous?: AcpToolCallState) {
+  // Decoding pins the fixtures to Hermes's actual wire shape.
   const notification = decodeNotification({
     sessionId: "hermes-session",
     update,
-  });
+  }) as EffectAcpCompat.SessionNotification;
   const event = parseSessionUpdateEvent(notification).events.find(
     (event) => event._tag === "ToolCallUpdated",
   );
@@ -32,17 +31,29 @@ function tool(update: unknown, previous?: AcpToolCallState) {
   return mergeToolCallState(previous, event.toolCall);
 }
 
-function progress(start: AcpToolCallState, value: Record<string, unknown>) {
+function progress(start: AcpToolCallState | undefined, value: Record<string, unknown>) {
   return tool(
     {
       sessionUpdate: "tool_call_update",
-      toolCallId: start.toolCallId,
+      toolCallId: start?.toolCallId ?? "tc-fixture-dispatched",
       status: "in_progress",
       rawOutput: { hermesDelegation: value },
     },
     start,
   );
 }
+
+let extract = makeHermesSubagentExtractor();
+beforeEach(() => {
+  extract = makeHermesSubagentExtractor();
+});
+const updates = (toolCall: AcpToolCallState) => extract(toolCall)!;
+/** A launch the adapter has already seen start. */
+const launch = (update: unknown) => {
+  const start = tool(update);
+  extract(start);
+  return start;
+};
 
 describe("Hermes delegate_task ACP boundary", () => {
   it("pins actual stock formatter output, not an invented raw JSON result", () => {
@@ -60,11 +71,9 @@ describe("Hermes delegate_task ACP boundary", () => {
     "recognizes stock delegations from Hermes $hermesCommit",
     (pinned) => {
       for (const scenario of pinned.cases) {
-        const events = new HermesDelegations().update(tool(scenario.start), turnId)!;
-        const titles = events
-          .filter((event) => event.type === "task.started")
-          .map((event) => event.payload.title);
-        expect(titles).toEqual(
+        expect(
+          makeHermesSubagentExtractor()(tool(scenario.start))!.map((update) => update.title),
+        ).toEqual(
           scenario.name === "batch"
             ? ["Inspect routing", "Run tests"]
             : [scenario.name === "dispatched" ? "Review parser" : "Review the parser"],
@@ -73,497 +82,295 @@ describe("Hermes delegate_task ACP boundary", () => {
     },
   );
 
-  it("starts every batch child pending, extracting stock goals and roles", () => {
-    const events = new HermesDelegations().update(tool(batch.start), turnId)!;
-    expect(
-      events.filter((event) => event.type === "task.started").map((event) => event.payload),
-    ).toEqual([
+  it("starts one running subagent per batch child, keyed by call and index", () => {
+    expect(updates(tool(batch.start))).toEqual([
       {
-        taskId: "tc-fixture-batch:task:0",
-        taskType: "subagent",
-        toolUseId: "tc-fixture-batch",
+        nativeTaskId: "tc-fixture-batch:task:0",
+        prompt: "Inspect routing",
         title: "Inspect routing",
-        agentIndex: 0,
+        model: null,
+        status: "running",
+        childSessionId: null,
+        result: null,
         role: "orchestrator",
-        description: "Inspect routing",
+        usage: null,
       },
       {
-        taskId: "tc-fixture-batch:task:1",
-        taskType: "subagent",
-        toolUseId: "tc-fixture-batch",
+        nativeTaskId: "tc-fixture-batch:task:1",
+        prompt: "Run tests",
         title: "Run tests",
-        agentIndex: 1,
+        model: null,
+        status: "running",
+        childSessionId: null,
+        result: null,
         role: "leaf",
-        description: "Run tests",
+        usage: null,
       },
     ]);
-    expect(
-      events.filter((event) => event.type === "task.progress").map((event) => event.payload.status),
-    ).toEqual(["pending", "pending"]);
   });
 
   it.each(fixture.cases.filter((item) => item.name !== "dispatched"))(
-    "parses stock $name completion status and detail",
+    "parses stock $name completion status and result",
     (scenario) => {
-      const state = new HermesDelegations();
-      const start = tool(scenario.start);
-      state.update(start, turnId);
-      const completed = state.update(tool(scenario.complete, start), turnId)!;
-      const results = completed.filter((event) => event.type === "task.completed");
+      const start = launch(scenario.start);
+      const completed = updates(tool(scenario.complete, start));
       if (scenario.name === "single") {
-        expect(results[0]?.payload).toMatchObject({
-          status: "completed",
-          model: "test/reviewer",
-          role: "leaf",
-          summary: "Parser reviewed.",
-          typedUsage: { durationMs: 2500 },
-        });
+        expect(completed).toMatchObject([
+          {
+            status: "completed",
+            model: "test/reviewer",
+            role: "leaf",
+            result: "Parser reviewed.",
+            usage: { durationMs: 2_500 },
+          },
+        ]);
       } else if (scenario.name === "batch") {
-        expect(results.map((event) => event.payload.status)).toEqual(["completed", "failed"]);
-        expect(results[0]?.payload).toMatchObject({
-          summary: "Routing inspected.",
-          typedUsage: { durationMs: 1500 },
-        });
-        expect(results[1]?.payload).toMatchObject({
-          summary: "Test process failed.",
-          model: "test/tester",
-          typedUsage: { durationMs: 2000 },
-        });
+        expect(completed).toMatchObject([
+          {
+            status: "completed",
+            role: "orchestrator",
+            result: "Routing inspected.",
+            usage: { durationMs: 1_500 },
+          },
+          {
+            status: "failed",
+            model: "test/tester",
+            role: "leaf",
+            result: "Test process failed.",
+            usage: { durationMs: 2_000 },
+          },
+        ]);
       } else {
-        expect(results[0]?.payload).toMatchObject({
-          status: "failed",
-          summary: "Delegation unavailable.",
-        });
+        expect(completed).toMatchObject([{ status: "failed", result: "Delegation unavailable." }]);
       }
-      expect(state.finish("interrupted")).toEqual([]);
     },
   );
 
   it("prefers structured args/results over clipped display content", () => {
-    const state = new HermesDelegations();
     const start = tool({ ...batch.start, rawInput: batch.args });
-    expect(state.update(start, turnId)?.[0]?.payload).toMatchObject({ model: "test/researcher" });
-    const events = state.update(
+    expect(updates(start)[0]).toMatchObject({ model: "test/researcher", role: "orchestrator" });
+    const completed = updates(
       tool({ ...batch.complete, content: [], rawOutput: batch.result }, start),
-      turnId,
-    )!;
-    expect(
-      events
-        .filter((event) => event.type === "task.completed")
-        .map((event) => event.payload.status),
-    ).toEqual(["completed", "failed"]);
+    );
+    expect(completed).toMatchObject([
+      { status: "completed", role: "orchestrator", usage: { durationMs: 1_500 } },
+      { status: "failed", role: "leaf", usage: { durationMs: 2_000 } },
+    ]);
   });
 
-  it("keeps short interleaved child progress and ignores duplicate/late text", () => {
-    const state = new HermesDelegations();
+  it("reads a single spawn's role from its args", () => {
+    const single = fixture.cases.find((item) => item.name === "single")!;
+    expect(updates(tool({ ...single.start, rawInput: single.args }))).toMatchObject([
+      { role: "leaf", model: "test/reviewer", usage: null },
+    ]);
+  });
+
+  it("counts a result entry's nested tokens, without double-counting reasoning", () => {
     const start = tool({ ...batch.start, rawInput: batch.args });
-    state.update(start, turnId);
-    for (const index of [0, 1]) {
-      const tick = progress(start, { event: "subagent.text", task_index: index, text: "Hi" });
-      expect(isHermesDelegationProgress(tick)).toBe(true);
-      expect(state.update(tick, turnId)?.[0]?.payload).toMatchObject({
-        taskId: `tc-fixture-batch:task:${index}`,
-        status: "running",
-        summary: "Hi",
-      });
-      expect(state.update(tick, turnId)).toEqual([]);
-    }
-    state.update(
-      progress(start, {
-        event: "subagent.complete",
-        task_index: 0,
-        status: "completed",
-        summary: "Done",
-      }),
-      turnId,
+    const [first] = updates(
+      tool(
+        {
+          ...batch.complete,
+          content: [],
+          rawOutput: {
+            results: [
+              {
+                task_index: 0,
+                status: "completed",
+                summary: "Routing inspected.",
+                duration_seconds: 1.5,
+                tokens: { input: 1_200, output: 340.4 },
+              },
+            ],
+          },
+        },
+        start,
+      ),
     );
+    expect(first!.usage).toEqual({
+      totalTokens: 1_540,
+      inputTokens: 1_200,
+      outputTokens: 340,
+      durationMs: 1_500,
+    });
+  });
+
+  it("moves only the child a progress event names", () => {
+    const start = tool({ ...batch.start, rawInput: batch.args });
     expect(
-      state.update(
-        progress(start, { event: "subagent.text", task_index: 0, text: "Late" }),
-        turnId,
-      ),
-    ).toEqual([]);
+      updates(progress(start, { event: "subagent.text", task_index: 1, text: "Hi" })),
+    ).toMatchObject([{ nativeTaskId: "tc-fixture-batch:task:1", status: "running" }]);
     expect(
-      state.update(
-        progress(start, { event: "subagent.text", task_index: 99, text: "Unknown child" }),
-        turnId,
+      updates(progress(start, { event: "subagent.spawn_requested", task_index: 0 })),
+    ).toMatchObject([{ nativeTaskId: "tc-fixture-batch:task:0", status: "pending" }]);
+    expect(
+      updates(
+        progress(start, {
+          event: "subagent.complete",
+          task_index: 0,
+          status: "completed",
+          summary: "Done",
+          input_tokens: 9_000,
+          output_tokens: 3_400,
+          reasoning_tokens: 1_200,
+          duration_seconds: 12.34,
+        }),
       ),
-    ).toEqual([]);
+    ).toMatchObject([
+      {
+        status: "completed",
+        result: "Done",
+        title: "Inspect routing",
+        role: "orchestrator",
+        usage: {
+          totalTokens: 12_400,
+          inputTokens: 9_000,
+          outputTokens: 3_400,
+          reasoningOutputTokens: 1_200,
+          durationMs: 12_340,
+        },
+      },
+    ]);
+  });
+
+  it("claims spinner frames and grandchildren without moving any child", () => {
+    const start = tool({ ...batch.start, rawInput: batch.args });
+    for (const text of ["(¬‿¬) analyzing...", "(¬‿¬) analyzing...ಠ_ಠ deliberating..."]) {
+      expect(updates(progress(start, { event: "subagent.thinking", task_index: 0, text }))).toEqual(
+        [],
+      );
+    }
+    expect(updates(progress(start, { event: "subagent.start", task_index: 0, depth: 1 }))).toEqual(
+      [],
+    );
+  });
+
+  it("names no goal for a child it never saw start, so it cannot open a row", () => {
+    const start = tool({ ...batch.start, rawInput: batch.args });
+    expect(
+      updates(progress(start, { event: "subagent.text", task_index: 99, text: "Unknown child" })),
+    ).toMatchObject([{ prompt: "", title: null }]);
   });
 
   it("does not confuse stock background dispatch with successful completion", () => {
-    const state = new HermesDelegations();
-    const start = tool(dispatched.start);
-    state.update(start, turnId);
-    const events = state.update(tool(dispatched.complete, start), turnId)!;
-    expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({
-      type: "task.progress",
-      payload: {
+    const start = launch(dispatched.start);
+    expect(updates(tool(dispatched.complete, start))).toMatchObject([
+      {
         status: "idle",
-        summary: "Dispatched in background; stock Hermes ACP does not report child completion.",
+        result: "Dispatched in background; stock Hermes ACP does not report child completion.",
       },
-    });
-    expect(state.finish("interrupted", undefined, { turnId, preserveBackground: true })).toEqual(
-      [],
-    );
-  });
-
-  it("attributes patched background completion to the original turn", () => {
-    const state = new HermesDelegations();
-    const start = tool({ ...dispatched.start, rawInput: dispatched.args });
-    state.update(start, turnId);
-    state.update(tool({ ...dispatched.complete, rawOutput: dispatched.result }, start), turnId);
-    expect(state.finish("interrupted", undefined, { turnId, preserveBackground: true })).toEqual(
-      [],
-    );
-    const events = state.update(
-      progress(start, {
-        event: "subagent.complete",
-        task_index: 0,
-        status: "completed",
-        summary: "Background done.",
-      }),
-      TurnId.make("new-turn"),
-    )!;
-    expect(events[0]).toMatchObject({
-      type: "task.completed",
-      turnId,
-      payload: { summary: "Background done." },
-    });
-  });
-
-  it("settles incomplete children on interruption and does not steal another turn's background tasks", () => {
-    const state = new HermesDelegations();
-    const start = tool(batch.start);
-    state.update(start, turnId);
-    expect(
-      state.finish("cancelled", undefined, {
-        turnId: TurnId.make("other"),
-        preserveBackground: false,
-      }),
-    ).toEqual([]);
-    expect(state.finish("cancelled").map((event) => event.payload)).toEqual([
-      expect.objectContaining({ taskId: "tc-fixture-batch:task:0", status: "cancelled" }),
-      expect.objectContaining({ taskId: "tc-fixture-batch:task:1", status: "cancelled" }),
     ]);
+  });
+
+  it("keeps patched background children running until they report", () => {
+    const start = launch({ ...dispatched.start, rawInput: dispatched.args });
     expect(
-      state.update(
-        tool({
-          sessionUpdate: "tool_call_update",
-          toolCallId: start.toolCallId,
-          status: "in_progress",
-          rawOutput: { hermesDelegation: { event: "subagent.text", task_index: 0, text: "Late" } },
+      updates(tool({ ...dispatched.complete, rawOutput: dispatched.result }, start)),
+    ).toMatchObject([{ status: "running", result: null }]);
+    // After the turn settles the adapter sees the raw update without the start,
+    // and a restarted server has not seen the launch at all.
+    expect(
+      makeHermesSubagentExtractor()(
+        progress(undefined, {
+          event: "subagent.complete",
+          task_index: 0,
+          status: "completed",
+          summary: "Background done.",
+          output_tokens: 800,
+          duration_seconds: 4,
         }),
-      ),
-    ).toEqual([]);
+      )!,
+    ).toMatchObject([
+      {
+        nativeTaskId: "tc-fixture-dispatched:task:0",
+        status: "completed",
+        result: "Background done.",
+        // The adapter keeps the role it saw at launch; the late report carries usage.
+        role: null,
+        usage: { totalTokens: 800, outputTokens: 800, durationMs: 4_000 },
+      },
+    ]);
+  });
+
+  it("recognizes a stock background dispatch even when its goals were clipped", () => {
+    const start = launch(dispatched.start);
+    const clipped = tool(
+      {
+        ...dispatched.complete,
+        content: [
+          {
+            type: "content",
+            content: {
+              type: "text",
+              text: '{"status": "dispatched", "mode": "background", "goals": ["clipped...',
+            },
+          },
+        ],
+      },
+      start,
+    );
+    expect(updates(clipped)).toMatchObject([{ status: "idle" }]);
   });
 
   it("keeps delegate controls and unrelated commands out of the roster", () => {
-    const state = new HermesDelegations();
     for (const action of ["list", "steer", "stop"]) {
       expect(
-        state.update(
+        makeHermesSubagentExtractor()(
           tool({ ...batch.start, title: "delegate task", rawInput: { action } }),
-          turnId,
         ),
       ).toBeUndefined();
     }
     expect(
-      state.update(tool({ ...batch.start, title: "delegate task", content: [] }), turnId),
+      makeHermesSubagentExtractor()(tool({ ...batch.start, title: "delegate task", content: [] })),
     ).toBeUndefined();
     // Stock controls share the delegate_task title prefix; only spawns name a goal.
     for (const title of ["delegate_task: list", "delegate_task: stop sa-0-test1234"]) {
       const content = [{ type: "content", content: { type: "text", text: "Delegating task" } }];
-      expect(state.update(tool({ ...batch.start, title, content }), turnId)).toBeUndefined();
+      expect(
+        makeHermesSubagentExtractor()(tool({ ...batch.start, title, content })),
+      ).toBeUndefined();
     }
     expect(
-      state.update(tool({ ...batch.start, title: "terminal: echo hello" }), turnId),
+      makeHermesSubagentExtractor()(tool({ ...batch.start, title: "terminal: echo hello" })),
     ).toBeUndefined();
-  });
-
-  it("does not let nested child indices or conflicting identities overwrite direct children", () => {
-    const state = new HermesDelegations();
-    const start = tool({ ...batch.start, rawInput: batch.args });
-    state.update(start, turnId);
-    expect(
-      state.update(
-        progress(start, {
-          event: "subagent.start",
-          task_index: 0,
-          subagent_id: "nested",
-          depth: 1,
-        }),
-        turnId,
-      ),
-    ).toEqual([]);
-    expect(
-      state.update(
-        progress(start, {
-          event: "subagent.start",
-          task_index: 0,
-          subagent_id: "direct",
-          depth: 0,
-        }),
-        turnId,
-      ),
-    ).toHaveLength(1);
-    expect(
-      state.update(
-        progress(start, {
-          event: "subagent.complete",
-          task_index: 0,
-          subagent_id: "another",
-          depth: 0,
-          status: "completed",
-        }),
-        turnId,
-      ),
-    ).toEqual([]);
-  });
-
-  it("does not reopen a child that finishes before the background dispatch acknowledgement", () => {
-    const state = new HermesDelegations();
-    const start = tool({ ...dispatched.start, rawInput: dispatched.args });
-    state.update(start, turnId);
-    state.update(
-      progress(start, {
-        event: "subagent.complete",
-        task_index: 0,
-        status: "completed",
-        summary: "Fast result",
-      }),
-      turnId,
-    );
-    expect(
-      state.update(tool({ ...dispatched.complete, rawOutput: dispatched.result }, start), turnId),
-    ).toEqual([]);
-    expect(
-      state.update(
-        progress(start, { event: "subagent.text", task_index: 0, text: "Late" }),
-        TurnId.make("next-turn"),
-      ),
-    ).toEqual([]);
-  });
-
-  it("completes a live foreground child once and releases the finished call", () => {
-    const state = new HermesDelegations();
-    const start = tool({ ...batch.start, rawInput: batch.args });
-    state.update(start, turnId);
-    state.update(
-      progress(start, { event: "subagent.complete", task_index: 0, status: "completed" }),
-      turnId,
-    );
-    const events = state.update(
-      tool({ ...batch.complete, rawOutput: batch.result }, start),
-      turnId,
-    )!;
-    expect(
-      events
-        .filter((event) => event.type === "task.completed")
-        .map((event) => event.payload.taskId),
-    ).toEqual(["tc-fixture-batch:task:1"]);
-    expect(state["calls"].size).toBe(0);
-  });
-
-  it("reopens children a cancelled turn settled when Hermes then acknowledges dispatch", () => {
-    const state = new HermesDelegations();
-    const start = tool({ ...dispatched.start, rawInput: dispatched.args });
-    state.update(start, turnId);
-    expect(
-      state.finish("cancelled", undefined, { turnId, preserveBackground: true }),
-    ).toMatchObject([{ type: "task.updated", payload: { status: "cancelled" } }]);
-    // Progress racing the acknowledgement must not retire the call.
-    state.update(progress(start, { event: "subagent.text", task_index: 0, text: "Hi" }), turnId);
-    const events = state.update(
-      tool({ ...dispatched.complete, rawOutput: dispatched.result }, start),
-      TurnId.make("next-turn"),
-    )!;
-    expect(events).toMatchObject([
-      { type: "task.progress", turnId, payload: { status: "running" } },
-    ]);
-    expect(
-      state
-        .update(progress(start, { event: "subagent.complete", task_index: 0, status: "completed" }))
-        ?.find((event) => event.type === "task.completed")?.payload.status,
-    ).toBe("completed");
   });
 
   it("bounds a stock batch count before allocating children", () => {
     const content = [
       { type: "content", content: { type: "text", text: "Delegating 4294967296 tasks\n\n1. A" } },
     ];
-    const events = new HermesDelegations().update(tool({ ...batch.start, content }), turnId)!;
-    expect(events.filter((event) => event.type === "task.started")).toHaveLength(128);
+    expect(updates(tool({ ...batch.start, content }))).toHaveLength(128);
   });
 
   it("settles missing/truncated stock child results without inventing success", () => {
-    const state = new HermesDelegations();
-    const start = tool(batch.start);
-    state.update(start, turnId);
-    const events = state.update(tool({ ...batch.complete, content: [] }, start), turnId)!;
-    expect(
-      events
-        .filter((event) => event.type === "task.completed")
-        .map((event) => event.payload.status),
-    ).toEqual(["stopped", "stopped"]);
-  });
-
-  it("accepts Hermes JSON-string task arrays", () => {
-    const state = new HermesDelegations();
-    const events = state.update(
-      tool({
-        ...batch.start,
-        title: "delegate task",
-        content: [],
-        rawInput: { tasks: JSON.stringify(batch.args.tasks) },
-      }),
-      turnId,
-    )!;
-    expect(
-      events.filter((event) => event.type === "task.started").map((event) => event.payload.title),
-    ).toEqual(["Inspect routing", "Run tests"]);
-  });
-
-  it("recognizes a stock background dispatch even when its goals were clipped", () => {
-    const state = new HermesDelegations();
-    const start = tool(dispatched.start);
-    state.update(start, turnId);
-    const events = state.update(
-      tool(
-        {
-          ...dispatched.complete,
-          content: [
-            {
-              type: "content",
-              content: {
-                type: "text",
-                text: '{"status": "dispatched", "mode": "background", "goals": ["clipped...',
-              },
-            },
-          ],
-        },
-        start,
-      ),
-      turnId,
-    )!;
-    expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({ type: "task.progress", payload: { status: "idle" } });
-  });
-
-  it("keeps detached children after parent cancellation but interrupts them on connection loss", () => {
-    const state = new HermesDelegations();
-    const start = tool({ ...dispatched.start, rawInput: dispatched.args });
-    state.update(start, turnId);
-    state.update(tool({ ...dispatched.complete, rawOutput: dispatched.result }, start), turnId);
-    expect(state.finish("cancelled", undefined, { turnId, preserveBackground: true })).toEqual([]);
-    expect(state.finish("interrupted", "ACP disconnected")).toMatchObject([
-      {
-        type: "task.updated",
-        turnId,
-        payload: { status: "interrupted", error: "ACP disconnected" },
-      },
+    const start = launch(batch.start);
+    expect(updates(tool({ ...batch.complete, content: [] }, start))).toMatchObject([
+      { status: "interrupted", result: "Hermes returned without a result for this task." },
+      { status: "interrupted", result: "Hermes returned without a result for this task." },
     ]);
   });
 
+  it("accepts Hermes JSON-string task arrays", () => {
+    const start = tool({
+      ...batch.start,
+      title: "delegate task",
+      content: [],
+      rawInput: { tasks: JSON.stringify(batch.args.tasks) },
+    });
+    expect(updates(start).map((update) => update.title)).toEqual(["Inspect routing", "Run tests"]);
+  });
+
   it("maps registry-stalled results to failure", () => {
-    const state = new HermesDelegations();
     const start = tool({ ...dispatched.start, rawInput: dispatched.args });
-    state.update(start, turnId);
     expect(
-      state.update(
+      updates(
         progress(start, {
           event: "subagent.complete",
           task_index: 0,
           status: "stalled",
           error: "No heartbeat",
         }),
-        turnId,
       ),
-    ).toMatchObject([
-      { type: "task.updated", payload: { status: "failed", error: "No heartbeat" } },
-      { type: "task.completed", payload: { status: "failed" } },
-    ]);
-  });
-
-  it("does not reactivate sidebar liveness after a terminal child result", () => {
-    const state = new HermesDelegations();
-    const liveness = ThreadBackgroundLiveness.make();
-    const apply = (events: NonNullable<ReturnType<HermesDelegations["update"]>>) => {
-      for (const event of events) {
-        const kind =
-          event.type === "task.started"
-            ? "started"
-            : event.type === "task.completed"
-              ? "completed"
-              : event.type === "task.progress"
-                ? "progress"
-                : "updated";
-        liveness.recordTaskLiveness({
-          threadId: "thread",
-          taskId: event.payload.taskId,
-          taskType: event.payload.taskType,
-          status: "status" in event.payload ? event.payload.status : undefined,
-          kind,
-        });
-      }
-    };
-    const start = tool({ ...dispatched.start, rawInput: dispatched.args });
-    apply(state.update(start, turnId)!);
-    apply(
-      state.update(tool({ ...dispatched.complete, rawOutput: dispatched.result }, start), turnId)!,
-    );
-    expect(liveness.getThreadBackgroundLiveness("thread")).toBe("working");
-    apply(
-      state.update(
-        progress(start, { event: "subagent.complete", task_index: 0, status: "completed" }),
-      )!,
-    );
-    expect(liveness.getThreadBackgroundLiveness("thread")).toBeNull();
-    apply(
-      state.update(
-        progress(start, { event: "subagent.text", task_index: 0, text: "Late chunk" }),
-        TurnId.make("new-turn"),
-      )!,
-    );
-    expect(liveness.getThreadBackgroundLiveness("thread")).toBeNull();
-  });
-
-  it("folds actual ingestion activities into client RuntimeSubagents", () => {
-    const state = new HermesDelegations();
-    const start = tool(batch.start);
-    const started = state.update(start, turnId)!;
-    const ended = state.update(tool(batch.complete, start), turnId)!;
-    const activities = [...started, ...ended].flatMap((event, index) =>
-      runtimeEventToActivities({
-        ...event,
-        eventId: EventId.make(`hermes-${index}`),
-        createdAt: `2026-09-29T12:00:${String(index).padStart(2, "0")}.000Z`,
-        provider: ProviderDriverKind.make("hermes"),
-        threadId: ThreadId.make("thread"),
-      }),
-    );
-    const persisted = [...new Map(activities.map((activity) => [activity.id, activity])).values()];
-    expect(foldSubagentActivities(persisted)).toMatchObject([
-      {
-        id: "tc-fixture-batch:task:0",
-        kind: "subagent",
-        title: "Inspect routing",
-        status: "completed",
-        model: "test/researcher",
-        role: "orchestrator",
-        result: "Routing inspected.",
-        usage: { durationMs: 1500 },
-      },
-      {
-        id: "tc-fixture-batch:task:1",
-        title: "Run tests",
-        status: "failed",
-        model: "test/tester",
-        role: "leaf",
-        error: "Test process failed.",
-        usage: { durationMs: 2000 },
-      },
-    ]);
+    ).toMatchObject([{ status: "failed", result: "No heartbeat" }]);
   });
 });

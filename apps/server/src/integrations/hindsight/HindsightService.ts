@@ -147,8 +147,6 @@ function notConfigured(enabled: boolean): HindsightProbe {
   };
 }
 
-const NOT_CONFIGURED = notConfigured(true);
-
 function trimmedOrNull(value: string | undefined): string | null {
   const trimmed = value?.trim() ?? "";
   return trimmed.length === 0 ? null : trimmed;
@@ -807,17 +805,3 @@ export const make = Effect.gen(function* () {
 });
 
 export const layer = Layer.effect(HindsightService, make);
-
-/** Unconfigured service, for suites that only need the RPC surface to resolve. */
-export const layerTest = Layer.succeed(
-  HindsightService,
-  HindsightService.of({
-    listBanks: () =>
-      Effect.succeed({ status: statusOf(NOT_CONFIGURED), banks: [], defaultBank: null }),
-    browse: () => Effect.succeed(emptyMemoryResult(NOT_CONFIGURED)),
-    recall: () => Effect.succeed(emptyMemoryResult(NOT_CONFIGURED)),
-    stats: () => Effect.succeed({ status: statusOf(NOT_CONFIGURED), stats: null }),
-    retain: () => Effect.fail(probeFailure(NOT_CONFIGURED)),
-    reflect: () => Effect.fail(probeFailure(NOT_CONFIGURED)),
-  }),
-);

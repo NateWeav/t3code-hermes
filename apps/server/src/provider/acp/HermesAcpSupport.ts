@@ -20,12 +20,11 @@ import * as Layer from "effect/Layer";
 import * as Scope from "effect/Scope";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import type * as EffectAcpErrors from "effect-acp/errors";
-import type * as EffectAcpSchema from "effect-acp/schema";
+import type * as EffectAcpSchema from "effect-acp/compat";
 import { normalizeModelSlug } from "@t3tools/shared/model";
 
 import type { AcpSessionModeState, AcpToolCallState } from "./AcpRuntimeModel.ts";
 import * as AcpSessionRuntime from "./AcpSessionRuntime.ts";
-import { isHermesDelegationProgress } from "./HermesDelegation.ts";
 
 const HERMES_DRIVER_KIND = ProviderDriverKind.make("hermes");
 /** Hermes authenticates from `~/.hermes/.env`; the method id is a formality. */
@@ -93,37 +92,18 @@ export const HERMES_BUILT_IN_SLASH_COMMANDS: ReadonlyArray<ServerProviderSlashCo
 ];
 
 /**
- * Hermes reports context compaction through its own `_meta` extension rather
- * than an ACP-native update: `session_info_update` carries
- * `_meta.hermes.sessionProvenance` and sets `reason: "compression"` when the
- * notification was triggered by a compression-driven session split.
- *
- * @see acp_adapter/provenance.py in NousResearch/hermes-agent
+ * Hermes skill and memory tools keep their name only in the agent's title
+ * (`skill view (name)`, `memory add: user`); the shared presentation flattens
+ * read and edit kinds into "Read file" or "Changed files". Clients label the
+ * fork's skill and memory work-log rows from the turn item title.
  */
-export function hermesSessionInfoIndicatesCompaction(rawPayload: unknown): boolean {
-  if (typeof rawPayload !== "object" || rawPayload === null) {
-    return false;
-  }
-  const meta = (rawPayload as { readonly _meta?: unknown })._meta;
-  const update = (rawPayload as { readonly update?: { readonly _meta?: unknown } }).update;
-  for (const candidate of [update?._meta, meta]) {
-    if (typeof candidate !== "object" || candidate === null) {
-      continue;
-    }
-    const hermes = (candidate as { readonly hermes?: unknown }).hermes;
-    if (typeof hermes !== "object" || hermes === null) {
-      continue;
-    }
-    const provenance = (hermes as { readonly sessionProvenance?: unknown }).sessionProvenance;
-    if (typeof provenance !== "object" || provenance === null) {
-      continue;
-    }
-    const reason = (provenance as { readonly reason?: unknown }).reason;
-    if (reason === "compression") {
-      return true;
-    }
-  }
-  return false;
+const HERMES_AGENT_ACTIVITY_TITLE = /^(?:skills?[ _]|memory )/i;
+
+export function preserveHermesAgentActivityTitle(toolCall: AcpToolCallState): AcpToolCallState {
+  const title = typeof toolCall.data.title === "string" ? toolCall.data.title.trim() : "";
+  return title && HERMES_AGENT_ACTIVITY_TITLE.test(title) && toolCall.title !== title
+    ? { ...toolCall, title }
+    : toolCall;
 }
 
 const HERMES_TERMINAL_RESULT_HEADINGS = new Set(["terminal result", "✅ terminal completed"]);
@@ -205,35 +185,11 @@ export function normalizeHermesTerminalResult(toolCall: AcpToolCallState): AcpTo
   };
 }
 
-/**
- * How many of a session's opening prompts to keep for
- * {@link isHermesDerivedTitle}. Hermes titles from the first message that
- * reaches the agent, which a locally handled slash command or a quick steer
- * can push past the very first prompt.
- */
-export const HERMES_TITLE_PROMPT_LIMIT = 4;
-
-/**
- * Hermes titles a session twice: first an instant title cut from the opening
- * message (`derive_title` in agent/title_generator.py), then a model-written
- * one. ACP does not say which is which, and T3 Code already titles a thread
- * from its first message, so a title that is just a prefix of one of the
- * opening prompts is the derived one and is not worth forwarding.
- */
-export function isHermesDerivedTitle(
-  title: string,
-  openingPrompts: ReadonlyArray<string>,
-): boolean {
-  const collapse = (value: string) => value.split(/\s+/).filter(Boolean).join(" ");
-  const stem = collapse(title.replace(/…$/, "")).replace(/[ ,.;:—-]+$/, "");
-  return stem.length > 0 && openingPrompts.some((prompt) => collapse(prompt).startsWith(stem));
-}
-
 type HermesAcpRuntimeHermesSettings = Pick<HermesSettings, "binaryPath">;
 
 export interface HermesAcpRuntimeInput extends Omit<
   AcpSessionRuntime.AcpSessionRuntimeOptions,
-  "authMethodId" | "clientCapabilities" | "spawn" | "transformSessionUpdate"
+  "authMethodId" | "spawn"
 > {
   readonly childProcessSpawner: ChildProcessSpawner.ChildProcessSpawner["Service"];
   readonly hermesSettings: HermesAcpRuntimeHermesSettings | null | undefined;
@@ -253,28 +209,6 @@ export function buildHermesAcpSpawnInput(
   };
 }
 
-/** Hermes's reply to a steer it folded into the running turn. */
-const HERMES_REDIRECT_ACK = "Redirected the active turn with your correction.";
-
-/**
- * Hermes confirms a live steer by sending a fixed sentence as assistant text.
- * The user's steer message already shows in the thread, so the sentence is
- * blanked; the runtime drops empty chunks without opening an assistant message.
- */
-function dropHermesRedirectAck(
-  notification: EffectAcpSchema.SessionNotification,
-): EffectAcpSchema.SessionNotification {
-  const update = notification.update;
-  if (
-    update.sessionUpdate !== "agent_message_chunk" ||
-    update.content.type !== "text" ||
-    update.content.text !== HERMES_REDIRECT_ACK
-  ) {
-    return notification;
-  }
-  return { ...notification, update: { ...update, content: { ...update.content, text: "" } } };
-}
-
 export const makeHermesAcpRuntime = (
   input: HermesAcpRuntimeInput,
 ): Effect.Effect<
@@ -288,8 +222,6 @@ export const makeHermesAcpRuntime = (
         ...input,
         spawn: buildHermesAcpSpawnInput(input.hermesSettings, input.cwd, input.environment),
         authMethodId: HERMES_AUTH_METHOD_ID,
-        transformSessionUpdate: dropHermesRedirectAck,
-        isPassthroughToolCallUpdate: isHermesDelegationProgress,
       }).pipe(
         Layer.provide(
           Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, input.childProcessSpawner),

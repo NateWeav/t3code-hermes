@@ -17,13 +17,14 @@
 - [Usage and limits](./user/usage.md)
 - [Watch Hermes scheduled tasks](./user/hermes-tasks.md)
 - [Browse Hermes memories](./user/hermes-memory.md)
+- [Browse Hermes skills](./user/hermes-skills.md)
 - [Configure Hermes reasoning](./user/hermes-reasoning.md)
 - [Keep Hermes patches in place](./user/hermes-patches.md)
 - [Product usage data](./user/telemetry.md)
 - [Remote access](./user/remote-access.md)
 - [Running in the background](./user/background-service.md)
 - [Updating T3 Code](./user/updating.md)
-- Provider guides: [Codex](./user/providers-codex.md) · [Claude](./user/providers-claude.md) · [OpenCode](./user/providers-opencode.md) · [Antigravity](./user/providers-antigravity.md)
+- Provider guides: [Codex](./user/providers-codex.md) · [Claude](./user/providers-claude.md) · [OpenCode](./user/providers-opencode.md) · [Antigravity](./user/providers-antigravity.md) · [Pi](./user/providers-pi.md)
 
 ---
 

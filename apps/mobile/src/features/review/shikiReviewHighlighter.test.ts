@@ -65,9 +65,17 @@ describe("highlightSourceFile", () => {
         .join(""),
     ).toBe(source);
     expect(highlighted.flat().some((token) => token.color !== null)).toBe(true);
+    // Compare warm results: on a slow machine the cold call can exceed Shiki's
+    // per-line tokenize time limit and leave the rest of the line as one token.
     expect(
       await highlighter.highlightCodeSnippet({ code: source, language: "ts", theme: "dark" }),
-    ).toEqual(highlighted);
+    ).toEqual(
+      await highlighter.highlightSourceFile({
+        path: "example.ts",
+        contents: source,
+        theme: "dark",
+      }),
+    );
   });
 });
 

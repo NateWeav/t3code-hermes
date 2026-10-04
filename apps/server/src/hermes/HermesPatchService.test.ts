@@ -77,6 +77,8 @@ const withInstance = (binaryPath: string, home: string) =>
 const makeRestartableCheckout = (restart: {
   readonly exitCode: number;
   readonly stopsGateway?: boolean;
+  /** Exits 0 without writing a new pid, as a restart that did nothing. */
+  readonly leavesGateway?: boolean;
 }) =>
   Effect.gen(function* () {
     const { root, binaryPath } = yield* makeHermesCheckout;
@@ -94,6 +96,7 @@ const makeRestartableCheckout = (restart: {
         '  console.error("✗ Gateway service restart failed.");',
         `  process.exit(${restart.exitCode});`,
         "}",
+        `if (${restart.leavesGateway === true}) process.exit(0);`,
         'writeFileSync(join(process.env.HERMES_HOME, "gateway.pid"), JSON.stringify({ pid: 5151 }));',
       ].join("\n"),
     });
@@ -198,6 +201,42 @@ describe("HermesPatchService", () => {
         yield* Fiber.join(update);
         yield* service.awaitGatewayRestart;
         assert.include(NodeFS.readFileSync(pidFile, "utf8"), "5151");
+      }).pipe(withInstance(binaryPath, home));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  // Live clock: the service waits out its retries for a replacement.
+  it.live("reports a restart failed when it leaves the gateway an update started", () =>
+    Effect.gen(function* () {
+      // The restart command "succeeds" but replaces nothing.
+      const { binaryPath, home } = yield* makeRestartableCheckout({
+        exitCode: 0,
+        leavesGateway: true,
+      });
+      yield* Effect.acquireRelease(
+        Effect.promise(() => startFakeGateway({ home, pid: 4242 })),
+        (fake) => Effect.promise(fake.close),
+      );
+      const pidFile = NodePath.join(home, "gateway.pid");
+      yield* Effect.gen(function* () {
+        const service = yield* HermesPatchService;
+        const release = yield* Deferred.make<void>();
+        const held = yield* Deferred.make<void>();
+        const update = yield* providerUpdateLock(HERMES_UPDATE_LOCK_KEY)
+          .withPermits(1)(
+            Deferred.succeed(held, undefined).pipe(Effect.andThen(Deferred.await(release))),
+          )
+          .pipe(Effect.forkChild);
+        yield* Deferred.await(held);
+        yield* service.restartGateway;
+        // An older Hermes restarts its gateway during the update.
+        NodeFS.writeFileSync(pidFile, JSON.stringify({ pid: 6363 }));
+        yield* Deferred.succeed(release, undefined);
+        yield* Fiber.join(update);
+        yield* service.awaitGatewayRestart;
+
+        const after = yield* service.list;
+        assert.isNotNull(after.gatewayRestartFailure);
       }).pipe(withInstance(binaryPath, home));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );

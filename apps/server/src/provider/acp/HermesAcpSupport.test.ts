@@ -5,14 +5,13 @@ import * as EffectAcpErrors from "effect-acp/errors";
 import {
   applyHermesAcpModelSelection,
   buildHermesAcpSpawnInput,
-  hermesSessionInfoIndicatesCompaction,
   HERMES_BUILT_IN_SLASH_COMMANDS,
   resolveHermesAcpBaseModelId,
-  isHermesDerivedTitle,
   normalizeHermesTerminalResult,
+  preserveHermesAgentActivityTitle,
   resolveHermesSessionModeId,
 } from "./HermesAcpSupport.ts";
-import { projectActivityPayload } from "../../orchestration/ActivityPayloadProjection.ts";
+import { parseSessionUpdateEvent } from "./AcpRuntimeModel.ts";
 
 describe("resolveHermesAcpBaseModelId", () => {
   it("falls back to the placeholder model for empty ids", () => {
@@ -52,33 +51,6 @@ describe("buildHermesAcpSpawnInput", () => {
       args: ["acp"],
       cwd: "/tmp/project",
     });
-  });
-});
-
-describe("isHermesDerivedTitle", () => {
-  // Observed from Hermes 0.21.0: the instant title, then the model's title.
-  const prompt =
-    "Do not run any tools or commands. In your head: is 391 prime? Answer yes or no with one short sentence.";
-
-  it("recognises the instant title Hermes cuts from the prompt", () => {
-    expect(isHermesDerivedTitle("Do not run any tools or commands. In your head…", [prompt])).toBe(
-      true,
-    );
-    expect(isHermesDerivedTitle("fix the  bug", ["fix the bug\nin the parser"])).toBe(true);
-  });
-
-  it("still recognises it after a steer lands before the title does", () => {
-    expect(
-      isHermesDerivedTitle("Do not run any tools or commands. In your head…", [
-        prompt,
-        "actually, also check 397",
-      ]),
-    ).toBe(true);
-  });
-
-  it("keeps a model-written title", () => {
-    expect(isHermesDerivedTitle("Check if 391 is prime", [prompt])).toBe(false);
-    expect(isHermesDerivedTitle("Check if 391 is prime", [])).toBe(false);
   });
 });
 
@@ -333,47 +305,6 @@ describe("HERMES_BUILT_IN_SLASH_COMMANDS", () => {
   });
 });
 
-describe("hermesSessionInfoIndicatesCompaction", () => {
-  it("detects a compression-driven session rotation", () => {
-    expect(
-      hermesSessionInfoIndicatesCompaction({
-        sessionId: "session-1",
-        update: {
-          sessionUpdate: "session_info_update",
-          title: "Long thread",
-          _meta: {
-            hermes: {
-              sessionProvenance: {
-                compressionDepth: 2,
-                reason: "compression",
-                creatorKind: "compression",
-              },
-            },
-          },
-        },
-      }),
-    ).toBe(true);
-  });
-
-  it("ignores provenance without a compression reason", () => {
-    expect(
-      hermesSessionInfoIndicatesCompaction({
-        sessionId: "session-1",
-        update: {
-          sessionUpdate: "session_info_update",
-          _meta: { hermes: { sessionProvenance: { compressionDepth: 0 } } },
-        },
-      }),
-    ).toBe(false);
-  });
-
-  it("ignores payloads with no Hermes provenance at all", () => {
-    expect(hermesSessionInfoIndicatesCompaction(undefined)).toBe(false);
-    expect(hermesSessionInfoIndicatesCompaction({ update: { title: "x" } })).toBe(false);
-    expect(hermesSessionInfoIndicatesCompaction({ _meta: { hermes: {} } })).toBe(false);
-  });
-});
-
 describe("normalizeHermesTerminalResult", () => {
   const completedTerminal = (text: string, status: "completed" | "failed" = "completed") => ({
     toolCallId: "tc-1",
@@ -423,24 +354,6 @@ describe("normalizeHermesTerminalResult", () => {
     });
   });
 
-  it("gives clients the output's first line instead of the summary heading", () => {
-    const toolCall = normalizeHermesTerminalResult(
-      completedTerminal("terminal result\n- **output:** 391\n- **exit_code:** 0"),
-    );
-    const projected = projectActivityPayload({
-      id: "activity-1" as never,
-      createdAt: "2026-09-29T00:00:00.000Z",
-      tone: "tool",
-      kind: "tool.completed",
-      summary: "Ran command",
-      turnId: null,
-      payload: { itemType: "command_execution", status: "completed", data: toolCall.data },
-    });
-    expect((projected.payload as { data: { rawOutput: unknown } }).data.rawOutput).toEqual({
-      content: "391",
-    });
-  });
-
   it("keeps the exit code when a failing command printed nothing", () => {
     const normalized = normalizeHermesTerminalResult(
       completedTerminal("✅ terminal completed\n- **exit_code:** 1", "failed"),
@@ -461,5 +374,32 @@ describe("normalizeHermesTerminalResult", () => {
 
     const edit = { ...completedTerminal("terminal result\n- **output:** x"), kind: "edit" };
     expect(normalizeHermesTerminalResult(edit)).toBe(edit);
+  });
+});
+
+describe("preserveHermesAgentActivityTitle", () => {
+  const parsed = (title: string, kind: "read" | "edit" | "other") => {
+    const event = parseSessionUpdateEvent({
+      sessionId: "s",
+      update: { sessionUpdate: "tool_call", toolCallId: "tc-1", title, kind, status: "pending" },
+    }).events[0];
+    if (event?._tag !== "ToolCallUpdated") throw new Error("expected a tool call");
+    return event.toolCall;
+  };
+
+  it("keeps the skill or memory name the shared summary would flatten", () => {
+    for (const [title, kind] of [
+      ["skill view (pr-review)", "read"],
+      ["skill patch: pr-review", "edit"],
+      ["memory add: user", "edit"],
+    ] as const) {
+      const toolCall = parsed(title, kind);
+      expect(preserveHermesAgentActivityTitle(toolCall).title).toBe(title);
+    }
+  });
+
+  it("leaves other tools on their shared summary", () => {
+    const toolCall = parsed("read_file: src/app.ts", "read");
+    expect(preserveHermesAgentActivityTitle(toolCall)).toBe(toolCall);
   });
 });

@@ -602,12 +602,3 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
 });
 
 export const layer = Layer.effect(HindsightAgentMemory, make());
-
-/** Inert service, for suites that only need the RPC surface to resolve. */
-export const layerTest = Layer.succeed(
-  HindsightAgentMemory,
-  HindsightAgentMemory.of({
-    changes: Stream.make(INITIAL_STATE),
-    apply: Effect.succeed(INITIAL_STATE),
-  }),
-);

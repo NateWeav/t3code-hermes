@@ -1,16 +1,11 @@
 import { describe, expect, it } from "@effect/vitest";
-import { ThreadId, TurnId, type OrchestrationCommand } from "@t3tools/contracts";
+import { ThreadId, type OrchestrationV2TurnItem } from "@t3tools/contracts";
 
 import type { HermesMessageRow } from "./hermesRunState.ts";
-import {
-  buildHermesRunPrimer,
-  hermesRunCommandsFor,
-  isSilentReport,
-  type HermesToolCall,
-} from "./hermesRunTranscript.ts";
+import { hermesRunItemsFor, isSilentReport, type HermesToolCall } from "./hermesRunTranscript.ts";
 
 const prefix = "hermes-run:default:s1";
-const ids = { threadId: ThreadId.make(prefix), turnId: TurnId.make(prefix), prefix };
+const ids = { threadId: ThreadId.make(prefix), prefix };
 
 const row = (fields: Partial<HermesMessageRow> & Pick<HermesMessageRow, "id" | "role">) => ({
   content: "",
@@ -25,16 +20,14 @@ const row = (fields: Partial<HermesMessageRow> & Pick<HermesMessageRow, "id" | "
 const toolCall = (id: string, name: string, args: Record<string, unknown>) =>
   JSON.stringify([{ id, type: "function", function: { name, arguments: JSON.stringify(args) } }]);
 
-function activities(commands: readonly OrchestrationCommand[]) {
-  return commands.flatMap((command) =>
-    command.type === "thread.activity.append" ? [command.activity] : [],
-  );
+function items(batch: ReturnType<typeof hermesRunItemsFor>): OrchestrationV2TurnItem[] {
+  return batch.entries.map((entry) => entry.item);
 }
 
-describe("hermesRunCommandsFor", () => {
-  it("mirrors a run's prompt, tool calls, and report like a live Hermes turn", () => {
+describe("hermesRunItemsFor", () => {
+  it("mirrors a run's prompt, tool calls, and report as run-less turn items", () => {
     const pending = new Map<string, HermesToolCall>();
-    const batch = hermesRunCommandsFor(
+    const batch = hermesRunItemsFor(
       ids,
       [
         row({ id: 1, role: "user", content: "Resolve the upstream conflict" }),
@@ -46,17 +39,20 @@ describe("hermesRunCommandsFor", () => {
       ],
       pending,
     );
-    expect(batch.commands.map((command) => command.type)).toEqual([
-      "thread.message.user.append",
-      "thread.activity.append",
+    expect(items(batch)).toMatchObject([
+      { type: "user_message", text: "Resolve the upstream conflict", runId: null },
+      {
+        id: `${prefix}:tool:call-1`,
+        type: "command_execution",
+        input: "gh pr create --fill",
+        status: "running",
+        completedAt: null,
+      },
     ]);
-    expect(activities(batch.commands)[0]).toMatchObject({
-      kind: "tool.updated",
-      payload: { toolCallId: "call-1", status: "inProgress" },
-    });
+    expect(batch.entries[0]?.message).toMatchObject({ role: "user", runId: null });
 
     // The result lands in a later poll; the pending call carries across.
-    const next = hermesRunCommandsFor(
+    const next = hermesRunItemsFor(
       ids,
       [
         row({
@@ -73,14 +69,17 @@ describe("hermesRunCommandsFor", () => {
       ],
       pending,
     );
-    expect(activities(next.commands)[0]).toMatchObject({
-      id: `${prefix}:tool:call-1:end`,
-      kind: "tool.completed",
-      payload: {
-        status: "completed",
-        data: { rawOutput: { stdout: "https://github.com/NateWeav/t3code-hermes/pull/72\n" } },
-      },
+    const [finished, report] = items(next);
+    expect(finished).toMatchObject({
+      id: `${prefix}:tool:call-1`,
+      type: "command_execution",
+      status: "completed",
+      output: "https://github.com/NateWeav/t3code-hermes/pull/72\n",
+      exitCode: 0,
     });
+    // A finished call keeps the time it started.
+    expect(finished?.startedAt).toEqual(items(batch)[1]?.startedAt);
+    expect(report).toMatchObject({ type: "assistant_message", messageId: `${prefix}:m4` });
     expect(next.pullRequestUrls).toEqual(["https://github.com/NateWeav/t3code-hermes/pull/72"]);
     expect(next.lastAssistantText).toBe("Opened the resolution PR and CI is green.");
     expect(pending.size).toBe(0);
@@ -90,7 +89,7 @@ describe("hermesRunCommandsFor", () => {
     const pending = new Map<string, HermesToolCall>([
       ["call-2", { name: "terminal", args: { command: "vp test" } }],
     ]);
-    const batch = hermesRunCommandsFor(
+    const batch = hermesRunItemsFor(
       ids,
       [
         row({
@@ -102,14 +101,14 @@ describe("hermesRunCommandsFor", () => {
       ],
       pending,
     );
-    expect(activities(batch.commands)[0]).toMatchObject({ payload: { status: "failed" } });
+    expect(items(batch)[0]).toMatchObject({ status: "failed", outputIndicatesFailure: true });
   });
 
   it("keeps a terminal error's text when there is no output", () => {
     const pending = new Map<string, HermesToolCall>([
       ["call-e", { name: "terminal", args: { command: "gh pr create" } }],
     ]);
-    const batch = hermesRunCommandsFor(
+    const batch = hermesRunItemsFor(
       ids,
       [
         row({
@@ -121,16 +120,41 @@ describe("hermesRunCommandsFor", () => {
       ],
       pending,
     );
-    expect(JSON.stringify(activities(batch.commands)[0]?.payload)).toContain(
-      "gh: command not found",
+    expect(JSON.stringify(items(batch)[0])).toContain("gh: command not found");
+  });
+
+  it("maps file edits, searches, and other tools to their item kinds", () => {
+    const batch = hermesRunItemsFor(
+      ids,
+      [
+        row({
+          id: 9,
+          role: "assistant",
+          reasoning: "Check the composer first.",
+          toolCalls: JSON.stringify([
+            { id: "a", function: { name: "patch", arguments: '{"path":"src/a.ts"}' } },
+            { id: "b", function: { name: "search_files", arguments: '{"pattern":"TODO"}' } },
+            { id: "c", function: { name: "skill_manage", arguments: "{}" } },
+            { id: "d", function: { name: "delegate_task", arguments: '{"goal":"x"}' } },
+          ]),
+        }),
+      ],
+      new Map(),
     );
+    expect(items(batch).map((item) => item.type)).toEqual([
+      "reasoning",
+      "file_change",
+      "file_search",
+      "file_change",
+      "dynamic_tool",
+    ]);
   });
 
   it("ignores pull request URLs a run only read about", () => {
     const pending = new Map<string, HermesToolCall>([
       ["call-3", { name: "web_extract", args: { urls: ["https://github.com/o/r/pull/1"] } }],
     ]);
-    const batch = hermesRunCommandsFor(
+    const batch = hermesRunItemsFor(
       ids,
       [
         row({
@@ -163,7 +187,7 @@ describe("hermesRunCommandsFor", () => {
         { name: "terminal", args: { command } },
       ]),
     );
-    const batch = hermesRunCommandsFor(
+    const batch = hermesRunItemsFor(
       ids,
       Object.entries(outputs).map(([toolCallId, output], index) =>
         row({
@@ -178,13 +202,11 @@ describe("hermesRunCommandsFor", () => {
     expect(batch.pullRequestUrls).toEqual(["https://github.com/NateWeav/t3code-hermes/pull/98"]);
   });
 
-  it("derives the same ids on replay, so re-reading rows is a no-op for the engine", () => {
+  it("derives the same items on replay, so re-reading rows writes nothing new", () => {
     const rows = [row({ id: 7, role: "assistant", content: "hello" })];
-    const first = hermesRunCommandsFor(ids, rows, new Map());
-    const second = hermesRunCommandsFor(ids, rows, new Map());
-    expect(second.commands.map((command) => command.commandId)).toEqual(
-      first.commands.map((command) => command.commandId),
-    );
+    const first = hermesRunItemsFor(ids, rows, new Map());
+    const second = hermesRunItemsFor(ids, rows, new Map());
+    expect(second.entries).toEqual(first.entries);
   });
 });
 
@@ -194,22 +216,5 @@ describe("isSilentReport", () => {
     expect(isSilentReport("  [SILENT] nothing to do")).toBe(true);
     expect(isSilentReport("Merged the PR")).toBe(false);
     expect(isSilentReport(null)).toBe(false);
-  });
-});
-
-describe("buildHermesRunPrimer", () => {
-  it("names the run's sessions, pull requests, report, and where the reply runs", () => {
-    const primer = buildHermesRunPrimer({
-      sourceLabel: "webhook/upstream-sync",
-      profile: "upstream-sync",
-      sessionIds: ["root", "tip"],
-      pullRequestUrls: ["https://github.com/NateWeav/t3code-hermes/pull/72"],
-      finalReport: "Blocked: ChatComposer.tsx needs a human call.",
-      workspaceRoot: "/w/t3code-hermes",
-    });
-    expect(primer).toContain("Hermes session root, continued after compression as tip");
-    expect(primer).toContain("https://github.com/NateWeav/t3code-hermes/pull/72");
-    expect(primer).toContain("Blocked: ChatComposer.tsx needs a human call.");
-    expect(primer).toContain("This session runs in /w/t3code-hermes");
   });
 });

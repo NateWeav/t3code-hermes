@@ -235,14 +235,14 @@ jobs:
           # matches nothing — the ordinary case for an upstream day that left
           # the adapters alone — exits 1 and would otherwise kill the step.
           adapters="$(
-            grep -aE '^apps/server/src/provider/Drivers/(Claude|Codex|Cursor|Grok|OpenCode)' "$RUNNER_TEMP/incoming.txt" \
-              | sed -E 's#^apps/server/src/provider/Drivers/(Claude|Codex|Cursor|Grok|OpenCode).*#\1#' \
+            grep -aE '^apps/server/src/(provider/Drivers|orchestration-v2/Adapters)/(Claude|Codex|Cursor|Grok|OpenCode)' "$RUNNER_TEMP/incoming.txt" \
+              | sed -E 's#^apps/server/src/(provider/Drivers|orchestration-v2/Adapters)/(Claude|Codex|Cursor|Grok|OpenCode).*#\2#' \
               | sort -u \
               || true
           )"
           adapter_count="$(printf '%s' "$adapters" | grep -ac . || true)"
 
-          acp_files="$(grep -aE '^apps/server/src/provider/acp/' "$RUNNER_TEMP/incoming.txt" | grep -av '/Hermes' || true)"
+          acp_files="$(grep -aE '^apps/server/src/(provider/acp/|orchestration-v2/Adapters/Acp)' "$RUNNER_TEMP/incoming.txt" | grep -av '/Hermes' || true)"
 
           if [[ "$adapter_count" -ge 2 || -n "$acp_files" ]]; then
             echo "review=true" >> "$GITHUB_OUTPUT"
@@ -277,7 +277,7 @@ jobs:
             fi
             echo
             echo "Check whether the same change is needed in the Hermes adapter"
-            echo "(\`HermesDriver.ts\`, \`HermesAcpSupport.ts\`, \`HermesTextGeneration.ts\`)."
+            echo "(\`HermesAdapterV2.ts\`, \`HermesDriver.ts\`, \`HermesAcpSupport.ts\`, \`HermesTextGeneration.ts\`)."
             echo "Upstream has previously fixed a bug across every sibling adapter in a"
             echo "commit that merged cleanly while leaving the Hermes copy broken — git"
             echo "cannot see that kind of drift. The sync PR is open; this is advisory."

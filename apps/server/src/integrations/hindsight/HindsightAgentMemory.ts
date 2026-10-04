@@ -198,7 +198,7 @@ export function installerConfigMatches(
  * Hermes' plugin config for this connection, as written to
  * `<HERMES_HOME>/hindsight/config.json`.
  */
-export function hermesHindsightConfigText(
+function hermesHindsightConfigText(
   connection: Pick<HindsightConnection, "baseUrl" | "apiKey">,
 ): string {
   const contents = {

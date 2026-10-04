@@ -104,7 +104,7 @@ export function unmarkFastModeEndpoints(document: Document): number {
  * answers without credentials with `{"message":"CLI Proxy API Server"}` and
  * `X-CPA-*` headers, so no API key is ever sent.
  */
-export const isCliProxyApiEndpoint = (baseUrl: string) =>
+const isCliProxyApiEndpoint = (baseUrl: string) =>
   Effect.gen(function* () {
     const root = new URL(baseUrl);
     root.pathname = root.pathname.replace(/\/v1\/?$/, "/");

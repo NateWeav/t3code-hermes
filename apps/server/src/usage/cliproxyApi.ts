@@ -9,8 +9,9 @@ import {
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
+import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 
 import { codexPlanLabel } from "../provider/Layers/CodexProvider.ts";
 import { codexRateLimitsToLimits } from "../provider/Layers/codexUsageLimits.ts";
@@ -96,6 +97,46 @@ const decodeConsumeResponse = Schema.decodeUnknownEffect(
   ),
 );
 
+/**
+ * The hub refused the management key. Each retry with the same key counts
+ * toward the hub's IP ban (five failures lock the address out for 30
+ * minutes), so callers hold off until the key changes.
+ */
+export class CliproxyKeyRejectedError extends Schema.TaggedError<CliproxyKeyRejectedError>()(
+  "CliproxyKeyRejectedError",
+  { detail: Schema.String },
+) {
+  override get message(): string {
+    return this.detail;
+  }
+}
+
+const ManagementError = Schema.Struct({ error: Schema.String });
+const decodeManagementError = Schema.decodeUnknownEffect(ManagementError);
+
+// The hub's own refusals are fixed strings; map the known ones to an action
+// rather than publishing whatever text came back.
+function managementRefusal(status: number, error: string | undefined) {
+  if (status === 401) {
+    return new CliproxyKeyRejectedError({
+      detail: "The hub rejected the management key. Update it in Settings to retry.",
+    });
+  }
+  if (status === 403 && error?.startsWith("IP banned")) {
+    return new UsageLimitSourceError({
+      detail: "The hub temporarily banned this server after too many failed key attempts.",
+    });
+  }
+  if (status === 403 && error === "remote management disabled") {
+    return new UsageLimitSourceError({
+      detail: "The hub does not allow remote management. Enable it in the hub's config.",
+    });
+  }
+  return new UsageLimitSourceError({
+    detail: `The hub refused the management request (HTTP ${status}).`,
+  });
+}
+
 const CODEX_BASE = "https://chatgpt.com/backend-api/wham";
 const CREDIT_URL = `${CODEX_BASE}/rate-limit-reset-credits`;
 
@@ -127,17 +168,37 @@ export const makeCliproxyApi = Effect.gen(function* () {
     const request = (
       body === undefined ? HttpClientRequest.get(url) : HttpClientRequest.post(url)
     ).pipe(HttpClientRequest.setHeader("Authorization", `Bearer ${config.managementKey}`));
-    const response = yield* client
-      .execute(body === undefined ? request : request.pipe(HttpClientRequest.bodyJsonUnsafe(body)))
-      .pipe(
-        Effect.flatMap(HttpClientResponse.filterStatusOk),
-        Effect.flatMap((response) => response.json),
-        Effect.timeout("15 seconds"),
+    return yield* Effect.gen(function* () {
+      const response = yield* client
+        .execute(
+          body === undefined ? request : request.pipe(HttpClientRequest.bodyJsonUnsafe(body)),
+        )
+        .pipe(
+          Effect.mapError(
+            () => new UsageLimitSourceError({ detail: "The hub could not be reached." }),
+          ),
+        );
+      if (response.status < 200 || response.status >= 300) {
+        const refusal = yield* response.json.pipe(
+          Effect.flatMap(decodeManagementError),
+          Effect.option,
+        );
+        return yield* managementRefusal(response.status, Option.getOrUndefined(refusal)?.error);
+      }
+      return yield* response.json.pipe(
         Effect.mapError(
-          () => new UsageLimitSourceError({ detail: "The hub management request failed." }),
+          () =>
+            new UsageLimitSourceError({
+              detail: "The hub returned an unexpected management response.",
+            }),
         ),
       );
-    return response;
+    }).pipe(
+      Effect.timeout("15 seconds"),
+      Effect.catchTag("TimeoutError", () =>
+        Effect.fail(new UsageLimitSourceError({ detail: "The hub did not answer in time." })),
+      ),
+    );
   });
 
   const authFiles = Effect.fn("CliproxyApi.authFiles")(function* (config: UsageLimitSourceConfig) {
@@ -294,10 +355,13 @@ export const makeCliproxyApi = Effect.gen(function* () {
 
   const readAccounts = Effect.fn("CliproxyApi.readAccounts")(function* (
     config: UsageLimitSourceConfig,
-  ): Effect.fn.Return<ReadonlyArray<UsageLimitSourceAccount>, UsageLimitSourceError> {
+  ): Effect.fn.Return<
+    ReadonlyArray<UsageLimitSourceAccount>,
+    UsageLimitSourceError | CliproxyKeyRejectedError
+  > {
     const accounts = yield* authFiles(config).pipe(
-      Effect.mapError(
-        () => new UsageLimitSourceError({ detail: "The hub could not list accounts." }),
+      Effect.catchTag("SchemaError", () =>
+        Effect.fail(new UsageLimitSourceError({ detail: "The hub could not list accounts." })),
       ),
     );
     return yield* Effect.forEach(
@@ -356,9 +420,11 @@ export const makeCliproxyApi = Effect.gen(function* () {
       Effect.mapError((error) =>
         isUsageLimitSourceError(error)
           ? error
-          : new UsageLimitSourceError({
-              detail: "The hub returned an unexpected reset-credit response.",
-            }),
+          : error._tag === "CliproxyKeyRejectedError"
+            ? new UsageLimitSourceError({ detail: error.detail })
+            : new UsageLimitSourceError({
+                detail: "The hub returned an unexpected reset-credit response.",
+              }),
       ),
     );
   });

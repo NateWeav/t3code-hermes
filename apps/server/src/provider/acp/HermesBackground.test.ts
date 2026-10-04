@@ -1,55 +1,61 @@
 import { assert, it } from "@effect/vitest";
-import { TurnId } from "@t3tools/contracts";
 
-import { HermesBackgroundProcesses, type HermesProcessReport } from "./HermesBackground.ts";
+import {
+  hermesNotificationReport,
+  hermesProcessMutation,
+  type HermesProcessReport,
+} from "./HermesBackground.ts";
 
 const running: HermesProcessReport = {
   sessionId: "acp-1",
   toolCallId: "tc-1",
   processId: "proc_1",
-  command: "npm run dev",
+  command: "npm run dev\nsecond line",
   status: "running",
 };
-const turnId = TurnId.make("turn-1");
+
+it("keys a background process by its Hermes process id and names it by command", () => {
+  assert.deepEqual(hermesProcessMutation(running), {
+    sessionId: "acp-1",
+    taskId: "proc_1",
+    status: "running",
+    report: { kind: "command", label: "npm run dev" },
+  });
+});
 
 it("settles each exit reason as the matching task status", () => {
-  const cases: Array<[Partial<HermesProcessReport>, string, string | undefined]> = [
-    [{ exitCode: 0, reason: "exited" }, "completed", undefined],
-    [{ exitCode: 2, reason: "exited" }, "failed", "Exit code 2"],
-    [{ exitCode: -15, reason: "killed" }, "stopped", "Stopped"],
-    [{ exitCode: null, reason: "lost" }, "failed", "Process backend disappeared"],
+  const cases: Array<[Partial<HermesProcessReport>, string]> = [
+    [{ exitCode: 0, reason: "exited" }, "completed"],
+    [{ exitCode: 2, reason: "exited" }, "failed"],
+    [{ exitCode: -15, reason: "killed" }, "completed"],
+    [{ exitCode: null, reason: "lost" }, "failed"],
+    [{ reason: "failed_start" }, "failed"],
   ];
-  for (const [exit, status, summary] of cases) {
-    const processes = new HermesBackgroundProcesses();
-    processes.report(running, turnId);
-    const [event] = processes.report({ ...running, status: "exited", ...exit }, undefined);
-    assert.equal(event?.type, "task.completed");
-    assert.equal(event?.turnId, turnId);
-    assert.deepInclude(event?.payload ?? {}, { status, ...(summary ? { summary } : {}) });
+  for (const [exit, status] of cases) {
+    const mutation = hermesProcessMutation({ ...running, status: "exited", ...exit });
+    assert.equal(mutation.status, status, JSON.stringify(exit));
   }
+  assert.deepInclude(hermesProcessMutation({ ...running, status: "exited", exitCode: 2 }).report, {
+    exitCode: 2,
+  });
 });
 
-it("ignores repeated starts and exits it never saw start", () => {
-  const processes = new HermesBackgroundProcesses();
-  assert.lengthOf(processes.report({ ...running, status: "exited", exitCode: 0 }, turnId), 0);
-  assert.lengthOf(processes.report(running, turnId), 1);
-  assert.lengthOf(processes.report(running, turnId), 0);
-});
-
-it("stops every live process when the Hermes session ends", () => {
-  const processes = new HermesBackgroundProcesses();
-  processes.report(running, turnId);
-  processes.report({ ...running, processId: "proc_2", toolCallId: "tc-2" }, undefined);
-  const stopped = processes.stopAll();
+it("names the work a Hermes wake notice reports", () => {
   assert.deepEqual(
-    stopped.map((event) => [
-      event.payload.taskId,
-      event.type === "task.completed" ? event.payload.status : event.type,
-    ]),
-    [
-      ["proc_1", "stopped"],
-      ["proc_2", "stopped"],
-    ],
+    hermesNotificationReport({
+      sessionId: "acp-1",
+      kind: "subagent_result",
+      title: " Review parser ",
+      text: "done",
+    }),
+    { kind: "subagent", label: "Review parser", outcome: "completed" },
   );
-  assert.lengthOf(processes.stopAll(), 0);
+  assert.equal(
+    hermesNotificationReport({ sessionId: "acp-1", kind: "process_exit", text: "x" }).kind,
+    "command",
+  );
+  assert.equal(
+    hermesNotificationReport({ sessionId: "acp-1", kind: "watch_match", text: "x" }).kind,
+    "monitor",
+  );
 });

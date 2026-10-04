@@ -8,18 +8,21 @@ import { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
-import { ServerConfig } from "../../config.ts";
-import { ServerSettingsService } from "../../serverSettings.ts";
+import * as ServerConfig from "../../config.ts";
+import * as ServerSettings from "../../serverSettings.ts";
 import { resolveHermesGitCheckout } from "../../hermes/hermesPatches.ts";
 import { makeHermesTextGeneration } from "../../textGeneration/HermesTextGeneration.ts";
+import {
+  HermesAdapterV2Driver,
+  type HermesAdapterV2DriverEnv,
+} from "../../orchestration-v2/Adapters/HermesAdapterV2.ts";
 import { ProviderDriverError } from "../Errors.ts";
-import { makeHermesAdapter } from "../Layers/HermesAdapter.ts";
 import {
   buildInitialHermesProviderSnapshot,
   checkHermesProviderStatus,
   enrichHermesSnapshot,
 } from "../Layers/HermesProvider.ts";
-import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
+import * as ProviderEventLoggers from "../Layers/ProviderEventLoggers.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
 import {
   defaultProviderContinuationIdentity,
@@ -80,15 +83,16 @@ const UPDATE: ProviderMaintenanceCapabilitiesResolver = {
 };
 
 export type HermesDriverEnv =
+  | HermesAdapterV2DriverEnv
   | BackgroundPolicy.BackgroundPolicy
   | ChildProcessSpawner.ChildProcessSpawner
   | Crypto.Crypto
   | FileSystem.FileSystem
   | HttpClient.HttpClient
   | Path.Path
-  | ProviderEventLoggers
-  | ServerConfig
-  | ServerSettingsService;
+  | ProviderEventLoggers.ProviderEventLoggers
+  | ServerConfig.ServerConfig
+  | ServerSettings.ServerSettingsService;
 
 const withInstanceIdentity =
   (input: {
@@ -121,8 +125,7 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const httpClient = yield* HttpClient.HttpClient;
-      const serverSettings = yield* ServerSettingsService;
-      const eventLoggers = yield* ProviderEventLoggers;
+      const serverSettings = yield* ServerSettings.ServerSettingsService;
       const processEnv = mergeProviderInstanceEnvironment(environment);
       const continuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
@@ -146,11 +149,24 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
         ),
       );
 
-      const adapter = yield* makeHermesAdapter(effectiveConfig, {
-        environment: processEnv,
-        ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
+      const orchestrationAdapter = yield* HermesAdapterV2Driver.create({
         instanceId,
-      });
+        displayName,
+        accentColor,
+        environment,
+        enabled,
+        config,
+      }).pipe(
+        Effect.mapError(
+          (cause) =>
+            new ProviderDriverError({
+              driver: DRIVER_KIND,
+              instanceId,
+              detail: "Failed to build Hermes orchestration adapter.",
+              cause,
+            }),
+        ),
+      );
       const textGeneration = yield* makeHermesTextGeneration(effectiveConfig, processEnv);
 
       const checkProvider = checkHermesProviderStatus(effectiveConfig, processEnv).pipe(
@@ -200,7 +216,7 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
         accentColor,
         enabled,
         snapshot,
-        adapter,
+        orchestrationAdapter,
         textGeneration,
       } satisfies ProviderInstance;
     }),

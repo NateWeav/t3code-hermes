@@ -502,8 +502,10 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
             continue;
           const instanceConfig = asRecord(instance.config) ?? {};
           const env = mergeProviderInstanceEnvironment(instance.environment, hostEnvironment);
+          // Managed Codex runs a copy T3 Code installs itself, usually off PATH.
+          const managed = agent.target === "codex" && instanceConfig["setupMode"] === "managed";
           const binary = nonEmptyString(instanceConfig["binaryPath"]) ?? agent.binary;
-          if (!(yield* isAvailable(binary, env))) continue;
+          if (!managed && !(yield* isAvailable(binary, env))) continue;
           found = true;
           // The same environment the provider is launched with, so a home
           // inherited from T3 Code's own counts too.
@@ -515,8 +517,15 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
             resolveHomePath(configuredHome) !== path.join(homeDir, agent.defaultHome)
               ? configuredHome
               : null;
+          // A managed instance other than the default runs from a shadow home
+          // under T3 Code's state, as `resolveManagedCodexHomeLayout` places it.
           const shadowHome =
-            agent.target === "codex" ? nonEmptyString(instanceConfig["shadowHomePath"]) : null;
+            agent.target !== "codex"
+              ? null
+              : (nonEmptyString(instanceConfig["shadowHomePath"]) ??
+                (managed && instanceId !== "codex"
+                  ? path.join(config.stateDir, "providers", "codex", instanceId, "shadow")
+                  : null));
           if (
             ownHome !== null ||
             (shadowHome !== null && !(yield* shadowSharesHooks(shadowHome)))
@@ -806,11 +815,21 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
       for (const target of coding) {
         if (yield* codingAgentInstalled(target)) wiredBefore.add(target);
       }
-      const configMatches = installerConfigMatches(
-        yield* readJson(installerConfigPath),
-        connection,
-      );
-      if (!configMatches || wiredBefore.size < coding.length) {
+      const installerConfigExists = yield* fs
+        .exists(installerConfigPath)
+        .pipe(Effect.orElseSucceed(() => true));
+      const installerConfig = yield* readJson(installerConfigPath);
+      const configMatches = installerConfigMatches(installerConfig, connection);
+      if (installerConfigExists && asRecord(installerConfig) === null) {
+        // Hindsight's own config is there but unreadable: the installer would
+        // replace it, and switching off could not put it back.
+        for (const target of coding) {
+          failures.set(
+            target,
+            "Hindsight's installer config could not be read, so it was left alone.",
+          );
+        }
+      } else if (!configMatches || wiredBefore.size < coding.length) {
         if (!(yield* isAvailable("npx", hostEnvironment))) {
           blocker = "nodeMissing";
         } else {

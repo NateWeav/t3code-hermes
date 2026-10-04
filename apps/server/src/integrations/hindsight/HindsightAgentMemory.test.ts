@@ -40,6 +40,8 @@ interface Options {
   readonly hostEnv?: Record<string, string>;
   /** Makes `chmod` fail for that file, as on a filesystem without modes. */
   readonly failChmod?: "hermesConfig" | "ledger";
+  /** Codex in managed setup: T3 Code installs its binary, which is not on PATH. */
+  readonly codexManaged?: boolean;
   /** Gives Codex a shadow home whose `hooks.json` is its own file, or a link to the shared one. */
   readonly codexShadowHooks?: "own" | "linked";
   /** A second enabled Hermes instance, `hermes_work`, with this `HERMES_HOME`. */
@@ -212,9 +214,16 @@ function setup(options: Options) {
         }),
     providers: {
       hermes: { enabled: true },
-      ...(options.codexShadowHooks === undefined
+      ...(options.codexShadowHooks === undefined && options.codexManaged !== true
         ? {}
-        : { codex: { shadowHomePath: codexShadowHome } }),
+        : {
+            codex: {
+              ...(options.codexShadowHooks === undefined
+                ? {}
+                : { shadowHomePath: codexShadowHome }),
+              ...(options.codexManaged === true ? { setupMode: "managed" as const } : {}),
+            },
+          }),
     },
   });
 
@@ -949,6 +958,33 @@ describe("HindsightAgentMemory", () => {
       expect(state.agents[0]?.detail).toBe(
         "Not covered: uses its own Hindsight server at 100.64.0.1:8888.",
       );
+    }).pipe(Effect.provide(harness.layer));
+  });
+  it.effect("wires a managed Codex whose binary T3 Code installed off PATH", () => {
+    const harness = setup({
+      agentMemory: true,
+      codexManaged: true,
+      missing: ["codex", "claude", "hermes"],
+    });
+    return Effect.gen(function* () {
+      const state = yield* harness.apply;
+
+      expect(harness.calls[0]).toContain("codex");
+      expect(state.agents).toEqual([{ target: "codex", state: "installed", detail: null }]);
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("never runs the installer over an installer config it cannot read", () => {
+    const harness = setup({ agentMemory: true, missing: ["hermes"] });
+    const installerConfig = NodePath.join(harness.home, ".hindsight", "coding-agent.json");
+    NodeFS.mkdirSync(NodePath.dirname(installerConfig), { recursive: true });
+    NodeFS.writeFileSync(installerConfig, "{ mine, half-edited");
+    return Effect.gen(function* () {
+      const state = yield* harness.apply;
+
+      expect(harness.calls).toEqual([]);
+      expect(NodeFS.readFileSync(installerConfig, "utf8")).toBe("{ mine, half-edited");
+      expect(state.agents.every((agent) => agent.state === "failed")).toBe(true);
     }).pipe(Effect.provide(harness.layer));
   });
 });

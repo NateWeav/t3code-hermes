@@ -318,6 +318,18 @@ describe("hermes patches", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("does not remove a change upstream now carries", () =>
+    Effect.gen(function* () {
+      const { root, patch } = yield* makeCheckout;
+      const file = NodePath.join(root, "session.py");
+      NodeFS.writeFileSync(file, "remote_cwd = configured()\n");
+      commit(root, "upstream carries it");
+
+      assert.isFalse((yield* changeHermesPatch(root, patch, "reverse")).ok);
+      assert.strictEqual(NodeFS.readFileSync(file, "utf8"), "remote_cwd = configured()\n");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("refuses to guess which version to remove once it is committed", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

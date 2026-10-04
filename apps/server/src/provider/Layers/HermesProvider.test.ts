@@ -20,7 +20,11 @@ const encodeJsonString = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.U
  */
 const writeFakeHermesAcpBinary = Effect.fn("writeFakeHermesAcpBinary")(function* (options: {
   readonly prefix: string;
-  readonly availableModels: ReadonlyArray<{ readonly modelId: string; readonly name: string }>;
+  readonly availableModels: ReadonlyArray<{
+    readonly modelId: string;
+    readonly name: string;
+    readonly _meta?: unknown;
+  }>;
   readonly availableCommands?: ReadonlyArray<{
     readonly name: string;
     readonly description: string;
@@ -219,6 +223,37 @@ it.live("reports authenticated with derived upstreams once ACP returns models", 
       "openai/gpt-5",
       "anthropic/claude-sonnet-4",
     ]);
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.live("offers fast mode only on the models Hermes marked for it", () =>
+  Effect.gen(function* () {
+    const snapshot = yield* Effect.scoped(
+      Effect.gen(function* () {
+        const hermesPath = yield* writeFakeHermesAcpBinary({
+          prefix: "t3code-hermes-fast-",
+          availableModels: [
+            {
+              modelId: "custom:proxy:gpt-5.5",
+              name: "gpt-5.5",
+              _meta: { hermes: { fastMode: true } },
+            },
+            { modelId: "custom:proxy:glm-5.1", name: "glm-5.1" },
+          ],
+        });
+        return yield* checkHermesProviderStatus(
+          decodeHermesSettings({ enabled: true, binaryPath: hermesPath }),
+        );
+      }),
+    );
+
+    const fastModeIds = (slug: string) =>
+      snapshot.models
+        .find((model) => model.slug === slug)
+        ?.capabilities?.optionDescriptors?.filter((descriptor) => descriptor.type === "boolean")
+        .map((descriptor) => descriptor.id);
+    expect(fastModeIds("custom:proxy:gpt-5.5")).toEqual(["fastMode"]);
+    expect(fastModeIds("custom:proxy:glm-5.1")).toEqual([]);
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 

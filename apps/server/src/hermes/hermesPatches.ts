@@ -55,6 +55,13 @@ export const HERMES_PATCHES: ReadonlyArray<HermesPatchDefinition> = [
       "Multi-profile gateways, so webhook runs in a profile are marked finished. Without it, T3 Code shows those runs as failed after two hours.",
     content: bundledPatch("0005-gateway-multiplex-webhook-session-close.patch"),
   },
+  {
+    id: HermesPatchId.make("acp-fast-mode"),
+    title: "Fast mode",
+    neededFor:
+      "Fast Mode on Hermes models, including models behind a proxy you opted in. Without it, the Fast Mode toggle does not appear.",
+    content: bundledPatch("0006-acp-fast-mode.patch"),
+  },
 ];
 
 /**

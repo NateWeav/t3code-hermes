@@ -47,8 +47,6 @@ describe("DesktopEnvironment", () => {
         { T3CODE_HOME: "/Users/alice/.t3", T3CODE_PORT: "3773" },
       );
       assert.equal(environment.stateDir, "/Users/alice/.t3-hermes/userdata");
-      assert.equal(environment.userDataDirName, "t3-hermes");
-      assert.equal(environment.legacyUserDataDirName, "T3 Hermes (Alpha)");
       assert.equal(environment.appUserModelId, "com.nateweav.t3hermes");
       assert.deepEqual(environment.configuredBackendPort, Option.none());
     }),

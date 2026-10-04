@@ -212,6 +212,29 @@ describe("hermes patches", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("refuses to guess which version to remove once it is committed", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hermes-checkout-" });
+      git(root, "init", "--quiet");
+      const file = NodePath.join(root, "session.py");
+      NodeFS.writeFileSync(file, "a = 1\nremote_cwd = None\nb = 2\n");
+      const older = commit(root, "older");
+      const patched = "a = 1\nremote_cwd = configured()\nb = 2\n";
+      const olderVersion = diffAt(root, "session.py", patched, older);
+      NodeFS.writeFileSync(file, "a = 1\nremote_cwd = default()\nb = 2\n");
+      const newer = commit(root, "newer");
+      const patch = definition([diffAt(root, "session.py", patched, newer), olderVersion]);
+
+      git(root, "checkout", "--quiet", older);
+      NodeFS.writeFileSync(file, patched);
+      commit(root, "patched by hand");
+      assert.strictEqual(yield* stateOf(root, patch), "applied");
+      assert.isFalse((yield* changeHermesPatch(root, patch, "reverse")).ok);
+      assert.strictEqual(NodeFS.readFileSync(file, "utf8"), patched);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("reports a checkout no version fits as not applying, and leaves it alone", () =>
     Effect.gen(function* () {
       const { root, file, patch } = yield* makeTwoVersionCheckout;

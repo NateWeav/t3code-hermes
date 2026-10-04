@@ -509,13 +509,20 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
           found = true;
           // The same environment the provider is launched with, so a home
           // inherited from T3 Code's own counts too.
-          const configuredHome =
-            nonEmptyString(instanceConfig["homePath"]) ?? nonEmptyString(env[agent.homeVariable]);
-          // One spelled out as the default home is the home the installer writes.
+          // A configured `homePath` takes `~`; an inherited variable is not
+          // shell-expanded, so its `~` stays literal, as the drivers read it.
+          const configuredHome = nonEmptyString(instanceConfig["homePath"]);
+          const inheritedHome = nonEmptyString(env[agent.homeVariable]);
+          const effectiveHome =
+            configuredHome !== null
+              ? resolveHomePath(configuredHome)
+              : inheritedHome !== null
+                ? path.resolve(inheritedHome)
+                : null;
+          // One that is the default home is the home the installer writes.
           const ownHome =
-            configuredHome !== null &&
-            resolveHomePath(configuredHome) !== path.join(homeDir, agent.defaultHome)
-              ? configuredHome
+            effectiveHome !== null && effectiveHome !== path.join(homeDir, agent.defaultHome)
+              ? effectiveHome
               : null;
           // A managed instance other than the default runs from a shadow home
           // under T3 Code's state, as `resolveManagedCodexHomeLayout` places it.
@@ -761,9 +768,17 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
     if (settings === null) return yield* SubscriptionRef.get(state);
     const desired = settings.integrations.hindsight.agentMemory;
     const resolved = yield* hindsight.resolveConnection;
-    const connection = resolved.connection;
     const agents = yield* presentAgents(settings);
     const ledger = yield* readLedger;
+    // A connection found only in the Hermes config T3 Code itself wrote is
+    // circular: it is the server T3 Code was handed, not one this machine
+    // has. It counts as none, so that config is taken back out with the rest.
+    const circular =
+      ledger !== null &&
+      ledger.hermes?.wroteConfig === true &&
+      resolved.connection?.source === "hermes" &&
+      resolved.hermes?.configPath === hermesHindsightFile(ledger.hermes.home);
+    const connection = circular ? null : resolved.connection;
     if (ledger === null) {
       // Changing anything now could leave a change T3 Code cannot undo.
       return {

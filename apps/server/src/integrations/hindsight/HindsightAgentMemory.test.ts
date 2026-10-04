@@ -40,6 +40,8 @@ interface Options {
   readonly hostEnv?: Record<string, string>;
   /** Makes `chmod` fail for that file, as on a filesystem without modes. */
   readonly failChmod?: "hermesConfig" | "ledger";
+  /** Claude Code's configured `homePath`. */
+  readonly claudeHomePath?: string;
   /** Codex in managed setup: T3 Code installs its binary, which is not on PATH. */
   readonly codexManaged?: boolean;
   /** Gives Codex a shadow home whose `hooks.json` is its own file, or a link to the shared one. */
@@ -146,17 +148,35 @@ function setup(options: Options) {
         ...base,
         resolveConnection: Effect.sync(() => {
           // Like the real one, a file that does not parse resolves nothing.
+          // With no server in settings, Hermes' own config is the connection.
           const pluginConfig = NodePath.join(hermesHome, "hindsight", "config.json");
-          const hermesConfigured = hermesFallback || parsesAsJson(pluginConfig);
+          const fromFile = parsesAsJson(pluginConfig);
+          const fileUrl = fromFile
+            ? (readJson(pluginConfig) as { api_url?: string }).api_url
+            : undefined;
+          const hermes =
+            fromFile || hermesFallback
+              ? {
+                  configPath: fromFile ? pluginConfig : null,
+                  baseUrl: fileUrl ?? BASE_URL,
+                  bank: "hermes",
+                  apiKey: null,
+                }
+              : null;
           return {
             enabled: true,
             connection:
-              connection === null
-                ? null
-                : { source: "settings" as const, defaultBank: null, ...connection },
-            hermes: hermesConfigured
-              ? { configPath: null, baseUrl: BASE_URL, bank: "hermes", apiKey: null }
-              : null,
+              connection !== null
+                ? { source: "settings" as const, defaultBank: null, ...connection }
+                : hermes === null
+                  ? null
+                  : {
+                      source: "hermes" as const,
+                      baseUrl: hermes.baseUrl,
+                      apiKey: hermes.apiKey,
+                      defaultBank: hermes.bank,
+                    },
+            hermes,
           };
         }),
       });
@@ -214,6 +234,9 @@ function setup(options: Options) {
         }),
     providers: {
       hermes: { enabled: true },
+      ...(options.claudeHomePath === undefined
+        ? {}
+        : { claudeAgent: { homePath: options.claudeHomePath } }),
       ...(options.codexShadowHooks === undefined && options.codexManaged !== true
         ? {}
         : {
@@ -833,17 +856,27 @@ describe("HindsightAgentMemory", () => {
     }).pipe(Effect.provide(harness.layer));
   });
 
-  it.effect("counts a config home spelled out as the default one as covered", () => {
-    const harness = setup({
+  it.effect("counts a configured home spelled out as the default one as covered", () => {
+    const configured = setup({
+      agentMemory: true,
+      missing: ["codex", "hermes"],
+      claudeHomePath: "~/.claude",
+    });
+    // An inherited variable is not shell-expanded: its `~` is a literal directory.
+    const inherited = setup({
       agentMemory: true,
       missing: ["codex", "hermes"],
       hostEnv: { CLAUDE_CONFIG_DIR: "~/.claude" },
     });
     return Effect.gen(function* () {
-      const state = yield* harness.apply;
+      const configuredState = yield* configured.apply.pipe(Effect.provide(configured.layer));
+      const inheritedState = yield* inherited.apply.pipe(Effect.provide(inherited.layer));
 
-      expect(state.agents).toEqual([{ target: "claudeCode", state: "installed", detail: null }]);
-    }).pipe(Effect.provide(harness.layer));
+      expect(configuredState.agents).toEqual([
+        { target: "claudeCode", state: "installed", detail: null },
+      ]);
+      expect(inheritedState.agents[0]?.detail).toContain("Not covered");
+    });
   });
   it.effect(
     "names a Hermes that keeps its own Hindsight server instead of calling it wired",
@@ -985,6 +1018,23 @@ describe("HindsightAgentMemory", () => {
       expect(harness.calls).toEqual([]);
       expect(NodeFS.readFileSync(installerConfig, "utf8")).toBe("{ mine, half-edited");
       expect(state.agents.every((agent) => agent.state === "failed")).toBe(true);
+    }).pipe(Effect.provide(harness.layer));
+  });
+  it.effect("drops a connection that only comes from the Hermes config it wrote", () => {
+    const harness = setup({ agentMemory: true, hermesYaml: "memory:\n  provider: holographic\n" });
+    const pluginConfig = NodePath.join(harness.hermesHome, "hindsight", "config.json");
+    return Effect.gen(function* () {
+      yield* harness.apply;
+      expect(NodeFS.existsSync(pluginConfig)).toBe(true);
+
+      // "Use each machine's own server": this machine had none before.
+      harness.setConnection(null);
+      const state = yield* harness.apply;
+
+      expect(state.blocker).toBe("notConfigured");
+      expect(harness.calls.at(-1)?.slice(2)).toEqual(["uninstall", "claude-code", "codex"]);
+      expect(NodeFS.existsSync(pluginConfig)).toBe(false);
+      expect(hermesProvider(harness.hermesHome)).toBe("holographic");
     }).pipe(Effect.provide(harness.layer));
   });
 });

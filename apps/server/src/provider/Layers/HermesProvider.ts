@@ -43,6 +43,11 @@ import {
   readHermesReasoningContext,
   type HermesReasoningContext,
 } from "../../hermes/hermesReasoningOptions.ts";
+import {
+  HERMES_FAST_MODE_DESCRIPTOR,
+  HERMES_FAST_MODE_OPTION_ID,
+  hermesModelSupportsFastMode,
+} from "../../hermes/hermesFastMode.ts";
 
 const HERMES_PRESENTATION = {
   displayName: "Hermes",
@@ -124,7 +129,8 @@ export function buildInitialHermesProviderSnapshot(
 }
 
 /**
- * Attaches the reasoning-effort selector to every model that has one.
+ * Attaches the reasoning-effort selector to every model that has one, keeping
+ * the fast-mode toggle discovery attached to the models Hermes marked.
  *
  * Applied in one place so discovered, built-in, and user-configured custom
  * models are treated identically — a custom slug is still a Hermes model and
@@ -134,10 +140,21 @@ function withHermesReasoningCapabilities(
   models: ReadonlyArray<ServerProviderModel>,
   context: HermesReasoningContext,
 ): ReadonlyArray<ServerProviderModel> {
-  return models.map((model) => ({
-    ...model,
-    capabilities: buildHermesModelCapabilities({ slug: model.slug, context }),
-  }));
+  return models.map((model) => {
+    const reasoning = buildHermesModelCapabilities({ slug: model.slug, context });
+    const fastMode = model.capabilities?.optionDescriptors?.find(
+      (descriptor) => descriptor.id === HERMES_FAST_MODE_OPTION_ID,
+    );
+    return {
+      ...model,
+      capabilities:
+        fastMode === undefined
+          ? reasoning
+          : createModelCapabilities({
+              optionDescriptors: [...(reasoning.optionDescriptors ?? []), fastMode],
+            }),
+    };
+  });
 }
 
 function hermesModelsFromSettings(
@@ -169,7 +186,9 @@ function buildHermesDiscoveredModelsFromSessionModelState(
         slug,
         name: model.name.trim() || slug,
         isCustom: false,
-        capabilities: EMPTY_CAPABILITIES,
+        capabilities: hermesModelSupportsFastMode(model)
+          ? createModelCapabilities({ optionDescriptors: [HERMES_FAST_MODE_DESCRIPTOR] })
+          : EMPTY_CAPABILITIES,
       };
     })
     .filter((model): model is ServerProviderModel => model !== undefined);

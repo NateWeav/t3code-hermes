@@ -147,3 +147,38 @@ Restart the gateway with `hermes gateway restart` after applying it.
 
 The patch's test in `tests/gateway/test_webhook_session_close.py` runs a profile webhook delivery
 through the real adapter pipeline on a multiplexed store.
+
+## `acp-fast-mode`
+
+**Needed by:** the Fast Mode toggle for Hermes models. Stock Hermes applies `/fast` only in its CLI,
+TUI, and gateway, never in ACP sessions, and sends fast-mode parameters only to the first-party
+endpoints that bill for them, so a proxy that forwards `service_tier` (such as CLIProxyAPI) never
+gets it.
+
+The patch adds a per-session `fast_mode` ACP config option (`on`/`off`), applied through the same
+gate as `/fast` and re-pinned before every turn because `session/set_model` rebuilds the agent. It
+is deliberately not advertised in `configOptions`, since Zed would render it in place of the model
+picker; instead, picker rows whose route takes fast mode carry `_meta.hermes.fastMode: true`, which
+is how T3 Code knows where to offer the toggle. It also lets a custom endpoint opt in:
+
+```yaml
+custom_providers:
+  - name: cliproxyapi
+    base_url: http://localhost:8317/v1
+    capabilities:
+      fast_mode: true
+```
+
+Applying the patch from T3 Code's Patches tab writes that opt-in for every custom endpoint whose
+root identifies as CLIProxyAPI (an unauthenticated `GET /` answering `"CLI Proxy API Server"`), with
+a trailing `# added by T3 Code` marker; removing the patch deletes only marked flags. Applying it
+with `git apply` leaves `config.yaml` alone.
+
+The opt-in covers `service_tier: priority` (OpenAI and xAI models) only. Anthropic's `speed: fast`
+is a Messages API parameter, and custom endpoints speak chat completions, so Claude models behind a
+proxy stay ungated.
+
+Restart the T3 Code server after applying the patch. The patch's
+`tests/acp_adapter/test_fast_mode.py` drives the real config, gate, and ACP server with a stubbed
+agent; run it with the rest of `tests/acp_adapter/` in a scratch checkout, as for
+`acp-delegation-progress`.

@@ -1,0 +1,299 @@
+diff --git a/acp_adapter/model_catalog.py b/acp_adapter/model_catalog.py
+index b2b036f51f..87e2c6fc99 100644
+--- a/acp_adapter/model_catalog.py
++++ b/acp_adapter/model_catalog.py
+@@ -235,6 +235,41 @@ class _ModelCatalog:
+                 self.add(named_slug, named_model, named_model, " • ".join(part for part in parts if part))
+ 
+ 
++def mark_fast_mode_models(state: SessionModelState) -> SessionModelState:
++    """Tag rows whose route takes fast mode with ``_meta.hermes.fastMode`` — the ``/fast`` gate,
++    per row — so a client offers the ``fast_mode`` session option only where it changes the
++    request."""
++    from hermes_cli.config import get_compatible_custom_providers, load_config_readonly
++    from hermes_cli.models import model_supports_fast_mode, resolve_fast_mode_overrides
++    from hermes_cli.providers import custom_provider_slug
++
++    endpoints: dict[str, str] | None = None
++    rows = []
++    for row in state.available_models:
++        # Cheap pre-filter on the trailing id segment before parsing the provider prefix.
++        if not model_supports_fast_mode(row.model_id.split(":")[-1]):
++            rows.append(row)
++            continue
++        provider = _choice_provider(row.model_id)
++        model = row.model_id[len(provider) + 1:] if row.model_id.lower().startswith(provider + ":") else row.model_id
++        base_url = None
++        if provider.startswith("custom:"):
++            if endpoints is None:
++                endpoints = {
++                    custom_provider_slug(str(e.get("name") or ""), str(e.get("provider_key") or "")): str(e.get("base_url") or "")
++                    for e in get_compatible_custom_providers(load_config_readonly())
++                }
++            base_url = endpoints.get(provider)
++        if (provider.startswith("custom") and not base_url) or resolve_fast_mode_overrides(
++                model, provider=provider, base_url=base_url) is None:
++            rows.append(row)
++            continue
++        meta = dict(row.field_meta or {})
++        meta["hermes"] = {**(meta.get("hermes") or {}), "fastMode": True}
++        rows.append(row.model_copy(update={"field_meta": meta}))
++    return state.model_copy(update={"available_models": rows})
++
++
+ def build_model_state(model: str, provider: str, base_url: str) -> SessionModelState | None:
+     """Picker state from the shared inventory + named endpoints; ``None`` when nothing is listable
+     (caller falls back to a single current-model row). Raises on inventory failure."""
+diff --git a/acp_adapter/server.py b/acp_adapter/server.py
+index 2ba7d0e8ff..54246d7aa6 100644
+--- a/acp_adapter/server.py
++++ b/acp_adapter/server.py
+@@ -31,7 +31,7 @@ from acp_adapter.events import (
+     AssistantMessageIdAllocator, _build_plan_update_from_todo_result, _send_update, flush_open_tool_calls,
+     make_message_cb, make_step_cb, make_thinking_cb, make_tool_progress_cb,
+ )
+-from acp_adapter.model_catalog import build_model_state, encode_model_choice
++from acp_adapter.model_catalog import build_model_state, encode_model_choice, mark_fast_mode_models
+ from acp_adapter.permissions import make_approval_callback
+ from acp_adapter.provenance import session_provenance_meta
+ from acp_adapter.session import SessionManager, SessionState, _expand_acp_enabled_toolsets
+@@ -234,6 +234,9 @@ class HermesACPAgent(SlashCommandsMixin, acp.Agent):
+     """ACP Agent implementation wrapping Hermes AIAgent."""
+ 
+     _EDIT_APPROVAL_POLICY_CONFIG_ID = "edit_approval_policy"
++    # Session-scoped /fast. Not advertised as a config option (Zed would render it in place of the
++    # model picker); rows that support it carry ``_meta.hermes.fastMode`` instead.
++    _FAST_MODE_CONFIG_ID = "fast_mode"
+     _EDIT_APPROVAL_POLICY_DEFAULT = "ask"
+     _MODE_DEFAULT = "default"
+     # mode id -> (edit approval policy, display name, description)
+@@ -290,6 +293,29 @@ class HermesACPAgent(SlashCommandsMixin, acp.Agent):
+             available_modes=[SessionMode(id=m, name=n, description=d) for m, (_p, n, d) in self._MODES.items()],
+         )
+ 
++    @staticmethod
++    def _apply_fast_mode(state: SessionState) -> None:
++        """Pin the session's ``fast_mode`` choice onto its agent, as ``/fast`` does. Runs before every
++        turn because ``session/set_model``, load, and resume rebuild the agent from config."""
++        agent = state.agent
++        if state.fast_mode is None or agent is None:
++            return
++        fast = None
++        if state.fast_mode:
++            from hermes_cli.models import resolve_fast_mode_overrides
++
++            base_url = getattr(agent, "base_url", None)
++            if getattr(agent, "api_mode", None) == "anthropic_messages":
++                base_url = getattr(agent, "_anthropic_base_url", None) or base_url
++            fast = resolve_fast_mode_overrides(
++                getattr(agent, "model", None), provider=getattr(agent, "provider", None), base_url=base_url)
++        overrides = {
++            key: value for key, value in (getattr(agent, "request_overrides", None) or {}).items()
++            if key not in ("service_tier", "speed")
++        }
++        agent.request_overrides = {**overrides, **(fast or {})}
++        agent.service_tier = "priority" if fast else None
++
+     def _edit_approval_policy_for_state(self, state: SessionState) -> tuple[str, str | None]:
+         mode = str(getattr(state, "mode", "") or self._MODE_DEFAULT)
+         policy = self._MODE_TO_EDIT_APPROVAL_POLICY.get(mode, self._EDIT_APPROVAL_POLICY_DEFAULT)
+@@ -303,6 +329,10 @@ class HermesACPAgent(SlashCommandsMixin, acp.Agent):
+         try:
+             picker = build_model_state(model, provider, str(getattr(state.agent, "base_url", "") or ""))
+             if picker is not None:
++                try:
++                    return mark_fast_mode_models(picker)
++                except Exception:
++                    logger.debug("Could not mark fast-mode models", exc_info=True)
+                 return picker
+         except Exception:
+             logger.debug("Could not build ACP model state", exc_info=True)
+@@ -853,6 +883,7 @@ class HermesACPAgent(SlashCommandsMixin, acp.Agent):
+         conn, loop = self._conn, asyncio.get_running_loop()
+         if state.cancel_event:
+             state.cancel_event.clear()
++        self._apply_fast_mode(state)
+         cbs = self._wire_turn_callbacks(state, session_id, conn, loop)
+ 
+         def _run_agent() -> dict:
+@@ -1082,6 +1113,11 @@ class HermesACPAgent(SlashCommandsMixin, acp.Agent):
+ 
+         if str(config_id) == self._EDIT_APPROVAL_POLICY_CONFIG_ID:
+             state.mode = self._EDIT_APPROVAL_POLICY_TO_MODE.get(str(value), self._MODE_DEFAULT)
++        elif str(config_id) == self._FAST_MODE_CONFIG_ID:
++            from utils import is_truthy_value
++
++            state.fast_mode = is_truthy_value(value)
++            self._apply_fast_mode(state)
+         else:
+             options = getattr(state, "config_options", None)
+             if not isinstance(options, dict):
+diff --git a/acp_adapter/session.py b/acp_adapter/session.py
+index e5a868b0cc..a1e3bc4e86 100644
+--- a/acp_adapter/session.py
++++ b/acp_adapter/session.py
+@@ -151,6 +151,8 @@ class SessionState:
+     # Per-session allocator for ACP assistant messageIds (lazily created by
+     # the server so streamed chunks group into distinct assistant replies).
+     message_ids: Any = None
++    # The client's ``fast_mode`` config option: None until set, then the session's /fast.
++    fast_mode: Optional[bool] = None
+ 
+ 
+ class SessionManager:
+diff --git a/hermes_cli/models.py b/hermes_cli/models.py
+index 9d922ba085..a7a8fa83a1 100644
+--- a/hermes_cli/models.py
++++ b/hermes_cli/models.py
+@@ -1170,13 +1170,35 @@ def _is_anthropic_fast_model(model_id: Optional[str]) -> bool:
+     return is_anthropic_fast_mode_model(model_id)
+ 
+ 
++def _custom_endpoint_accepts_fast_mode(base_url: Optional[str]) -> bool:
++    """A configured endpoint that opted in with ``capabilities: {fast_mode: true}`` — a proxy that
++    forwards ``service_tier`` to a first-party backend that bills for it."""
++    target = str(base_url or "").strip().rstrip("/").lower()
++    if not target:
++        return False
++    try:
++        from hermes_cli.config import get_compatible_custom_providers, load_config_readonly
++
++        entries = get_compatible_custom_providers(load_config_readonly())
++    except Exception:
++        return False
++    return any(
++        (entry.get("capabilities") or {}).get("fast_mode") is True
++        and str(entry.get("base_url") or "").strip().rstrip("/").lower() == target
++        for entry in entries)
++
++
+ def _fast_mode_route_supported(
+     model_id: Optional[str], provider: Optional[str], base_url: Optional[str]) -> bool:
+-    """Only the first-party endpoint that bills for fast mode may receive its params."""
++    """Only the first-party endpoint that bills for fast mode may receive its params, unless the
++    user opted a custom endpoint in. That opt-in covers ``service_tier`` only: Anthropic's
++    ``speed`` needs the Messages API, and custom endpoints speak chat completions."""
+     from urllib.parse import urlparse
+ 
+     from agent.model_metadata import is_grok_46_family
+ 
++    if not _is_anthropic_fast_model(model_id) and _custom_endpoint_accepts_fast_mode(base_url):
++        return True
+     if _is_anthropic_fast_model(model_id):
+         allowed = {"anthropic": "api.anthropic.com"}
+     elif is_grok_46_family(str(model_id or "")):
+diff --git a/tests/acp_adapter/test_fast_mode.py b/tests/acp_adapter/test_fast_mode.py
+new file mode 100644
+index 0000000000..cd6add1776
+--- /dev/null
++++ b/tests/acp_adapter/test_fast_mode.py
+@@ -0,0 +1,109 @@
++"""Session-scoped fast mode over ACP, and the per-endpoint opt-in that lets a proxy receive it.
++
++Real config-file → ``load_config`` → fast-mode gate chain on the per-test ``HERMES_HOME``; only the
++agent and the model inventory are stubbed.
++"""
++
++import os
++from pathlib import Path
++from types import SimpleNamespace
++from unittest.mock import patch
++
++import hermes_yaml as yaml
++import pytest
++from acp.schema import ModelInfo, SessionModelState
++
++from acp_adapter.model_catalog import mark_fast_mode_models
++from acp_adapter.server import HermesACPAgent
++from acp_adapter.session import SessionManager
++from hermes_cli.models import resolve_fast_mode_overrides
++
++PROXY = "http://proxy.test:8317/v1"
++
++
++@pytest.fixture
++def hermes_config(monkeypatch, tmp_path):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++
++    def write(custom_providers: list[dict]) -> None:
++        (Path(os.environ["HERMES_HOME"]) / "config.yaml").write_text(
++            yaml.safe_dump({"custom_providers": custom_providers}), encoding="utf-8")
++
++    write([
++        {"name": "proxy", "base_url": PROXY, "capabilities": {"fast_mode": True}},
++        {"name": "plain", "base_url": "http://plain.test/v1"},
++    ])
++    return write
++
++
++def _agent(**overrides):
++    fields = {"model": "gpt-5.5", "provider": "custom", "base_url": PROXY, "api_mode": "chat_completions",
++              "request_overrides": {"extra_body": {"tags": ["t3"]}}, "service_tier": None}
++    return SimpleNamespace(**{**fields, **overrides})
++
++
++def test_opted_in_endpoint_receives_service_tier_only(hermes_config):
++    assert resolve_fast_mode_overrides("gpt-5.5", provider="custom", base_url=PROXY + "/") == {
++        "service_tier": "priority"}
++    # Anthropic's ``speed`` is a Messages API parameter; a chat-completions proxy never gets it.
++    assert resolve_fast_mode_overrides("claude-opus-5-5", provider="custom", base_url=PROXY) is None
++    # Without the capability a proxy stays gated, as before.
++    assert resolve_fast_mode_overrides("gpt-5.5", provider="custom", base_url="http://plain.test/v1") is None
++
++
++def test_model_rows_carry_fast_mode_meta_where_the_route_takes_it(hermes_config):
++    ids = ["custom:proxy:gpt-5.5", "custom:proxy:claude-opus-5-5", "custom:proxy:glm-5.1",
++           "custom:plain:gpt-5.5", "openai-codex:gpt-5.5", "openrouter:openai/gpt-5.5"]
++    state = SessionModelState(available_models=[ModelInfo(model_id=i, name=i) for i in ids],
++                              current_model_id=ids[0])
++
++    marked = mark_fast_mode_models(state)
++
++    fast = [m.model_id for m in marked.available_models if (m.field_meta or {}).get("hermes", {}).get("fastMode")]
++    assert fast == ["custom:proxy:gpt-5.5", "openai-codex:gpt-5.5"]
++    assert marked.current_model_id == ids[0]
++
++
++@pytest.mark.asyncio
++async def test_new_session_advertises_fast_rows_without_a_config_option(hermes_config):
++    acp_agent = HermesACPAgent(session_manager=SessionManager(agent_factory=_agent))
++    picker = SessionModelState(available_models=[ModelInfo(model_id="custom:proxy:gpt-5.5", name="gpt-5.5")],
++                               current_model_id="custom:proxy:gpt-5.5")
++    with patch("acp_adapter.server.build_model_state", return_value=picker):
++        resp = await acp_agent.new_session(cwd="/tmp")
++
++    assert resp.config_options is None
++    assert resp.models.available_models[0].field_meta == {"hermes": {"fastMode": True}}
++
++
++@pytest.mark.asyncio
++async def test_fast_mode_option_pins_the_tier_and_survives_an_agent_rebuild(hermes_config):
++    acp_agent = HermesACPAgent(session_manager=SessionManager(agent_factory=_agent))
++    sid = (await acp_agent.new_session(cwd="/tmp")).session_id
++    state = acp_agent.session_manager.get_session(sid)
++
++    await acp_agent.set_config_option("fast_mode", sid, "on")
++    assert state.agent.request_overrides == {"extra_body": {"tags": ["t3"]}, "service_tier": "priority"}
++    assert state.agent.service_tier == "priority"
++
++    # set_model / resume rebuild the agent from config; the next turn re-pins the choice.
++    state.agent = _agent()
++    HermesACPAgent._apply_fast_mode(state)
++    assert state.agent.request_overrides["service_tier"] == "priority"
++
++    await acp_agent.set_config_option("fast_mode", sid, "off")
++    assert state.agent.request_overrides == {"extra_body": {"tags": ["t3"]}}
++    assert state.agent.service_tier is None
++
++
++@pytest.mark.asyncio
++async def test_fast_mode_on_an_unsupported_route_sends_nothing(hermes_config):
++    acp_agent = HermesACPAgent(session_manager=SessionManager(
++        agent_factory=lambda: _agent(base_url="http://plain.test/v1")))
++    sid = (await acp_agent.new_session(cwd="/tmp")).session_id
++
++    await acp_agent.set_config_option("fast_mode", sid, "on")
++
++    agent = acp_agent.session_manager.get_session(sid).agent
++    assert "service_tier" not in agent.request_overrides
++    assert agent.service_tier is None

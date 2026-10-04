@@ -176,8 +176,10 @@ const patchFilePaths = (content: string): ReadonlySet<string> => {
  * places; reversing the wrong one would write the wrong text back.
  *
  * The applied one is a version that, applied to HEAD, gives exactly the files
- * the checkout has now. Failing that (the user also edited those files), the
- * one version that applies to HEAD at all. Each check runs in its own
+ * the checkout has now once the other applied patches are taken back out:
+ * patches can share a file, and their changes are not this one's. Failing
+ * that (the user also edited those files), the one version that applies to
+ * HEAD at all. Each check runs in its own
  * scratch index, so the checkout's own index is untouched. When neither picks
  * out exactly one, there is no telling, so null: the patch still reads as
  * applied, and Remove refuses rather than guess.
@@ -185,19 +187,22 @@ const patchFilePaths = (content: string): ReadonlySet<string> => {
 const pickAppliedVersion = Effect.fn("pickHermesAppliedVersion")(function* (
   checkoutRoot: string,
   candidates: ReadonlyArray<string>,
+  others: ReadonlyArray<ReadonlyArray<string>>,
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-hermes-index-" });
+  const pathsOf = (files: ReadonlyArray<string>) =>
+    Effect.forEach(files, (file) =>
+      fileSystem.readFileString(file).pipe(Effect.map(patchFilePaths)),
+    ).pipe(Effect.map((sets) => sets.flatMap((set) => [...set])));
   // Compared over every path any candidate touches, both sides of a rename
   // included: a version that changes fewer files would otherwise match while
-  // another's change sits elsewhere.
-  const paths = new Set<string>();
-  for (const file of candidates) {
-    const content = yield* fileSystem.readFileString(file);
-    for (const touched of patchFilePaths(content)) paths.add(touched);
-  }
-  if (paths.size === 0) return null;
+  // another's change sits elsewhere. The other patches' paths are taken too,
+  // so they can be reversed out of the snapshot whole.
+  const candidatePaths = yield* pathsOf(candidates);
+  if (candidatePaths.length === 0) return null;
+  const paths = new Set([...candidatePaths, ...(yield* pathsOf(others.flat()))]);
   // The working tree over those paths, as a tree. Built through its own
   // scratch index so files a patch added, which `git apply` leaves
   // untracked, count too; a plain `git diff` would skip them.
@@ -209,6 +214,14 @@ const pickAppliedVersion = Effect.fn("pickHermesAppliedVersion")(function* (
     worktreeEnv,
   );
   if (staged.code !== 0) return null;
+  // Out with every other patch applied here, newest fitting version first.
+  // Ones not applied fail to reverse and are skipped.
+  for (const versionFiles of others) {
+    for (const file of versionFiles) {
+      const reversed = yield* runGit(checkoutRoot, ["apply", "--cached", "-R", file], worktreeEnv);
+      if (reversed.code === 0) break;
+    }
+  }
   const worktreeTree = yield* runGit(checkoutRoot, ["write-tree"], worktreeEnv);
   if (worktreeTree.code !== 0) return null;
   const checks = yield* Effect.forEach(
@@ -288,8 +301,10 @@ const pickForwardVersion = Effect.fn("pickHermesForwardVersion")(function* (
 const resolvePatchState = Effect.fn("resolveHermesPatchState")(function* (
   checkoutRoot: string,
   patch: HermesPatchDefinition,
-  versionFiles: ReadonlyArray<string>,
+  files: ReadonlyMap<HermesPatchId, ReadonlyArray<string>>,
 ) {
+  const versionFiles = files.get(patch.id) ?? [];
+  const others = [...files].filter(([id]) => id !== patch.id).map(([, other]) => other);
   const result = (state: HermesPatchState, file: string | null) => ({ state, file });
   // Reverse first, over every version: a checkout that already has a change
   // must read as applied, not as a conflict of a forward patch with itself.
@@ -297,7 +312,7 @@ const resolvePatchState = Effect.fn("resolveHermesPatchState")(function* (
   // carries reverses cleanly too, and removing it would rewrite upstream code.
   const reverse = yield* fitting(checkoutRoot, versionFiles, ["apply", "--check", "-R"]);
   if (reverse.length > 0) {
-    return result("applied", yield* pickAppliedVersion(checkoutRoot, reverse));
+    return result("applied", yield* pickAppliedVersion(checkoutRoot, reverse, others));
   }
   const forward = yield* fitting(checkoutRoot, versionFiles, ["apply", "--check"]);
   if (forward.length === 1) return result("notApplied", forward[0]!);
@@ -320,7 +335,7 @@ export const readHermesPatches = Effect.fn("readHermesPatches")(function* (
   return yield* Effect.forEach(
     patches,
     (patch) =>
-      resolvePatchState(checkoutRoot, patch, files.get(patch.id) ?? []).pipe(
+      resolvePatchState(checkoutRoot, patch, files).pipe(
         Effect.map(({ state }): HermesPatch => ({
           id: patch.id,
           title: patch.title,
@@ -342,15 +357,21 @@ export const isHermesCheckoutDetached = (checkoutRoot: string) =>
  * Applies (`forward`) or removes (`reverse`) one patch, returning whether git
  * accepted it. Applying uses the newest version that fits the checkout;
  * removing reverses whichever version is applied. `git apply` is
- * all-or-nothing, so a refusal leaves the checkout untouched.
+ * all-or-nothing, so a refusal leaves the checkout untouched. `patches` is
+ * every patch that may be applied alongside, so their changes in shared files
+ * are told apart from this one's.
  */
 export const changeHermesPatch = Effect.fn("changeHermesPatch")(function* (
   checkoutRoot: string,
   patch: HermesPatchDefinition,
   direction: "forward" | "reverse",
+  patches: ReadonlyArray<HermesPatchDefinition> = HERMES_PATCHES,
 ) {
-  const files = yield* writePatchFiles([patch]);
-  const { state, file } = yield* resolvePatchState(checkoutRoot, patch, files.get(patch.id) ?? []);
+  const files = yield* writePatchFiles([
+    patch,
+    ...patches.filter((other) => other.id !== patch.id),
+  ]);
+  const { state, file } = yield* resolvePatchState(checkoutRoot, patch, files);
   const expected: HermesPatchState = direction === "forward" ? "notApplied" : "applied";
   if (state !== expected || file === null) return { ok: false } as const;
   const result = yield* runGit(

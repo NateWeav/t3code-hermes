@@ -18,6 +18,7 @@ import {
   hindsightSharedPatch,
   planHindsightServerHandoff,
   summarizeHindsightMachines,
+  summarizeHindsightSharedSettings,
   type HindsightAgentMemorySummary,
   type HindsightHandoffMachine,
   type HindsightSharedWrite,
@@ -156,6 +157,7 @@ export function HindsightAgentMemorySettings() {
               hasServer: connection === undefined ? null : connection !== null,
               serverUrl: connection?.baseUrl ?? null,
               savedUrl: saved.baseUrl ?? "",
+              hasSavedKey: (saved.apiKey ?? "").length > 0,
               serverHasKey: connection?.hasApiKey === true,
               state,
               summary: describeHindsightAgentMemory(state, { enabled: saved.agentMemory }),
@@ -184,15 +186,10 @@ export function HindsightAgentMemorySettings() {
       state: machine.state,
     })),
   );
-  // The primary machine speaks for the shared fields; any writable one will do.
-  const representative =
-    writable.find(
-      (machine) => machine.environment.entry.target._tag === "PrimaryConnectionTarget",
-    ) ??
-    writable[0] ??
-    null;
-  const savedUrl = representative?.saved.baseUrl ?? "";
-  const hasSavedKey = (representative?.saved.apiKey ?? "").length > 0;
+  // The shared fields speak for every machine they write to.
+  const shared = summarizeHindsightSharedSettings(writable);
+  const savedUrl = shared.url;
+  const hasSavedKey = shared.hasKey;
   const resolvedUrl = machines.find((machine) => machine.serverUrl !== null)?.serverUrl ?? null;
   // What a machine without a server is handed: the shared override, else the
   // server some other machine already resolved (usually from Hermes).
@@ -307,7 +304,7 @@ export function HindsightAgentMemorySettings() {
             : "Every connected machine sends its agents' memory here. Empty keeps each machine's own server."
         }
         resetAction={
-          savedUrl.length > 0 ? (
+          shared.hasOverride ? (
             <SettingResetButton
               label="Hindsight server"
               tooltip="Use each machine's own server"
@@ -321,7 +318,9 @@ export function HindsightAgentMemorySettings() {
             size="sm"
             aria-label="Hindsight server URL"
             disabled={!overall.canToggle || busy}
-            placeholder={resolvedUrl ?? HINDSIGHT_URL_PLACEHOLDER}
+            placeholder={
+              shared.urlsDiffer ? "Differs per machine" : (resolvedUrl ?? HINDSIGHT_URL_PLACEHOLDER)
+            }
             value={savedUrl}
             onCommit={(next) => {
               if (next.trim() !== savedUrl) void saveServer(next.trim());

@@ -5,6 +5,7 @@ import {
   hindsightSharedPatch,
   planHindsightServerHandoff,
   summarizeHindsightMachines,
+  summarizeHindsightSharedSettings,
   type HindsightAgentMemorySummary,
   type HindsightHandoffMachine,
   type HindsightSharedWrite,
@@ -99,6 +100,7 @@ export function EnvironmentAgentMemorySettings() {
               hasServer: connection === undefined ? null : connection !== null,
               serverUrl: connection?.baseUrl ?? null,
               savedUrl: saved.baseUrl ?? "",
+              hasSavedKey: (saved.apiKey ?? "").length > 0,
               serverHasKey: connection?.hasApiKey === true,
               state,
               summary: describeHindsightAgentMemory(state, { enabled: saved.agentMemory }),
@@ -127,9 +129,10 @@ export function EnvironmentAgentMemorySettings() {
       state: machine.state,
     })),
   );
-  const representative = writable[0] ?? null;
-  const savedUrl = representative?.saved.baseUrl ?? "";
-  const hasSavedKey = (representative?.saved.apiKey ?? "").length > 0;
+  // The shared fields speak for every machine they write to.
+  const shared = summarizeHindsightSharedSettings(writable);
+  const savedUrl = shared.url;
+  const hasSavedKey = shared.hasKey;
   const resolvedUrl = machines.find((machine) => machine.serverUrl !== null)?.serverUrl ?? null;
   const handoff = planHindsightServerHandoff({ url: savedUrl, hasKey: hasSavedKey }, machines);
   const statusLabel = describeHindsightKeyWait(writable, handoff) ?? overall.label;
@@ -202,7 +205,9 @@ export function EnvironmentAgentMemorySettings() {
         ))}
         <TextInput
           accessibilityLabel="Hindsight server URL"
-          placeholder={resolvedUrl ?? "http://127.0.0.1:8888"}
+          placeholder={
+            shared.urlsDiffer ? "Differs per machine" : (resolvedUrl ?? "http://127.0.0.1:8888")
+          }
           value={urlDraft ?? savedUrl}
           onChangeText={setUrlDraft}
           onEndEditing={() => {
@@ -216,6 +221,13 @@ export function EnvironmentAgentMemorySettings() {
           editable={editable}
           className={INPUT_CLASS}
         />
+        {shared.hasOverride ? (
+          <MemoryButton
+            label="Use each machine's own server"
+            disabled={!editable}
+            onPress={() => void saveServer("")}
+          />
+        ) : null}
         <View className="flex-row items-center gap-3">
           <TextInput
             accessibilityLabel="Hindsight API key"

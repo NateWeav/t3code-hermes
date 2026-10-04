@@ -431,6 +431,11 @@ export interface HindsightHandoffMachine {
   readonly serverUrl: string | null;
   /** Its saved server override, or empty. */
   readonly savedUrl: string;
+  /**
+   * It has an API key saved. Only ever shown, never trusted to belong to
+   * any particular server.
+   */
+  readonly hasSavedKey: boolean;
   /** That server is reached with an API key. */
   readonly serverHasKey: boolean;
 }
@@ -547,4 +552,39 @@ export function hindsightSharedPatch(
       // cut it off from a key it inherits from Hermes.
       return isOnHindsightServer(machine, write.url) ? null : { baseUrl: write.url, apiKey: "" };
   }
+}
+
+/** What the shared server and key controls show, across every machine they write to. */
+export interface HindsightSharedSettings {
+  /** The override the machines that have one agree on; empty when none has one or they differ. */
+  readonly url: string;
+  /** Machines hold different overrides, so no one URL stands for them. */
+  readonly urlsDiffer: boolean;
+  /** Some machine has an override, which a reset clears. */
+  readonly hasOverride: boolean;
+  /** Some machine on the shared server has a key saved, which Remove clears. */
+  readonly hasKey: boolean;
+}
+
+/**
+ * The shared controls' state from all the machines they write to, not one
+ * stand-in, so an override or key saved on any of them stays visible and
+ * can be taken back.
+ */
+export function summarizeHindsightSharedSettings(
+  machines: ReadonlyArray<HindsightHandoffMachine>,
+): HindsightSharedSettings {
+  const overrides = machines.filter((machine) => machine.savedUrl.length > 0);
+  const distinct = new Set(overrides.map((machine) => canonicalHindsightUrl(machine.savedUrl)));
+  const url = distinct.size === 1 ? (overrides[0]?.savedUrl ?? "") : "";
+  const target =
+    url.length > 0
+      ? url
+      : (machines.find((machine) => machine.serverUrl !== null)?.serverUrl ?? null);
+  return {
+    url,
+    urlsDiffer: distinct.size > 1,
+    hasOverride: overrides.length > 0,
+    hasKey: machines.some((machine) => machine.hasSavedKey && isOnHindsightServer(machine, target)),
+  };
 }

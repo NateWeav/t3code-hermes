@@ -7,6 +7,7 @@ import {
   planHindsightServerHandoff,
   shouldHandOffHindsightServer,
   summarizeHindsightMachines,
+  summarizeHindsightSharedSettings,
 } from "./hindsight.ts";
 
 const base = { applying: false, blocker: null, agents: [], detail: null } as const;
@@ -144,6 +145,7 @@ describe("handing a machine the shared server", () => {
     hasServer: true,
     serverUrl: "https://hs.example",
     savedUrl: "",
+    hasSavedKey: false,
     serverHasKey: true,
   };
   const bare = {
@@ -151,6 +153,7 @@ describe("handing a machine the shared server", () => {
     hasServer: false,
     serverUrl: null,
     savedUrl: "",
+    hasSavedKey: false,
     serverHasKey: false,
   };
 
@@ -249,5 +252,28 @@ describe("handing a machine the shared server", () => {
         write,
       ),
     ).toBeNull();
+  });
+
+  it("shows an override or key saved on any machine, not just the first", () => {
+    const inheriting = { ...keyedSource, serverUrl: "https://hs.example" };
+    const overridden = {
+      ...bare,
+      hasServer: true,
+      savedUrl: "https://hs.example/",
+      serverUrl: "https://hs.example",
+      hasSavedKey: true,
+    };
+    expect(summarizeHindsightSharedSettings([inheriting, overridden])).toEqual({
+      url: "https://hs.example/",
+      urlsDiffer: false,
+      hasOverride: true,
+      hasKey: true,
+    });
+    expect(
+      summarizeHindsightSharedSettings([
+        overridden,
+        { ...overridden, savedUrl: "http://other:8888", serverUrl: "http://other:8888" },
+      ]),
+    ).toMatchObject({ url: "", urlsDiffer: true, hasOverride: true });
   });
 });

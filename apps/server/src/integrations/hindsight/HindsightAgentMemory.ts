@@ -59,6 +59,7 @@ import * as ProcessRunner from "../../processRunner.ts";
 import { deriveProviderInstanceConfigMap } from "../../provider/Layers/ProviderInstanceRegistryHydration.ts";
 import { mergeProviderInstanceEnvironment } from "../../provider/ProviderInstanceEnvironment.ts";
 import * as ServerSettingsService from "../../serverSettings.ts";
+import { hermesUserHome } from "./hermesHindsightConfig.ts";
 import {
   HindsightService,
   type HindsightConnection,
@@ -525,13 +526,9 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
         }
         if (found) present.push({ target: agent.target, customHomeInstances, hermesHome: null });
       }
-      // Hermes, like Python's `Path.home()`, takes `~` from the instance's own
-      // HOME (USERPROFILE on Windows) when it sets one.
+      // Resolved exactly as the connection resolver finds Hermes' config.
       const hermesHomeOf = (env: NodeJS.ProcessEnv) =>
-        resolveHermesHome(
-          env,
-          nonEmptyString(env["HOME"]) ?? nonEmptyString(env["USERPROFILE"]) ?? homeDir,
-        );
+        resolveHermesHome(env, hermesUserHome(env, homeDir));
       // Like Memory, Skills and Tasks, this follows one Hermes instance; another
       // enabled one with a home of its own is named, not wired.
       const hermes = resolveEnabledHermesInstance(settings);

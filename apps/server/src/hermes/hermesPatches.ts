@@ -162,10 +162,11 @@ const fitting = (
   }).pipe(Effect.map((results) => versionFiles.filter((_, index) => results[index]?.code === 0)));
 
 /**
- * Which of several versions that all reverse cleanly is the one applied. Two
- * versions can patch different upstream text into the same result, or the
- * same text in different places, and reversing the wrong one would write the
- * wrong text back.
+ * Which of the versions that reverse cleanly is the one applied in the working
+ * tree, or null when none can be told to be. A version reverses cleanly too
+ * when upstream already carries its change, and two versions can patch
+ * different upstream text into the same result, or the same text in different
+ * places; reversing the wrong one would write the wrong text back.
  *
  * The applied one is a version that, applied to HEAD, gives exactly the files
  * the checkout has now. Failing that (the user also edited those files), the
@@ -270,9 +271,10 @@ const resolvePatchState = Effect.fn("resolveHermesPatchState")(function* (
   const result = (state: HermesPatchState, file: string | null) => ({ state, file });
   // Reverse first, over every version: a checkout that already has a change
   // must read as applied, not as a conflict of a forward patch with itself.
+  // Even a lone candidate is checked against HEAD: a change upstream now
+  // carries reverses cleanly too, and removing it would rewrite upstream code.
   const reverse = yield* fitting(checkoutRoot, versionFiles, ["apply", "--check", "-R"]);
-  if (reverse.length === 1) return result("applied", reverse[0]!);
-  if (reverse.length > 1) {
+  if (reverse.length > 0) {
     return result("applied", yield* pickAppliedVersion(checkoutRoot, reverse));
   }
   const forward = yield* fitting(checkoutRoot, versionFiles, ["apply", "--check"]);

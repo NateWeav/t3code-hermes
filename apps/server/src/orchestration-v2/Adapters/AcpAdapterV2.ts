@@ -1380,6 +1380,9 @@ export function acpCompletedTurnShouldTerminalizeTool(
   return acpSubagentUpdates(flavor, tool) === undefined;
 }
 
+/** Provider-reported subagent details a status change may carry. */
+type AcpSubagentDetails = Pick<AcpAdapterV2SubagentUpdate, "role" | "usage">;
+
 interface ActiveAcpSubagent {
   task: OrchestrationV2Subagent;
   readonly childThreadId: ThreadId;
@@ -4170,7 +4173,7 @@ export function makeAcpAdapterV2(
                       subagentUpdate.nativeTaskId,
                       subagentUpdate.status,
                       subagentUpdate.result,
-                      { project: projectCarryover },
+                      { project: projectCarryover, details: subagentUpdate },
                     )
                   ) {
                     carryoverTerminalized = true;
@@ -4181,7 +4184,7 @@ export function makeAcpAdapterV2(
                       subagentUpdate.childSessionId,
                       subagentUpdate.status,
                       subagentUpdate.result,
-                      { project: projectCarryover },
+                      { project: projectCarryover, details: subagentUpdate },
                     ))
                   ) {
                     carryoverTerminalized = true;
@@ -5010,6 +5013,7 @@ export function makeAcpAdapterV2(
           subagent: ActiveAcpSubagent,
           status: OrchestrationV2Subagent["status"],
           resultOverride?: string | null,
+          details?: AcpSubagentDetails,
         ) {
           const now = yield* DateTime.now;
           const result =
@@ -5017,8 +5021,13 @@ export function makeAcpAdapterV2(
               ? resultOverride
               : (subagent.task.result ?? (subagent.assistantText || null));
           const completedAt = acpSubagentStatusIsTerminal(status) ? now : null;
+          // Children usually finish after the root settles; keep what they report.
+          const role = details?.role ?? subagent.task.role;
+          const usage = details?.usage ?? subagent.task.usage;
           subagent.task = {
             ...subagent.task,
+            ...(role ? { role } : {}),
+            ...(usage ? { usage } : {}),
             status,
             result,
             completedAt,
@@ -5035,8 +5044,9 @@ export function makeAcpAdapterV2(
           subagent: ActiveAcpSubagent,
           status: OrchestrationV2Subagent["status"],
           resultOverride?: string | null,
+          details?: AcpSubagentDetails,
         ) {
-          yield* mutateCarryoverSubagentStatus(subagent, status, resultOverride);
+          yield* mutateCarryoverSubagentStatus(subagent, status, resultOverride, details);
           const now = subagent.task.updatedAt;
           const nativeTaskId = subagent.task.nativeTaskRef?.nativeId ?? subagent.task.id;
           const nativeItemRef = {
@@ -5140,8 +5150,9 @@ export function makeAcpAdapterV2(
           nativeIdOrChildSessionId: string,
           status: OrchestrationV2Subagent["status"],
           result?: string | null,
-          options?: { readonly project?: boolean },
+          options?: { readonly project?: boolean; readonly details?: AcpSubagentDetails },
         ) {
+          const details = options?.details;
           const carryover = yield* Ref.get(carryoverSubagents);
           if (carryover === null) return false;
           const match = carryover.subagents.find((subagent) => {
@@ -5158,7 +5169,7 @@ export function makeAcpAdapterV2(
             if (!shouldProject || match.terminalStatusProjected) {
               return true;
             }
-            yield* projectCarryoverSubagentStatus(match, status, result);
+            yield* projectCarryoverSubagentStatus(match, status, result, details);
             return true;
           }
           // Only advance nonterminal entries; do not resurrect a terminal one.
@@ -5166,9 +5177,9 @@ export function makeAcpAdapterV2(
             return false;
           }
           if (!shouldProject) {
-            yield* mutateCarryoverSubagentStatus(match, status, result);
+            yield* mutateCarryoverSubagentStatus(match, status, result, details);
           } else {
-            yield* projectCarryoverSubagentStatus(match, status, result);
+            yield* projectCarryoverSubagentStatus(match, status, result, details);
           }
           return true;
         });
@@ -5246,7 +5257,7 @@ export function makeAcpAdapterV2(
             if (context.finalizedStatus === "completed") {
               yield* emitSubagent(context, update);
             } else {
-              yield* mutateCarryoverSubagentStatus(subagent, update.status, update.result);
+              yield* mutateCarryoverSubagentStatus(subagent, update.status, update.result, update);
             }
             return true;
           });

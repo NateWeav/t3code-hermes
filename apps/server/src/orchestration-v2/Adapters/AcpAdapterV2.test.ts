@@ -26,6 +26,7 @@ import {
   RunId,
   ThreadId,
   type OrchestrationV2ProviderThread,
+  type OrchestrationV2Subagent,
 } from "@t3tools/contracts";
 import { HostProcessIsExecutable, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { resolveSelfInvocation } from "@t3tools/shared/nodeRuntime";
@@ -6354,6 +6355,14 @@ describe("AcpAdapterV2", () => {
                     status: "completed",
                     childSessionId,
                     result: "SUB_DONE",
+                    // Reported only at the end, after the root settled (Hermes background children).
+                    role: "leaf",
+                    usage: {
+                      totalTokens: 1200,
+                      inputTokens: 1000,
+                      outputTokens: 200,
+                      durationMs: 7430,
+                    },
                   }),
           makeRuntime: makeMockRuntime({
             childProcessSpawner,
@@ -6493,9 +6502,13 @@ describe("AcpAdapterV2", () => {
 
       let eagerCompletedUpdates = 0;
       let eagerRunningUpdates = 0;
+      let completedSubagent: OrchestrationV2Subagent | undefined;
       let polled = yield* Queue.poll(events);
       while (Option.isSome(polled)) {
         const event = polled.value;
+        if (event.type === "subagent.updated" && event.subagent.status === "completed") {
+          completedSubagent = event.subagent;
+        }
         if (event.type === "turn_item.updated" && event.turnItem.type === "subagent") {
           if (event.turnItem.status === "completed") eagerCompletedUpdates += 1;
           if (event.turnItem.status === "running") eagerRunningUpdates += 1;
@@ -6503,6 +6516,13 @@ describe("AcpAdapterV2", () => {
         polled = yield* Queue.poll(events);
       }
       assert.equal(eagerCompletedUpdates, 1, "completed root must project before any attach");
+      assert.equal(completedSubagent?.role, "leaf");
+      assert.deepEqual(completedSubagent?.usage, {
+        totalTokens: 1200,
+        inputTokens: 1000,
+        outputTokens: 200,
+        durationMs: 7430,
+      });
       assert.equal(eagerRunningUpdates, 0);
       assert.lengthOf(continuationRequests, 1);
       assert.isTrue(yield* hasPendingBackgroundWork, "buffered spawn ACK still requires a drain");

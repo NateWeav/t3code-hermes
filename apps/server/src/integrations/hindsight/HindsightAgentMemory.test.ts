@@ -621,7 +621,7 @@ describe("HindsightAgentMemory", () => {
 
       expect(harness.calls).toEqual([]);
       expect(hermesProvider(harness.hermesHome)).toBe("holographic");
-      expect(state.detail).toContain("could not save");
+      expect(state.detail).toContain("could not read its record");
     }).pipe(Effect.provide(harness.layer));
   });
   it.effect("unwires an agent that is no longer set up, and leaves the rest", () => {
@@ -860,6 +860,51 @@ describe("HindsightAgentMemory", () => {
 
       expect(readJson(installerConfig)).toEqual({ serverMode: "cloud", apiToken: "hsk_mine" });
       expect(NodeFS.statSync(installerConfig).mode & 0o777).toBe(0o600);
+    }).pipe(Effect.provide(harness.layer));
+  });
+  it.effect("changes nothing while its record of changes cannot be read", () => {
+    const harness = setup({ agentMemory: true, missing: ["hermes"] });
+    const ledgerFile = NodePath.join(harness.home, "t3", "userdata", "hindsight-agent-memory.json");
+    return Effect.gen(function* () {
+      yield* harness.apply;
+      NodeFS.writeFileSync(ledgerFile, "{ torn");
+      yield* harness.setAgentMemory(false);
+      const state = yield* harness.apply;
+
+      // Not taken for "owns nothing": the hooks it installed are not orphaned silently.
+      expect(harness.calls.map((args) => args[2])).toEqual(["install"]);
+      expect(state.detail).toContain("could not read its record");
+      expect(NodeFS.readFileSync(ledgerFile, "utf8")).toBe("{ torn");
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("keeps a private Hermes config.yaml private", () => {
+    const harness = setup({
+      agentMemory: true,
+      missing: ["claude", "codex"],
+      hermesYaml: "memory:\n  provider: holographic\n",
+    });
+    const configYaml = NodePath.join(harness.hermesHome, "config.yaml");
+    NodeFS.chmodSync(configYaml, 0o600);
+    return Effect.gen(function* () {
+      yield* harness.apply;
+      expect(hermesProvider(harness.hermesHome)).toBe("hindsight");
+      expect(NodeFS.statSync(configYaml).mode & 0o777).toBe(0o600);
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("names a Hermes that sends its own key to the shared server", () => {
+    const harness = setup({
+      agentMemory: true,
+      missing: ["claude", "codex"],
+      hermesHasHindsight: true,
+      hermesYaml: "memory:\n  provider: hindsight\n",
+    });
+    return Effect.gen(function* () {
+      harness.setConnection({ baseUrl: BASE_URL, apiKey: "hsk_shared" });
+      const state = yield* harness.apply;
+
+      expect(state.agents[0]?.detail).toBe("Not covered: uses its own API key for this server.");
     }).pipe(Effect.provide(harness.layer));
   });
 });

@@ -59,7 +59,11 @@ import * as ProcessRunner from "../../processRunner.ts";
 import { deriveProviderInstanceConfigMap } from "../../provider/Layers/ProviderInstanceRegistryHydration.ts";
 import { mergeProviderInstanceEnvironment } from "../../provider/ProviderInstanceEnvironment.ts";
 import * as ServerSettingsService from "../../serverSettings.ts";
-import { HindsightService, type HindsightConnection } from "./HindsightService.ts";
+import {
+  HindsightService,
+  type HindsightConnection,
+  type ResolvedHindsight,
+} from "./HindsightService.ts";
 
 /**
  * Pinned so the flags below keep meaning what they mean. The runtime the
@@ -394,22 +398,46 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
       ),
     );
 
-  const readLedger = readText(ledgerPath).pipe(
-    Effect.flatMap((text) =>
-      text === null
-        ? Effect.succeed(EMPTY_LEDGER)
-        : decodeLedger(text).pipe(Effect.orElseSucceed(() => EMPTY_LEDGER)),
-    ),
-  );
+  /**
+   * The ledger, empty when there is none yet, or null when one is there but
+   * cannot be read: that is not proof T3 Code changed nothing.
+   */
+  const readLedger = Effect.gen(function* () {
+    if (!(yield* fs.exists(ledgerPath).pipe(Effect.orElseSucceed(() => true)))) {
+      return EMPTY_LEDGER;
+    }
+    const text = yield* readText(ledgerPath);
+    const ledger =
+      text === null ? null : yield* decodeLedger(text).pipe(Effect.orElseSucceed(() => null));
+    if (ledger === null) {
+      yield* Effect.logWarning("could not read the agent memory ledger", { path: ledgerPath });
+    }
+    return ledger;
+  });
 
-  /** Whether the file now holds `contents`; one given a `mode` is never published without it. */
-  const writeText = (filePath: string, contents: string, mode?: number) =>
-    writeFileStringAtomically({ filePath, contents, ...(mode === undefined ? {} : { mode }) }).pipe(
-      Effect.provideService(FileSystem.FileSystem, fs),
-      Effect.provideService(Path.Path, path),
-      Effect.as(true),
-      Effect.orElseSucceed(() => false),
-    );
+  /**
+   * Whether the file now holds `contents`. A file that is there keeps its
+   * mode and a new one gets `newFileMode`, set before it is published, so a
+   * private config never comes back readable by others.
+   */
+  const writeText = (filePath: string, contents: string, newFileMode?: number) =>
+    Effect.gen(function* () {
+      const mode =
+        (yield* fs.stat(filePath).pipe(
+          Effect.map((info) => info.mode & 0o777),
+          Effect.orElseSucceed(() => undefined),
+        )) ?? newFileMode;
+      return yield* writeFileStringAtomically({
+        filePath,
+        contents,
+        ...(mode === undefined ? {} : { mode }),
+      }).pipe(
+        Effect.provideService(FileSystem.FileSystem, fs),
+        Effect.provideService(Path.Path, path),
+        Effect.as(true),
+        Effect.orElseSucceed(() => false),
+      );
+    });
 
   /** Whether `file` is gone afterwards; a missing file already is. */
   const removeFile = (file: string) =>
@@ -557,18 +585,9 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
         ),
       );
 
-  /**
-   * Rewrites the installer config, which can hold a token, with the mode it
-   * already has; a new one is owner-only.
-   */
+  /** The installer config can hold a token, so a new one is owner-only. */
   const writeInstallerConfig = (contents: string) =>
-    Effect.gen(function* () {
-      const mode = yield* fs.stat(installerConfigPath).pipe(
-        Effect.map((info) => info.mode & 0o777),
-        Effect.orElseSucceed(() => 0o600),
-      );
-      return yield* writeText(installerConfigPath, contents, mode);
-    });
+    writeText(installerConfigPath, contents, 0o600);
 
   /** Drops `apiToken` from the installer's config; whether none is left. */
   const clearInstallerToken = Effect.gen(function* () {
@@ -632,7 +651,7 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
       return yield* writeText(hermesConfigFile(home), emptied ? "" : document.toString());
     });
 
-  /** Owner-only from the start, because a Hindsight Cloud key may ride in it. */
+  /** Owner-only from the start when new, because a Hindsight Cloud key may ride in it. */
   const writeHermesHindsightConfig = (home: string, contents: string) =>
     writeText(hermesHindsightFile(home), contents, 0o600);
 
@@ -677,6 +696,54 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
       return changedProvider || wroteConfig ? { ...owned, changedProvider, wroteConfig } : null;
     });
 
+  /**
+   * One row per present agent. `wroteHermesConfig` is null when the ledger
+   * could not be read, so whose Hermes config it is stays unknown.
+   */
+  const agentStatuses = (input: {
+    readonly agents: ReadonlyArray<PresentAgent>;
+    readonly failures: ReadonlyMap<HindsightAgentTarget, string>;
+    readonly hermesConfig: ResolvedHindsight["hermes"];
+    readonly connection: HindsightConnection | null;
+    readonly wroteHermesConfig: boolean | null;
+  }) =>
+    Effect.gen(function* () {
+      const { connection, hermesConfig } = input;
+      const statuses: Array<HindsightAgentStatus> = [];
+      for (const agent of input.agents) {
+        const failure = input.failures.get(agent.target) ?? null;
+        const installed =
+          agent.target === "hermes"
+            ? agent.hermesHome !== null &&
+              hermesConfig !== null &&
+              (yield* readHermesProvider(agent.hermesHome)) === "hindsight"
+            : yield* codingAgentInstalled(agent.target);
+        // Hermes' own Hindsight config is never rewritten, so one pointing at
+        // another server, or sending another key, is named instead of
+        // passing for wired to this connection. The key itself never shows.
+        const ownConfig =
+          agent.target === "hermes" &&
+          connection !== null &&
+          hermesConfig !== null &&
+          input.wroteHermesConfig === false;
+        const note =
+          ownConfig &&
+          canonicalHindsightUrl(hermesConfig.baseUrl) !== canonicalHindsightUrl(connection.baseUrl)
+            ? `Not covered: uses its own Hindsight server at ${hindsightServerHost(hermesConfig.baseUrl)}.`
+            : ownConfig && connection.apiKey !== null && hermesConfig.apiKey !== connection.apiKey
+              ? "Not covered: uses its own API key for this server."
+              : agent.customHomeInstances.length > 0
+                ? `Not covered: ${agent.customHomeInstances.join(", ")} (own config home).`
+                : null;
+        statuses.push({
+          target: agent.target,
+          state: failure !== null ? "failed" : installed ? "installed" : "notInstalled",
+          detail: failure ?? note,
+        });
+      }
+      return statuses;
+    });
+
   const pass = Effect.gen(function* () {
     const settings = yield* settingsService.getSettings.pipe(Effect.orElseSucceed(() => null));
     if (settings === null) return yield* SubscriptionRef.get(state);
@@ -685,6 +752,22 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
     const connection = resolved.connection;
     const agents = yield* presentAgents(settings);
     const ledger = yield* readLedger;
+    if (ledger === null) {
+      // Changing anything now could leave a change T3 Code cannot undo.
+      return {
+        applying: false,
+        blocker: null,
+        agents: yield* agentStatuses({
+          agents,
+          failures: new Map(),
+          hermesConfig: resolved.hermes,
+          connection,
+          wroteHermesConfig: null,
+        }),
+        detail:
+          "T3 Code could not read its record of what it changed here, so it changed nothing. The server log has the details.",
+      } satisfies HindsightAgentMemoryState;
+    }
     let nextLedger = ledger;
     let blocker: HindsightAgentMemoryBlocker | null =
       desired && connection === null ? "notConfigured" : null;
@@ -898,37 +981,13 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
 
     const after =
       nextLedger.hermes !== ledger.hermes ? yield* hindsight.resolveConnection : resolved;
-    const statuses: Array<HindsightAgentStatus> = [];
-    for (const agent of agents) {
-      const failure = failures.get(agent.target) ?? null;
-      const installed =
-        agent.target === "hermes"
-          ? agent.hermesHome !== null &&
-            after.hermes !== null &&
-            (yield* readHermesProvider(agent.hermesHome)) === "hindsight"
-          : yield* codingAgentInstalled(agent.target);
-      // Hermes' own Hindsight config is never rewritten, so one pointing at
-      // another server is named instead of passing for wired to this one.
-      const ownServer =
-        agent.target === "hermes" &&
-        connection !== null &&
-        after.hermes !== null &&
-        nextLedger.hermes?.wroteConfig !== true &&
-        canonicalHindsightUrl(after.hermes.baseUrl) !== canonicalHindsightUrl(connection.baseUrl)
-          ? hindsightServerHost(after.hermes.baseUrl)
-          : null;
-      const note =
-        ownServer !== null
-          ? `Not covered: uses its own Hindsight server at ${ownServer}.`
-          : agent.customHomeInstances.length > 0
-            ? `Not covered: ${agent.customHomeInstances.join(", ")} (own config home).`
-            : null;
-      statuses.push({
-        target: agent.target,
-        state: failure !== null ? "failed" : installed ? "installed" : "notInstalled",
-        detail: failure ?? note,
-      });
-    }
+    const statuses = yield* agentStatuses({
+      agents,
+      failures,
+      hermesConfig: after.hermes,
+      connection,
+      wroteHermesConfig: nextLedger.hermes?.wroteConfig === true,
+    });
     return {
       applying: false,
       blocker,

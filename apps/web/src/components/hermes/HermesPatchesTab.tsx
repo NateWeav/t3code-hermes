@@ -3,16 +3,17 @@
  * the environment's Hermes checkout. Decisions live in `useHermesPatches`.
  */
 import {
+  describeHermesGateway,
   describeHermesPatchesUnavailable,
   HERMES_DETACHED_HEAD_WARNING,
   HERMES_PATCH_STATE_HINTS,
   HERMES_PATCH_STATE_LABELS,
 } from "@t3tools/client-runtime/state/hermes-patches";
 import type { HermesPatch, HermesPatchState } from "@t3tools/contracts";
-import { RefreshCwIcon, TriangleAlertIcon } from "lucide-react";
+import { InfoIcon, RefreshCwIcon, RotateCwIcon, TriangleAlertIcon } from "lucide-react";
 
 import { useHermesPatches } from "../../state/hermesPatches";
-import { Alert, AlertDescription } from "../ui/alert";
+import { Alert, AlertAction, AlertDescription } from "../ui/alert";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
@@ -63,8 +64,17 @@ function PatchRow({
 }
 
 export function HermesPatchesTab() {
-  const { snapshot, isPending, error, changingPatchId, refresh, apply, remove } =
-    useHermesPatches();
+  const {
+    snapshot,
+    isPending,
+    error,
+    changingPatchId,
+    refresh,
+    apply,
+    remove,
+    requestingRestart,
+    restartGateway,
+  } = useHermesPatches();
 
   if (isPending) {
     return (
@@ -104,6 +114,8 @@ export function HermesPatchesTab() {
     );
   }
 
+  const gateway = describeHermesGateway(snapshot.gateway, snapshot.gatewayRestartFailure);
+
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2">
@@ -119,6 +131,25 @@ export function HermesPatchesTab() {
         <Alert variant="warning">
           <TriangleAlertIcon />
           <AlertDescription>{HERMES_DETACHED_HEAD_WARNING}</AlertDescription>
+        </Alert>
+      ) : null}
+      {gateway !== null ? (
+        <Alert variant={gateway.tone}>
+          {gateway.tone === "info" ? <InfoIcon /> : <TriangleAlertIcon />}
+          <AlertDescription>{gateway.text}</AlertDescription>
+          {gateway.restart ? (
+            <AlertAction>
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={requestingRestart || changingPatchId !== null}
+                onClick={restartGateway}
+              >
+                <RotateCwIcon />
+                {requestingRestart ? "Restarting…" : "Restart gateway"}
+              </Button>
+            </AlertAction>
+          ) : null}
         </Alert>
       ) : null}
       {snapshot.patches.length === 0 ? (

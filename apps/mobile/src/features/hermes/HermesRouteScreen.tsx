@@ -9,6 +9,7 @@ import {
   type HermesCronStatusTone,
 } from "@t3tools/client-runtime/state/hermes-cron";
 import {
+  describeHermesGateway,
   describeHermesPatchesUnavailable,
   HERMES_DETACHED_HEAD_WARNING,
   HERMES_PATCH_STATE_HINTS,
@@ -488,6 +489,11 @@ function HermesPatchesScreen({ environmentId }: { readonly environmentId: Enviro
   if (unavailable !== null) {
     return <CenteredState title={unavailable.title} description={unavailable.description} />;
   }
+  const gateway = describeHermesGateway(snapshot.gateway, snapshot.gatewayRestartFailure);
+  const restartGateway = async () => {
+    const failure = await patches.restartGateway();
+    if (failure !== null) Alert.alert("Gateway not restarted", failure);
+  };
 
   return (
     <ScreenScrollView
@@ -498,6 +504,18 @@ function HermesPatchesScreen({ environmentId }: { readonly environmentId: Enviro
       showsVerticalScrollIndicator={false}
     >
       {snapshot.detachedHead ? <NoticeText text={HERMES_DETACHED_HEAD_WARNING} /> : null}
+      {gateway !== null ? (
+        <View className="gap-2 rounded-[20px] border border-border bg-card p-4">
+          <Text className="text-sm text-foreground-muted">{gateway.text}</Text>
+          {gateway.restart ? (
+            <ActionButton
+              label={patches.requestingRestart ? "Restarting…" : "Restart gateway"}
+              disabled={patches.requestingRestart || patches.changingPatchId !== null}
+              onPress={() => void restartGateway()}
+            />
+          ) : null}
+        </View>
+      ) : null}
       {snapshot.patches.length === 0 ? (
         <NoticeText text="This T3 Code release carries no Hermes patches." />
       ) : (

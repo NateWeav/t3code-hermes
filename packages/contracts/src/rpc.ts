@@ -328,6 +328,7 @@ import {
   HermesRunSourcesResult,
 } from "./hermesRuns.ts";
 import {
+  HermesGatewayRestartInput,
   HermesPatchChangeInput,
   HermesPatchError,
   HermesPatchesSnapshot,
@@ -530,6 +531,7 @@ export const WS_METHODS = {
   hermesPatchList: "hermes.patchList",
   hermesPatchApply: "hermes.patchApply",
   hermesPatchRevert: "hermes.patchRevert",
+  hermesGatewayRestart: "hermes.gatewayRestart",
   hindsightListBanks: "hindsight.listBanks",
   hindsightBrowse: "hindsight.browse",
   hindsightRecall: "hindsight.recall",
@@ -995,6 +997,12 @@ const WsHermesPatchApplyRpc = Rpc.make(WS_METHODS.hermesPatchApply, {
 
 const WsHermesPatchRevertRpc = Rpc.make(WS_METHODS.hermesPatchRevert, {
   payload: HermesPatchChangeInput,
+  success: HermesPatchesSnapshot,
+  error: Schema.Union([EnvironmentAuthorizationError, HermesPatchError]),
+});
+
+const WsHermesGatewayRestartRpc = Rpc.make(WS_METHODS.hermesGatewayRestart, {
+  payload: HermesGatewayRestartInput,
   success: HermesPatchesSnapshot,
   error: Schema.Union([EnvironmentAuthorizationError, HermesPatchError]),
 });
@@ -1966,6 +1974,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsHermesPatchListRpc,
   WsHermesPatchApplyRpc,
   WsHermesPatchRevertRpc,
+  WsHermesGatewayRestartRpc,
   WsHindsightListBanksRpc,
   WsHindsightBrowseRpc,
   WsHindsightRecallRpc,

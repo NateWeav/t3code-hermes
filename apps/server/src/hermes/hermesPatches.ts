@@ -198,6 +198,19 @@ const pickAppliedVersion = Effect.fn("pickHermesAppliedVersion")(function* (
     for (const touched of patchFilePaths(content)) paths.add(touched);
   }
   if (paths.size === 0) return null;
+  // The working tree over those paths, as a tree. Built through its own
+  // scratch index so files a patch added, which `git apply` leaves
+  // untracked, count too; a plain `git diff` would skip them.
+  const worktreeEnv = { GIT_INDEX_FILE: path.join(directory, "index-worktree") };
+  if ((yield* runGit(checkoutRoot, ["read-tree", "HEAD"], worktreeEnv)).code !== 0) return null;
+  const staged = yield* runGit(
+    checkoutRoot,
+    ["update-index", "--add", "--remove", "--", ...paths],
+    worktreeEnv,
+  );
+  if (staged.code !== 0) return null;
+  const worktreeTree = yield* runGit(checkoutRoot, ["write-tree"], worktreeEnv);
+  if (worktreeTree.code !== 0) return null;
   const checks = yield* Effect.forEach(
     candidates,
     (file, index) =>
@@ -209,8 +222,12 @@ const pickAppliedVersion = Effect.fn("pickHermesAppliedVersion")(function* (
         if ((yield* runGit(checkoutRoot, ["apply", "--cached", file], env)).code !== 0) {
           return { file, onHead: false, matches: false };
         }
-        const diff = yield* runGit(checkoutRoot, ["diff", "--quiet", "--", ...paths], env);
-        return { file, onHead: true, matches: diff.code === 0 };
+        const tree = yield* runGit(checkoutRoot, ["write-tree"], env);
+        return {
+          file,
+          onHead: true,
+          matches: tree.code === 0 && tree.stdout.trim() === worktreeTree.stdout.trim(),
+        };
       }),
     { concurrency: GIT_CHECK_CONCURRENCY },
   );

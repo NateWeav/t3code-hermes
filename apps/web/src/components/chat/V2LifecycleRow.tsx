@@ -1,7 +1,6 @@
 import { ThreadHoverCardPopup } from "../ThreadHoverCard";
 import { AgentElapsed } from "./AgentElapsed";
 import { projectedSubagentsToRuntime } from "@t3tools/client-runtime/state/subagentRuntime";
-import type { ReactNode } from "react";
 import { useThreadShell, useProject } from "../../state/entities";
 import { SubagentTooltipContent } from "./SubagentTooltipContent";
 import { useAtomValue } from "@effect/atom-react";
@@ -358,6 +357,7 @@ function SubagentTimelineLink(props: {
     status,
     startedAt: isoOrNull(agent?.startedAt ?? props.startedAt),
     completedAt: isoOrNull(agent?.completedAt ?? props.completedAt),
+    usage: agent?.usage ?? null,
   };
   const content = (
     <>
@@ -437,6 +437,8 @@ function SubagentTimelineLink(props: {
           {...props}
           elapsed={agent ? <AgentElapsed agent={projectedSubagentsToRuntime([agent])[0]!} /> : null}
           model={agent?.model ?? null}
+          role={agent?.role}
+          usage={agent?.usage}
           status={status}
           result={agent?.result ?? props.result}
           progress={agent?.progress ?? props.progress}
@@ -447,7 +449,8 @@ function SubagentTimelineLink(props: {
 }
 
 function SubagentTimelineTooltip(
-  props: Parameters<typeof SubagentTimelineLink>[0] & { model: string | null; elapsed: ReactNode },
+  props: Parameters<typeof SubagentTimelineLink>[0] &
+    Pick<Parameters<typeof SubagentTooltipContent>[0], "model" | "role" | "usage" | "elapsed">,
 ) {
   const environmentId = props.parentRef.environmentId;
   const parent = useThreadShell(props.parentRef)?.source;
@@ -462,6 +465,8 @@ function SubagentTimelineTooltip(
     <SubagentTooltipContent
       title={formatSubagentDisplayTitle(child?.title ?? props.title)}
       model={props.model}
+      role={props.role}
+      usage={props.usage}
       provider={props.provider}
       driver={props.driver}
       elapsed={props.elapsed}

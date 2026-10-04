@@ -8,7 +8,9 @@ import type {
 import {
   resolveSubagentMetadata,
   subagentDetailPreview,
+  subagentTokensLabel,
 } from "@t3tools/client-runtime/state/subagent-display";
+import type { SubagentUsage } from "@t3tools/client-runtime/state/subagentRuntime";
 import type { ReactNode } from "react";
 import {
   BotIcon,
@@ -28,6 +30,8 @@ import { cn } from "~/lib/utils";
 export function SubagentTooltipContent(props: {
   title: string;
   model: string | null;
+  role?: string | null | undefined;
+  usage?: SubagentUsage | null | undefined;
   provider?: ServerProvider | undefined;
   driver?: ProviderDriverKind | undefined;
   elapsed?: ReactNode;
@@ -41,6 +45,7 @@ export function SubagentTooltipContent(props: {
 }) {
   const { modelLabel, workspace: metadata } = resolveSubagentMetadata(props);
   const preview = subagentDetailPreview(props);
+  const tokens = subagentTokensLabel(props.usage);
   const driver = props.provider?.driver ?? props.driver;
   const working = ["running", "in_progress", "pending", "waiting"].includes(props.status);
   const failed = ["failed", "error"].includes(props.status);
@@ -64,7 +69,9 @@ export function SubagentTooltipContent(props: {
         ) : (
           <BotIcon className="size-3 shrink-0" />
         )}
-        <span className="min-w-0 truncate text-foreground/75">{modelLabel}</span>
+        <span className="min-w-0 truncate text-foreground/75">
+          {props.role ? `${props.role} · ${modelLabel}` : modelLabel}
+        </span>
       </div>
       <div className="flex min-w-0 items-center justify-between gap-4">
         <span
@@ -82,7 +89,10 @@ export function SubagentTooltipContent(props: {
           <StatusIcon aria-hidden className="size-3 shrink-0" />
           {props.status.replaceAll("_", " ")}
         </span>
-        {props.elapsed}
+        <span className="flex shrink-0 items-center gap-2 tabular-nums">
+          {tokens ? <span>{tokens}</span> : null}
+          {props.elapsed}
+        </span>
       </div>
       {metadata.map(({ label, value }) => {
         const Icon = label === "Branch" ? GitBranchIcon : FolderIcon;

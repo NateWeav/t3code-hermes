@@ -175,7 +175,7 @@ function AgentElapsed(props: {
  * so the timer never repaints the metadata or a settled sheet.
  */
 function useSubagentElapsed(
-  subagent: Pick<OrchestrationV2Subagent, "status" | "startedAt" | "completedAt">,
+  subagent: Pick<OrchestrationV2Subagent, "status" | "startedAt" | "completedAt" | "usage">,
   tickSeconds: boolean,
 ): string | null {
   const [nowMs, setNowMs] = useState(() => Date.now());
@@ -190,6 +190,7 @@ function useSubagentElapsed(
       status: subagent.status,
       startedAt: subagent.startedAt === null ? null : DateTime.formatIso(subagent.startedAt),
       completedAt: subagent.completedAt === null ? null : DateTime.formatIso(subagent.completedAt),
+      usage: subagent.usage,
     },
     nowMs,
   );

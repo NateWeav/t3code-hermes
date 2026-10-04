@@ -11,6 +11,7 @@ import {
   RunId,
   ThreadId,
   type OrchestrationV2ProviderThread,
+  type OrchestrationV2Subagent,
   type RuntimeMode,
 } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
@@ -336,24 +337,34 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
           progress({ event: "subagent.start", task_index: 0 }),
           progress({ event: "subagent.text", task_index: 0, text: "Inspecting the boundary." }),
           progress({ event: "subagent.thinking", task_index: 1, text: "(¬‿¬) analyzing..." }),
+          progress({
+            event: "subagent.complete",
+            task_index: 0,
+            status: "completed",
+            summary: "Routing inspected.",
+            input_tokens: 9_000,
+            output_tokens: 3_400,
+            duration_seconds: 1.5,
+          }),
           { ...batch.complete, rawOutput: batch.result } as EffectAcpSchema.SessionUpdate,
           { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Done." } },
         ],
       });
-      const latest = new Map<string, { title: string | null; status: string; result: unknown }>();
+      const latest = new Map<string, OrchestrationV2Subagent>();
       for (const event of events) {
         if (event.type !== "subagent.updated") continue;
-        latest.set(String(event.subagent.id), {
-          title: event.subagent.title,
-          status: event.subagent.status,
-          result: event.subagent.result,
-        });
+        latest.set(String(event.subagent.id), event.subagent);
       }
       assert.deepEqual(
-        [...latest.values()].map(({ title, status }) => [title, status]),
+        [...latest.values()].map(({ title, status, role, usage }) => [title, status, role, usage]),
         [
-          ["Inspect routing", "completed"],
-          ["Run tests", "failed"],
+          [
+            "Inspect routing",
+            "completed",
+            "orchestrator",
+            { totalTokens: 12_400, inputTokens: 9_000, outputTokens: 3_400, durationMs: 1_500 },
+          ],
+          ["Run tests", "failed", "leaf", { durationMs: 2_000 }],
         ],
       );
       const delegateRows = events.filter(

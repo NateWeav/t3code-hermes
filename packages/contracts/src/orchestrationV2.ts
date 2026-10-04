@@ -631,6 +631,21 @@ export const OrchestrationV2ExecutionNode = Schema.Struct({
 });
 export type OrchestrationV2ExecutionNode = typeof OrchestrationV2ExecutionNode.Type;
 
+/**
+ * What a provider reports about a finished subagent. Some report duration
+ * without token counts, so every field is optional. Output includes reasoning.
+ */
+export const OrchestrationV2SubagentUsage = Schema.Struct({
+  totalTokens: Schema.optional(NonNegativeInt),
+  inputTokens: Schema.optional(NonNegativeInt),
+  cachedInputTokens: Schema.optional(NonNegativeInt),
+  outputTokens: Schema.optional(NonNegativeInt),
+  reasoningOutputTokens: Schema.optional(NonNegativeInt),
+  /** The provider's own measure; the child may start well after its spawn. */
+  durationMs: Schema.optional(NonNegativeInt),
+});
+export type OrchestrationV2SubagentUsage = typeof OrchestrationV2SubagentUsage.Type;
+
 export const OrchestrationV2Subagent = Schema.Struct({
   id: NodeId,
   threadId: ThreadId,
@@ -646,6 +661,9 @@ export const OrchestrationV2Subagent = Schema.Struct({
   prompt: Schema.String,
   title: Schema.NullOr(Schema.String),
   model: Schema.NullOr(Schema.String),
+  /** Provider-named role (Hermes "leaf"/"orchestrator"); absent on older records. */
+  role: Schema.optional(Schema.NullOr(Schema.String)),
+  usage: Schema.optional(Schema.NullOr(OrchestrationV2SubagentUsage)),
   // Parent-wake policy for app-owned tasks: "always" offers a continuation on
   // every terminal (async delegations; queue_after_active sequences it behind
   // a live parent run), "settled_only" offers only when the parent has no

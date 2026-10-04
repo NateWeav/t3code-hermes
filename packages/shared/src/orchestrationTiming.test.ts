@@ -160,4 +160,23 @@ describe("deriveSubagentElapsedMs", () => {
       deriveSubagentElapsedMs({ status: "running", startedAt: null, completedAt: null }, now),
     ).toBeNull();
   });
+  it("prefers a settled task's reported duration over its observed window", () => {
+    const usage = { totalTokens: 1_200, durationMs: 2_500 };
+    expect(
+      deriveSubagentElapsedMs({ status: "completed", startedAt, completedAt, usage }, now),
+    ).toBe(2_500);
+    expect(
+      deriveSubagentElapsedMs({ status: "failed", startedAt: null, completedAt: null, usage }, now),
+    ).toBe(2_500);
+    // Live work keeps ticking, and token-only usage leaves the window alone.
+    expect(deriveSubagentElapsedMs({ status: "running", startedAt, completedAt, usage }, now)).toBe(
+      3_600_000,
+    );
+    expect(
+      deriveSubagentElapsedMs(
+        { status: "completed", startedAt, completedAt, usage: { totalTokens: 1_200 } },
+        now,
+      ),
+    ).toBe(10_000);
+  });
 });

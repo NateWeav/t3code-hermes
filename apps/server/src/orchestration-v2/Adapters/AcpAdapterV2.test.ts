@@ -26,6 +26,7 @@ import {
   RunId,
   ThreadId,
   type OrchestrationV2ProviderThread,
+  type OrchestrationV2Subagent,
 } from "@t3tools/contracts";
 import { HostProcessIsExecutable, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { resolveSelfInvocation } from "@t3tools/shared/nodeRuntime";
@@ -1218,6 +1219,124 @@ describe("AcpAdapterV2", () => {
       );
       assert.equal(parentTools.length, 1);
       assert.equal(parentTools[0]?.title, "Parent tool finished");
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+
+  it.effect("carries a subagent's role and usage across updates that omit them", () =>
+    Effect.gen(function* () {
+      const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const path = yield* Path.Path;
+      const mockAgentPath = yield* path.fromFileUrl(
+        new URL("../../../scripts/acp-mock-agent.ts", import.meta.url),
+      );
+      type Runtime = AcpSessionRuntime.AcpSessionRuntime["Service"];
+      let handler: Parameters<Runtime["handleSessionUpdate"]>[0] | undefined;
+      const instanceId = ProviderInstanceId.make("acp-subagent-usage");
+      const adapter = makeAcpAdapterV2({
+        instanceId,
+        crypto: yield* Crypto.Crypto,
+        fileSystem: yield* FileSystem.FileSystem,
+        idAllocator: yield* IdAllocator.IdAllocatorV2,
+        serverConfig: yield* ServerConfig.ServerConfig,
+        selfInvocation: yield* resolveSelfInvocation(),
+        flavor: {
+          driver: ACP_TEST_DRIVER,
+          capabilities: AcpProviderCapabilitiesV2,
+          // Only the launch names the role and only the end reports usage, as
+          // Hermes does; a flavor that reports neither leaves both absent.
+          extractSubagentUpdate: (toolCall) => {
+            const reports = toolCall.toolCallId === "spawn-reported";
+            const done = toolCall.status === "completed";
+            return {
+              nativeTaskId: toolCall.toolCallId,
+              prompt: "Review the parser",
+              title: "Review the parser",
+              model: null,
+              status: done ? "completed" : "running",
+              childSessionId: null,
+              result: done ? "Reviewed." : null,
+              ...(reports && toolCall.status === "pending" ? { role: "reviewer" } : {}),
+              ...(reports && done ? { usage: { totalTokens: 1_200, durationMs: 1_500 } } : {}),
+            };
+          },
+          makeRuntime: makeMockRuntime({
+            childProcessSpawner,
+            mockAgentPath,
+            wrapRuntime: (runtime) => ({
+              ...runtime,
+              handleSessionUpdate: (next) =>
+                Effect.sync(() => {
+                  handler = next;
+                }).pipe(Effect.andThen(runtime.handleSessionUpdate(next))),
+              prompt: () =>
+                Effect.gen(function* () {
+                  assert.isDefined(handler);
+                  for (const toolCallId of ["spawn-reported", "spawn-silent"]) {
+                    const updates = [
+                      { sessionUpdate: "tool_call", toolCallId, title: "spawn", status: "pending" },
+                      { sessionUpdate: "tool_call_update", toolCallId, status: "in_progress" },
+                      { sessionUpdate: "tool_call_update", toolCallId, status: "completed" },
+                    ] satisfies Array<EffectAcpSchema.SessionUpdate>;
+                    for (const update of updates)
+                      yield* handler!({ sessionId: "mock-session-1", update });
+                  }
+                  return { stopReason: "end_turn" as const };
+                }),
+            }),
+          }),
+        },
+      });
+      const threadId = ThreadId.make("acp-subagent-usage-parent");
+      const modelSelection = { instanceId, model: "default" };
+      const runtimePolicy = ProviderAdapterV2RuntimePolicy.make({
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        cwd: process.cwd(),
+      });
+      const runtime = yield* adapter.openSession({
+        threadId,
+        providerSessionId: ProviderSessionId.make("acp-subagent-usage-session"),
+        modelSelection,
+        runtimePolicy,
+      });
+      const providerThread = yield* runtime.ensureThread({
+        threadId,
+        modelSelection,
+        runtimePolicy,
+      });
+      yield* runtime.startTurn(
+        makeTurnInput({
+          threadId,
+          providerThread,
+          instanceId,
+          runtimePolicy,
+          now: yield* DateTime.now,
+        }),
+      );
+      const events = Array.from(
+        yield* runtime.events.pipe(
+          Stream.takeUntil((event) => event.type === "turn.terminal"),
+          Stream.runCollect,
+        ),
+      );
+      const tasks = events.flatMap((event) =>
+        event.type === "subagent.updated" ? [event.subagent] : [],
+      );
+      const reported = tasks.filter((task) => task.nativeTaskRef?.nativeId === "spawn-reported");
+      assert.deepEqual(
+        reported.map(({ status, role, usage }) => [status, role, usage]),
+        [
+          ["running", "reviewer", undefined],
+          ["running", "reviewer", undefined],
+          ["completed", "reviewer", { totalTokens: 1_200, durationMs: 1_500 }],
+        ],
+      );
+      const silent = tasks.filter((task) => task.nativeTaskRef?.nativeId === "spawn-silent");
+      assert.isNotEmpty(silent);
+      for (const task of silent) {
+        assert.notProperty(task, "role");
+        assert.notProperty(task, "usage");
+      }
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 
@@ -6236,6 +6355,14 @@ describe("AcpAdapterV2", () => {
                     status: "completed",
                     childSessionId,
                     result: "SUB_DONE",
+                    // Reported only at the end, after the root settled (Hermes background children).
+                    role: "leaf",
+                    usage: {
+                      totalTokens: 1200,
+                      inputTokens: 1000,
+                      outputTokens: 200,
+                      durationMs: 7430,
+                    },
                   }),
           makeRuntime: makeMockRuntime({
             childProcessSpawner,
@@ -6375,9 +6502,13 @@ describe("AcpAdapterV2", () => {
 
       let eagerCompletedUpdates = 0;
       let eagerRunningUpdates = 0;
+      let completedSubagent: OrchestrationV2Subagent | undefined;
       let polled = yield* Queue.poll(events);
       while (Option.isSome(polled)) {
         const event = polled.value;
+        if (event.type === "subagent.updated" && event.subagent.status === "completed") {
+          completedSubagent = event.subagent;
+        }
         if (event.type === "turn_item.updated" && event.turnItem.type === "subagent") {
           if (event.turnItem.status === "completed") eagerCompletedUpdates += 1;
           if (event.turnItem.status === "running") eagerRunningUpdates += 1;
@@ -6385,6 +6516,13 @@ describe("AcpAdapterV2", () => {
         polled = yield* Queue.poll(events);
       }
       assert.equal(eagerCompletedUpdates, 1, "completed root must project before any attach");
+      assert.equal(completedSubagent?.role, "leaf");
+      assert.deepEqual(completedSubagent?.usage, {
+        totalTokens: 1200,
+        inputTokens: 1000,
+        outputTokens: 200,
+        durationMs: 7430,
+      });
       assert.equal(eagerRunningUpdates, 0);
       assert.lengthOf(continuationRequests, 1);
       assert.isTrue(yield* hasPendingBackgroundWork, "buffered spawn ACK still requires a drain");

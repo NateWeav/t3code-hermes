@@ -9,6 +9,8 @@
  * rawInput and title across progress, and drops repeated or late updates for a
  * child it already finished.
  */
+import type { OrchestrationV2SubagentUsage } from "@t3tools/contracts";
+
 import type { AcpToolCallState } from "./AcpRuntimeModel.ts";
 
 /** Structurally an `AcpAdapterV2SubagentUpdate`. */
@@ -27,11 +29,14 @@ export interface HermesSubagentUpdate {
     | "cancelled";
   readonly childSessionId: null;
   readonly result: string | null;
+  readonly role: string | null;
+  readonly usage: OrchestrationV2SubagentUsage | null;
 }
 
 type Child = {
   readonly index: number;
   readonly title: string;
+  readonly role?: string;
   readonly model?: string;
 };
 
@@ -65,6 +70,32 @@ function text(value: unknown): string | undefined {
 
 function count(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+/**
+ * Hermes counts a child's tokens only once it finishes: flat on a live
+ * `subagent.complete`, nested under `tokens` in a result entry. Its output
+ * count already includes reasoning. Duration comes from either, or from the
+ * stock header's `1.5s` bit, and is Hermes's own measure of the child.
+ */
+function childUsage(result: Record<string, unknown>): OrchestrationV2SubagentUsage | null {
+  const tokens = record(result.tokens);
+  const round = (value: number | undefined) =>
+    value === undefined ? undefined : Math.round(value);
+  const input = round(count(result.input_tokens) ?? count(tokens.input));
+  const output = round(count(result.output_tokens) ?? count(tokens.output));
+  const reasoning = round(count(result.reasoning_tokens));
+  const duration = count(result.duration_seconds);
+  const usage = {
+    ...(input !== undefined || output !== undefined
+      ? { totalTokens: (input ?? 0) + (output ?? 0) }
+      : {}),
+    ...(input !== undefined ? { inputTokens: input } : {}),
+    ...(output !== undefined ? { outputTokens: output } : {}),
+    ...(reasoning !== undefined ? { reasoningOutputTokens: reasoning } : {}),
+    ...(duration !== undefined ? { durationMs: Math.round(duration * 1000) } : {}),
+  };
+  return Object.keys(usage).length > 0 ? usage : null;
 }
 
 function contentText(tool: AcpToolCallState): string {
@@ -108,10 +139,12 @@ function startChildren(tool: AcpToolCallState): Child[] {
   if (tasks.length > 0) {
     return tasks.map((task, index) => {
       const input = record(task);
+      const role = text(input.role) ?? text(args.role);
       const model = text(input.model) ?? text(args.model);
       return {
         index,
         title: text(input.goal) ?? `Delegated task ${index + 1}`,
+        ...(role ? { role } : {}),
         ...(model ? { model } : {}),
       };
     });
@@ -128,7 +161,11 @@ function startChildren(tool: AcpToolCallState): Child[] {
     return Array.from({ length: Math.min(Number(batchCount), 128) }, (_, index) => {
       const line = new RegExp(`^${index + 1}\\. (.*)$`, "m").exec(content)?.[1];
       const roleMatch = line ? /^(.*) \(([^()]+)\)$/.exec(line) : null;
-      return { index, title: roleMatch?.[1] ?? line ?? `Delegated task ${index + 1}` };
+      return {
+        index,
+        title: roleMatch?.[1] ?? line ?? `Delegated task ${index + 1}`,
+        ...(roleMatch?.[2] ? { role: roleMatch[2] } : {}),
+      };
     });
   }
   return [
@@ -153,10 +190,13 @@ function stockResults(content: string): Record<string, unknown>[] {
     const toolsAt = lines.findLastIndex((line) => line.startsWith("Tools: "));
     const end = toolsAt === -1 ? lines.length : toolsAt;
     const bits = header[3]?.split(", ") ?? [];
+    const duration = bits.find((bit) => /^\d+(?:\.\d+)?s$/.test(bit));
     return {
       task_index: Number(header[1]) - 1,
       status: header[2],
       model: bits.find((bit) => !bit.startsWith("role=") && !/^\d+(?:\.\d+)?s$/.test(bit)),
+      _child_role: bits.find((bit) => bit.startsWith("role="))?.slice(5),
+      duration_seconds: duration ? Number(duration.slice(0, -1)) : undefined,
       summary: lines
         .slice(0, errorAt === -1 ? end : errorAt)
         .join("\n")
@@ -192,7 +232,12 @@ function childUpdate(
   child: Child | undefined,
   index: number,
   status: HermesSubagentUpdate["status"],
-  fields: { readonly model?: string | undefined; readonly result?: string | undefined } = {},
+  fields: {
+    readonly model?: string | undefined;
+    readonly role?: string | undefined;
+    readonly result?: string | undefined;
+    readonly usage?: OrchestrationV2SubagentUsage | null;
+  } = {},
 ): HermesSubagentUpdate {
   return {
     nativeTaskId: `${toolCallId}:task:${index}`,
@@ -204,7 +249,14 @@ function childUpdate(
     status,
     childSessionId: null,
     result: fields.result ?? null,
+    role: fields.role ?? child?.role ?? null,
+    usage: fields.usage ?? null,
   };
+}
+
+/** Patched results name the role `_child_role`; stock headers carry `role=`. */
+function resultRole(result: Record<string, unknown>): string | undefined {
+  return text(result._child_role) ?? text(result.role);
 }
 
 function resultUpdate(
@@ -218,7 +270,9 @@ function resultUpdate(
   const error = text(result.error);
   return childUpdate(toolCallId, child, index, status, {
     model: text(result.model),
+    role: resultRole(result),
     result: (status === "completed" ? (summary ?? error) : (error ?? summary)) ?? undefined,
+    usage: childUsage(result),
   });
 }
 
@@ -335,7 +389,7 @@ function delegationUpdates(
         childAt(index),
         index,
         progress.event === "subagent.spawn_requested" ? "pending" : "running",
-        { model: text(progress.model) },
+        { model: text(progress.model), role: resultRole(progress) },
       ),
     ];
   }

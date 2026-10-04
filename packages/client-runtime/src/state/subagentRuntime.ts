@@ -3,7 +3,7 @@
  * web agent rows render.
  */
 import * as DateTime from "effect/DateTime";
-import type { OrchestrationV2Subagent } from "@t3tools/contracts";
+import type { OrchestrationV2Subagent, OrchestrationV2SubagentUsage } from "@t3tools/contracts";
 import { isOrchestrationV2WorkActive } from "@t3tools/contracts";
 
 export type RuntimeSubagentStatus =
@@ -16,15 +16,7 @@ export type RuntimeSubagentStatus =
   | "cancelled"
   | "interrupted";
 
-export interface SubagentUsage {
-  readonly totalTokens: number;
-  readonly inputTokens?: number;
-  readonly cachedInputTokens?: number;
-  readonly outputTokens?: number;
-  readonly reasoningOutputTokens?: number;
-  readonly toolUses?: number;
-  readonly durationMs?: number;
-}
+export type SubagentUsage = OrchestrationV2SubagentUsage;
 
 export interface SubagentActivityEntry {
   readonly at: string;
@@ -101,6 +93,8 @@ export function projectedSubagentsToRuntime(
     readonly title: string | null;
     readonly prompt: string;
     readonly model: string | null;
+    readonly role?: string | null | undefined;
+    readonly usage?: OrchestrationV2Subagent["usage"];
     readonly status: OrchestrationV2Subagent["status"];
     readonly progress?: string | undefined;
     readonly result: string | null;
@@ -118,12 +112,12 @@ export function projectedSubagentsToRuntime(
       title:
         subagent.title ??
         (subagent.prompt.length > 80 ? `${subagent.prompt.slice(0, 77)}...` : subagent.prompt),
-      role: null,
+      role: subagent.role ?? null,
       model: subagent.model,
       effort: null,
       status: subagent.status,
       activationCount: 1,
-      usage: null,
+      usage: subagent.usage ?? null,
       progress: subagent.progress ?? null,
       lastToolName: null,
       result: subagent.result,

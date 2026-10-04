@@ -23,7 +23,7 @@ import { SubagentRow } from "./SubagentRow";
 import { WorkLogBlock } from "./work-log-layout";
 
 type SubagentItem = Extract<OrchestrationV2TurnItem, { type: "subagent" }>;
-type AgentTiming = Pick<OrchestrationV2Subagent, "status" | "startedAt" | "completedAt">;
+type AgentTiming = Pick<OrchestrationV2Subagent, "status" | "startedAt" | "completedAt" | "usage">;
 
 function SubagentElapsed({ agents }: { readonly agents: ReadonlyArray<AgentTiming> }) {
   const focused = useIsFocused();
@@ -89,6 +89,8 @@ export function ThreadSubagentGroup(props: {
       result: live?.result ?? item.result,
       progress: live?.progress ?? item.progress,
       model: live?.model ?? null,
+      role: live?.role ?? null,
+      usage: live?.usage ?? null,
     };
   });
   const grouped = agents.length > 1;

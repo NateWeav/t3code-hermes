@@ -24,11 +24,11 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Option from "effect/Option";
+import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { providerUpdateLock } from "../provider/providerMaintenanceCommandCoordinator.ts";
 import { mergeProviderInstanceEnvironment } from "../provider/ProviderInstanceEnvironment.ts";
-import { spawnAndCollect } from "../provider/providerSnapshot.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { resolveEnabledHermesInstance } from "./hermesCronState.ts";
 import {
@@ -71,6 +71,32 @@ export interface HermesPatchServiceOptions {
   /** How long `hermes update` may run before it is stopped. */
   readonly updateTimeout?: Duration.Input;
 }
+
+/** Per stream, kept from the end of `hermes update`'s output. */
+const HERMES_OUTPUT_MAX_BYTES = 16_384;
+
+/**
+ * The last `maxBytes` of a byte stream as text, dropping older chunks as new
+ * ones arrive so memory stays bounded however long the process runs.
+ */
+const collectTailText = <E>(stream: Stream.Stream<Uint8Array, E>, maxBytes: number) =>
+  stream.pipe(
+    Stream.runFold(
+      () => ({ chunks: [] as Uint8Array[], bytes: 0 }),
+      (state, chunk) => {
+        state.chunks.push(chunk);
+        let bytes = state.bytes + chunk.byteLength;
+        while (state.chunks.length > 1 && bytes - state.chunks[0]!.byteLength >= maxBytes) {
+          bytes -= state.chunks.shift()!.byteLength;
+        }
+        return { chunks: state.chunks, bytes };
+      },
+    ),
+    Effect.map(({ chunks, bytes }) => {
+      const joined = Buffer.concat(chunks, bytes);
+      return joined.subarray(Math.max(0, joined.byteLength - maxBytes)).toString("utf8");
+    }),
+  );
 
 /** Keeps the end of a long update log, where the failure usually is. */
 const outputTail = (output: string, limit = 2_000) =>
@@ -236,6 +262,10 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
       };
     });
 
+  /**
+   * Runs Hermes in its checkout. Output is capped while it streams: a full
+   * dependency install logs a lot, and only its end is ever shown.
+   */
   const runHermes = (
     checkout: {
       readonly checkoutRoot: string;
@@ -246,17 +276,23 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
   ) =>
     Effect.gen(function* () {
       const spawn = yield* resolveSpawnCommand(checkout.commandPath, args, { env: checkout.env });
-      return yield* provide(
-        spawnAndCollect(
-          checkout.commandPath,
-          ChildProcess.make(spawn.command, spawn.args, {
-            cwd: checkout.checkoutRoot,
-            env: checkout.env,
-            shell: spawn.shell,
-          }),
-        ),
+      const child = yield* spawner.spawn(
+        ChildProcess.make(spawn.command, spawn.args, {
+          cwd: checkout.checkoutRoot,
+          env: checkout.env,
+          shell: spawn.shell,
+        }),
       );
-    });
+      const [stdout, stderr, code] = yield* Effect.all(
+        [
+          collectTailText(child.stdout, HERMES_OUTPUT_MAX_BYTES),
+          collectTailText(child.stderr, HERMES_OUTPUT_MAX_BYTES),
+          child.exitCode.pipe(Effect.map(Number)),
+        ],
+        { concurrency: "unbounded" },
+      );
+      return { stdout, stderr, code };
+    }).pipe(Effect.scoped);
 
   /**
    * Runs `hermes update` without prompts or stash restore. The gateway restart

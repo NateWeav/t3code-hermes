@@ -114,6 +114,7 @@ const makeHermesWith = (options: { readonly updateHelp: string }) =>
         "#!/bin/sh",
         `if [ "$2" = "--help" ]; then echo "${options.updateHelp}"; exit 0; fi`,
         `echo "$@" >> "${log}"`,
+        `if [ -f "${NodePath.join(base, "noisy")}" ]; then yes "resolving dependency" | head -c 2000000 >&2; fi`,
         `if [ -f "${NodePath.join(base, "fail")}" ]; then echo "network unreachable" >&2; exit 1; fi`,
         `cd "${root}" && git pull --quiet --ff-only`,
         "",
@@ -326,6 +327,23 @@ describe("HermesPatchService.updateHermes", () => {
         assert.strictEqual(hermes.head(), hermes.older);
         assert.strictEqual(hermes.read(), "backend = local\nremote_cwd = configured()\n");
         assert.strictEqual(result.snapshot.patches[0]?.state, "applied");
+      }).pipe(withService(hermes.binaryPath, [patch]));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("keeps only the end of a long failed update's output", () =>
+    Effect.gen(function* () {
+      const hermes = yield* makeHermes;
+      const patch = hermes.patch([hermes.newerVersion, hermes.olderVersion]);
+      NodeFS.writeFileSync(NodePath.join(hermes.base, "noisy"), "");
+      NodeFS.writeFileSync(NodePath.join(hermes.base, "fail"), "");
+      yield* Effect.gen(function* () {
+        const service = yield* HermesPatchService;
+        const result = yield* service.updateHermes;
+        assert.isTrue(result.updateFailed);
+        const output = result.failureOutput ?? "";
+        assert.isTrue(output.trimEnd().endsWith("network unreachable"));
+        assert.isBelow(output.length, 4_000);
       }).pipe(withService(hermes.binaryPath, [patch]));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );

@@ -162,6 +162,21 @@ const fitting = (
   }).pipe(Effect.map((results) => versionFiles.filter((_, index) => results[index]?.code === 0)));
 
 /**
+ * Every repository path a patch reads or writes, from its `diff --git`,
+ * `rename`/`copy`, and `---`/`+++` headers: a rename's source as well as its
+ * destination.
+ */
+const patchFilePaths = (content: string): ReadonlySet<string> => {
+  const paths = new Set<string>();
+  const header =
+    /^(?:diff --git a\/(\S+) b\/(\S+)|(?:rename|copy) (?:from|to) (.+)|(?:---|\+\+\+) [ab]\/(.+))$/gm;
+  for (const match of content.matchAll(header)) {
+    for (const path of match.slice(1)) if (path !== undefined) paths.add(path);
+  }
+  return paths;
+};
+
+/**
  * Which of the versions that reverse cleanly is the one applied in the working
  * tree, or null when none can be told to be. A version reverses cleanly too
  * when upstream already carries its change, and two versions can patch
@@ -182,15 +197,13 @@ const pickAppliedVersion = Effect.fn("pickHermesAppliedVersion")(function* (
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-hermes-index-" });
-  // Compared over every path any candidate touches: a version that changes
-  // fewer files would otherwise match while another's change sits elsewhere.
+  // Compared over every path any candidate touches, both sides of a rename
+  // included: a version that changes fewer files would otherwise match while
+  // another's change sits elsewhere.
   const paths = new Set<string>();
   for (const file of candidates) {
-    const numstat = yield* runGit(checkoutRoot, ["apply", "--numstat", "-z", file]);
-    for (const entry of numstat.stdout.split("\0")) {
-      const changed = entry.split("\t")[2];
-      if (changed !== undefined && changed.length > 0) paths.add(changed);
-    }
+    const content = yield* fileSystem.readFileString(file);
+    for (const touched of patchFilePaths(content)) paths.add(touched);
   }
   if (paths.size === 0) return null;
   const checks = yield* Effect.forEach(

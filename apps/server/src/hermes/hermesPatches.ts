@@ -287,6 +287,12 @@ const pickAppliedVersion = Effect.fn("pickHermesAppliedVersion")(function* (
   if (exact.length > 0) {
     return exact.every((check) => check.tree === exact[0]!.tree) ? exact[0]!.file : null;
   }
+  // Failing that, the one version that applies to HEAD, but only when the
+  // working tree differs from HEAD there at all: a clean checkout can hold a
+  // patch's before and after text in different places, so it fits both ways
+  // without the patch having been applied.
+  const headTree = yield* runGit(checkoutRoot, ["rev-parse", "HEAD^{tree}"]);
+  if (headTree.code !== 0 || normalized.has(headTree.stdout.trim())) return null;
   const onHead = checks.filter((check) => check.onHead);
   return onHead.length === 1 ? onHead[0]!.file : null;
 }, Effect.scoped);

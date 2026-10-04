@@ -13,18 +13,22 @@ toggle does not appear.
 
 ## Using it through a proxy
 
-Hermes never sends fast-mode settings to a custom endpoint unless you say the endpoint accepts them.
-For a proxy that forwards them to OpenAI or ChatGPT, such as CLIProxyAPI, add this to that provider's
-entry in Hermes's `config.yaml`:
+Hermes never sends fast-mode settings to a custom endpoint unless the endpoint is marked as accepting
+them. Applying the Fast mode patch marks every CLIProxyAPI endpoint in Hermes's `config.yaml` for
+you, and the toggle appears for that proxy's GPT models right away. Removing the patch takes those
+marks back out.
+
+For another proxy that forwards fast-mode settings to OpenAI or ChatGPT, add this to its entry in
+Hermes's `config.yaml` yourself, then refresh providers in **Settings → Providers**:
 
 ```yaml
 capabilities:
   fast_mode: true
 ```
 
-Then refresh providers in **Settings → Providers** so the toggle shows up for that provider's GPT
-models. Claude models behind a proxy are not covered: Claude's fast mode needs
-Anthropic's own API format, which proxies reached over chat completions do not pass through.
+A value you set by hand, `true` or `false`, is never changed by applying or removing the patch.
+Claude models behind a proxy are not covered: Claude's fast mode needs Anthropic's own API format,
+which proxies reached over chat completions do not pass through.
 
 ## Things to know
 

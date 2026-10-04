@@ -23,6 +23,9 @@ export interface HermesPatchDefinition {
   readonly content: string;
 }
 
+/** Applying it also opts CLIProxyAPI endpoints in (`hermesFastModeConfig.ts`). */
+export const HERMES_FAST_MODE_PATCH_ID = HermesPatchId.make("acp-fast-mode");
+
 /** A file under `infra/hermes`; empty when it is missing, which a test catches. */
 const bundledPatch = (file: string) => HERMES_PATCH_FILES[file] ?? "";
 
@@ -56,10 +59,10 @@ export const HERMES_PATCHES: ReadonlyArray<HermesPatchDefinition> = [
     content: bundledPatch("0005-gateway-multiplex-webhook-session-close.patch"),
   },
   {
-    id: HermesPatchId.make("acp-fast-mode"),
+    id: HERMES_FAST_MODE_PATCH_ID,
     title: "Fast mode",
     neededFor:
-      "Fast Mode on Hermes models, including models behind a proxy you opted in. Without it, the Fast Mode toggle does not appear.",
+      "Fast Mode on Hermes models. Applying it also turns fast mode on for CLIProxyAPI endpoints in your Hermes config. Without it, the Fast Mode toggle does not appear.",
     content: bundledPatch("0006-acp-fast-mode.patch"),
   },
 ];

@@ -159,6 +159,11 @@ custom_providers:
       fast_mode: true
 ```
 
+Applying the patch from T3 Code's Patches tab writes that opt-in for every custom endpoint whose
+root identifies as CLIProxyAPI (an unauthenticated `GET /` answering `"CLI Proxy API Server"`), with
+a trailing `# added by T3 Code` marker; removing the patch deletes only marked flags. Applying it
+with `git apply` leaves `config.yaml` alone.
+
 The opt-in covers `service_tier: priority` (OpenAI and xAI models) only. Anthropic's `speed: fast`
 is a Messages API parameter, and custom endpoints speak chat completions, so Claude models behind a
 proxy stay ungated.

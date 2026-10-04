@@ -19,19 +19,28 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as PubSub from "effect/PubSub";
 import * as Semaphore from "effect/Semaphore";
+import * as Stream from "effect/Stream";
+import { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { mergeProviderInstanceEnvironment } from "../provider/ProviderInstanceEnvironment.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { resolveEnabledHermesInstance } from "./hermesCronState.ts";
 import {
+  optInHermesFastModeEndpoints,
+  optOutHermesFastModeEndpoints,
+} from "./hermesFastModeConfig.ts";
+import {
   changeHermesPatch,
+  HERMES_FAST_MODE_PATCH_ID,
   HERMES_PATCHES,
   isHermesCheckoutDetached,
   readHermesPatches,
   resolveHermesGitCheckout,
 } from "./hermesPatches.ts";
+import { resolveHermesReasoningPaths } from "./hermesReasoning.ts";
 
 export class HermesPatchService extends Context.Service<
   HermesPatchService,
@@ -43,6 +52,8 @@ export class HermesPatchService extends Context.Service<
     readonly revert: (
       input: HermesPatchChangeInput,
     ) => Effect.Effect<HermesPatchesSnapshot, HermesPatchError>;
+    /** Emits after a patch was applied or removed, so provider snapshots can re-probe. */
+    readonly changes: Stream.Stream<void>;
   }
 >()("t3-hermes/hermes/HermesPatchService") {}
 
@@ -58,6 +69,8 @@ export const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const httpClient = yield* HttpClient.HttpClient;
+  const changesPubSub = yield* PubSub.unbounded<void>();
   // Two clicks racing on one checkout would both pass the state check.
   const changeLock = yield* Semaphore.make(1);
 
@@ -91,7 +104,7 @@ export const make = Effect.gen(function* () {
       const checkoutRoot =
         realCommandPath === null ? null : yield* resolveHermesGitCheckout(realCommandPath);
       if (checkoutRoot === null) return { availability: "notGitCheckout" } as const;
-      return { availability: "ready", checkoutRoot } as const;
+      return { availability: "ready", checkoutRoot, environment: env } as const;
     }),
   );
 
@@ -175,6 +188,19 @@ export const make = Effect.gen(function* () {
               : "git refused to remove the patch. The checkout was left unchanged.",
         });
       }
+      if (patch.id === HERMES_FAST_MODE_PATCH_ID) {
+        const { configFile } = resolveHermesReasoningPaths(checkout.environment);
+        yield* (
+          direction === "forward"
+            ? optInHermesFastModeEndpoints(configFile)
+            : optOutHermesFastModeEndpoints(configFile)
+        ).pipe(
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(Path.Path, path),
+          Effect.provideService(HttpClient.HttpClient, httpClient),
+        );
+      }
+      yield* PubSub.publish(changesPubSub, undefined);
       return yield* readSnapshot(checkout.checkoutRoot);
     }).pipe(changeLock.withPermits(1));
 
@@ -182,6 +208,7 @@ export const make = Effect.gen(function* () {
     list,
     apply: (input) => change(input, "forward"),
     revert: (input) => change(input, "reverse"),
+    changes: Stream.fromPubSub(changesPubSub),
   });
 });
 

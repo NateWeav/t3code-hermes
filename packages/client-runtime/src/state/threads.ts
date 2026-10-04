@@ -234,6 +234,9 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
   };
   if (resumeCache?.owner === owner) resumeCache.snapshot = committed;
   const awaitingCompletion = yield* Ref.make(false);
+  // Throughput needs to tell replayed events from live ones. A server without
+  // the completion marker replays with no boundary, so its threads show none.
+  const replayBoundaryKnown = yield* Ref.make(false);
   const applyLock = yield* Semaphore.make(1);
   // Save only completed data/cursor updates. A canceled scope must not cache
   // a cursor whose event has not reached the data yet.
@@ -471,6 +474,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     if (fresh.length === 0) return;
 
     const waiting = yield* Ref.get(awaitingCompletion);
+    const observesThroughput = !waiting && (yield* Ref.get(replayBoundaryKnown));
     const nowMs = yield* Clock.currentTimeMillis;
     // Apply against the latest projection/history in one update so a concurrent
     // loadEarlier merge (or history-meta patch) cannot be clobbered by a stale
@@ -512,7 +516,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
             }
           : undefined;
       // Replayed events describe the model's past, not its current pace.
-      if (!waiting && item.event.type === "turn-item.updated") {
+      if (observesThroughput && item.event.type === "turn-item.updated") {
         const updated = item.event.payload;
         observeTurnThroughputItem(
           { environmentId, threadId },
@@ -855,6 +859,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
           Effect.orElseSucceed(() => false),
         );
         yield* Ref.set(awaitingCompletion, supportsCompletionMarker);
+        yield* Ref.set(replayBoundaryKnown, supportsCompletionMarker);
         yield* markSynchronizing;
         yield* Ref.set(resumingLive, false);
 

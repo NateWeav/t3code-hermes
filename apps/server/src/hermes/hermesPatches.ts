@@ -446,9 +446,10 @@ const isAncestor = (checkoutRoot: string, ancestor: string, descendant: string) 
 
 /**
  * Whether HEAD is older than a version's Hermes commit, so updating Hermes
- * moves toward it. Ancestry decides when the commit is known locally; a commit
- * the checkout has never fetched, or one on a diverged line, falls back to
- * comparing HEAD's committer date with the recorded commit date.
+ * moves toward it. Ancestry decides when the commit is known locally,
+ * including a HEAD whose local commits sit on an older base; a commit the
+ * checkout has never fetched falls back to comparing HEAD's committer date
+ * with the recorded commit date.
  */
 const isHeadOlderThan = Effect.fn("isHermesHeadOlderThan")(function* (
   checkoutRoot: string,
@@ -459,6 +460,11 @@ const isHeadOlderThan = Effect.fn("isHermesHeadOlderThan")(function* (
     // Checked first so HEAD at the version's own commit reads as not older.
     if (yield* isAncestor(checkoutRoot, version.hermesCommit, "HEAD")) return false;
     if (yield* isAncestor(checkoutRoot, "HEAD", version.hermesCommit)) return true;
+    // Diverged: local commits on an older upstream base, which `hermes update`
+    // rebases forward. The version is ahead whenever it lies past the point
+    // the two lines split, however recent the local tip is.
+    const base = yield* runGit(checkoutRoot, ["merge-base", "HEAD", version.hermesCommit]);
+    if (base.code === 0) return base.stdout.trim() !== "";
   }
   const headDate = yield* runGit(checkoutRoot, ["log", "-1", "--format=%cI", "HEAD"]);
   const head = Date.parse(headDate.stdout.trim());

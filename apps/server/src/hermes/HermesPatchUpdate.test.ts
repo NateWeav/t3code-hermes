@@ -471,6 +471,21 @@ describe("why a Hermes patch does not apply", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("says Hermes is too old under a newer local commit on an older base", () =>
+    Effect.gen(function* () {
+      const hermes = yield* makeHermes;
+      const patch = hermes.patch([hermes.newerVersion]);
+      // A local commit, dated after the version's, on the older upstream base.
+      NodeFS.writeFileSync(NodePath.join(hermes.root, "notes.txt"), "mine\n");
+      commit(hermes.root, "local", "2026-10-01T00:00:00Z");
+      yield* Effect.gen(function* () {
+        const status = yield* stateOf(yield* HermesPatchService);
+        assert.strictEqual(status?.state, "doesNotApply");
+        assert.strictEqual(status?.reason, "hermesTooOld");
+      }).pipe(withService(hermes.binaryPath, [patch]));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("falls back to commit dates when the version's commit was never fetched", () =>
     Effect.gen(function* () {
       const hermes = yield* makeHermes;

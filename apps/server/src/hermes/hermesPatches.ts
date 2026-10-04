@@ -261,24 +261,24 @@ const pickAppliedVersion = Effect.fn("pickHermesAppliedVersion")(function* (
     (file, index) =>
       Effect.gen(function* () {
         const env = { GIT_INDEX_FILE: path.join(directory, `index-${index}`) };
-        if ((yield* runGit(checkoutRoot, ["read-tree", "HEAD"], env)).code !== 0) {
-          return { file, onHead: false, matches: false };
-        }
+        const missing = { file, onHead: false, tree: null, matches: false } as const;
+        if ((yield* runGit(checkoutRoot, ["read-tree", "HEAD"], env)).code !== 0) return missing;
         if ((yield* runGit(checkoutRoot, ["apply", "--cached", file], env)).code !== 0) {
-          return { file, onHead: false, matches: false };
+          return missing;
         }
-        const tree = yield* runGit(checkoutRoot, ["write-tree"], env);
-        return {
-          file,
-          onHead: true,
-          matches: tree.code === 0 && normalized.has(tree.stdout.trim()),
-        };
+        const written = yield* runGit(checkoutRoot, ["write-tree"], env);
+        const tree = written.code === 0 ? written.stdout.trim() : null;
+        return { file, onHead: true, tree, matches: tree !== null && normalized.has(tree) };
       }),
     { concurrency: GIT_CHECK_CONCURRENCY },
   );
-  // Any version that rebuilds the checkout exactly also undoes back to HEAD.
-  const exact = checks.find((check) => check.matches);
-  if (exact !== undefined) return exact.file;
+  // A version that rebuilds the checkout exactly also undoes back to HEAD.
+  // Several can, once the other patches are taken out more than one way;
+  // they are interchangeable only when they build the same tree.
+  const exact = checks.filter((check) => check.matches);
+  if (exact.length > 0) {
+    return exact.every((check) => check.tree === exact[0]!.tree) ? exact[0]!.file : null;
+  }
   const onHead = checks.filter((check) => check.onHead);
   return onHead.length === 1 ? onHead[0]!.file : null;
 }, Effect.scoped);

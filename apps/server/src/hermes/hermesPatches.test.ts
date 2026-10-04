@@ -576,6 +576,31 @@ describe("hermes patches", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("does not remove from a clean checkout the patch fits both ways", () =>
+    Effect.gen(function* () {
+      // HEAD has the patch's before text in one block and its after text in
+      // another, so it applies and reverses, though nothing was applied.
+      const fileSystem = yield* FileSystem.FileSystem;
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hermes-checkout-" });
+      git(root, "init", "--quiet");
+      const file = NodePath.join(root, "session.py");
+      // Lines in front keep the hunk off the start of the file, where git
+      // would pin it.
+      const lead = "a\nb\nc\nd\n";
+      const block = "k = 0\nk = 1\nk = 2\n";
+      const lines = (first: string, second: string) =>
+        `${lead}${block}v = ${first}\n${block}v = ${second}\n${block}`;
+      NodeFS.writeFileSync(file, lines("1", "1"));
+      const base = commit(root, "base");
+      const patch = definition([diffAt(root, "session.py", lines("2", "1"), base)]);
+      NodeFS.writeFileSync(file, lines("1", "2"));
+      commit(root, "upstream writes the after text elsewhere");
+
+      assert.isFalse((yield* changeHermesPatch(root, patch, "reverse")).ok);
+      assert.strictEqual(NodeFS.readFileSync(file, "utf8"), lines("1", "2"));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("does not remove a change upstream now carries", () =>
     Effect.gen(function* () {
       const { root, patch } = yield* makeCheckout;

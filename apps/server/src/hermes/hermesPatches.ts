@@ -47,6 +47,24 @@ export const HERMES_PATCHES: ReadonlyArray<HermesPatchDefinition> = HERMES_PATCH
 );
 
 /**
+ * The non-test source files the patches touch, relative to the checkout.
+ * A running gateway that started before one of them last changed still runs
+ * the code from before the change.
+ */
+export const hermesPatchedSourceFiles = (
+  patches: ReadonlyArray<HermesPatchDefinition> = HERMES_PATCHES,
+): ReadonlyArray<string> => {
+  const files = new Set<string>();
+  for (const patch of patches) {
+    for (const match of patch.content.matchAll(/^diff --git a\/(\S+) b\/(\S+)$/gm)) {
+      const file = match[2]!;
+      if (!file.startsWith("tests/")) files.add(file);
+    }
+  }
+  return [...files];
+};
+
+/**
  * The git checkout a Hermes executable was installed from, or null.
  *
  * A source install puts the binary at `<checkout>/venv/bin/hermes`. Nix,

@@ -56,9 +56,11 @@ export const hermesPatchedSourceFiles = (
 ): ReadonlyArray<string> => {
   const files = new Set<string>();
   for (const patch of patches) {
-    for (const match of patch.content.matchAll(/^diff --git a\/(\S+) b\/(\S+)$/gm)) {
-      const file = match[2]!;
-      if (!file.startsWith("tests/")) files.add(file);
+    for (const version of patch.versions) {
+      for (const match of version.content.matchAll(/^diff --git a\/(\S+) b\/(\S+)$/gm)) {
+        const file = match[2]!;
+        if (!file.startsWith("tests/")) files.add(file);
+      }
     }
   }
   return [...files];

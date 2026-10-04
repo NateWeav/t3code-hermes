@@ -208,11 +208,55 @@ const pickAppliedVersion = Effect.fn("pickHermesAppliedVersion")(function* (
 }, Effect.scoped);
 
 /**
+ * Which of several versions that all apply is the one for this checkout: the
+ * newest made for a commit HEAD already contains. Older versions can still fit
+ * a newer checkout when they touch other occurrences of the same text, so
+ * manifest order alone could apply the wrong one. When no recorded commit is
+ * known here, the versions are still interchangeable if they all produce the
+ * same tree from HEAD; otherwise null, and Apply refuses rather than guess.
+ */
+const pickForwardVersion = Effect.fn("pickHermesForwardVersion")(function* (
+  checkoutRoot: string,
+  candidates: ReadonlyArray<{ readonly file: string; readonly hermesCommit: string }>,
+) {
+  for (const candidate of candidates) {
+    const contained = yield* runGit(checkoutRoot, [
+      "merge-base",
+      "--is-ancestor",
+      candidate.hermesCommit,
+      "HEAD",
+    ]);
+    if (contained.code === 0) return candidate.file;
+  }
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-hermes-index-" });
+  const trees = yield* Effect.forEach(
+    candidates,
+    (candidate, index) =>
+      Effect.gen(function* () {
+        const env = { GIT_INDEX_FILE: path.join(directory, `index-${index}`) };
+        if ((yield* runGit(checkoutRoot, ["read-tree", "HEAD"], env)).code !== 0) return null;
+        const applied = yield* runGit(checkoutRoot, ["apply", "--cached", candidate.file], env);
+        if (applied.code !== 0) return null;
+        const tree = yield* runGit(checkoutRoot, ["write-tree"], env);
+        return tree.code === 0 ? tree.stdout.trim() : null;
+      }),
+    { concurrency: GIT_CHECK_CONCURRENCY },
+  );
+  const first = trees[0];
+  return first != null && trees.every((tree) => tree === first) ? candidates[0]!.file : null;
+}, Effect.scoped);
+
+/**
  * Where one patch stands, and the version file that got it there: the version
- * whose change the checkout contains, or the one that applies cleanly.
+ * whose change the checkout contains, or the one that applies cleanly. A null
+ * file means the state is known but not which version made it, and changing it
+ * is refused.
  */
 const resolvePatchState = Effect.fn("resolveHermesPatchState")(function* (
   checkoutRoot: string,
+  patch: HermesPatchDefinition,
   versionFiles: ReadonlyArray<string>,
 ) {
   const result = (state: HermesPatchState, file: string | null) => ({ state, file });
@@ -223,8 +267,15 @@ const resolvePatchState = Effect.fn("resolveHermesPatchState")(function* (
   if (reverse.length > 1) {
     return result("applied", yield* pickAppliedVersion(checkoutRoot, reverse));
   }
-  const [forward] = yield* fitting(checkoutRoot, versionFiles, ["apply", "--check"]);
-  if (forward !== undefined) return result("notApplied", forward);
+  const forward = yield* fitting(checkoutRoot, versionFiles, ["apply", "--check"]);
+  if (forward.length === 1) return result("notApplied", forward[0]!);
+  if (forward.length > 1) {
+    const candidates = forward.map((file) => ({
+      file,
+      hermesCommit: patch.versions[versionFiles.indexOf(file)]?.hermesCommit ?? "",
+    }));
+    return result("notApplied", yield* pickForwardVersion(checkoutRoot, candidates));
+  }
   return result("doesNotApply", null);
 });
 
@@ -237,7 +288,7 @@ export const readHermesPatches = Effect.fn("readHermesPatches")(function* (
   return yield* Effect.forEach(
     patches,
     (patch) =>
-      resolvePatchState(checkoutRoot, files.get(patch.id) ?? []).pipe(
+      resolvePatchState(checkoutRoot, patch, files.get(patch.id) ?? []).pipe(
         Effect.map(({ state }): HermesPatch => ({
           id: patch.id,
           title: patch.title,
@@ -267,7 +318,7 @@ export const changeHermesPatch = Effect.fn("changeHermesPatch")(function* (
   direction: "forward" | "reverse",
 ) {
   const files = yield* writePatchFiles([patch]);
-  const { state, file } = yield* resolvePatchState(checkoutRoot, files.get(patch.id) ?? []);
+  const { state, file } = yield* resolvePatchState(checkoutRoot, patch, files.get(patch.id) ?? []);
   const expected: HermesPatchState = direction === "forward" ? "notApplied" : "applied";
   if (state !== expected || file === null) return { ok: false } as const;
   const result = yield* runGit(

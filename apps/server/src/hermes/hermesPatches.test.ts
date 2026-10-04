@@ -264,6 +264,60 @@ describe("hermes patches", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("applies the version made for this checkout when an older one also fits", () =>
+    Effect.gen(function* () {
+      // Both versions apply to the older commit, at different `v`s; only the
+      // older one was made for it.
+      const fileSystem = yield* FileSystem.FileSystem;
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hermes-checkout-" });
+      git(root, "init", "--quiet");
+      const file = NodePath.join(root, "session.py");
+      const block = "k = 0\nk = 1\nk = 2\n";
+      const lines = (first: string, second: string) =>
+        `${block}v = ${first}\n${block}v = ${second}\n${block}`;
+      NodeFS.writeFileSync(file, lines("1", "3"));
+      const older = commit(root, "older");
+      const olderVersion = diffAt(root, "session.py", lines("2", "3"), older);
+      NodeFS.writeFileSync(NodePath.join(root, "notes.txt"), "newer\n");
+      const newer = commit(root, "newer");
+      const newerVersion = diffAt(root, "session.py", lines("1", "2"), newer);
+      const patch = definition([newerVersion, olderVersion]);
+
+      git(root, "checkout", "--quiet", older);
+      assert.strictEqual(yield* stateOf(root, patch), "notApplied");
+      assert.isTrue((yield* changeHermesPatch(root, patch, "forward")).ok);
+      assert.strictEqual(NodeFS.readFileSync(file, "utf8"), lines("2", "3"));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("refuses to guess which version to apply when nothing tells them apart", () =>
+    Effect.gen(function* () {
+      // Neither version's commit is in this history, and they change
+      // different lines.
+      const fileSystem = yield* FileSystem.FileSystem;
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hermes-checkout-" });
+      git(root, "init", "--quiet");
+      const file = NodePath.join(root, "session.py");
+      const block = "k = 0\nk = 1\nk = 2\n";
+      const lines = (first: string, second: string) =>
+        `${block}v = ${first}\n${block}v = ${second}\n${block}`;
+      NodeFS.writeFileSync(file, lines("1", "3"));
+      const base = commit(root, "base");
+      const unknown = (version: HermesPatchVersion): HermesPatchVersion => ({
+        ...version,
+        hermesCommit: "0123456789abcdef0123456789abcdef01234567",
+      });
+      const patch = definition([
+        unknown(diffAt(root, "session.py", lines("1", "2"), base)),
+        unknown(diffAt(root, "session.py", lines("2", "3"), base)),
+      ]);
+
+      assert.strictEqual(yield* stateOf(root, patch), "notApplied");
+      assert.isFalse((yield* changeHermesPatch(root, patch, "forward")).ok);
+      assert.strictEqual(NodeFS.readFileSync(file, "utf8"), lines("1", "3"));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("refuses to guess which version to remove once it is committed", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

@@ -241,15 +241,3 @@ export const make = Effect.gen(function* () {
 });
 
 export const layer = Layer.effect(HermesSkillsService, make);
-
-export const layerTest = Layer.succeed(
-  HermesSkillsService,
-  HermesSkillsService.of({
-    list: () => Effect.succeed(emptySnapshot("1970-01-01T00:00:00.000Z")),
-    get: () =>
-      Effect.fail(
-        new HermesSkillsError({ reason: "providerDisabled", detail: "Hermes is not enabled." }),
-      ),
-    subscribe: Effect.succeed(Stream.empty),
-  }),
-);

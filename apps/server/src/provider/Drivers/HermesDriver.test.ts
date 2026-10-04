@@ -11,6 +11,7 @@ import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawne
 
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import { ServerConfig } from "../../config.ts";
+import * as IdAllocator from "../../orchestration-v2/IdAllocator.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { NoOpProviderEventLoggers, ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
 import { HermesDriver } from "./HermesDriver.ts";
@@ -19,6 +20,7 @@ const testLayer = ServerConfig.layerTest(process.cwd(), {
   prefix: "t3-hermes-driver-update-",
 }).pipe(
   Layer.provideMerge(NodeServices.layer),
+  Layer.provideMerge(IdAllocator.layer),
   Layer.provideMerge(ServerSettingsService.layerTest()),
   Layer.provideMerge(
     Layer.mock(BackgroundPolicy.BackgroundPolicy)({

@@ -114,7 +114,7 @@ export function readHermesUsageRecords(
         model: row.model.trim(),
         sessionId: row.id,
         totals,
-        fast: false,
+        speed: "standard",
         // Hermes initializes unknown costs to numeric zero. Zero is not a
         // provider-reported price: let T3's model-rate table estimate it.
         reportedCostUsd:

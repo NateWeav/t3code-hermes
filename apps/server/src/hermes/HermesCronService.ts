@@ -563,21 +563,3 @@ export const make = Effect.gen(function* () {
 });
 
 export const layer = Layer.effect(HermesCronService, make);
-
-/** Empty service, for suites that only need the RPC surface to resolve. */
-export const layerTest = Layer.succeed(
-  HermesCronService,
-  HermesCronService.of({
-    list: () => Effect.succeed(emptySnapshot("1970-01-01T00:00:00.000Z", "providerDisabled")),
-    getRunOutput: () => Effect.succeed({ content: null, truncated: false, source: null }),
-    setEnabled: () =>
-      Effect.fail(
-        new HermesCronError({ reason: "providerDisabled", detail: "Hermes is not enabled." }),
-      ),
-    setMuted: () =>
-      Effect.fail(
-        new HermesCronError({ reason: "providerDisabled", detail: "Hermes is not enabled." }),
-      ),
-    subscribe: Effect.succeed(Stream.empty),
-  }),
-);

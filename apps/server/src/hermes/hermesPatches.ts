@@ -142,6 +142,10 @@ const writePatchFiles = Effect.fn("writeHermesPatchFiles")(function* (
   return files;
 });
 
+// The ways of taking other applied patches out that are tried when picking
+// the applied version: one per combination of their reversing versions.
+const MAX_OTHER_COMBINATIONS = 16;
+
 // Every patch is read at once, so this keeps a full read to a few dozen git
 // processes however many versions the manifest retains.
 const GIT_CHECK_CONCURRENCY = 4;
@@ -222,16 +226,44 @@ const pickAppliedVersion = Effect.fn("pickHermesAppliedVersion")(function* (
     worktreeEnv,
   );
   if (staged.code !== 0) return null;
-  // Out with every other patch applied here, newest fitting version first.
-  // Ones not applied fail to reverse and are skipped.
-  for (const versionFiles of others) {
-    for (const file of versionFiles) {
-      const reversed = yield* runGit(checkoutRoot, ["apply", "--cached", "-R", file], worktreeEnv);
-      if (reversed.code === 0) break;
-    }
-  }
   const worktreeTree = yield* runGit(checkoutRoot, ["write-tree"], worktreeEnv);
   if (worktreeTree.code !== 0) return null;
+  // Out with every other patch applied here. Another patch can itself have
+  // several versions that reverse, and only the applied one leaves the right
+  // text behind, so each choice is tried: one per reversing version, across
+  // the few patches that share these files.
+  const choices: ReadonlyArray<string>[] = [];
+  for (const versionFiles of others) {
+    const reversing = yield* fitting(
+      checkoutRoot,
+      versionFiles,
+      ["apply", "--check", "--cached", "-R"],
+      worktreeEnv,
+    );
+    if (reversing.length > 0) choices.push(reversing);
+  }
+  const combinations = choices.reduce<ReadonlyArray<ReadonlyArray<string>>>(
+    (acc, options) => acc.flatMap((combo) => options.map((file) => [...combo, file])),
+    [[]],
+  );
+  if (combinations.length > MAX_OTHER_COMBINATIONS) return null;
+  const normalized = new Set<string>();
+  for (const [index, combo] of combinations.entries()) {
+    const env = { GIT_INDEX_FILE: path.join(directory, `index-others-${index}`) };
+    if ((yield* runGit(checkoutRoot, ["read-tree", worktreeTree.stdout.trim()], env)).code !== 0) {
+      continue;
+    }
+    let reversedAll = true;
+    for (const file of combo) {
+      if ((yield* runGit(checkoutRoot, ["apply", "--cached", "-R", file], env)).code !== 0) {
+        reversedAll = false;
+        break;
+      }
+    }
+    if (!reversedAll) continue;
+    const tree = yield* runGit(checkoutRoot, ["write-tree"], env);
+    if (tree.code === 0) normalized.add(tree.stdout.trim());
+  }
   const checks = yield* Effect.forEach(
     candidates,
     (file, index) =>
@@ -247,7 +279,7 @@ const pickAppliedVersion = Effect.fn("pickHermesAppliedVersion")(function* (
         return {
           file,
           onHead: true,
-          matches: tree.code === 0 && tree.stdout.trim() === worktreeTree.stdout.trim(),
+          matches: tree.code === 0 && normalized.has(tree.stdout.trim()),
         };
       }),
     { concurrency: GIT_CHECK_CONCURRENCY },

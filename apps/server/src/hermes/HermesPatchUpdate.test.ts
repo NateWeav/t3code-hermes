@@ -579,6 +579,43 @@ describe("why a Hermes patch does not apply", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("blames the user's own edit beside a patch committed to HEAD", () =>
+    Effect.gen(function* () {
+      const hermes = yield* makeHermes;
+      // As above, but the other patch's change is committed rather than
+      // applied in the working tree.
+      const lines = Array.from({ length: 12 }, (_, index) => `line_${index} = ${index}`);
+      const file = NodePath.join(hermes.root, "config.py");
+      NodeFS.writeFileSync(file, `${lines.join("\n")}\n`);
+      const head = commit(hermes.root, "config", NEWER_DATE);
+      const withLine = (index: number, text: string, from = lines) =>
+        `${from.map((line, at) => (at === index ? text : line)).join("\n")}\n`;
+      const version = (content: string) =>
+        versionAt(hermes.root, "config.py", content, head, NEWER_DATE);
+      const other: HermesPatchDefinition = {
+        id: HermesPatchId.make("other"),
+        title: "Other",
+        neededFor: "Tests.",
+        versions: [version(withLine(0, "line_0 = patched"))],
+      };
+      const ours: HermesPatchDefinition = {
+        id: HermesPatchId.make("ours"),
+        title: "Ours",
+        neededFor: "Tests.",
+        versions: [version(withLine(11, "line_11 = patched"))],
+      };
+      const committed = withLine(0, "line_0 = patched");
+      NodeFS.writeFileSync(file, committed);
+      commit(hermes.root, "carry the other patch", NEWER_DATE);
+      NodeFS.writeFileSync(file, withLine(10, "line_10 = mine", committed.trimEnd().split("\n")));
+      yield* Effect.gen(function* () {
+        const snapshot = yield* (yield* HermesPatchService).list;
+        assert.strictEqual(snapshot.patches[1]?.state, "doesNotApply");
+        assert.strictEqual(snapshot.patches[1]?.reason, "localChanges");
+      }).pipe(withService(hermes.binaryPath, [other, ours]));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("does not blame edits another applied patch made to the same file", () =>
     Effect.gen(function* () {
       const hermes = yield* makeHermes;

@@ -361,9 +361,19 @@ const readPathsBeyondVersions = Effect.fn("readHermesPathsBeyondVersions")(funct
  */
 const readUserEdits = Effect.fn("readHermesUserEdits")(function* (
   checkoutRoot: string,
-  applied: ReadonlyArray<{ readonly patch: HermesPatchDefinition; readonly file: string | null }>,
+  allApplied: ReadonlyArray<{
+    readonly patch: HermesPatchDefinition;
+    readonly file: string | null;
+  }>,
 ) {
   const dirty = yield* readHermesDirtyPaths(checkoutRoot);
+  // A patch HEAD already holds explains nothing in the working tree, and
+  // cannot be replayed onto HEAD either, so it takes no part here.
+  const inHead = yield* readHermesPatchesInHead(
+    checkoutRoot,
+    allApplied.map(({ patch }) => patch),
+  );
+  const applied = allApplied.filter(({ patch }) => !inHead.has(patch.id));
   const touched = new Set(applied.flatMap(({ patch }) => [...patchPaths(patch)]));
   // An applied patch whose version cannot be told cannot be replayed either.
   const files = applied.flatMap(({ file }) => (file === null ? [] : [file]));

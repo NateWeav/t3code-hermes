@@ -250,12 +250,3 @@ export const make = Effect.gen(function* () {
 });
 
 export const layer = Layer.effect(HermesMemoryService, make);
-export const layerTest = Layer.succeed(
-  HermesMemoryService,
-  HermesMemoryService.of({
-    read: Effect.succeed(disabled),
-    mutate: () =>
-      Effect.fail(new HermesMemoryError({ reason: "providerDisabled", detail: disabled.detail! })),
-    subscribe: Effect.succeed(Stream.make(disabled)),
-  }),
-);

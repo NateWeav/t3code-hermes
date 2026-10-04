@@ -4,13 +4,9 @@
  * stock Hermes reports nothing once a background terminal call returns, so
  * without the patch no task is ever opened and none can be left running.
  */
-import {
-  RuntimeTaskId,
-  type ProviderRuntimeTaskCompletedEvent,
-  type ProviderRuntimeTaskStartedEvent,
-  type TurnId,
-} from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
+
+import type { BackgroundWork, BackgroundWorkReport } from "../../orchestration-v2/Notification.ts";
 
 export const HERMES_PROCESS_METHOD = "_hermes/process";
 
@@ -41,81 +37,39 @@ export const HermesNotification = Schema.Struct({
 });
 export type HermesNotification = typeof HermesNotification.Type;
 
-type TaskEvent = (
-  | Pick<ProviderRuntimeTaskStartedEvent, "type" | "payload">
-  | Pick<ProviderRuntimeTaskCompletedEvent, "type" | "payload">
-) & { readonly turnId?: TurnId };
-
-interface LiveProcess {
-  readonly payload: {
-    readonly taskId: RuntimeTaskId;
-    readonly taskType: "shell";
-    readonly description: string;
-    readonly title: string;
-    readonly toolUseId: string;
-  };
-  readonly turnId: TurnId | undefined;
-}
-
-function outcome(report: HermesProcessReport): {
-  status: "completed" | "failed" | "stopped";
-  summary?: string;
-} {
-  if (report.reason === "killed") return { status: "stopped", summary: "Stopped" };
-  if (report.reason === "lost") return { status: "failed", summary: "Process backend disappeared" };
-  if (report.reason === "failed_start") return { status: "failed", summary: "Failed to start" };
-  if (report.exitCode === 0) return { status: "completed" };
+/** A process report as a background-task mutation, keyed by Hermes's process id. */
+export function hermesProcessMutation(report: HermesProcessReport) {
+  const label = report.command.trim().split("\n")[0]!.slice(0, 200) || "Background process";
+  // A kill is the user's or the agent's choice, not a failure.
+  const succeeded =
+    report.reason === "killed" ||
+    (report.reason !== "lost" && report.reason !== "failed_start" && report.exitCode === 0);
+  const status =
+    report.status === "running"
+      ? ("running" as const)
+      : succeeded
+        ? ("completed" as const)
+        : ("failed" as const);
   return {
-    status: "failed",
-    ...(typeof report.exitCode === "number" ? { summary: `Exit code ${report.exitCode}` } : {}),
+    sessionId: report.sessionId,
+    taskId: report.processId,
+    status,
+    report: {
+      kind: "command",
+      label,
+      ...(typeof report.exitCode === "number" ? { exitCode: report.exitCode } : {}),
+    } satisfies BackgroundWork,
   };
 }
 
-/** Background shells as tasks: the thread reads as Monitoring until each exits. */
-export class HermesBackgroundProcesses {
-  private readonly live = new Map<string, LiveProcess>();
-
-  report(report: HermesProcessReport, turnId: TurnId | undefined): TaskEvent[] {
-    const known = this.live.get(report.processId);
-    if (report.status === "running") {
-      if (known) return [];
-      const description =
-        report.command.trim().split("\n")[0]!.slice(0, 200) || "Background process";
-      const process: LiveProcess = {
-        payload: {
-          taskId: RuntimeTaskId.make(report.processId),
-          taskType: "shell",
-          description,
-          title: description,
-          toolUseId: report.toolCallId,
-        },
-        turnId,
-      };
-      this.live.set(report.processId, process);
-      return [{ type: "task.started", payload: process.payload, ...attribution(process) }];
-    }
-    if (!known) return [];
-    this.live.delete(report.processId);
-    const { status, summary } = outcome(report);
-    return [
-      {
-        type: "task.completed",
-        payload: { ...known.payload, status, ...(summary ? { summary } : {}) },
-        ...attribution(known),
-      },
-    ];
+/** Names the background work a Hermes notice wakes the agent about. */
+export function hermesNotificationReport(notice: HermesNotification): BackgroundWorkReport {
+  const kind = notice.kind.toLowerCase();
+  const label = notice.title?.trim() || undefined;
+  if (kind.includes("subagent") || kind.includes("delegat")) {
+    return { kind: "subagent", label, outcome: "completed" };
   }
-
-  /** Hermes kills its background processes when its ACP process goes away. */
-  stopAll(): TaskEvent[] {
-    const events: TaskEvent[] = [...this.live.values()].map((process) => ({
-      type: "task.completed",
-      payload: { ...process.payload, status: "stopped", summary: "Hermes session ended" },
-      ...attribution(process),
-    }));
-    this.live.clear();
-    return events;
-  }
+  if (kind.includes("watch")) return { kind: "monitor", label, outcome: "updated" };
+  if (kind.includes("process")) return { kind: "command", label, outcome: "completed" };
+  return { kind: "background_task", label, outcome: "updated" };
 }
-
-const attribution = (process: LiveProcess) => (process.turnId ? { turnId: process.turnId } : {});

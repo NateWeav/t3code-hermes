@@ -238,6 +238,32 @@ describe("hermes patches", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("removes every file of the applied version when another touches fewer", () =>
+    Effect.gen(function* () {
+      // The older version changes two files, the newer only one of them the
+      // same way: once the older is applied, both reverse cleanly.
+      const fileSystem = yield* FileSystem.FileSystem;
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hermes-checkout-" });
+      git(root, "init", "--quiet");
+      const session = NodePath.join(root, "session.py");
+      const config = NodePath.join(root, "config.py");
+      NodeFS.writeFileSync(session, "remote_cwd = None\n");
+      NodeFS.writeFileSync(config, "ssh = False\n");
+      const base = commit(root, "base");
+      NodeFS.writeFileSync(config, "ssh = True\n");
+      const olderVersion = diffAt(root, "session.py", "remote_cwd = configured()\n", base);
+      NodeFS.writeFileSync(config, "ssh = False\n");
+      const newerVersion = diffAt(root, "session.py", "remote_cwd = configured()\n", base);
+      const patch = definition([newerVersion, olderVersion]);
+
+      NodeFS.writeFileSync(session, "remote_cwd = configured()\n");
+      NodeFS.writeFileSync(config, "ssh = True\n");
+      assert.strictEqual(yield* stateOf(root, patch), "applied");
+      assert.isTrue((yield* changeHermesPatch(root, patch, "reverse")).ok);
+      assert.strictEqual(git(root, "status", "--porcelain"), "");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("refuses to guess which version to remove once it is committed", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

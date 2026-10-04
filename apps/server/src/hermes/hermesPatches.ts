@@ -173,6 +173,17 @@ const pickAppliedVersion = Effect.fn("pickHermesAppliedVersion")(function* (
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-hermes-index-" });
+  // Compared over every path any candidate touches: a version that changes
+  // fewer files would otherwise match while another's change sits elsewhere.
+  const paths = new Set<string>();
+  for (const file of candidates) {
+    const numstat = yield* runGit(checkoutRoot, ["apply", "--numstat", "-z", file]);
+    for (const entry of numstat.stdout.split("\0")) {
+      const changed = entry.split("\t")[2];
+      if (changed !== undefined && changed.length > 0) paths.add(changed);
+    }
+  }
+  if (paths.size === 0) return null;
   const checks = yield* Effect.forEach(
     candidates,
     (file, index) =>
@@ -184,13 +195,8 @@ const pickAppliedVersion = Effect.fn("pickHermesAppliedVersion")(function* (
         if ((yield* runGit(checkoutRoot, ["apply", "--cached", file], env)).code !== 0) {
           return { file, onHead: false, matches: false };
         }
-        const numstat = yield* runGit(checkoutRoot, ["apply", "--numstat", "-z", file]);
-        const paths = numstat.stdout
-          .split("\0")
-          .map((entry) => entry.split("\t")[2])
-          .filter((entry): entry is string => entry !== undefined && entry.length > 0);
         const diff = yield* runGit(checkoutRoot, ["diff", "--quiet", "--", ...paths], env);
-        return { file, onHead: true, matches: paths.length > 0 && diff.code === 0 };
+        return { file, onHead: true, matches: diff.code === 0 };
       }),
     { concurrency: GIT_CHECK_CONCURRENCY },
   );

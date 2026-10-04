@@ -415,3 +415,18 @@ export type HindsightAgentMemoryState = typeof HindsightAgentMemoryState.Type;
 
 export const HindsightAgentMemoryInput = Schema.Struct({});
 export type HindsightAgentMemoryInput = typeof HindsightAgentMemoryInput.Type;
+
+/**
+ * One spelling per Hindsight endpoint, so a server is recognised however its
+ * URL was typed: credentials and a trailing slash go, the host is lower-cased,
+ * and the path and query stay.
+ */
+export function canonicalHindsightUrl(url: string): string {
+  try {
+    const parsed = new URL(url.trim());
+    const pathname = parsed.pathname.replace(/\/+$/, "");
+    return `${parsed.protocol}//${parsed.host}${pathname}${parsed.search}`;
+  } catch {
+    return url.trim().replace(/\/+$/, "");
+  }
+}

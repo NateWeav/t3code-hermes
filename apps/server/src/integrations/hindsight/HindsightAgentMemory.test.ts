@@ -828,4 +828,38 @@ describe("HindsightAgentMemory", () => {
       expect(state.agents).toEqual([{ target: "claudeCode", state: "installed", detail: null }]);
     }).pipe(Effect.provide(harness.layer));
   });
+  it.effect(
+    "names a Hermes that keeps its own Hindsight server instead of calling it wired",
+    () => {
+      const harness = setup({
+        agentMemory: true,
+        missing: ["claude", "codex"],
+        hermesHasHindsight: true,
+        hermesYaml: "memory:\n  provider: hindsight\n",
+      });
+      return Effect.gen(function* () {
+        harness.setConnection({ baseUrl: "http://shared-host:8888", apiKey: null });
+        const state = yield* harness.apply;
+
+        expect(state.agents[0]?.detail).toBe(
+          "Not covered: uses its own Hindsight server at 100.64.0.1:8888.",
+        );
+      }).pipe(Effect.provide(harness.layer));
+    },
+  );
+
+  it.effect("puts a private installer config back private", () => {
+    const harness = setup({ agentMemory: true, preinstalled: true, missing: ["hermes"] });
+    const installerConfig = NodePath.join(harness.home, ".hindsight", "coding-agent.json");
+    writeJson(installerConfig, { serverMode: "cloud", apiToken: "hsk_mine" });
+    NodeFS.chmodSync(installerConfig, 0o600);
+    return Effect.gen(function* () {
+      yield* harness.apply;
+      yield* harness.setAgentMemory(false);
+      yield* harness.apply;
+
+      expect(readJson(installerConfig)).toEqual({ serverMode: "cloud", apiToken: "hsk_mine" });
+      expect(NodeFS.statSync(installerConfig).mode & 0o777).toBe(0o600);
+    }).pipe(Effect.provide(harness.layer));
+  });
 });

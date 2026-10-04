@@ -11,6 +11,7 @@
  * @module state/hindsight
  */
 import {
+  canonicalHindsightUrl,
   HINDSIGHT_TARGET_API_VERSION,
   type HindsightAgentMemoryState,
   type HindsightAgentTarget,
@@ -477,22 +478,6 @@ export interface HindsightSharedPatch {
   readonly agentMemory?: boolean;
   readonly baseUrl?: string;
   readonly apiKey?: string;
-}
-
-/**
- * One spelling per endpoint, so a key follows a server however its URL was
- * typed: credentials and a trailing slash go, the host is lower-cased, and
- * the path and query stay. Machines report their server without credentials,
- * so a saved URL has to lose them to compare equal.
- */
-function canonicalHindsightUrl(url: string): string {
-  try {
-    const parsed = new URL(url.trim());
-    const pathname = parsed.pathname.replace(/\/+$/, "");
-    return `${parsed.protocol}//${parsed.host}${pathname}${parsed.search}`;
-  } catch {
-    return url.trim().replace(/\/+$/, "");
-  }
 }
 
 function isOnHindsightServer(machine: HindsightHandoffMachine, url: string | null): boolean {

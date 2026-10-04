@@ -30,6 +30,7 @@
 import * as NodeOS from "node:os";
 
 import {
+  canonicalHindsightUrl,
   type HindsightAgentMemoryBlocker,
   type HindsightAgentMemoryState,
   type HindsightAgentStatus,
@@ -303,6 +304,15 @@ function withoutHermesConnection(current: Record<string, unknown>): string | nul
   return `${JSON.stringify(rest, null, 2)}\n`;
 }
 
+/** A server's host, for naming it to a client without credentials or a query. */
+function hindsightServerHost(url: string): string {
+  try {
+    return new URL(url.trim()).host;
+  } catch {
+    return "another address";
+  }
+}
+
 /** Whether an agent's hook config carries an entry the installer wrote. */
 function hasInstallerHook(hooks: unknown): boolean {
   return hooks !== null && hooks !== undefined && JSON.stringify(hooks).includes(INSTALLER_MARKER);
@@ -547,11 +557,24 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
         ),
       );
 
+  /**
+   * Rewrites the installer config, which can hold a token, with the mode it
+   * already has; a new one is owner-only.
+   */
+  const writeInstallerConfig = (contents: string) =>
+    Effect.gen(function* () {
+      const mode = yield* fs.stat(installerConfigPath).pipe(
+        Effect.map((info) => info.mode & 0o777),
+        Effect.orElseSucceed(() => 0o600),
+      );
+      return yield* writeText(installerConfigPath, contents, mode);
+    });
+
   /** Drops `apiToken` from the installer's config; whether none is left. */
   const clearInstallerToken = Effect.gen(function* () {
     const record = asRecord(yield* readJson(installerConfigPath));
     if (record === null || !("apiToken" in record)) return true;
-    return yield* writeText(installerConfigPath, withoutApiToken(record));
+    return yield* writeInstallerConfig(withoutApiToken(record));
   });
 
   /** What the installer config's connection is before T3 Code changes it. */
@@ -573,7 +596,7 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
       const restored = restoredInstallerConfigText(current, previous);
       return restored === null
         ? yield* removeFile(installerConfigPath)
-        : yield* writeText(installerConfigPath, restored);
+        : yield* writeInstallerConfig(restored);
     });
 
   const hermesConfigFile = (home: string) => path.join(home, "config.yaml");
@@ -884,10 +907,22 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
             after.hermes !== null &&
             (yield* readHermesProvider(agent.hermesHome)) === "hindsight"
           : yield* codingAgentInstalled(agent.target);
-      const note =
-        agent.customHomeInstances.length > 0
-          ? `Not covered: ${agent.customHomeInstances.join(", ")} (own config home).`
+      // Hermes' own Hindsight config is never rewritten, so one pointing at
+      // another server is named instead of passing for wired to this one.
+      const ownServer =
+        agent.target === "hermes" &&
+        connection !== null &&
+        after.hermes !== null &&
+        nextLedger.hermes?.wroteConfig !== true &&
+        canonicalHindsightUrl(after.hermes.baseUrl) !== canonicalHindsightUrl(connection.baseUrl)
+          ? hindsightServerHost(after.hermes.baseUrl)
           : null;
+      const note =
+        ownServer !== null
+          ? `Not covered: uses its own Hindsight server at ${ownServer}.`
+          : agent.customHomeInstances.length > 0
+            ? `Not covered: ${agent.customHomeInstances.join(", ")} (own config home).`
+            : null;
       statuses.push({
         target: agent.target,
         state: failure !== null ? "failed" : installed ? "installed" : "notInstalled",

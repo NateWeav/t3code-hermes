@@ -24,9 +24,9 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Option from "effect/Option";
-import * as Semaphore from "effect/Semaphore";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
+import { providerUpdateLock } from "../provider/providerMaintenanceCommandCoordinator.ts";
 import { mergeProviderInstanceEnvironment } from "../provider/ProviderInstanceEnvironment.ts";
 import { spawnAndCollect } from "../provider/providerSnapshot.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -34,11 +34,12 @@ import { resolveEnabledHermesInstance } from "./hermesCronState.ts";
 import {
   changeHermesPatch,
   HERMES_PATCHES,
-  hermesPatchesPaths,
+  HERMES_UPDATE_LOCK_KEY,
   isHermesCheckoutDetached,
   readHermesDirtyPaths,
   readHermesHeadCommit,
   readHermesPatches,
+  readHermesUserEdits,
   resolveHermesGitCheckout,
   type HermesPatchDefinition,
 } from "./hermesPatches.ts";
@@ -82,8 +83,10 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  // Two clicks racing on one checkout would both pass the state check.
-  const changeLock = yield* Semaphore.make(1);
+  // Two clicks racing on one checkout would both pass the state check, and a
+  // provider update from Settings changes the same checkout, so both share the
+  // Hermes update lock.
+  const changeLock = providerUpdateLock(HERMES_UPDATE_LOCK_KEY);
 
   const provide = <A, E>(
     effect: Effect.Effect<
@@ -233,20 +236,17 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
       };
     });
 
-  /**
-   * Runs `hermes update` without prompts or stash restore. The gateway restart
-   * is deferred: it would otherwise restart on the code before our patches go
-   * back on, so the user restarts it once they have.
-   */
-  const runHermesUpdate = (checkout: {
-    readonly checkoutRoot: string;
-    readonly commandPath: string;
-    readonly env: NodeJS.ProcessEnv;
-  }) =>
+  const runHermes = (
+    checkout: {
+      readonly checkoutRoot: string;
+      readonly commandPath: string;
+      readonly env: NodeJS.ProcessEnv;
+    },
+    args: ReadonlyArray<string>,
+  ) =>
     Effect.gen(function* () {
-      const args = ["update", "--yes", "--keep-stash", "--no-gateway-restart"];
       const spawn = yield* resolveSpawnCommand(checkout.commandPath, args, { env: checkout.env });
-      const result = yield* provide(
+      return yield* provide(
         spawnAndCollect(
           checkout.commandPath,
           ChildProcess.make(spawn.command, spawn.args, {
@@ -255,7 +255,41 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
             shell: spawn.shell,
           }),
         ),
-      ).pipe(Effect.timeoutOption(updateTimeout));
+      );
+    });
+
+  /**
+   * Runs `hermes update` without prompts or stash restore. The gateway restart
+   * is deferred: it would otherwise restart on the code before our patches go
+   * back on, so the user restarts it once they have.
+   *
+   * Older Hermes rejects flags it predates (`--keep-stash` and
+   * `--no-gateway-restart` came in August and September 2026) before pulling
+   * anything, and those are the checkouts most in need of an update, so only
+   * flags `update --help` lists are passed. Without `--keep-stash` there is
+   * nothing to restore anyway, since the tree is clean by then; without
+   * `--no-gateway-restart` the gateway restarts once before the patches return.
+   */
+  const runHermesUpdate = (checkout: {
+    readonly checkoutRoot: string;
+    readonly commandPath: string;
+    readonly env: NodeJS.ProcessEnv;
+  }) =>
+    Effect.gen(function* () {
+      const help = yield* runHermes(checkout, ["update", "--help"]).pipe(
+        Effect.map((result) => `${result.stdout}${result.stderr}`),
+        Effect.orElseSucceed(() => ""),
+      );
+      // `--yes` is as old as `update` itself; without it the update would wait
+      // on a prompt, so it is passed even when the help cannot be read.
+      const args = [
+        "update",
+        "--yes",
+        ...["--keep-stash", "--no-gateway-restart"].filter((flag) =>
+          new RegExp(`(^|[\\s\\[,])${flag}(?![\\w-])`, "m").test(help),
+        ),
+      ];
+      const result = yield* runHermes(checkout, args).pipe(Effect.timeoutOption(updateTimeout));
       if (Option.isNone(result)) {
         return { ok: false, output: "hermes update did not finish in time and was stopped." };
       }
@@ -292,13 +326,12 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
         reason: "wrongState",
         detail: `The Hermes checkout has uncommitted changes of your own (${paths.length === 1 ? paths[0] : `${paths[0]} and ${paths.length - 1} more`}). Updating would park them in a git stash, so commit or discard them first.`,
       });
-    // Edits in files no applied patch touches can only be the user's.
-    const ours = hermesPatchesPaths(applied);
-    const dirty = yield* provide(readHermesDirtyPaths(checkoutRoot)).pipe(
+    // Refused before anything moves, whenever the user's edits can be told
+    // apart from the applied patches' changes.
+    const userEdits = yield* provide(readHermesUserEdits(checkoutRoot, shippedPatches)).pipe(
       Effect.mapError(gitFailed("Could not read the Hermes checkout with git.")),
     );
-    const foreign = [...dirty].filter((path) => !ours.has(path)).sort();
-    if (foreign.length > 0) return yield* refuseLocalChanges(foreign);
+    if (userEdits.size > 0) return yield* refuseLocalChanges([...userEdits].sort());
 
     const removed: HermesPatchDefinition[] = [];
     for (const patch of applied) {
@@ -314,7 +347,8 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
       }
       removed.push(patch);
     }
-    // Whatever is still dirty is the user's own edit inside a patched file.
+    // Whatever is still dirty is the user's own edit inside a patched file
+    // that the check above could not attribute.
     const leftover = yield* provide(readHermesDirtyPaths(checkoutRoot)).pipe(
       Effect.orElseSucceed(() => new Set<string>()),
     );

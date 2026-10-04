@@ -6,12 +6,19 @@ import * as NodePath from "node:path";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import { HermesPatchId } from "@t3tools/contracts";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 
+import { providerUpdateLock } from "../provider/providerMaintenanceCommandCoordinator.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import { type HermesPatchDefinition, type HermesPatchVersion } from "./hermesPatches.ts";
+import {
+  HERMES_UPDATE_LOCK_KEY,
+  type HermesPatchDefinition,
+  type HermesPatchVersion,
+} from "./hermesPatches.ts";
 import { HermesPatchService, makeWith } from "./HermesPatchService.ts";
 
 const IDENTITY = ["-c", "user.name=t", "-c", "user.email=t@t"];
@@ -59,87 +66,94 @@ const NEWEST_DATE = "2026-09-30T00:00:00Z";
  * `git pull --ff-only`, as `hermes update` would. `newerVersion` is the patch
  * version made for the newer commit, `olderVersion` the one for the older.
  */
-const makeHermes = Effect.gen(function* () {
-  const fileSystem = yield* FileSystem.FileSystem;
-  const base = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hermes-update-" });
-  const seed = NodePath.join(base, "seed");
-  const upstream = NodePath.join(base, "upstream.git");
-  const root = NodePath.join(base, "hermes-agent");
-  NodeFS.mkdirSync(seed);
-  git(seed, "init", "--quiet", "--initial-branch=main");
-  NodeFS.writeFileSync(NodePath.join(seed, ".gitignore"), "venv/\n");
-  NodeFS.writeFileSync(NodePath.join(seed, "session.py"), "backend = local\nremote_cwd = None\n");
-  NodeFS.writeFileSync(NodePath.join(seed, "notes.txt"), "notes\n");
-  const older = commit(seed, "older", OLDER_DATE);
-  const olderVersion = versionAt(
-    seed,
-    "session.py",
-    "backend = local\nremote_cwd = configured()\n",
-    older,
-    OLDER_DATE,
-  );
-  NodeFS.writeFileSync(
-    NodePath.join(seed, "session.py"),
-    "backend = resolve()\nremote_cwd = None\n",
-  );
-  const newer = commit(seed, "newer", NEWER_DATE);
-  const newerVersion = versionAt(
-    seed,
-    "session.py",
-    "backend = resolve()\nremote_cwd = configured()\n",
-    newer,
-    NEWER_DATE,
-  );
-  git(base, "clone", "--quiet", "--bare", seed, upstream);
-  git(base, "clone", "--quiet", upstream, root);
-  git(root, "reset", "--quiet", "--hard", older);
+const CURRENT_UPDATE_HELP =
+  "usage: hermes update [-h] [--yes] [--keep-stash] [--no-gateway-restart]";
 
-  const binaryPath = NodePath.join(root, "venv", "bin", "hermes");
-  NodeFS.mkdirSync(NodePath.dirname(binaryPath), { recursive: true });
-  const log = NodePath.join(base, "hermes.log");
-  NodeFS.writeFileSync(
-    binaryPath,
-    [
-      "#!/bin/sh",
-      `echo "$@" >> "${log}"`,
-      `if [ -f "${NodePath.join(base, "fail")}" ]; then echo "network unreachable" >&2; exit 1; fi`,
-      `cd "${root}" && git pull --quiet --ff-only`,
-      "",
-    ].join("\n"),
-    { mode: 0o755 },
-  );
-  const patch = (versions: ReadonlyArray<HermesPatchVersion>): HermesPatchDefinition => ({
-    id: HermesPatchId.make("remote-cwd"),
-    title: "Remote cwd",
-    neededFor: "Tests.",
-    versions,
+const makeHermesWith = (options: { readonly updateHelp: string }) =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const base = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hermes-update-" });
+    const seed = NodePath.join(base, "seed");
+    const upstream = NodePath.join(base, "upstream.git");
+    const root = NodePath.join(base, "hermes-agent");
+    NodeFS.mkdirSync(seed);
+    git(seed, "init", "--quiet", "--initial-branch=main");
+    NodeFS.writeFileSync(NodePath.join(seed, ".gitignore"), "venv/\n");
+    NodeFS.writeFileSync(NodePath.join(seed, "session.py"), "backend = local\nremote_cwd = None\n");
+    NodeFS.writeFileSync(NodePath.join(seed, "notes.txt"), "notes\n");
+    const older = commit(seed, "older", OLDER_DATE);
+    const olderVersion = versionAt(
+      seed,
+      "session.py",
+      "backend = local\nremote_cwd = configured()\n",
+      older,
+      OLDER_DATE,
+    );
+    NodeFS.writeFileSync(
+      NodePath.join(seed, "session.py"),
+      "backend = resolve()\nremote_cwd = None\n",
+    );
+    const newer = commit(seed, "newer", NEWER_DATE);
+    const newerVersion = versionAt(
+      seed,
+      "session.py",
+      "backend = resolve()\nremote_cwd = configured()\n",
+      newer,
+      NEWER_DATE,
+    );
+    git(base, "clone", "--quiet", "--bare", seed, upstream);
+    git(base, "clone", "--quiet", upstream, root);
+    git(root, "reset", "--quiet", "--hard", older);
+
+    const binaryPath = NodePath.join(root, "venv", "bin", "hermes");
+    NodeFS.mkdirSync(NodePath.dirname(binaryPath), { recursive: true });
+    const log = NodePath.join(base, "hermes.log");
+    NodeFS.writeFileSync(
+      binaryPath,
+      [
+        "#!/bin/sh",
+        `if [ "$2" = "--help" ]; then echo "${options.updateHelp}"; exit 0; fi`,
+        `echo "$@" >> "${log}"`,
+        `if [ -f "${NodePath.join(base, "fail")}" ]; then echo "network unreachable" >&2; exit 1; fi`,
+        `cd "${root}" && git pull --quiet --ff-only`,
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    const patch = (versions: ReadonlyArray<HermesPatchVersion>): HermesPatchDefinition => ({
+      id: HermesPatchId.make("remote-cwd"),
+      title: "Remote cwd",
+      neededFor: "Tests.",
+      versions,
+    });
+    return {
+      base,
+      seed,
+      upstream,
+      root,
+      binaryPath,
+      log,
+      older,
+      newer,
+      olderVersion,
+      newerVersion,
+      patch,
+      read: () => NodeFS.readFileSync(NodePath.join(root, "session.py"), "utf8"),
+      head: () => git(root, "rev-parse", "HEAD").trim(),
+      /** Pushes a third upstream commit that rewrites the patched line itself. */
+      pushNewest: () => {
+        git(seed, "reset", "--quiet", "--hard", newer);
+        NodeFS.writeFileSync(
+          NodePath.join(seed, "session.py"),
+          "backend = resolve()\nremote_cwd = from_profile()\n",
+        );
+        commit(seed, "newest", NEWEST_DATE);
+        git(seed, "push", "--quiet", upstream, "main");
+      },
+    };
   });
-  return {
-    base,
-    seed,
-    upstream,
-    root,
-    binaryPath,
-    log,
-    older,
-    newer,
-    olderVersion,
-    newerVersion,
-    patch,
-    read: () => NodeFS.readFileSync(NodePath.join(root, "session.py"), "utf8"),
-    head: () => git(root, "rev-parse", "HEAD").trim(),
-    /** Pushes a third upstream commit that rewrites the patched line itself. */
-    pushNewest: () => {
-      git(seed, "reset", "--quiet", "--hard", newer);
-      NodeFS.writeFileSync(
-        NodePath.join(seed, "session.py"),
-        "backend = resolve()\nremote_cwd = from_profile()\n",
-      );
-      commit(seed, "newest", NEWEST_DATE);
-      git(seed, "push", "--quiet", upstream, "main");
-    },
-  };
-});
+
+const makeHermes = makeHermesWith({ updateHelp: CURRENT_UPDATE_HELP });
 
 const withService = (binaryPath: string, patches: ReadonlyArray<HermesPatchDefinition>) =>
   Effect.provide(
@@ -185,6 +199,21 @@ describe("HermesPatchService.updateHermes", () => {
         );
         // Nothing parked: the patch was off the tree while Hermes updated.
         assert.strictEqual(git(hermes.root, "stash", "list"), "");
+      }).pipe(withService(hermes.binaryPath, [patch]));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("leaves out update flags an older Hermes does not know", () =>
+    Effect.gen(function* () {
+      const hermes = yield* makeHermesWith({ updateHelp: "usage: hermes update [-h] [--yes]" });
+      const patch = hermes.patch([hermes.newerVersion, hermes.olderVersion]);
+      yield* Effect.gen(function* () {
+        const service = yield* HermesPatchService;
+        yield* service.apply({ patchId: patch.id });
+        const result = yield* service.updateHermes;
+        assert.isFalse(result.updateFailed);
+        assert.deepStrictEqual(result.reapplied, [patch.id]);
+        assert.strictEqual(NodeFS.readFileSync(hermes.log, "utf8").trim(), "update --yes");
       }).pipe(withService(hermes.binaryPath, [patch]));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
@@ -247,6 +276,36 @@ describe("HermesPatchService.updateHermes", () => {
         assert.strictEqual(error.reason, "wrongState");
         assert.isFalse(NodeFS.existsSync(hermes.log));
         assert.strictEqual(hermes.read(), edited);
+      }).pipe(withService(hermes.binaryPath, [patch]));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("waits for a provider update from Settings, which holds the same lock", () =>
+    Effect.gen(function* () {
+      const hermes = yield* makeHermes;
+      const patch = hermes.patch([hermes.newerVersion, hermes.olderVersion]);
+      yield* Effect.gen(function* () {
+        const service = yield* HermesPatchService;
+        const settingsUpdate = yield* Deferred.make<void>();
+        const held = yield* Deferred.make<void>();
+        // Stands in for ProviderMaintenanceRunner holding the lock mid-update.
+        const holder = yield* providerUpdateLock(HERMES_UPDATE_LOCK_KEY)
+          .withPermits(1)(
+            Deferred.succeed(held, undefined).pipe(Effect.andThen(Deferred.await(settingsUpdate))),
+          )
+          .pipe(Effect.forkChild);
+        yield* Deferred.await(held);
+        const apply = yield* service.apply({ patchId: patch.id }).pipe(Effect.forkChild);
+        // The apply's own git reads happen inside the lock, so nothing it does
+        // can land before the holder lets go.
+        yield* Effect.yieldNow;
+        assert.isUndefined(apply.pollUnsafe());
+        assert.strictEqual(hermes.read(), "backend = local\nremote_cwd = None\n");
+
+        yield* Deferred.succeed(settingsUpdate, undefined);
+        yield* Fiber.join(holder);
+        yield* Fiber.join(apply);
+        assert.strictEqual(hermes.read(), "backend = local\nremote_cwd = configured()\n");
       }).pipe(withService(hermes.binaryPath, [patch]));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
@@ -353,6 +412,46 @@ describe("why a Hermes patch does not apply", () => {
         assert.strictEqual(status?.state, "doesNotApply");
         assert.strictEqual(status?.reason, "localChanges");
       }).pipe(withService(hermes.binaryPath, [patch]));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("blames the user's own edit in a file an applied patch also changed", () =>
+    Effect.gen(function* () {
+      const hermes = yield* makeHermes;
+      // A file long enough that the two patches' hunks do not share context:
+      // the other patch rewrites the first line, ours the last, and the user
+      // edits the line just above ours.
+      const lines = Array.from({ length: 12 }, (_, index) => `line_${index} = ${index}`);
+      const file = NodePath.join(hermes.root, "config.py");
+      NodeFS.writeFileSync(file, `${lines.join("\n")}\n`);
+      const head = commit(hermes.root, "config", NEWER_DATE);
+      const withLine = (index: number, text: string, from = lines) =>
+        `${from.map((line, at) => (at === index ? text : line)).join("\n")}\n`;
+      const version = (content: string) =>
+        versionAt(hermes.root, "config.py", content, head, NEWER_DATE);
+      const other: HermesPatchDefinition = {
+        id: HermesPatchId.make("other"),
+        title: "Other",
+        neededFor: "Tests.",
+        versions: [version(withLine(0, "line_0 = patched"))],
+      };
+      const ours: HermesPatchDefinition = {
+        id: HermesPatchId.make("ours"),
+        title: "Ours",
+        neededFor: "Tests.",
+        versions: [version(withLine(11, "line_11 = patched"))],
+      };
+      yield* Effect.gen(function* () {
+        const service = yield* HermesPatchService;
+        yield* service.apply({ patchId: other.id });
+        const applied = NodeFS.readFileSync(file, "utf8").trimEnd().split("\n");
+        NodeFS.writeFileSync(file, withLine(10, "line_10 = mine", applied));
+
+        const snapshot = yield* service.list;
+        assert.strictEqual(snapshot.patches[0]?.state, "applied");
+        assert.strictEqual(snapshot.patches[1]?.state, "doesNotApply");
+        assert.strictEqual(snapshot.patches[1]?.reason, "localChanges");
+      }).pipe(withService(hermes.binaryPath, [other, ours]));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 

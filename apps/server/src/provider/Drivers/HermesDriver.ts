@@ -10,7 +10,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import * as ServerConfig from "../../config.ts";
 import * as ServerSettings from "../../serverSettings.ts";
-import { resolveHermesGitCheckout } from "../../hermes/hermesPatches.ts";
+import { HERMES_UPDATE_LOCK_KEY, resolveHermesGitCheckout } from "../../hermes/hermesPatches.ts";
 import { makeHermesTextGeneration } from "../../textGeneration/HermesTextGeneration.ts";
 import {
   HermesAdapterV2Driver,
@@ -74,7 +74,7 @@ const UPDATE: ProviderMaintenanceCapabilitiesResolver = {
         packageName: null,
         updateExecutable: context.resolvedCommandPath,
         updateArgs: ["update", "--yes"],
-        updateLockKey: "hermes",
+        updateLockKey: HERMES_UPDATE_LOCK_KEY,
         platform: context.platform,
         env: context.env,
         githubReleaseRepository: HERMES_RELEASE_REPOSITORY,

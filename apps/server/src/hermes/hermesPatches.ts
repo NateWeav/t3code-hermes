@@ -38,6 +38,9 @@ export interface HermesPatchDefinition {
   readonly versions: ReadonlyArray<HermesPatchVersion>;
 }
 
+/** Serializes everything that changes a Hermes checkout: updates and patches. */
+export const HERMES_UPDATE_LOCK_KEY = "hermes";
+
 export const HERMES_PATCHES: ReadonlyArray<HermesPatchDefinition> = HERMES_PATCH_FILES.map(
   (patch) => ({
     id: HermesPatchId.make(patch.id),
@@ -74,7 +77,11 @@ export const resolveHermesGitCheckout = Effect.fn("resolveHermesGitCheckout")(fu
  * Runs git in the checkout. Inherited repository bindings (a server started
  * from a git hook, say) would otherwise point git at a different repository.
  */
-const runGit = (checkoutRoot: string, args: ReadonlyArray<string>) =>
+const runGit = (
+  checkoutRoot: string,
+  args: ReadonlyArray<string>,
+  env: { readonly GIT_INDEX_FILE?: string } = {},
+) =>
   spawnAndCollect(
     "git",
     ChildProcess.make("git", args, {
@@ -87,6 +94,7 @@ const runGit = (checkoutRoot: string, args: ReadonlyArray<string>) =>
         GIT_INDEX_FILE: undefined,
         GIT_OBJECT_DIRECTORY: undefined,
         GIT_ALTERNATE_OBJECT_DIRECTORIES: undefined,
+        ...env,
       },
     }),
   );
@@ -189,6 +197,81 @@ export const readHermesDirtyPaths = Effect.fn("readHermesDirtyPaths")(function* 
   return paths;
 });
 
+/**
+ * Paths whose content differs from HEAD with the given applied versions on
+ * top. Built in a scratch index, so the checkout's own index is untouched.
+ * Null when the versions do not stack there.
+ */
+const readPathsBeyondVersions = Effect.fn("readHermesPathsBeyondVersions")(function* (
+  checkoutRoot: string,
+  versionFiles: ReadonlyArray<string>,
+) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-hermes-index-" });
+  const env = { GIT_INDEX_FILE: path.join(directory, "index") };
+  if ((yield* runGit(checkoutRoot, ["read-tree", "HEAD"], env)).code !== 0) return null;
+  for (const file of versionFiles) {
+    if ((yield* runGit(checkoutRoot, ["apply", "--cached", file], env)).code !== 0) return null;
+  }
+  const diff = yield* runGit(checkoutRoot, ["diff", "--name-only", "-z"], env);
+  if (diff.code !== 0) return null;
+  return new Set(diff.stdout.split("\0").filter((entry) => entry.length > 0));
+}, Effect.scoped);
+
+/**
+ * The user's own uncommitted edits: dirty paths no applied patch touches, and
+ * paths an applied patch touches whose content goes beyond what that patch
+ * changed. When the applied versions cannot be replayed, a file an applied
+ * patch touches is taken to hold only that patch's change.
+ */
+const readUserEdits = Effect.fn("readHermesUserEdits")(function* (
+  checkoutRoot: string,
+  applied: ReadonlyArray<{ readonly patch: HermesPatchDefinition; readonly file: string }>,
+) {
+  const dirty = yield* readHermesDirtyPaths(checkoutRoot);
+  const touched = new Set(applied.flatMap(({ patch }) => [...patchPaths(patch)]));
+  const beyond = [...dirty].some((path) => touched.has(path))
+    ? yield* readPathsBeyondVersions(
+        checkoutRoot,
+        applied.map(({ file }) => file),
+      )
+    : null;
+  return new Set([...dirty].filter((path) => !touched.has(path) || (beyond?.has(path) ?? false)));
+});
+
+/**
+ * The user's own uncommitted edits in the checkout, told apart from the
+ * changes of the given patches wherever those are applied.
+ */
+export const readHermesUserEdits = Effect.fn("readHermesUserEditsForPatches")(function* (
+  checkoutRoot: string,
+  patches: ReadonlyArray<HermesPatchDefinition>,
+) {
+  const files = yield* writePatchFiles(patches);
+  const resolved = yield* Effect.forEach(
+    patches,
+    (patch) =>
+      resolvePatchState(checkoutRoot, files.get(patch.id) ?? []).pipe(
+        Effect.map((result) => ({ patch, ...result })),
+      ),
+    { concurrency: "unbounded" },
+  );
+  return yield* readUserEdits(checkoutRoot, appliedVersions(resolved));
+}, Effect.scoped);
+
+/** The applied ones, in manifest order, which is the order they stack in. */
+const appliedVersions = (
+  resolved: ReadonlyArray<{
+    readonly patch: HermesPatchDefinition;
+    readonly state: HermesPatchState;
+    readonly file: string | null;
+  }>,
+) =>
+  resolved.flatMap(({ patch, state, file }) =>
+    state === "applied" && file !== null ? [{ patch, file }] : [],
+  );
+
 /** The checkout's HEAD, abbreviated, or null in a repository without commits. */
 export const readHermesHeadCommit = (checkoutRoot: string) =>
   runGit(checkoutRoot, ["rev-parse", "--short", "HEAD"]).pipe(
@@ -224,21 +307,16 @@ const isHeadOlderThan = Effect.fn("isHermesHeadOlderThan")(function* (
 
 /**
  * Why a patch that applies in neither direction does not fit, which decides
- * what the user can do about it. `explainedPaths` are paths changed by
- * patches that are applied, so their edits are ours, not the user's.
+ * what the user can do about it. `userEdits` are the user's own edits, apart
+ * from the changes of patches that are applied.
  */
 const classifyHermesPatchMisfit = Effect.fn("classifyHermesPatchMisfit")(function* (
   checkoutRoot: string,
   patch: HermesPatchDefinition,
-  context: {
-    readonly dirtyPaths: ReadonlySet<string>;
-    readonly explainedPaths: ReadonlySet<string>;
-  },
+  userEdits: ReadonlySet<string>,
 ) {
   for (const path of patchPaths(patch)) {
-    if (context.dirtyPaths.has(path) && !context.explainedPaths.has(path)) {
-      return "localChanges" satisfies HermesPatchMisfitReason;
-    }
+    if (userEdits.has(path)) return "localChanges" satisfies HermesPatchMisfitReason;
   }
   const newest = patch.versions[0];
   if (newest === undefined) return "awaitingPatchUpdate" satisfies HermesPatchMisfitReason;
@@ -254,31 +332,19 @@ export const readHermesPatches = Effect.fn("readHermesPatches")(function* (
 ) {
   const files = yield* writePatchFiles(patches);
   // Patches are read independently, so read them all at once.
-  const states = new Map<HermesPatchId, HermesPatchState>(
-    yield* Effect.forEach(
-      patches,
-      (patch) =>
-        resolvePatchState(checkoutRoot, files.get(patch.id) ?? []).pipe(
-          Effect.map(({ state }) => [patch.id, state] as const),
-        ),
-      { concurrency: "unbounded" },
-    ),
+  const resolved = yield* Effect.forEach(
+    patches,
+    (patch) =>
+      resolvePatchState(checkoutRoot, files.get(patch.id) ?? []).pipe(
+        Effect.map((result) => ({ patch, ...result })),
+      ),
+    { concurrency: "unbounded" },
   );
-  const misfits = patches.filter((patch) => states.get(patch.id) === "doesNotApply");
-  const context =
-    misfits.length === 0
-      ? null
-      : {
-          dirtyPaths: yield* readHermesDirtyPaths(checkoutRoot),
-          explainedPaths: new Set(
-            patches
-              .filter((patch) => states.get(patch.id) === "applied")
-              .flatMap((patch) => [...patchPaths(patch)]),
-          ),
-        };
+  const userEdits = resolved.some(({ state }) => state === "doesNotApply")
+    ? yield* readUserEdits(checkoutRoot, appliedVersions(resolved))
+    : null;
   const statuses: HermesPatch[] = [];
-  for (const patch of patches) {
-    const state = states.get(patch.id) ?? "doesNotApply";
+  for (const { patch, state } of resolved) {
     const status: HermesPatch = {
       id: patch.id,
       title: patch.title,
@@ -286,17 +352,13 @@ export const readHermesPatches = Effect.fn("readHermesPatches")(function* (
       state,
     };
     statuses.push(
-      state === "doesNotApply" && context !== null
-        ? { ...status, reason: yield* classifyHermesPatchMisfit(checkoutRoot, patch, context) }
+      state === "doesNotApply" && userEdits !== null
+        ? { ...status, reason: yield* classifyHermesPatchMisfit(checkoutRoot, patch, userEdits) }
         : status,
     );
   }
   return statuses;
 }, Effect.scoped);
-
-/** Paths changed by any version of the given patches. */
-export const hermesPatchesPaths = (patches: ReadonlyArray<HermesPatchDefinition>) =>
-  new Set(patches.flatMap((patch) => [...patchPaths(patch)]));
 
 /** True when HEAD is not on a branch, which `hermes update` cannot move. */
 export const isHermesCheckoutDetached = (checkoutRoot: string) =>

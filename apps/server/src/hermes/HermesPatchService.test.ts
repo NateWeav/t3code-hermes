@@ -230,7 +230,7 @@ describe("HermesPatchService", () => {
         yield* Deferred.await(held);
         yield* service.restartGateway;
         // An older Hermes restarts its gateway during the update.
-        NodeFS.writeFileSync(pidFile, JSON.stringify({ pid: 6363 }));
+        NodeFS.writeFileSync(pidFile, `{"pid":6363}`);
         yield* Deferred.succeed(release, undefined);
         yield* Fiber.join(update);
         yield* service.awaitGatewayRestart;

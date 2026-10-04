@@ -208,4 +208,22 @@ describe("handing a machine the shared server", () => {
       hindsightSharedPatch(onOverride, open, { kind: "server", url: "http://old:8888" }),
     ).toEqual({ baseUrl: "http://old:8888" });
   });
+
+  it("treats spellings of one server as the same server", () => {
+    const handoff = planHindsightServerHandoff({ url: "https://HS.example/", hasKey: true }, []);
+    const reported = { ...keyedSource, serverUrl: "https://hs.example" };
+    const savedWithCredentials = { ...bare, savedUrl: "https://user:pw@hs.example/" };
+    const write = { kind: "apiKey", apiKey: "" } as const;
+
+    expect(hindsightSharedPatch(reported, handoff, write)).toEqual({ apiKey: "" });
+    expect(hindsightSharedPatch(savedWithCredentials, handoff, write)).toEqual({ apiKey: "" });
+    // A different path is a different server.
+    expect(
+      hindsightSharedPatch(
+        { ...keyedSource, serverUrl: "https://hs.example/other" },
+        handoff,
+        write,
+      ),
+    ).toBeNull();
+  });
 });

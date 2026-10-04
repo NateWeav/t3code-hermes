@@ -42,6 +42,8 @@ interface Options {
   readonly failChmod?: "hermesConfig" | "ledger";
   /** Gives Codex a shadow home whose `hooks.json` is its own file, or a link to the shared one. */
   readonly codexShadowHooks?: "own" | "linked";
+  /** A second enabled Hermes instance, `hermes_work`, with this `HERMES_HOME`. */
+  readonly secondHermesHome?: string;
   /** Puts a non-empty directory where the ledger goes, so saving it fails. */
   readonly unsavableLedger?: boolean;
 }
@@ -52,6 +54,16 @@ const writeJson = (file: string, value: unknown) => {
 };
 
 const readJson = (file: string): unknown => JSON.parse(NodeFS.readFileSync(file, "utf8"));
+
+function parsesAsJson(file: string): boolean {
+  if (!NodeFS.existsSync(file)) return false;
+  try {
+    readJson(file);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 const hooksFor = (home: string) => ({
   Stop: [{ hooks: [{ command: `node "${home}/.hindsight/coding-agents/dist/stop-hook.js"` }] }],
@@ -129,9 +141,10 @@ function setup(options: Options) {
       return HindsightService.HindsightService.of({
         ...base,
         resolveConnection: Effect.sync(() => {
+          // Like the real one, a file that does not parse resolves nothing.
+          const pluginConfig = NodePath.join(hermesHome, "hindsight", "config.json");
           const hermesConfigured =
-            options.hermesHasHindsight === true ||
-            NodeFS.existsSync(NodePath.join(hermesHome, "hindsight", "config.json"));
+            options.hermesHasHindsight === true || parsesAsJson(pluginConfig);
           return {
             enabled: true,
             connection:
@@ -183,6 +196,19 @@ function setup(options: Options) {
 
   const settings = ServerSettings.layerTest({
     integrations: { hindsight: { agentMemory: options.agentMemory } },
+    ...(options.secondHermesHome === undefined
+      ? {}
+      : {
+          providerInstances: {
+            [ProviderInstanceId.make("hermes_work")]: {
+              driver: ProviderDriverKind.make("hermes"),
+              enabled: true,
+              environment: [
+                { name: "HERMES_HOME", value: options.secondHermesHome, sensitive: false },
+              ],
+            },
+          },
+        }),
     providers: {
       hermes: { enabled: true },
       ...(options.codexShadowHooks === undefined
@@ -707,6 +733,41 @@ describe("HindsightAgentMemory", () => {
 
       expect(state.agents).toEqual([]);
       expect(state.detail).toContain("could not be put back");
+    }).pipe(Effect.provide(harness.layer));
+  });
+  it.effect("never overwrites a Hermes Hindsight config it cannot read", () => {
+    const harness = setup({
+      agentMemory: true,
+      missing: ["claude", "codex"],
+      hermesYaml: "memory:\n  provider: holographic\n",
+    });
+    const pluginConfig = NodePath.join(harness.hermesHome, "hindsight", "config.json");
+    NodeFS.mkdirSync(NodePath.dirname(pluginConfig), { recursive: true });
+    NodeFS.writeFileSync(pluginConfig, "{ mine, half-edited");
+    return Effect.gen(function* () {
+      const state = yield* harness.apply;
+
+      expect(state.agents[0]?.state).toBe("failed");
+      expect(NodeFS.readFileSync(pluginConfig, "utf8")).toBe("{ mine, half-edited");
+      expect(hermesProvider(harness.hermesHome)).toBe("holographic");
+
+      yield* harness.setAgentMemory(false);
+      yield* harness.apply;
+      expect(NodeFS.readFileSync(pluginConfig, "utf8")).toBe("{ mine, half-edited");
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("names a second Hermes instance with a home of its own", () => {
+    const harness = setup({
+      agentMemory: true,
+      missing: ["claude", "codex"],
+      secondHermesHome: "/srv/hermes-work",
+    });
+    return Effect.gen(function* () {
+      const state = yield* harness.apply;
+
+      expect(state.agents[0]).toMatchObject({ target: "hermes", state: "installed" });
+      expect(state.agents[0]?.detail).toContain("hermes_work");
     }).pipe(Effect.provide(harness.layer));
   });
 });

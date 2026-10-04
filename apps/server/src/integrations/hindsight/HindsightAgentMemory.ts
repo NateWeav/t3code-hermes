@@ -428,16 +428,26 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
         }
         if (found) present.push({ target: agent.target, customHomeInstances, hermesHome: null });
       }
+      // Like Memory, Skills and Tasks, this follows one Hermes instance; another
+      // enabled one with a home of its own is named, not wired.
       const hermes = resolveEnabledHermesInstance(settings);
       if (hermes !== null) {
         const env = mergeProviderInstanceEnvironment(hermes.environment, hostEnvironment);
         const binary = nonEmptyString(hermes.settings.binaryPath) ?? "hermes";
         if (yield* isAvailable(binary, env)) {
-          present.push({
-            target: "hermes",
-            customHomeInstances: [],
-            hermesHome: resolveHermesHome(env, homeDir),
-          });
+          const hermesHome = resolveHermesHome(env, homeDir);
+          const otherHomes = instances.flatMap(([instanceId, instance]) =>
+            instanceId !== hermes.instanceId &&
+            instance.driver === "hermes" &&
+            resolveProviderInstanceEnabled(instance) &&
+            resolveHermesHome(
+              mergeProviderInstanceEnvironment(instance.environment, hostEnvironment),
+              homeDir,
+            ) !== hermesHome
+              ? [instanceId]
+              : [],
+          );
+          present.push({ target: "hermes", customHomeInstances: otherHomes, hermesHome });
         }
       }
       return present;
@@ -715,18 +725,33 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
         // A config T3 Code wrote follows the connection; one Hermes had is left alone.
         const ownsConfig = owned?.wroteConfig === true;
         const configText = hermesHindsightConfigText(connection);
+        // A file that is there but does not resolve is still Hermes' own: it is
+        // never overwritten, since switching off would then delete it.
+        const configFileExists = yield* fs
+          .exists(hermesHindsightFile(home))
+          .pipe(Effect.orElseSucceed(() => true));
+        const foreignConfig = resolved.hermes === null && configFileExists && !ownsConfig;
+        if (foreignConfig) {
+          failures.set(
+            "hermes",
+            "Hermes' own Hindsight config could not be read, so it was left alone.",
+          );
+        }
+        // Hermes is only switched to Hindsight once it has a config to read.
+        const switchProvider = !foreignConfig && provider !== "hindsight";
         const configStale =
-          resolved.hermes === null ||
-          (ownsConfig && (yield* readText(hermesHindsightFile(home))) !== configText);
+          !foreignConfig &&
+          (resolved.hermes === null ||
+            (ownsConfig && (yield* readText(hermesHindsightFile(home))) !== configText));
         const previousProvider = owned?.changedProvider ? owned.previousProvider : provider;
         const claimed =
-          configStale || provider !== "hindsight"
+          configStale || switchProvider
             ? yield* persist({
                 ...nextLedger,
                 hermes: {
                   home,
                   previousProvider,
-                  changedProvider: provider !== "hindsight" || (owned?.changedProvider ?? false),
+                  changedProvider: switchProvider || (owned?.changedProvider ?? false),
                   wroteConfig: configStale || ownsConfig,
                 },
               })
@@ -737,10 +762,8 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
           failures.set("hermes", "Hermes' Hindsight config could not be written.");
         }
         const changedProvider =
-          claimed && provider !== "hindsight"
-            ? yield* writeHermesProvider(home, "hindsight")
-            : false;
-        if (provider !== "hindsight" && !changedProvider) {
+          claimed && switchProvider ? yield* writeHermesProvider(home, "hindsight") : false;
+        if (switchProvider && !changedProvider) {
           failures.set("hermes", "Hermes' config.yaml could not be updated.");
         }
         if (wroteConfig || changedProvider) {

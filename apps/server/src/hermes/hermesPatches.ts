@@ -152,12 +152,16 @@ const fitting = (
 
 /**
  * Which of several versions that all reverse cleanly is the one applied. Two
- * versions can patch different upstream text into the same result, and
- * reversing the wrong one would write the other commit's original text back.
- * The applied one is the version that applies to HEAD itself, checked in a
- * scratch index so the checkout's own index is untouched. When none does (the
- * user committed the patch, say), there is no telling, so null: the patch
- * still reads as applied, and Remove refuses rather than guess.
+ * versions can patch different upstream text into the same result, or the
+ * same text in different places, and reversing the wrong one would write the
+ * wrong text back.
+ *
+ * The applied one is a version that, applied to HEAD, gives exactly the files
+ * the checkout has now. Failing that (the user also edited those files), the
+ * one version that applies to HEAD at all. Each check runs in its own
+ * scratch index, so the checkout's own index is untouched. When neither picks
+ * out exactly one, there is no telling, so null: the patch still reads as
+ * applied, and Remove refuses rather than guess.
  */
 const pickAppliedVersion = Effect.fn("pickHermesAppliedVersion")(function* (
   checkoutRoot: string,
@@ -166,10 +170,32 @@ const pickAppliedVersion = Effect.fn("pickHermesAppliedVersion")(function* (
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-hermes-index-" });
-  const env = { GIT_INDEX_FILE: path.join(directory, "index") };
-  if ((yield* runGit(checkoutRoot, ["read-tree", "HEAD"], env)).code !== 0) return null;
-  const onHead = yield* fitting(checkoutRoot, candidates, ["apply", "--check", "--cached"], env);
-  return onHead[0] ?? null;
+  const checks = yield* Effect.forEach(
+    candidates,
+    (file, index) =>
+      Effect.gen(function* () {
+        const env = { GIT_INDEX_FILE: path.join(directory, `index-${index}`) };
+        if ((yield* runGit(checkoutRoot, ["read-tree", "HEAD"], env)).code !== 0) {
+          return { file, onHead: false, matches: false };
+        }
+        if ((yield* runGit(checkoutRoot, ["apply", "--cached", file], env)).code !== 0) {
+          return { file, onHead: false, matches: false };
+        }
+        const numstat = yield* runGit(checkoutRoot, ["apply", "--numstat", "-z", file]);
+        const paths = numstat.stdout
+          .split("\0")
+          .map((entry) => entry.split("\t")[2])
+          .filter((entry): entry is string => entry !== undefined && entry.length > 0);
+        const diff = yield* runGit(checkoutRoot, ["diff", "--quiet", "--", ...paths], env);
+        return { file, onHead: true, matches: paths.length > 0 && diff.code === 0 };
+      }),
+    { concurrency: GIT_CHECK_CONCURRENCY },
+  );
+  // Any version that rebuilds the checkout exactly also undoes back to HEAD.
+  const exact = checks.find((check) => check.matches);
+  if (exact !== undefined) return exact.file;
+  const onHead = checks.filter((check) => check.onHead);
+  return onHead.length === 1 ? onHead[0]!.file : null;
 }, Effect.scoped);
 
 /**

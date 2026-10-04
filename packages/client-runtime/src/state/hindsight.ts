@@ -317,7 +317,15 @@ export function describeHindsightAgentMemory(
     );
   }
   if (state.detail !== null) return headline("attention", "Needs attention", state.detail);
-  if (!options.enabled) return headline("idle", null, null);
+  // Off, a failed row is cleanup still to finish: it needs attention, and the
+  // rows themselves say what failed.
+  if (!options.enabled) {
+    return headline(
+      agents.some((agent) => agent.tone === "attention") ? "attention" : "idle",
+      null,
+      null,
+    );
+  }
   if (agents.length === 0) {
     return headline(
       "idle",

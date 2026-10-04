@@ -38,8 +38,8 @@ interface Options {
   readonly preinstalled?: boolean;
   /** T3 Code's own environment, which provider instances inherit. */
   readonly hostEnv?: Record<string, string>;
-  /** Makes `chmod` fail on Hermes' Hindsight config, as on a filesystem without modes. */
-  readonly failConfigChmod?: boolean;
+  /** Makes `chmod` fail for that file, as on a filesystem without modes. */
+  readonly failChmod?: "hermesConfig" | "ledger";
   /** Puts a non-empty directory where the ledger goes, so saving it fails. */
   readonly unsavableLedger?: boolean;
 }
@@ -151,8 +151,13 @@ function setup(options: Options) {
       FileSystem.FileSystem.of({
         ...fs,
         chmod: (file, mode) =>
-          options.failConfigChmod === true &&
-          file.endsWith(NodePath.join("hindsight", "config.json"))
+          // Matches the temp file an atomic write sets the mode on, too.
+          options.failChmod !== undefined &&
+          file.includes(
+            options.failChmod === "ledger"
+              ? "hindsight-agent-memory.json"
+              : NodePath.join("hindsight", "config.json"),
+          )
             ? Effect.fail(
                 PlatformError.systemError({
                   _tag: "PermissionDenied",
@@ -623,7 +628,7 @@ describe("HindsightAgentMemory", () => {
     const harness = setup({
       agentMemory: true,
       missing: ["claude", "codex"],
-      failConfigChmod: true,
+      failChmod: "hermesConfig",
     });
     return Effect.gen(function* () {
       const state = yield* harness.apply;
@@ -632,6 +637,25 @@ describe("HindsightAgentMemory", () => {
       expect(NodeFS.existsSync(NodePath.join(harness.hermesHome, "hindsight", "config.json"))).toBe(
         false,
       );
+    }).pipe(Effect.provide(harness.layer));
+  });
+  it.effect("publishes no ledger it could not make private, and acts on none", () => {
+    const harness = setup({
+      agentMemory: true,
+      failChmod: "ledger",
+      hermesYaml: "memory:\n  provider: holographic\n",
+    });
+    return Effect.gen(function* () {
+      const state = yield* harness.apply;
+
+      expect(harness.calls).toEqual([]);
+      expect(hermesProvider(harness.hermesHome)).toBe("holographic");
+      expect(state.detail).toContain("could not save");
+      expect(
+        NodeFS.existsSync(
+          NodePath.join(harness.home, "t3", "userdata", "hindsight-agent-memory.json"),
+        ),
+      ).toBe(false);
     }).pipe(Effect.provide(harness.layer));
   });
 });

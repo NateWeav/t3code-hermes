@@ -249,7 +249,8 @@ export function EnvironmentAgentMemorySettings() {
         </View>
       </View>
       {writable
-        .filter((machine) => machine.saved.agentMemory && machine.summary.tone === "attention")
+        // Also while switched off: cleanup that failed is retried the same way.
+        .filter((machine) => machine.summary.tone === "attention")
         .map((machine) => (
           <SettingsActionRow
             key={machine.environment.environmentId}

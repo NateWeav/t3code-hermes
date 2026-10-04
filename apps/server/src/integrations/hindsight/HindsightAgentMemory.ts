@@ -346,9 +346,9 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
     ),
   );
 
-  /** Whether the file now holds `contents`. */
-  const writeText = (filePath: string, contents: string) =>
-    writeFileStringAtomically({ filePath, contents }).pipe(
+  /** Whether the file now holds `contents`; one given a `mode` is never published without it. */
+  const writeText = (filePath: string, contents: string, mode?: number) =>
+    writeFileStringAtomically({ filePath, contents, ...(mode === undefined ? {} : { mode }) }).pipe(
       Effect.provideService(FileSystem.FileSystem, fs),
       Effect.provideService(Path.Path, path),
       Effect.as(true),
@@ -362,13 +362,13 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
       Effect.orElseSucceed(() => false),
     );
 
-  // Owner-only: the installer config it may hold carries the API key.
+  // Owner-only from the start: the installer fields it may hold carry the API key.
   const writeLedger = (ledger: AgentMemoryLedger) =>
     writeFileStringAtomically({
       filePath: ledgerPath,
       contents: `${JSON.stringify(ledger, null, 2)}\n`,
+      mode: 0o600,
     }).pipe(
-      Effect.andThen(fs.chmod(ledgerPath, 0o600)),
       Effect.provideService(FileSystem.FileSystem, fs),
       Effect.provideService(Path.Path, path),
       Effect.as(true),
@@ -515,22 +515,9 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
       return yield* writeText(hermesConfigFile(home), emptied ? "" : document.toString());
     });
 
-  /**
-   * Owner-only, because a Hindsight Cloud key may ride in it. One that cannot
-   * be made owner-only is removed again; `unhardened` means even that failed,
-   * so the file is there and still T3 Code's to take out.
-   */
+  /** Owner-only from the start, because a Hindsight Cloud key may ride in it. */
   const writeHermesHindsightConfig = (home: string, contents: string) =>
-    Effect.gen(function* () {
-      const file = hermesHindsightFile(home);
-      if (!(yield* writeText(file, contents))) return "failed" as const;
-      const hardened = yield* fs.chmod(file, 0o600).pipe(
-        Effect.as(true),
-        Effect.orElseSucceed(() => false),
-      );
-      if (hardened) return "written" as const;
-      return (yield* removeFile(file)) ? ("failed" as const) : ("unhardened" as const);
-    });
+    writeText(hermesHindsightFile(home), contents, 0o600);
 
   const state = yield* SubscriptionRef.make<HindsightAgentMemoryState>(INITIAL_STATE);
   const lock = yield* Semaphore.make(1);
@@ -718,16 +705,10 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
                 },
               })
             : true;
-        const configWrite =
-          claimed && configStale ? yield* writeHermesHindsightConfig(home, configText) : "failed";
-        const wroteConfig = configWrite !== "failed";
-        if (configStale && configWrite !== "written") {
-          failures.set(
-            "hermes",
-            configWrite === "unhardened"
-              ? "Hermes' Hindsight config could not be made private to its owner."
-              : "Hermes' Hindsight config could not be written.",
-          );
+        const wroteConfig =
+          claimed && configStale ? yield* writeHermesHindsightConfig(home, configText) : false;
+        if (configStale && !wroteConfig) {
+          failures.set("hermes", "Hermes' Hindsight config could not be written.");
         }
         const changedProvider =
           claimed && provider !== "hindsight"

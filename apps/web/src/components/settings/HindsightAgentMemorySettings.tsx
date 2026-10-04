@@ -274,11 +274,9 @@ export function HindsightAgentMemorySettings() {
           <ul className="mt-3 flex flex-col gap-1.5 text-xs">
             {machines.map((machine) => {
               const status = machineStatus(machine);
+              // Also while switched off: cleanup that failed is retried the same way.
               const canRetry =
-                machine.writable &&
-                !machine.unsupported &&
-                machine.saved.agentMemory &&
-                machine.summary.tone === "attention";
+                machine.writable && !machine.unsupported && machine.summary.tone === "attention";
               return (
                 <li
                   key={machine.environment.environmentId}

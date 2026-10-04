@@ -61,6 +61,21 @@ describe("describeHindsightAgentMemory", () => {
     ]);
   });
 
+  it("keeps a failed cleanup in view after switching off", () => {
+    const failed = describeHindsightAgentMemory(
+      { ...base, agents: [{ target: "codex", state: "failed", detail: "npx exited 1" }] },
+      { enabled: false },
+    );
+    expect(failed).toMatchObject({ tone: "attention", label: null });
+    expect(failed.agents[0]?.text).toBe("Codex failed · npx exited 1");
+    expect(
+      describeHindsightAgentMemory(
+        { ...base, agents: [{ target: "codex", state: "notInstalled", detail: null }] },
+        { enabled: false },
+      ).tone,
+    ).toBe("idle");
+  });
+
   it("reports an in-flight pass instead of a stale verdict", () => {
     expect(
       describeHindsightAgentMemory(

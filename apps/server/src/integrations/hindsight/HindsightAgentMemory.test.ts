@@ -34,6 +34,8 @@ interface Options {
   readonly hermesYaml?: string;
   readonly hermesHasHindsight?: boolean;
   readonly preinstalled?: boolean;
+  /** T3 Code's own environment, which provider instances inherit. */
+  readonly hostEnv?: Record<string, string>;
   /** Puts a non-empty directory where the ledger goes, so saving it fails. */
   readonly unsavableLedger?: boolean;
 }
@@ -155,7 +157,7 @@ function setup(options: Options) {
     Layer.provide(
       Layer.succeed(CommandAvailability, (command) => Effect.succeed(!missing.has(command))),
     ),
-    Layer.provide(Layer.succeed(HostProcessEnvironment, {})),
+    Layer.provide(Layer.succeed(HostProcessEnvironment, options.hostEnv ?? {})),
     Layer.provideMerge(NodeServices.layer),
   );
 
@@ -192,6 +194,8 @@ function setup(options: Options) {
   return {
     home,
     hermesHome,
+    /** CLIs not on the host; add one to take that agent away. */
+    missing,
     calls,
     layer,
     setAgentMemory,
@@ -542,6 +546,32 @@ describe("HindsightAgentMemory", () => {
       expect(harness.calls).toEqual([]);
       expect(hermesProvider(harness.hermesHome)).toBe("holographic");
       expect(state.detail).toContain("could not save");
+    }).pipe(Effect.provide(harness.layer));
+  });
+  it.effect("unwires an agent that is no longer set up, and leaves the rest", () => {
+    const harness = setup({ agentMemory: true, hermesYaml: "memory:\n  provider: holographic\n" });
+    return Effect.gen(function* () {
+      yield* harness.apply;
+      harness.missing.add("codex");
+      harness.missing.add("hermes");
+      const state = yield* harness.apply;
+
+      expect(harness.calls.at(-1)?.slice(2)).toEqual(["uninstall", "codex"]);
+      expect(hermesProvider(harness.hermesHome)).toBe("holographic");
+      expect(state.agents).toEqual([{ target: "claudeCode", state: "installed", detail: null }]);
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("names an instance whose config home comes from T3 Code's own environment", () => {
+    const harness = setup({
+      agentMemory: true,
+      missing: ["codex", "hermes"],
+      hostEnv: { CLAUDE_CONFIG_DIR: "/srv/claude-work" },
+    });
+    return Effect.gen(function* () {
+      const state = yield* harness.apply;
+
+      expect(state.agents[0]?.detail).toContain("Not covered");
     }).pipe(Effect.provide(harness.layer));
   });
 });

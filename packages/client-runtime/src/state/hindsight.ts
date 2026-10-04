@@ -387,3 +387,76 @@ export function summarizeHindsightMachines(
           : null;
   return { checked, mixed, canToggle: writable.length > 0, tone, label };
 }
+
+/** A connected machine, as handing it the shared server needs to see it. */
+export interface HindsightHandoffMachine {
+  /** `integrations.hindsight.agentMemory` on that machine. */
+  readonly enabled: boolean;
+  /** It resolves a server of its own; null until it has answered. */
+  readonly hasServer: boolean | null;
+  /** It has an API key saved in its settings. */
+  readonly hasSavedKey: boolean;
+  /** The server it resolves, if any. */
+  readonly serverUrl: string | null;
+  /** That server is reached with an API key. */
+  readonly serverHasKey: boolean;
+}
+
+export interface HindsightServerHandoff {
+  /** What a machine with no server of its own is handed, or null when there is nothing to hand. */
+  readonly url: string | null;
+  /**
+   * That server takes an API key. Clients never see a saved key, so it can
+   * only be handed on together with a key entered here, or to a machine that
+   * already has one saved.
+   */
+  readonly needsKey: boolean;
+}
+
+/** The shared server: the saved override, else one some machine already resolves. */
+export function planHindsightServerHandoff(
+  saved: { readonly url: string; readonly hasKey: boolean },
+  machines: ReadonlyArray<HindsightHandoffMachine>,
+): HindsightServerHandoff {
+  if (saved.url.length > 0) return { url: saved.url, needsKey: saved.hasKey };
+  const source = machines.find((machine) => machine.serverUrl !== null);
+  return source === undefined
+    ? { url: null, needsKey: false }
+    : { url: source.serverUrl, needsKey: source.serverHasKey };
+}
+
+/**
+ * Whether a write should hand `machine` the shared server. `enabling` is set
+ * when the write itself switches agent memory on, `withKey` when it carries
+ * an API key. A machine is never handed a keyed server without a key, so its
+ * agents do not start calling it unauthenticated.
+ */
+export function shouldHandOffHindsightServer(
+  machine: HindsightHandoffMachine,
+  handoff: HindsightServerHandoff,
+  options: { readonly enabling: boolean; readonly withKey: boolean },
+): boolean {
+  return (
+    (options.enabling || machine.enabled) &&
+    machine.hasServer === false &&
+    handoff.url !== null &&
+    (!handoff.needsKey || options.withKey || machine.hasSavedKey)
+  );
+}
+
+/** The switch's line while switched-on machines wait for the server's key, else null. */
+export function describeHindsightKeyWait(
+  machines: ReadonlyArray<HindsightHandoffMachine>,
+  handoff: HindsightServerHandoff,
+): string | null {
+  const waiting = machines.filter(
+    (machine) =>
+      machine.enabled &&
+      machine.hasServer === false &&
+      handoff.url !== null &&
+      handoff.needsKey &&
+      !machine.hasSavedKey,
+  ).length;
+  if (waiting === 0) return null;
+  return `Enter the API key below to finish ${waiting === 1 ? "1 machine" : `${waiting} machines`}`;
+}

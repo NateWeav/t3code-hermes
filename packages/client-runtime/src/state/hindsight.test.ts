@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { describeHindsightAgentMemory, summarizeHindsightMachines } from "./hindsight.ts";
+import {
+  describeHindsightAgentMemory,
+  describeHindsightKeyWait,
+  planHindsightServerHandoff,
+  shouldHandOffHindsightServer,
+  summarizeHindsightMachines,
+} from "./hindsight.ts";
 
 const base = { applying: false, blocker: null, agents: [], detail: null } as const;
 
@@ -94,5 +100,53 @@ describe("summarizeHindsightMachines", () => {
     expect(
       summarizeHindsightMachines([{ enabled: false, writable: false, state: null }]).canToggle,
     ).toBe(false);
+  });
+});
+
+describe("handing a machine the shared server", () => {
+  const keyedSource = {
+    enabled: true,
+    hasServer: true,
+    hasSavedKey: false,
+    serverUrl: "https://hs.example",
+    serverHasKey: true,
+  };
+  const bare = {
+    enabled: true,
+    hasServer: false,
+    hasSavedKey: false,
+    serverUrl: null,
+    serverHasKey: false,
+  };
+
+  it("never hands a keyed server on without a key, and says what is missing", () => {
+    const handoff = planHindsightServerHandoff({ url: "", hasKey: false }, [keyedSource, bare]);
+    expect(handoff).toEqual({ url: "https://hs.example", needsKey: true });
+    expect(shouldHandOffHindsightServer(bare, handoff, { enabling: true, withKey: false })).toBe(
+      false,
+    );
+    expect(describeHindsightKeyWait([keyedSource, bare], handoff)).toBe(
+      "Enter the API key below to finish 1 machine",
+    );
+    // Saving the key finishes it.
+    expect(shouldHandOffHindsightServer(bare, handoff, { enabling: false, withKey: true })).toBe(
+      true,
+    );
+  });
+
+  it("hands an open server, or a keyed one to a machine that has its key, in one click", () => {
+    const open = planHindsightServerHandoff({ url: "", hasKey: false }, [
+      { ...keyedSource, serverHasKey: false },
+      bare,
+    ]);
+    expect(shouldHandOffHindsightServer(bare, open, { enabling: true, withKey: false })).toBe(true);
+    const keyed = planHindsightServerHandoff({ url: "https://hs.example", hasKey: true }, []);
+    expect(
+      shouldHandOffHindsightServer({ ...bare, hasSavedKey: true }, keyed, {
+        enabling: true,
+        withKey: false,
+      }),
+    ).toBe(true);
+    expect(describeHindsightKeyWait([{ ...bare, hasSavedKey: true }], keyed)).toBeNull();
   });
 });

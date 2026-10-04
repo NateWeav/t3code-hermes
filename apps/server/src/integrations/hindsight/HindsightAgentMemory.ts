@@ -21,8 +21,9 @@
  * by switching this off; it is only pointed back at the server it used before.
  * The ledger is saved before anything it covers is changed, and an entry is
  * cleared only once its undo succeeds, so a failed one is retried by the next
- * pass. Agents follow the connection: with Memory off or no server left, what
- * T3 Code wired is taken out, and the switch puts it back once there is one.
+ * pass. Wiring follows what should be wired right now: with Memory off, no
+ * server left, or an agent no longer set up, what T3 Code wired for it is
+ * taken out, and the switch puts it back once it should be wired again.
  *
  * @module HindsightAgentMemory
  */
@@ -357,11 +358,10 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
           const binary = nonEmptyString(instanceConfig["binaryPath"]) ?? agent.binary;
           if (!(yield* isAvailable(binary, env))) continue;
           found = true;
+          // The same environment the provider is launched with, so a home
+          // inherited from T3 Code's own counts too.
           const ownHome =
-            nonEmptyString(instanceConfig["homePath"]) ??
-            nonEmptyString(
-              instance.environment?.find((entry) => entry.name === agent.homeVariable)?.value,
-            );
+            nonEmptyString(instanceConfig["homePath"]) ?? nonEmptyString(env[agent.homeVariable]);
           if (ownHome !== null) customHomeInstances.push(instanceId);
         }
         if (found) present.push({ target: agent.target, customHomeInstances, hermesHome: null });
@@ -540,77 +540,87 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
       agent.target === "claudeCode" || agent.target === "codex" ? [agent.target] : [],
     );
 
-    if (desired && connection !== null) {
-      if (coding.length > 0) {
-        const wiredBefore = new Set<CodingAgentTarget>();
-        for (const target of coding) {
-          if (yield* codingAgentInstalled(target)) wiredBefore.add(target);
-        }
-        const configMatches = installerConfigMatches(
-          yield* readJson(installerConfigPath),
-          connection,
-        );
-        if (!configMatches || wiredBefore.size < coding.length) {
-          if (!(yield* isAvailable("npx", hostEnvironment))) {
-            blocker = "nodeMissing";
-          } else {
-            yield* markApplying;
-            // Claimed before the installer runs; uninstalling an agent a failed
-            // install never reached is harmless.
-            const ownedByT3 = new Set([
-              ...ledger.codingAgents,
-              ...coding.filter((target) => !wiredBefore.has(target)),
-            ]);
-            const claimed: AgentMemoryLedger = {
-              ...nextLedger,
-              codingAgents: [...ownedByT3],
-              installerConfig: nextLedger.installerConfig ?? {
-                previous: yield* readText(installerConfigPath),
-              },
-            };
-            const failure = (yield* persist(claimed))
-              ? yield* runInstaller("install", coding, connection)
-              : "T3 Code could not save what it changes, so the installer was not run.";
-            if (persisted === claimed) nextLedger = claimed;
-            if (failure === null) {
-              if (connection.apiKey === null && !(yield* clearInstallerToken)) {
-                for (const target of coding) {
-                  failures.set(
-                    target,
-                    "The removed API key could not be cleared from Hindsight's config.",
-                  );
-                }
-              }
-            } else {
-              for (const target of coding) failures.set(target, failure);
-            }
-          }
-        }
+    if (desired && connection !== null && coding.length > 0) {
+      const wiredBefore = new Set<CodingAgentTarget>();
+      for (const target of coding) {
+        if (yield* codingAgentInstalled(target)) wiredBefore.add(target);
       }
-    } else if (ledger.codingAgents.length > 0 || ledger.installerConfig !== undefined) {
-      let uninstalled = ledger.codingAgents.length === 0;
-      if (!uninstalled) {
+      const configMatches = installerConfigMatches(
+        yield* readJson(installerConfigPath),
+        connection,
+      );
+      if (!configMatches || wiredBefore.size < coding.length) {
         if (!(yield* isAvailable("npx", hostEnvironment))) {
           blocker = "nodeMissing";
         } else {
           yield* markApplying;
-          const failure = yield* runInstaller("uninstall", ledger.codingAgents, null);
+          // Claimed before the installer runs; uninstalling an agent a failed
+          // install never reached is harmless.
+          const ownedByT3 = new Set([
+            ...ledger.codingAgents,
+            ...coding.filter((target) => !wiredBefore.has(target)),
+          ]);
+          const claimed: AgentMemoryLedger = {
+            ...nextLedger,
+            codingAgents: [...ownedByT3],
+            installerConfig: nextLedger.installerConfig ?? {
+              previous: yield* readText(installerConfigPath),
+            },
+          };
+          const failure = (yield* persist(claimed))
+            ? yield* runInstaller("install", coding, connection)
+            : "T3 Code could not save what it changes, so the installer was not run.";
+          if (persisted === claimed) nextLedger = claimed;
           if (failure === null) {
-            nextLedger = { ...nextLedger, codingAgents: [] };
-            uninstalled = true;
+            if (connection.apiKey === null && !(yield* clearInstallerToken)) {
+              for (const target of coding) {
+                failures.set(
+                  target,
+                  "The removed API key could not be cleared from Hindsight's config.",
+                );
+              }
+            }
           } else {
-            for (const target of ledger.codingAgents) failures.set(target, failure);
+            for (const target of coding) failures.set(target, failure);
           }
         }
       }
-      // Only once T3 Code's own hooks are gone, so they never run against it.
-      if (uninstalled && ledger.installerConfig !== undefined) {
-        if (yield* restoreInstallerConfig(ledger.installerConfig.previous)) {
-          nextLedger = { codingAgents: nextLedger.codingAgents, hermes: nextLedger.hermes };
+    }
+
+    // What T3 Code wired but should not be wired now: the switch is off, there
+    // is no server, or the agent is no longer set up here.
+    const wanted: ReadonlyArray<CodingAgentTarget> = wire ? coding : [];
+    const unwanted = nextLedger.codingAgents.filter((target) => !wanted.includes(target));
+    if (unwanted.length > 0) {
+      if (!(yield* isAvailable("npx", hostEnvironment))) {
+        blocker = "nodeMissing";
+      } else {
+        yield* markApplying;
+        const failure = yield* runInstaller("uninstall", unwanted, null);
+        if (failure === null) {
+          nextLedger = {
+            ...nextLedger,
+            codingAgents: nextLedger.codingAgents.filter((target) => wanted.includes(target)),
+          };
         } else {
-          for (const target of coding) {
-            failures.set(target, "Hindsight's config could not be put back as it was.");
+          for (const target of unwanted) failures.set(target, failure);
+          if (unwanted.some((target) => !coding.includes(target))) {
+            detail = failure;
           }
+        }
+      }
+    }
+    // Only once nothing T3 Code wired is left, so its hooks never run against it.
+    if (
+      wanted.length === 0 &&
+      nextLedger.codingAgents.length === 0 &&
+      nextLedger.installerConfig !== undefined
+    ) {
+      if (yield* restoreInstallerConfig(nextLedger.installerConfig.previous)) {
+        nextLedger = { codingAgents: nextLedger.codingAgents, hermes: nextLedger.hermes };
+      } else {
+        for (const target of coding) {
+          failures.set(target, "Hindsight's config could not be put back as it was.");
         }
       }
     }
@@ -676,11 +686,14 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
           };
         }
       }
-    } else if (!wire && ledger.hermes !== null) {
-      const remaining = yield* undoHermes(ledger.hermes);
+    } else if (nextLedger.hermes !== null) {
+      // Off, no server, or Hermes no longer set up here.
+      const remaining = yield* undoHermes(nextLedger.hermes);
       nextLedger = { ...nextLedger, hermes: remaining };
       if (remaining !== null) {
-        failures.set("hermes", "Hermes' config could not be put back yet. Retry to try again.");
+        const failure = "Hermes' config could not be put back yet. Retry to try again.";
+        failures.set("hermes", failure);
+        if (hermes === undefined) detail = failure;
       }
     }
 

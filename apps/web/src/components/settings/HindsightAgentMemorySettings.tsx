@@ -5,16 +5,21 @@
  * client can change; each machine then wires its own agents and streams back
  * where they stand. A machine that has no Hindsight server yet is handed the
  * shared one on the way, so a freshly connected remote box needs nothing but
- * the click. The server and key rows write to every machine too — one memory
- * server, everywhere.
+ * the click — unless that server takes an API key, which this client never
+ * sees: then it waits for the key to be entered once below. The server and
+ * key rows write to every machine too — one memory server, everywhere.
  *
  * @module HindsightAgentMemorySettings
  */
 import { useAtomValue } from "@effect/atom-react";
 import {
   describeHindsightAgentMemory,
+  describeHindsightKeyWait,
+  planHindsightServerHandoff,
+  shouldHandOffHindsightServer,
   summarizeHindsightMachines,
   type HindsightAgentMemorySummary,
+  type HindsightHandoffMachine,
 } from "@t3tools/client-runtime/state/hindsight";
 import {
   type EnvironmentId,
@@ -51,7 +56,7 @@ const HINDSIGHT_URL_PLACEHOLDER = "http://127.0.0.1:8888";
 
 type HindsightPatch = { -readonly [K in keyof HindsightSettings]?: HindsightSettings[K] };
 
-interface Machine {
+interface Machine extends HindsightHandoffMachine {
   readonly environment: EnvironmentPresentation;
   readonly writable: boolean;
   readonly saved: HindsightSettings;
@@ -146,8 +151,11 @@ export function HindsightAgentMemorySettings() {
               environment,
               writable: operate === "granted",
               saved,
+              enabled: saved.agentMemory,
               hasServer: connection === undefined ? null : connection !== null,
+              hasSavedKey: (saved.apiKey ?? "").length > 0,
               serverUrl: connection?.baseUrl ?? null,
+              serverHasKey: connection?.hasApiKey === true,
               state,
               summary: describeHindsightAgentMemory(state, { enabled: saved.agentMemory }),
               applying: state?.applying === true,
@@ -187,7 +195,10 @@ export function HindsightAgentMemorySettings() {
   const resolvedUrl = machines.find((machine) => machine.serverUrl !== null)?.serverUrl ?? null;
   // What a machine without a server is handed: the shared override, else the
   // server some other machine already resolved (usually from Hermes).
-  const sharedUrl = savedUrl.length > 0 ? savedUrl : resolvedUrl;
+  const handoff = planHindsightServerHandoff({ url: savedUrl, hasKey: hasSavedKey }, machines);
+  const keyWait = describeHindsightKeyWait(writable, handoff);
+  const statusLabel = keyWait ?? overall.label;
+  const statusTone = keyWait === null ? overall.tone : "attention";
   const busy = saving || machines.some((machine) => machine.applying);
   const checking = writable.some((machine) => machine.hasServer === null);
 
@@ -218,8 +229,20 @@ export function HindsightAgentMemorySettings() {
       agentMemory,
       // A machine with no server yet gets the shared one; one that already
       // resolves a server keeps it.
-      ...(agentMemory && machine.hasServer === false && sharedUrl !== null
-        ? { baseUrl: sharedUrl }
+      ...(agentMemory &&
+      handoff.url !== null &&
+      shouldHandOffHindsightServer(machine, handoff, { enabling: true, withKey: false })
+        ? { baseUrl: handoff.url }
+        : {}),
+    }));
+
+  // A key entered here also finishes the machines that were waiting for it.
+  const saveApiKey = (apiKey: string) =>
+    writeAll((machine) => ({
+      apiKey,
+      ...(handoff.url !== null &&
+      shouldHandOffHindsightServer(machine, handoff, { enabling: false, withKey: true })
+        ? { baseUrl: handoff.url }
         : {}),
     }));
 
@@ -231,10 +254,10 @@ export function HindsightAgentMemorySettings() {
         {...searchableSetting("agent-memory")}
         description="Give Claude Code, Codex, and Hermes on every connected machine long-term memory in one Hindsight server. Each machine wires its own agents; turning it off removes only what T3 Code added."
         status={
-          overall.label === null ? undefined : (
+          statusLabel === null ? undefined : (
             <span className="flex min-w-0 items-center gap-2 text-xs">
-              <ToneDot tone={overall.tone} />
-              <span className="font-medium text-foreground">{overall.label}</span>
+              <ToneDot tone={statusTone} />
+              <span className="font-medium text-foreground">{statusLabel}</span>
             </span>
           )
         }
@@ -329,7 +352,7 @@ export function HindsightAgentMemorySettings() {
             onSubmit={(event) => {
               event.preventDefault();
               const next = apiKeyDraft.trim();
-              if (next.length > 0) void writeAll(() => ({ apiKey: next }));
+              if (next.length > 0) void saveApiKey(next);
             }}
           >
             <Input

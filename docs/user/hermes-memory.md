@@ -56,7 +56,9 @@ machine: each one wires the agents on its own machine and reports back, so a rem
 nothing but the click. The rows under the switch show every machine and where its agents stand.
 
 The server comes from Memory above. A machine that has no Hindsight server yet is handed the
-shared one when you switch on; a machine that already has one keeps it. To put every machine on the
+shared one when you switch on; a machine that already has one keeps it. If the shared server needs
+an API key, T3 Code cannot copy it from another machine, so the switch asks you to enter it once
+below and finishes those machines when you save it. To put every machine on the
 same server, enter it in the **Hindsight server** field, which writes to all of them, and add an
 **API key** there if the server needs one. Every machine must be able to reach that address, so a
 tailnet address works and a loopback one only does on the machine Hindsight runs on.

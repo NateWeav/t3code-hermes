@@ -1,8 +1,12 @@
 import { useAtomValue } from "@effect/atom-react";
 import {
   describeHindsightAgentMemory,
+  describeHindsightKeyWait,
+  planHindsightServerHandoff,
+  shouldHandOffHindsightServer,
   summarizeHindsightMachines,
   type HindsightAgentMemorySummary,
+  type HindsightHandoffMachine,
 } from "@t3tools/client-runtime/state/hindsight";
 import type { HindsightAgentMemoryState, HindsightSettings } from "@t3tools/contracts";
 import * as Option from "effect/Option";
@@ -24,7 +28,7 @@ type HindsightPatch = { -readonly [K in keyof HindsightSettings]?: HindsightSett
 
 const INPUT_CLASS = "min-h-11 rounded-xl bg-subtle px-3 py-2 text-base";
 
-interface Machine {
+interface Machine extends HindsightHandoffMachine {
   readonly environment: EnvironmentPresentation;
   readonly writable: boolean;
   readonly saved: HindsightSettings;
@@ -90,8 +94,11 @@ export function EnvironmentAgentMemorySettings() {
                   true,
                 ),
               saved,
+              enabled: saved.agentMemory,
               hasServer: connection === undefined ? null : connection !== null,
+              hasSavedKey: (saved.apiKey ?? "").length > 0,
               serverUrl: connection?.baseUrl ?? null,
+              serverHasKey: connection?.hasApiKey === true,
               state,
               summary: describeHindsightAgentMemory(state, { enabled: saved.agentMemory }),
               unsupported: state === null && memoryResult._tag === "Failure",
@@ -123,7 +130,8 @@ export function EnvironmentAgentMemorySettings() {
   const savedUrl = representative?.saved.baseUrl ?? "";
   const hasSavedKey = (representative?.saved.apiKey ?? "").length > 0;
   const resolvedUrl = machines.find((machine) => machine.serverUrl !== null)?.serverUrl ?? null;
-  const sharedUrl = savedUrl.length > 0 ? savedUrl : resolvedUrl;
+  const handoff = planHindsightServerHandoff({ url: savedUrl, hasKey: hasSavedKey }, machines);
+  const statusLabel = describeHindsightKeyWait(writable, handoff) ?? overall.label;
   const busy = saving || machines.some((machine) => machine.state?.applying === true);
   const checking = writable.some((machine) => machine.hasServer === null);
   const editable = overall.canToggle && !busy;
@@ -149,8 +157,20 @@ export function EnvironmentAgentMemorySettings() {
   const setEnabled = (agentMemory: boolean) =>
     writeAll((machine) => ({
       agentMemory,
-      ...(agentMemory && machine.hasServer === false && sharedUrl !== null
-        ? { baseUrl: sharedUrl }
+      ...(agentMemory &&
+      handoff.url !== null &&
+      shouldHandOffHindsightServer(machine, handoff, { enabling: true, withKey: false })
+        ? { baseUrl: handoff.url }
+        : {}),
+    }));
+
+  // A key entered here also finishes the machines that were waiting for it.
+  const saveApiKey = (apiKey: string) =>
+    writeAll((machine) => ({
+      apiKey,
+      ...(handoff.url !== null &&
+      shouldHandOffHindsightServer(machine, handoff, { enabling: false, withKey: true })
+        ? { baseUrl: handoff.url }
         : {}),
     }));
 
@@ -159,7 +179,7 @@ export function EnvironmentAgentMemorySettings() {
       <SettingsSwitchRow
         icon="brain"
         label="Hindsight for every agent"
-        {...(overall.label === null ? {} : { subtitle: overall.label })}
+        {...(statusLabel === null ? {} : { subtitle: statusLabel })}
         disabled={!editable || checking}
         value={overall.checked}
         onValueChange={(next) => void setEnabled(next || overall.mixed)}
@@ -218,7 +238,7 @@ export function EnvironmentAgentMemorySettings() {
             <MemoryButton
               label="Save"
               disabled={!editable}
-              onPress={() => void writeAll(() => ({ apiKey: apiKeyDraft.trim() }))}
+              onPress={() => void saveApiKey(apiKeyDraft.trim())}
             />
           ) : hasSavedKey ? (
             <MemoryButton

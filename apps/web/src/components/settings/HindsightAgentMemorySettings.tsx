@@ -15,11 +15,12 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   describeHindsightAgentMemory,
   describeHindsightKeyWait,
+  hindsightSharedPatch,
   planHindsightServerHandoff,
-  shouldHandOffHindsightServer,
   summarizeHindsightMachines,
   type HindsightAgentMemorySummary,
   type HindsightHandoffMachine,
+  type HindsightSharedWrite,
 } from "@t3tools/client-runtime/state/hindsight";
 import {
   type EnvironmentId,
@@ -154,6 +155,7 @@ export function HindsightAgentMemorySettings() {
               enabled: saved.agentMemory,
               hasServer: connection === undefined ? null : connection !== null,
               serverUrl: connection?.baseUrl ?? null,
+              savedUrl: saved.baseUrl ?? "",
               serverHasKey: connection?.hasApiKey === true,
               state,
               summary: describeHindsightAgentMemory(state, { enabled: saved.agentMemory }),
@@ -223,27 +225,14 @@ export function HindsightAgentMemorySettings() {
     }
   };
 
-  const setEnabled = (agentMemory: boolean) =>
-    writeAll((machine) => ({
-      agentMemory,
-      // A machine with no server yet gets the shared one; one that already
-      // resolves a server keeps it.
-      ...(agentMemory &&
-      handoff.url !== null &&
-      shouldHandOffHindsightServer(machine, handoff, { enabling: true, withKey: false })
-        ? { baseUrl: handoff.url }
-        : {}),
-    }));
-
-  // A key entered here also finishes the machines that were waiting for it.
-  const saveApiKey = (apiKey: string) =>
-    writeAll((machine) => ({
-      apiKey,
-      ...(handoff.url !== null &&
-      shouldHandOffHindsightServer(machine, handoff, { enabling: false, withKey: true })
-        ? { baseUrl: handoff.url }
-        : {}),
-    }));
+  // A machine without a server is handed the shared one, and a key entered
+  // here also finishes the machines that were waiting for it. Each machine's
+  // server and key move together; see `hindsightSharedPatch`.
+  const writeShared = (write: HindsightSharedWrite) =>
+    writeAll((machine) => hindsightSharedPatch(machine, handoff, write));
+  const setEnabled = (agentMemory: boolean) => writeShared({ kind: "switch", agentMemory });
+  const saveApiKey = (apiKey: string) => writeShared({ kind: "apiKey", apiKey });
+  const saveServer = (url: string) => writeShared({ kind: "server", url });
 
   const retry = (environmentId: EnvironmentId) => void apply({ environmentId, input: {} });
 
@@ -322,7 +311,7 @@ export function HindsightAgentMemorySettings() {
             <SettingResetButton
               label="Hindsight server"
               tooltip="Use each machine's own server"
-              onClick={() => void writeAll(() => ({ baseUrl: "" }))}
+              onClick={() => void saveServer("")}
             />
           ) : null
         }
@@ -335,14 +324,14 @@ export function HindsightAgentMemorySettings() {
             placeholder={resolvedUrl ?? HINDSIGHT_URL_PLACEHOLDER}
             value={savedUrl}
             onCommit={(next) => {
-              if (next.trim() !== savedUrl) void writeAll(() => ({ baseUrl: next.trim() }));
+              if (next.trim() !== savedUrl) void saveServer(next.trim());
             }}
           />
         }
       />
       <SettingsRow
         title="API key"
-        description="Sent to that server as a bearer token from every machine. Leave empty for an open instance."
+        description="Sent as a bearer token by every machine on that server, never to another one. Leave empty for an open instance."
         control={
           <form
             className="flex items-center gap-2"
@@ -368,7 +357,7 @@ export function HindsightAgentMemorySettings() {
                 size="sm"
                 variant="outline"
                 disabled={!overall.canToggle || busy}
-                onClick={() => void writeAll(() => ({ apiKey: "" }))}
+                onClick={() => void saveApiKey("")}
               >
                 Remove
               </Button>

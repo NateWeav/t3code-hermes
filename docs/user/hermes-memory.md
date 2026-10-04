@@ -61,7 +61,9 @@ an API key, T3 Code cannot copy it from another machine, so the switch asks you 
 below and finishes those machines when you save it. To put every machine on the
 same server, enter it in the **Hindsight server** field, which writes to all of them, and add an
 **API key** there if the server needs one. Every machine must be able to reach that address, so a
-tailnet address works and a loopback one only does on the machine Hindsight runs on.
+tailnet address works and a loopback one only does on the machine Hindsight runs on. The key goes only to
+machines on that server, and a machine moved to another server drops the key it had, so a key is
+never sent anywhere it was not entered for.
 
 Claude Code and Codex are wired by Hindsight's own installer, which adds hooks and a `hindsight`
 MCP server to `~/.claude` and `~/.codex`; that machine needs Node.js 18 or newer on its `PATH`.

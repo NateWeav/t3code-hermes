@@ -2,11 +2,12 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   describeHindsightAgentMemory,
   describeHindsightKeyWait,
+  hindsightSharedPatch,
   planHindsightServerHandoff,
-  shouldHandOffHindsightServer,
   summarizeHindsightMachines,
   type HindsightAgentMemorySummary,
   type HindsightHandoffMachine,
+  type HindsightSharedWrite,
 } from "@t3tools/client-runtime/state/hindsight";
 import type { HindsightAgentMemoryState, HindsightSettings } from "@t3tools/contracts";
 import * as Option from "effect/Option";
@@ -97,6 +98,7 @@ export function EnvironmentAgentMemorySettings() {
               enabled: saved.agentMemory,
               hasServer: connection === undefined ? null : connection !== null,
               serverUrl: connection?.baseUrl ?? null,
+              savedUrl: saved.baseUrl ?? "",
               serverHasKey: connection?.hasApiKey === true,
               state,
               summary: describeHindsightAgentMemory(state, { enabled: saved.agentMemory }),
@@ -135,16 +137,21 @@ export function EnvironmentAgentMemorySettings() {
   const checking = writable.some((machine) => machine.hasServer === null);
   const editable = overall.canToggle && !busy;
 
-  const writeAll = async (patchFor: (machine: Machine) => HindsightPatch) => {
+  const writeAll = async (patchFor: (machine: Machine) => HindsightPatch | null) => {
     setSaving(true);
     try {
       await Promise.all(
-        writable.map((machine) =>
-          updateSettings({
-            environmentId: machine.environment.environmentId,
-            input: { patch: { integrations: { hindsight: patchFor(machine) } } },
-          }),
-        ),
+        writable.flatMap((machine) => {
+          const patch = patchFor(machine);
+          return patch === null
+            ? []
+            : [
+                updateSettings({
+                  environmentId: machine.environment.environmentId,
+                  input: { patch: { integrations: { hindsight: patch } } },
+                }),
+              ];
+        }),
       );
       setUrlDraft(null);
       setApiKeyDraft("");
@@ -153,25 +160,14 @@ export function EnvironmentAgentMemorySettings() {
     }
   };
 
-  const setEnabled = (agentMemory: boolean) =>
-    writeAll((machine) => ({
-      agentMemory,
-      ...(agentMemory &&
-      handoff.url !== null &&
-      shouldHandOffHindsightServer(machine, handoff, { enabling: true, withKey: false })
-        ? { baseUrl: handoff.url }
-        : {}),
-    }));
-
-  // A key entered here also finishes the machines that were waiting for it.
-  const saveApiKey = (apiKey: string) =>
-    writeAll((machine) => ({
-      apiKey,
-      ...(handoff.url !== null &&
-      shouldHandOffHindsightServer(machine, handoff, { enabling: false, withKey: true })
-        ? { baseUrl: handoff.url }
-        : {}),
-    }));
+  // A machine without a server is handed the shared one, and a key entered
+  // here also finishes the machines that were waiting for it. Each machine's
+  // server and key move together; see `hindsightSharedPatch`.
+  const writeShared = (write: HindsightSharedWrite) =>
+    writeAll((machine) => hindsightSharedPatch(machine, handoff, write));
+  const setEnabled = (agentMemory: boolean) => writeShared({ kind: "switch", agentMemory });
+  const saveApiKey = (apiKey: string) => writeShared({ kind: "apiKey", apiKey });
+  const saveServer = (url: string) => writeShared({ kind: "server", url });
 
   return (
     <SettingsSection title="Memory">
@@ -211,7 +207,7 @@ export function EnvironmentAgentMemorySettings() {
           onChangeText={setUrlDraft}
           onEndEditing={() => {
             if (urlDraft !== null && urlDraft.trim() !== savedUrl) {
-              void writeAll(() => ({ baseUrl: urlDraft.trim() }));
+              void saveServer(urlDraft.trim());
             }
           }}
           autoCapitalize="none"
@@ -240,11 +236,7 @@ export function EnvironmentAgentMemorySettings() {
               onPress={() => void saveApiKey(apiKeyDraft.trim())}
             />
           ) : hasSavedKey ? (
-            <MemoryButton
-              label="Remove"
-              disabled={!editable}
-              onPress={() => void writeAll(() => ({ apiKey: "" }))}
-            />
+            <MemoryButton label="Remove" disabled={!editable} onPress={() => void saveApiKey("")} />
           ) : null}
         </View>
       </View>

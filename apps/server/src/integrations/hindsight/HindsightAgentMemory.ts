@@ -57,6 +57,7 @@ import { resolveEnabledHermesInstance, resolveHermesHome } from "../../hermes/he
 import * as ProcessRunner from "../../processRunner.ts";
 import { deriveProviderInstanceConfigMap } from "../../provider/Layers/ProviderInstanceRegistryHydration.ts";
 import { mergeProviderInstanceEnvironment } from "../../provider/ProviderInstanceEnvironment.ts";
+import { expandHomePath } from "../../pathExpansion.ts";
 import * as ServerSettingsService from "../../serverSettings.ts";
 import { HindsightService, type HindsightConnection } from "./HindsightService.ts";
 
@@ -379,6 +380,23 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
       ),
     );
 
+  /**
+   * Whether a Codex shadow home still runs the shared `hooks.json`. A shadow
+   * links it from the shared home when Codex starts, unless it already holds
+   * a file of its own, which then never sees the installer's hooks.
+   */
+  const shadowSharesHooks = (shadowHome: string) =>
+    Effect.gen(function* () {
+      const shadowHooks = path.join(path.resolve(expandHomePath(shadowHome)), "hooks.json");
+      // Missing, or a link to a shared file not written yet: linked on the next start.
+      if (!(yield* fs.exists(shadowHooks).pipe(Effect.orElseSucceed(() => false)))) return true;
+      const own = yield* fs.realPath(shadowHooks).pipe(Effect.orElseSucceed(() => null));
+      const shared = yield* fs
+        .realPath(path.join(homeDir, ".codex", "hooks.json"))
+        .pipe(Effect.orElseSucceed(() => null));
+      return own !== null && own === shared;
+    });
+
   /** Agents with an enabled instance whose CLI is actually on this host. */
   const presentAgents = (settings: ServerSettings) =>
     Effect.gen(function* () {
@@ -399,7 +417,14 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
           // inherited from T3 Code's own counts too.
           const ownHome =
             nonEmptyString(instanceConfig["homePath"]) ?? nonEmptyString(env[agent.homeVariable]);
-          if (ownHome !== null) customHomeInstances.push(instanceId);
+          const shadowHome =
+            agent.target === "codex" ? nonEmptyString(instanceConfig["shadowHomePath"]) : null;
+          if (
+            ownHome !== null ||
+            (shadowHome !== null && !(yield* shadowSharesHooks(shadowHome)))
+          ) {
+            customHomeInstances.push(instanceId);
+          }
         }
         if (found) present.push({ target: agent.target, customHomeInstances, hermesHome: null });
       }
@@ -662,9 +687,10 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
       if (yield* restoreInstallerConnection(nextLedger.installerConnection)) {
         nextLedger = { codingAgents: nextLedger.codingAgents, hermes: nextLedger.hermes };
       } else {
-        for (const target of coding) {
-          failures.set(target, "Hindsight's config could not be put back as it was.");
-        }
+        const failure = "Hindsight's config could not be put back as it was.";
+        for (const target of coding) failures.set(target, failure);
+        // With no Claude Code or Codex row left to carry it, the machine does.
+        if (coding.length === 0) detail = failure;
       }
     }
 

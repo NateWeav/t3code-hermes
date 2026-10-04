@@ -40,6 +40,8 @@ interface Options {
   readonly hostEnv?: Record<string, string>;
   /** Makes `chmod` fail for that file, as on a filesystem without modes. */
   readonly failChmod?: "hermesConfig" | "ledger";
+  /** Gives Codex a shadow home whose `hooks.json` is its own file, or a link to the shared one. */
+  readonly codexShadowHooks?: "own" | "linked";
   /** Puts a non-empty directory where the ledger goes, so saving it fails. */
   readonly unsavableLedger?: boolean;
 }
@@ -171,9 +173,22 @@ function setup(options: Options) {
     ),
   );
 
+  const codexShadowHome = NodePath.join(home, "codex-shadow");
+  if (options.codexShadowHooks !== undefined) {
+    NodeFS.mkdirSync(codexShadowHome, { recursive: true });
+    const shadowHooks = NodePath.join(codexShadowHome, "hooks.json");
+    if (options.codexShadowHooks === "own") writeJson(shadowHooks, { hooks: {} });
+    else NodeFS.symlinkSync(NodePath.join(home, ".codex", "hooks.json"), shadowHooks);
+  }
+
   const settings = ServerSettings.layerTest({
     integrations: { hindsight: { agentMemory: options.agentMemory } },
-    providers: { hermes: { enabled: true } },
+    providers: {
+      hermes: { enabled: true },
+      ...(options.codexShadowHooks === undefined
+        ? {}
+        : { codex: { shadowHomePath: codexShadowHome } }),
+    },
   });
 
   const layer = Layer.effect(
@@ -656,6 +671,42 @@ describe("HindsightAgentMemory", () => {
           NodePath.join(harness.home, "t3", "userdata", "hindsight-agent-memory.json"),
         ),
       ).toBe(false);
+    }).pipe(Effect.provide(harness.layer));
+  });
+  it.effect("names a Codex shadow home that keeps a hooks.json of its own", () => {
+    const own = setup({
+      agentMemory: true,
+      missing: ["claude", "hermes"],
+      codexShadowHooks: "own",
+    });
+    const linked = setup({
+      agentMemory: true,
+      missing: ["claude", "hermes"],
+      codexShadowHooks: "linked",
+    });
+    return Effect.gen(function* () {
+      const ownState = yield* own.apply.pipe(Effect.provide(own.layer));
+      const linkedState = yield* linked.apply.pipe(Effect.provide(linked.layer));
+
+      expect(ownState.agents[0]?.detail).toContain("Not covered");
+      expect(linkedState.agents[0]?.detail).toBeNull();
+    });
+  });
+
+  it.effect("says so when cleanup fails after the last agent is gone", () => {
+    const harness = setup({ agentMemory: true, missing: ["hermes"] });
+    return Effect.gen(function* () {
+      yield* harness.apply;
+      NodeFS.writeFileSync(
+        NodePath.join(harness.home, ".hindsight", "coding-agent.json"),
+        "{broken",
+      );
+      harness.missing.add("claude");
+      harness.missing.add("codex");
+      const state = yield* harness.apply;
+
+      expect(state.agents).toEqual([]);
+      expect(state.detail).toContain("could not be put back");
     }).pipe(Effect.provide(harness.layer));
   });
 });

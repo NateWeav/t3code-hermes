@@ -404,6 +404,8 @@ export interface HindsightHandoffMachine {
   readonly hasServer: boolean | null;
   /** The server it resolves, if any. */
   readonly serverUrl: string | null;
+  /** Its saved server override, or empty. */
+  readonly savedUrl: string;
   /** That server is reached with an API key. */
   readonly serverHasKey: boolean;
 }
@@ -461,4 +463,58 @@ export function describeHindsightKeyWait(
   ).length;
   if (waiting === 0) return null;
   return `Enter the API key below to finish ${waiting === 1 ? "1 machine" : `${waiting} machines`}`;
+}
+
+/** One change the clients make on every machine they can write to. */
+export type HindsightSharedWrite =
+  | { readonly kind: "switch"; readonly agentMemory: boolean }
+  /** An empty key removes it. */
+  | { readonly kind: "apiKey"; readonly apiKey: string }
+  /** An empty URL puts each machine back on its own server. */
+  | { readonly kind: "server"; readonly url: string };
+
+export interface HindsightSharedPatch {
+  readonly agentMemory?: boolean;
+  readonly baseUrl?: string;
+  readonly apiKey?: string;
+}
+
+function isOnHindsightServer(machine: HindsightHandoffMachine, url: string | null): boolean {
+  return url !== null && url.length > 0 && (machine.savedUrl === url || machine.serverUrl === url);
+}
+
+/**
+ * What one shared write changes on one machine, or null for nothing. A
+ * machine's server and key move together, so a key only ever reaches the
+ * server it was entered for: a key goes to machines on the shared server,
+ * and a machine moved to another server loses the key it had.
+ */
+export function hindsightSharedPatch(
+  machine: HindsightHandoffMachine,
+  handoff: HindsightServerHandoff,
+  write: HindsightSharedWrite,
+): HindsightSharedPatch | null {
+  switch (write.kind) {
+    case "switch":
+      // Only an open server is handed on here; a keyed one waits for its key.
+      return write.agentMemory &&
+        handoff.url !== null &&
+        shouldHandOffHindsightServer(machine, handoff, { enabling: true, withKey: false })
+        ? { agentMemory: true, baseUrl: handoff.url, apiKey: "" }
+        : { agentMemory: write.agentMemory };
+    case "apiKey":
+      if (isOnHindsightServer(machine, handoff.url)) return { apiKey: write.apiKey };
+      return write.apiKey.length > 0 &&
+        handoff.url !== null &&
+        shouldHandOffHindsightServer(machine, handoff, { enabling: false, withKey: true })
+        ? { baseUrl: handoff.url, apiKey: write.apiKey }
+        : null;
+    case "server":
+      if (write.url.length === 0) {
+        return machine.savedUrl.length > 0 ? { baseUrl: "", apiKey: "" } : null;
+      }
+      return isOnHindsightServer(machine, write.url)
+        ? { baseUrl: write.url }
+        : { baseUrl: write.url, apiKey: "" };
+  }
 }

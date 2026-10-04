@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   describeHindsightAgentMemory,
   describeHindsightKeyWait,
+  hindsightSharedPatch,
   planHindsightServerHandoff,
   shouldHandOffHindsightServer,
   summarizeHindsightMachines,
@@ -123,12 +124,14 @@ describe("handing a machine the shared server", () => {
     enabled: true,
     hasServer: true,
     serverUrl: "https://hs.example",
+    savedUrl: "",
     serverHasKey: true,
   };
   const bare = {
     enabled: true,
     hasServer: false,
     serverUrl: null,
+    savedUrl: "",
     serverHasKey: false,
   };
 
@@ -163,5 +166,46 @@ describe("handing a machine the shared server", () => {
       false,
     );
     expect(shouldHandOffHindsightServer(bare, keyed, { enabling: true, withKey: true })).toBe(true);
+  });
+
+  it("keeps every key with the server it was entered for", () => {
+    const handoff = planHindsightServerHandoff({ url: "", hasKey: false }, [keyedSource, bare]);
+    const elsewhere = { ...keyedSource, serverUrl: "http://own-host:8888" };
+    const write = { kind: "apiKey", apiKey: "hsk_new" } as const;
+
+    expect(hindsightSharedPatch(keyedSource, handoff, write)).toEqual({ apiKey: "hsk_new" });
+    // Handed the server in the same write as its key.
+    expect(hindsightSharedPatch(bare, handoff, write)).toEqual({
+      baseUrl: "https://hs.example",
+      apiKey: "hsk_new",
+    });
+    // On another server: its own key stays, and this one never goes there.
+    expect(hindsightSharedPatch(elsewhere, handoff, write)).toBeNull();
+  });
+
+  it("drops a machine's key when it moves to another server", () => {
+    const open = planHindsightServerHandoff({ url: "", hasKey: false }, [
+      { ...keyedSource, serverHasKey: false },
+    ]);
+    expect(hindsightSharedPatch(bare, open, { kind: "switch", agentMemory: true })).toEqual({
+      agentMemory: true,
+      baseUrl: "https://hs.example",
+      apiKey: "",
+    });
+    const onOverride = {
+      ...keyedSource,
+      savedUrl: "http://old:8888",
+      serverUrl: "http://old:8888",
+    };
+    expect(
+      hindsightSharedPatch(onOverride, open, { kind: "server", url: "http://new:8888" }),
+    ).toEqual({ baseUrl: "http://new:8888", apiKey: "" });
+    expect(hindsightSharedPatch(onOverride, open, { kind: "server", url: "" })).toEqual({
+      baseUrl: "",
+      apiKey: "",
+    });
+    expect(
+      hindsightSharedPatch(onOverride, open, { kind: "server", url: "http://old:8888" }),
+    ).toEqual({ baseUrl: "http://old:8888" });
   });
 });

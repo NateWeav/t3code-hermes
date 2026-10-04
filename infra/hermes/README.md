@@ -25,9 +25,9 @@ needs its id, title, and `neededFor` text there; patch order is the order the ta
 order the patches stack in. Then run `node scripts/generate-hermes-patches.ts`, which rejects an
 inconsistent manifest; a server test fails until the generated file matches.
 
-The Patches tab picks the version for you, and is the easier way. To apply one by hand, use the
-first version listed in `patches.json` whose `hermesCommit` your checkout already contains, and
-check that it fits:
+The Patches tab picks the version for you, and is the easier way. To apply one by hand, go through
+the versions listed in `patches.json` in order and use the first that both fits and has a
+`hermesCommit` your checkout already contains:
 
 ```bash
 cd ~/.hermes/hermes-agent
@@ -36,8 +36,8 @@ git apply --check /path/to/t3code/infra/hermes/<patch-id>/<version>.patch
 git apply /path/to/t3code/infra/hermes/<patch-id>/<version>.patch
 ```
 
-If no listed commit is in your checkout, apply a version only when it is the one version that
-passes `--check`. When several pass, they can be changing different code, so use the Patches tab,
+If no version passes both checks, apply a version only when it is the one version that passes
+`--check`. When several pass, they can be changing different code, so use the Patches tab,
 which refuses when it can't tell them apart.
 
 ## `acp-central-ssh-execution`

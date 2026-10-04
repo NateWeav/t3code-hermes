@@ -365,6 +365,78 @@ describe("hermes patches", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("removes the applied version beside another patch upstream now carries", () =>
+    Effect.gen(function* () {
+      // The two-places checkout, with another patch in the same file whose
+      // change is committed. It reverses too, but was never applied here.
+      const fileSystem = yield* FileSystem.FileSystem;
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hermes-checkout-" });
+      git(root, "init", "--quiet");
+      const file = NodePath.join(root, "session.py");
+      const block = "k = 0\nk = 1\nk = 2\n";
+      const padding = "p = 0\np = 1\np = 2\np = 3\n";
+      const lines = (first: string, second: string, tail = "0") =>
+        `${block}v = ${first}\n${block}v = ${second}\n${block}${padding}tail = ${tail}\n`;
+      NodeFS.writeFileSync(file, lines("1", "3"));
+      const base = commit(root, "base");
+      const other: HermesPatchDefinition = {
+        id: HermesPatchId.make("other-patch"),
+        title: "Other",
+        neededFor: "Tests.",
+        versions: [diffAt(root, "session.py", lines("1", "3", "1"), base)],
+      };
+      NodeFS.writeFileSync(file, lines("1", "3", "1"));
+      const carried = commit(root, "upstream carries the other patch");
+      const patch = definition([
+        diffAt(root, "session.py", lines("1", "2", "1"), carried),
+        diffAt(root, "session.py", lines("2", "3", "1"), carried),
+      ]);
+
+      NodeFS.writeFileSync(file, lines("2", "3", "1"));
+      assert.isTrue((yield* changeHermesPatch(root, patch, "reverse", [patch, other])).ok);
+      assert.strictEqual(NodeFS.readFileSync(file, "utf8"), lines("1", "3", "1"));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("ignores an edit in a file only another patch's unapplied version touches", () =>
+    Effect.gen(function* () {
+      // Another patch shares the file; its other version also touches a
+      // second file, where the user has an unrelated edit.
+      const fileSystem = yield* FileSystem.FileSystem;
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hermes-checkout-" });
+      git(root, "init", "--quiet");
+      const file = NodePath.join(root, "session.py");
+      const elsewhere = NodePath.join(root, "gateway.py");
+      const block = "k = 0\nk = 1\nk = 2\n";
+      const padding = "p = 0\np = 1\np = 2\np = 3\n";
+      const lines = (first: string, second: string, tail = "0") =>
+        `${block}v = ${first}\n${block}v = ${second}\n${block}${padding}tail = ${tail}\n`;
+      NodeFS.writeFileSync(file, lines("1", "3"));
+      NodeFS.writeFileSync(elsewhere, "gateway = 1\n");
+      const base = commit(root, "base");
+      const patch = definition([
+        diffAt(root, "session.py", lines("1", "2"), base),
+        diffAt(root, "session.py", lines("2", "3"), base),
+      ]);
+      const onlyShared = diffAt(root, "session.py", lines("1", "3", "1"), base);
+      NodeFS.writeFileSync(file, lines("1", "3", "1"));
+      NodeFS.writeFileSync(elsewhere, "gateway = 2\n");
+      const withGateway: HermesPatchVersion = { ...onlyShared, content: git(root, "diff") };
+      git(root, "checkout", "--quiet", "--", ".");
+      const other: HermesPatchDefinition = {
+        id: HermesPatchId.make("other-patch"),
+        title: "Other",
+        neededFor: "Tests.",
+        versions: [withGateway, onlyShared],
+      };
+
+      NodeFS.writeFileSync(file, lines("2", "3", "1"));
+      NodeFS.writeFileSync(elsewhere, "gateway = mine\n");
+      assert.isTrue((yield* changeHermesPatch(root, patch, "reverse", [patch, other])).ok);
+      assert.strictEqual(NodeFS.readFileSync(file, "utf8"), lines("1", "3", "1"));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("removes every file of the applied version when another touches fewer", () =>
     Effect.gen(function* () {
       // The older version changes two files, the newer only one of them the

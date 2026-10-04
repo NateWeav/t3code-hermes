@@ -167,6 +167,41 @@ describe("hermes patches", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("removes the version applied when two versions patch to the same text", () =>
+    Effect.gen(function* () {
+      // Upstream rewrote the very line the patch replaces, so both versions
+      // produce the same file and both reverse cleanly on either commit.
+      const fileSystem = yield* FileSystem.FileSystem;
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hermes-checkout-" });
+      git(root, "init", "--quiet");
+      const file = NodePath.join(root, "session.py");
+      NodeFS.writeFileSync(file, "a = 1\nremote_cwd = None\nb = 2\n");
+      const older = commit(root, "older");
+      const olderVersion = diffAt(
+        root,
+        "session.py",
+        "a = 1\nremote_cwd = configured()\nb = 2\n",
+        older,
+      );
+      NodeFS.writeFileSync(file, "a = 1\nremote_cwd = default()\nb = 2\n");
+      const newer = commit(root, "newer");
+      const newerVersion = diffAt(
+        root,
+        "session.py",
+        "a = 1\nremote_cwd = configured()\nb = 2\n",
+        newer,
+      );
+      const patch = definition([newerVersion, olderVersion]);
+
+      git(root, "checkout", "--quiet", older);
+      assert.isTrue((yield* changeHermesPatch(root, patch, "forward")).ok);
+      assert.strictEqual(yield* stateOf(root, patch), "applied");
+      assert.isTrue((yield* changeHermesPatch(root, patch, "reverse")).ok);
+      assert.strictEqual(NodeFS.readFileSync(file, "utf8"), "a = 1\nremote_cwd = None\nb = 2\n");
+      assert.strictEqual(git(root, "status", "--porcelain"), "");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("reports a checkout no version fits as not applying, and leaves it alone", () =>
     Effect.gen(function* () {
       const { root, file, patch } = yield* makeTwoVersionCheckout;

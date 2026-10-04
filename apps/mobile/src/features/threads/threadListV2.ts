@@ -9,7 +9,10 @@ import {
 } from "@t3tools/client-runtime/state/thread-settled";
 import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
-import { resolveThreadProviderStack } from "@t3tools/client-runtime/state/models";
+import {
+  resolveThreadProviderStack,
+  threadIsMonitoring,
+} from "@t3tools/client-runtime/state/models";
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
 import {
   createInboxReturnTracker,
@@ -72,6 +75,8 @@ export function resolveThreadListV2ProviderDrivers(
  * Six visual states. Color distinguishes approval, input, active work, and
  * failures. Ready is the unlabeled resting state; waiting (runtime status "idle") is the agent
  * parked on open background tasks, grey like working rather than a false Done.
+ * Monitoring is the agent stopped while a watch will wake it with news: a pull
+ * request the server watches, or provider monitors as the only held work.
  * The orchestrator v2 presentation bridge parks runtime at idle when the
  * post-settlement background roster holds the run's completion (subagents,
  * monitors); commands left running, such as a dev server, read as ready.
@@ -81,6 +86,7 @@ export type ThreadListV2Status =
   | "input"
   | "working"
   | "waiting"
+  | "monitoring"
   | "failed"
   | "limited"
   | "ready";
@@ -183,7 +189,14 @@ export function threadHasUnseenCompletion(
 }
 
 export function resolveThreadListV2Status(
-  thread: Pick<EnvironmentThreadShell, "hasPendingApprovals" | "hasPendingUserInput" | "runtime">,
+  thread: Pick<
+    EnvironmentThreadShell,
+    | "hasPendingApprovals"
+    | "hasPendingUserInput"
+    | "pendingBackgroundTasks"
+    | "pullRequests"
+    | "runtime"
+  >,
 ): ThreadListV2Status {
   if (thread.hasPendingApprovals) {
     return "approval";
@@ -196,6 +209,9 @@ export function resolveThreadListV2Status(
     ["preparing", "queued", "starting", "running", "waiting"].includes(thread.runtime.status)
   ) {
     return "working";
+  }
+  if (threadIsMonitoring(thread)) {
+    return "monitoring";
   }
   if (thread.runtime?.status === "idle") {
     return "waiting";

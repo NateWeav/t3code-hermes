@@ -1,4 +1,7 @@
-import { resolveThreadWorkingStartedAt } from "@t3tools/client-runtime/state/models";
+import {
+  resolveThreadWorkingStartedAt,
+  threadIsMonitoring,
+} from "@t3tools/client-runtime/state/models";
 import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import { threadPullRequestSearchTerms } from "@t3tools/shared/threadPullRequests";
 import * as React from "react";
@@ -625,7 +628,8 @@ export interface ThreadStatusPill {
     | "Pending Approval"
     | "Awaiting Input"
     | "Waiting"
-    | "Plan Ready";
+    | "Plan Ready"
+    | "Monitoring";
   colorClass: string;
   dotClass: string;
   pulse: boolean;
@@ -638,6 +642,7 @@ const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
   Connecting: 3,
   Waiting: 2.5,
   "Plan Ready": 2,
+  Monitoring: 1.5,
   Completed: 1,
 };
 
@@ -648,6 +653,7 @@ type ThreadStatusInput = Pick<
   | "hasPendingUserInput"
   | "interactionMode"
   | "latestRun"
+  | "pullRequests"
   | "runtime"
 > & {
   lastVisitedAt?: string | null | undefined;
@@ -941,8 +947,10 @@ export function resolveThreadRowClassName(input: {
 // whether it finished, asked a question, or proposed a plan. Waiting
 // (runtime status "idle") is the agent stopped with background work that will
 // wake it (subagents, monitors): not the user's turn yet, so it renders grey
-// like working, not as a false Done. Commands it left running, such as a dev
-// server, do not hold the thread; it reads as ready.
+// like working, not as a false Done. Monitoring is the agent stopped while a
+// watch will wake it with news (a pull request the server watches, or provider
+// monitors as the only held work); it recedes like working. Commands it left
+// running, such as a dev server, do not hold the thread; it reads as ready.
 // Unread completion is tracked separately: it describes whether a ready
 // thread needs attention, not what the thread is currently doing.
 export type SidebarThreadStatus =
@@ -950,6 +958,7 @@ export type SidebarThreadStatus =
   | "input"
   | "working"
   | "waiting"
+  | "monitoring"
   | "failed"
   | "limited"
   | "ready";
@@ -962,7 +971,9 @@ export function shouldRecedeSidebarThread(input: {
   isSelected: boolean;
 }): boolean {
   if (input.isActive || input.isSelected || input.status === "input") return false;
-  if (input.status === "working" || input.status === "waiting") return true;
+  if (input.status === "working" || input.status === "waiting" || input.status === "monitoring") {
+    return true;
+  }
   if (input.status === "ready" || input.status === "approval") {
     return !input.isUnread && !input.isWoke;
   }
@@ -971,7 +982,11 @@ export function shouldRecedeSidebarThread(input: {
 
 type SidebarThreadStatusInput = Pick<
   SidebarThreadSummary,
-  "hasPendingApprovals" | "hasPendingUserInput" | "runtime"
+  | "hasPendingApprovals"
+  | "hasPendingUserInput"
+  | "pendingBackgroundTasks"
+  | "pullRequests"
+  | "runtime"
 >;
 
 export function resolveSidebarThreadStatus(thread: SidebarThreadStatusInput): SidebarThreadStatus {
@@ -986,6 +1001,9 @@ export function resolveSidebarThreadStatus(thread: SidebarThreadStatusInput): Si
     ["preparing", "queued", "starting", "running", "waiting"].includes(thread.runtime.status)
   ) {
     return "working";
+  }
+  if (threadIsMonitoring(thread)) {
+    return "monitoring";
   }
   if (thread.runtime?.status === "idle") {
     return "waiting";
@@ -1020,6 +1038,13 @@ export function resolveThreadStatusRing(input: {
         kind: "waiting",
         colorClass: "text-sky-600/60 dark:text-sky-400/60",
         dashed: true,
+        motion: "none",
+      };
+    case "monitoring":
+      return {
+        kind: "monitoring",
+        colorClass: "text-sky-600/60 dark:text-sky-400/60",
+        dashed: false,
         motion: "none",
       };
     case "approval":
@@ -1068,6 +1093,7 @@ export type SidebarV2TopStatusKind =
   | "failed"
   | "limited"
   | "input"
+  | "monitoring"
   | "waiting"
   | "woke"
   | "working";
@@ -1080,8 +1106,8 @@ export function resolveSidebarV2TopStatus(input: {
   if (input.status === "working") {
     return "working";
   }
-  if (input.status === "waiting") {
-    return "waiting";
+  if (input.status === "waiting" || input.status === "monitoring") {
+    return input.status;
   }
   if (input.status === "approval") {
     return "approval";
@@ -1266,7 +1292,12 @@ export function resolveThreadStatusPill(input: {
     };
   }
 
-  if (backgroundWorkHoldsCompletion(thread.pendingBackgroundTasks ?? [])) {
+  const monitoring = threadIsMonitoring({
+    pendingBackgroundTasks: thread.pendingBackgroundTasks ?? [],
+    pullRequests: thread.pullRequests,
+    runtime: thread.runtime,
+  });
+  if (!monitoring && backgroundWorkHoldsCompletion(thread.pendingBackgroundTasks ?? [])) {
     return {
       label: "Waiting",
       colorClass: "text-sidebar-muted-foreground",
@@ -1285,6 +1316,15 @@ export function resolveThreadStatusPill(input: {
       label: "Plan Ready",
       colorClass: "text-violet-600 dark:text-violet-300/90",
       dotClass: "bg-violet-500 dark:bg-violet-300/90",
+      pulse: false,
+    };
+  }
+
+  if (monitoring) {
+    return {
+      label: "Monitoring",
+      colorClass: "text-sky-600 dark:text-sky-300/80",
+      dotClass: "bg-sky-500 dark:bg-sky-300/80",
       pulse: false,
     };
   }

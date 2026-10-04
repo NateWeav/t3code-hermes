@@ -163,7 +163,7 @@ describe("resolveThreadListV2Status", () => {
         makeThread({
           id: ThreadId.make("t"),
           title: "t",
-          pendingBackgroundTasks: [{ taskId: "bg-1", description: "Watch build", kind: "monitor" }],
+          pendingBackgroundTasks: [{ taskId: "bg-1", description: "Review", kind: "subagent" }],
           runtime: {
             status: "idle",
             activeRunId: null,
@@ -179,7 +179,8 @@ describe("resolveThreadListV2Status", () => {
 
   it.each([
     { kind: "command", status: "ready" },
-    { kind: "monitor", status: "waiting" },
+    { kind: "subagent", status: "waiting" },
+    { kind: "monitor", status: "monitoring" },
   ] as const)(
     "presents an unseen completion with a $kind roster as $status",
     ({ kind, status }) => {

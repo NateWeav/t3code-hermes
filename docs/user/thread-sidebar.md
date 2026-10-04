@@ -49,14 +49,15 @@ Turn on **Thread status rings** in Settings under Appearance > Motion to outline
 in the same color as the status label inside them, so you can read a column of threads without
 reading the labels:
 
-| Outline                | State                                                                    |
-| ---------------------- | ------------------------------------------------------------------------ |
-| Blue, dashed, marching | Working — the agent is running                                           |
-| Blue, dashed, still    | Waiting — a monitor, subagent, or scheduled check-in will wake the agent |
-| Amber, breathing       | Approval — a tool call is waiting on your decision                       |
-| Indigo, breathing      | Input — the agent asked you a question                                   |
-| Red, fast pulse        | Failed — the session hit an error                                        |
-| Green, still           | Done — the agent finished and you have not opened the thread yet         |
+| Outline                | State                                                               |
+| ---------------------- | ------------------------------------------------------------------- |
+| Blue, dashed, marching | Working — the agent is running                                      |
+| Blue, dashed, still    | Waiting — a subagent or scheduled check-in will wake the agent      |
+| Blue, solid, still     | Monitoring — the agent watches a pull request or a monitor for news |
+| Amber, breathing       | Approval — a tool call is waiting on your decision                  |
+| Indigo, breathing      | Input — the agent asked you a question                              |
+| Red, fast pulse        | Failed — the session hit an error                                   |
+| Green, still           | Done — the agent finished and you have not opened the thread yet    |
 
 Settled threads and threads you have already caught up on carry no outline.
 

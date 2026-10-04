@@ -194,6 +194,23 @@ function shellRuntime(thread: OrchestrationV2ThreadShell): ThreadRuntimeSummary 
   };
 }
 
+/**
+ * The agent's turn is over but something will wake it with news: a pull request
+ * the server watches for it, or provider monitors that are the only work holding
+ * its completion. Lists show these threads as Monitoring and the Working section
+ * folds them. A running or failed run, or held subagent work, outranks it.
+ */
+export function threadIsMonitoring(
+  thread: Pick<EnvironmentThreadShell, "pendingBackgroundTasks" | "pullRequests" | "runtime">,
+): boolean {
+  if (threadRuntimeIsActive(thread.runtime) || thread.runtime?.status === "failed") return false;
+  const held = thread.pendingBackgroundTasks.filter((task) =>
+    backgroundWorkHoldsCompletion([task]),
+  );
+  if (held.length > 0) return held.every((task) => task.kind === "monitor");
+  return thread.pullRequests.some((link) => link.watch !== undefined);
+}
+
 export function scopeProject(
   environmentId: EnvironmentId,
   project: OrchestrationProjectShell,

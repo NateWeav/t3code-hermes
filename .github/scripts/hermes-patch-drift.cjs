@@ -84,10 +84,15 @@ function ownersOfTestFile(file, patches) {
   return (sibling.length > 0 ? sibling : patches).map((patch) => patch.id);
 }
 
-/** Failed and errored node ids from `pytest -rfE` output. */
+/**
+ * Failed and errored node ids from `pytest -rfE` output. A parametrized id's
+ * brackets may hold spaces and ` - `, so they run to the `]` that ends the id:
+ * the one followed by pytest's ` - ` message separator or the end of the line.
+ */
 function parsePytestFailures(output) {
   const ids = new Set();
-  for (const match of output.matchAll(/^(?:FAILED|ERROR) (\S+?)(?: - .*)?$/gm)) {
+  const line = /^(?:FAILED|ERROR) ([^\s[]+(?:\[.*?\](?= - |$))?)(?: - .*)?$/gm;
+  for (const match of output.matchAll(line)) {
     ids.add(match[1]);
   }
   return [...ids].sort();

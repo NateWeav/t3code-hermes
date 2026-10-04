@@ -47,11 +47,15 @@ test("pytest -rfE summary lines yield failed and errored node ids", () => {
     "FAILED tests/a/test_x.py::test_one - AssertionError: nope",
     "ERROR tests/a/test_x.py::test_two",
     "FAILED tests/a/test_x.py::TestK::test_p[a-b] - boom",
+    "FAILED tests/a/test_x.py::test_s[param with space] - assert x[0] == 1",
+    "ERROR tests/a/test_x.py::test_d[a - b]",
     "1 failed, 3 passed",
   ].join("\n");
   assert.deepEqual(parsePytestFailures(output), [
     "tests/a/test_x.py::TestK::test_p[a-b]",
+    "tests/a/test_x.py::test_d[a - b]",
     "tests/a/test_x.py::test_one",
+    "tests/a/test_x.py::test_s[param with space]",
     "tests/a/test_x.py::test_two",
   ]);
 });

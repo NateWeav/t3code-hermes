@@ -1,20 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { EnvironmentId, EventId, MessageId, ThreadId, TurnId } from "@t3tools/contracts";
-import type { OrchestrationEvent } from "@t3tools/contracts";
+import { EnvironmentId, MessageId, RunId, ThreadId, TurnItemId } from "@t3tools/contracts";
+import type { OrchestrationV2TurnItem } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 
-import { observeTurnThroughputEvent, readTurnThroughput } from "./turnThroughput.ts";
-
-const baseEventFields = {
-  eventId: EventId.make("event-1"),
-  commandId: null,
-  causationEventId: null,
-  correlationId: null,
-  metadata: {},
-  sequence: 1,
-  occurredAt: "2026-04-01T00:00:00.000Z",
-  aggregateKind: "thread",
-} as const;
+import { observeTurnThroughputItem, readTurnThroughput } from "./turnThroughput.ts";
 
 let refCounter = 0;
 function freshRef() {
@@ -25,67 +15,84 @@ function freshRef() {
   };
 }
 
-const turn = TurnId.make("turn-1");
+const run = RunId.make("run-1");
+const at = DateTime.makeUnsafe("2026-04-01T00:00:00.000Z");
 
-function textDelta(
-  threadId: ThreadId,
-  chars: number,
-  options: { readonly role?: "assistant" | "reasoning" | "user"; readonly turnId?: TurnId } = {},
-): OrchestrationEvent {
+function baseFields(threadId: ThreadId, id: string, runId: RunId) {
   return {
-    ...baseEventFields,
-    aggregateId: threadId,
-    type: "thread.message-sent",
-    payload: {
-      threadId,
-      messageId: MessageId.make("message-1"),
-      role: options.role ?? "assistant",
-      text: "x".repeat(chars),
-      turnId: options.turnId ?? turn,
-      streaming: true,
-      createdAt: baseEventFields.occurredAt,
-      updatedAt: baseEventFields.occurredAt,
-    },
-  };
+    id: TurnItemId.make(id),
+    threadId,
+    runId,
+    nodeId: null,
+    providerThreadId: null,
+    providerTurnId: null,
+    nativeItemRef: null,
+    parentItemId: null,
+    ordinal: 0,
+    status: "running",
+    title: null,
+    startedAt: at,
+    completedAt: null,
+    updatedAt: at,
+  } as const;
 }
 
-function activity(threadId: ThreadId, kind: string, payload: unknown = {}): OrchestrationEvent {
-  return {
-    ...baseEventFields,
-    aggregateId: threadId,
-    type: "thread.activity-appended",
-    payload: {
-      threadId,
-      activity: {
-        id: EventId.make("activity-1"),
-        tone: "tool",
-        kind,
-        summary: kind,
-        payload,
-        turnId: turn,
-        createdAt: baseEventFields.occurredAt,
-      },
-    },
+function text(
+  threadId: ThreadId,
+  chars: number,
+  options: {
+    readonly type?: "assistant_message" | "reasoning";
+    readonly id?: string;
+    readonly runId?: RunId;
+    readonly streaming?: boolean;
+  } = {},
+): OrchestrationV2TurnItem {
+  const base = baseFields(threadId, options.id ?? "item-1", options.runId ?? run);
+  const body = "x".repeat(chars);
+  const streaming = options.streaming ?? true;
+  return options.type === "reasoning"
+    ? { ...base, type: "reasoning", text: body, streaming }
+    : {
+        ...base,
+        type: "assistant_message",
+        messageId: MessageId.make("message-1"),
+        text: body,
+        streaming,
+      };
+}
+
+function command(threadId: ThreadId): OrchestrationV2TurnItem {
+  return { ...baseFields(threadId, "command-1", run), type: "command_execution", input: "ls" };
+}
+
+/** Feeds a sequence of item states the way the projection would see them. */
+function feeder(ref: ReturnType<typeof freshRef>) {
+  const known = new Map<string, OrchestrationV2TurnItem>();
+  return (item: OrchestrationV2TurnItem, nowMs: number) => {
+    observeTurnThroughputItem(ref, item, known.get(item.id), nowMs);
+    known.set(item.id, item);
   };
 }
 
 describe("turnThroughput", () => {
-  it("charges a flush with the time since the previous flush", () => {
+  it("charges a flush's new text with the time since the previous flush", () => {
     const ref = freshRef();
-    observeTurnThroughputEvent(ref, textDelta(ref.threadId, 100), 0);
-    expect(readTurnThroughput(ref, turn, 0)?.tokensPerSecond).toBeNull();
+    const feed = feeder(ref);
+    feed(text(ref.threadId, 400), 0);
+    expect(readTurnThroughput(ref, run, 0)?.tokensPerSecond).toBeNull();
 
-    // 400 chars at 4 chars/token over one second.
-    observeTurnThroughputEvent(ref, textDelta(ref.threadId, 400), 1_000);
-    expect(readTurnThroughput(ref, turn, 1_000)?.tokensPerSecond).toBeCloseTo(100);
+    // 400 new chars at 4 chars/token over one second.
+    feed(text(ref.threadId, 800), 1_000);
+    expect(readTurnThroughput(ref, run, 1_000)?.tokensPerSecond).toBeCloseTo(100);
   });
 
   it("averages tokens over charged time across the window", () => {
     const ref = freshRef();
-    observeTurnThroughputEvent(ref, textDelta(ref.threadId, 100), 0);
-    observeTurnThroughputEvent(ref, textDelta(ref.threadId, 400), 1_000);
-    observeTurnThroughputEvent(ref, textDelta(ref.threadId, 1_200), 2_000);
-    const throughput = readTurnThroughput(ref, turn, 2_000);
+    const feed = feeder(ref);
+    feed(text(ref.threadId, 100), 0);
+    feed(text(ref.threadId, 500), 1_000);
+    feed(text(ref.threadId, 1_700), 2_000);
+    const throughput = readTurnThroughput(ref, run, 2_000);
     // (100 + 300 tokens) over 2 s.
     expect(throughput?.tokensPerSecond).toBeCloseTo(200);
     expect(throughput?.history).toEqual([100, 200]);
@@ -93,69 +100,82 @@ describe("turnThroughput", () => {
 
   it("reads the same rate when two flushes are delivered bunched together", () => {
     const ref = freshRef();
-    observeTurnThroughputEvent(ref, textDelta(ref.threadId, 100), 0);
+    const feed = feeder(ref);
+    feed(text(ref.threadId, 100), 0);
     // The transport held one flush back and delivered both 2.9 s and 3 s in.
-    observeTurnThroughputEvent(ref, textDelta(ref.threadId, 600), 2_900);
-    observeTurnThroughputEvent(ref, textDelta(ref.threadId, 600), 3_000);
-    expect(readTurnThroughput(ref, turn, 3_000)?.tokensPerSecond).toBeCloseTo(100);
+    feed(text(ref.threadId, 700), 2_900);
+    feed(text(ref.threadId, 1_300), 3_000);
+    expect(readTurnThroughput(ref, run, 3_000)?.tokensPerSecond).toBeCloseTo(100);
   });
 
-  it("counts reasoning text and ignores user and non-streaming messages", () => {
+  it("counts reasoning items and the final chunk that closes a stream", () => {
     const ref = freshRef();
-    observeTurnThroughputEvent(ref, textDelta(ref.threadId, 100), 0);
-    observeTurnThroughputEvent(ref, textDelta(ref.threadId, 400, { role: "user" }), 500);
-    observeTurnThroughputEvent(ref, textDelta(ref.threadId, 400, { role: "reasoning" }), 1_000);
-    expect(readTurnThroughput(ref, turn, 1_000)?.tokensPerSecond).toBeCloseTo(100);
+    const feed = feeder(ref);
+    feed(text(ref.threadId, 100, { type: "reasoning", id: "reasoning-1" }), 0);
+    feed(text(ref.threadId, 500, { type: "reasoning", id: "reasoning-1" }), 1_000);
+    feed(
+      text(ref.threadId, 900, { type: "reasoning", id: "reasoning-1", streaming: false }),
+      2_000,
+    );
+    expect(readTurnThroughput(ref, run, 2_000)?.tokensPerSecond).toBeCloseTo(100);
+  });
+
+  it("ignores a message that arrives whole without streaming", () => {
+    const ref = freshRef();
+    const feed = feeder(ref);
+    feed(text(ref.threadId, 100), 0);
+    feed(text(ref.threadId, 400, { id: "item-2", streaming: false }), 1_000);
+    expect(readTurnThroughput(ref, run, 1_000)?.tokensPerSecond).toBeNull();
+  });
+
+  it("only counts text the client had not seen, so a thread opened mid-stream does not spike", () => {
+    const ref = freshRef();
+    // The item held 4,000 chars before this client last saw it; the update adds 400.
+    observeTurnThroughputItem(ref, text(ref.threadId, 4_000), undefined, 0);
+    observeTurnThroughputItem(ref, text(ref.threadId, 4_400), text(ref.threadId, 4_000), 1_000);
+    expect(readTurnThroughput(ref, run, 1_000)?.tokensPerSecond).toBeCloseTo(100);
   });
 
   it("does not charge a flush with time the model spent in a tool call", () => {
     const ref = freshRef();
-    observeTurnThroughputEvent(ref, textDelta(ref.threadId, 100), 0);
-    observeTurnThroughputEvent(ref, activity(ref.threadId, "file-edit"), 500);
+    const feed = feeder(ref);
+    feed(text(ref.threadId, 100), 0);
+    feed(command(ref.threadId), 500);
     // The tool ran for 30 s; the next paragraph took one second after it.
-    observeTurnThroughputEvent(ref, activity(ref.threadId, "file-edit"), 30_500);
-    observeTurnThroughputEvent(ref, textDelta(ref.threadId, 400), 31_500);
-    expect(readTurnThroughput(ref, turn, 31_500)?.tokensPerSecond).toBeCloseTo(100);
-  });
-
-  it("lets a usage snapshot through without charging the text after it", () => {
-    const ref = freshRef();
-    observeTurnThroughputEvent(ref, textDelta(ref.threadId, 100), 0);
-    observeTurnThroughputEvent(
-      ref,
-      activity(ref.threadId, "context-window.updated", { usedTokens: 1, outputTokens: 50 }),
-      900,
-    );
-    observeTurnThroughputEvent(ref, textDelta(ref.threadId, 400), 1_000);
-    expect(readTurnThroughput(ref, turn, 1_000)?.tokensPerSecond).toBeCloseTo(100);
+    feed(command(ref.threadId), 30_500);
+    feed(text(ref.threadId, 400, { id: "item-2" }), 31_500);
+    expect(readTurnThroughput(ref, run, 31_500)?.tokensPerSecond).toBeCloseTo(100);
   });
 
   it("skips replay bursts that arrive faster than any provider flushes", () => {
     const ref = freshRef();
-    observeTurnThroughputEvent(ref, textDelta(ref.threadId, 100), 0);
-    observeTurnThroughputEvent(ref, textDelta(ref.threadId, 4_000), 10);
-    expect(readTurnThroughput(ref, turn, 10)?.tokensPerSecond).toBeNull();
+    const feed = feeder(ref);
+    feed(text(ref.threadId, 100), 0);
+    feed(text(ref.threadId, 4_000), 10);
+    expect(readTurnThroughput(ref, run, 10)?.tokensPerSecond).toBeNull();
   });
 
   it("reads a null rate once the window has emptied, and nothing before the first text", () => {
     const ref = freshRef();
-    expect(readTurnThroughput(ref, turn, 0)).toBeNull();
-    observeTurnThroughputEvent(ref, textDelta(ref.threadId, 100), 0);
-    observeTurnThroughputEvent(ref, textDelta(ref.threadId, 400), 1_000);
-    expect(readTurnThroughput(ref, turn, 5_000)?.tokensPerSecond).toBeCloseTo(100);
-    const quiet = readTurnThroughput(ref, turn, 20_000);
+    const feed = feeder(ref);
+    expect(readTurnThroughput(ref, run, 0)).toBeNull();
+    feed(text(ref.threadId, 100), 0);
+    feed(text(ref.threadId, 500), 1_000);
+    expect(readTurnThroughput(ref, run, 5_000)?.tokensPerSecond).toBeCloseTo(100);
+    const quiet = readTurnThroughput(ref, run, 20_000);
     expect(quiet?.tokensPerSecond).toBeNull();
     expect(quiet?.history).toEqual([100]);
   });
 
-  it("starts over for a new turn and reads nothing for another turn", () => {
+  it("starts over for a new run and reads nothing for another run", () => {
     const ref = freshRef();
-    observeTurnThroughputEvent(ref, textDelta(ref.threadId, 100), 0);
-    observeTurnThroughputEvent(ref, textDelta(ref.threadId, 400), 1_000);
-    const nextTurn = TurnId.make("turn-2");
-    expect(readTurnThroughput(ref, nextTurn, 1_000)).toBeNull();
-    observeTurnThroughputEvent(ref, textDelta(ref.threadId, 100, { turnId: nextTurn }), 60_000);
-    expect(readTurnThroughput(ref, turn, 60_000)).toBeNull();
-    expect(readTurnThroughput(ref, nextTurn, 60_000)?.history).toHaveLength(0);
+    const feed = feeder(ref);
+    feed(text(ref.threadId, 100), 0);
+    feed(text(ref.threadId, 500), 1_000);
+    const nextRun = RunId.make("run-2");
+    expect(readTurnThroughput(ref, nextRun, 1_000)).toBeNull();
+    feed(text(ref.threadId, 100, { id: "item-2", runId: nextRun }), 60_000);
+    expect(readTurnThroughput(ref, run, 60_000)).toBeNull();
+    expect(readTurnThroughput(ref, nextRun, 60_000)?.history).toHaveLength(0);
   });
 });

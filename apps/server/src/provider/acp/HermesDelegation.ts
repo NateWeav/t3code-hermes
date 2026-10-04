@@ -3,35 +3,41 @@
  * Hermes suppresses rawInput/rawOutput, even for JSON results: _structured() is
  * only a Markdown formatter. Prefer the carried patch's structured fields;
  * keep the stock formatter fallback here, never in orchestration or clients.
+ *
+ * One call can launch a batch, so it maps to one subagent per child. Updates
+ * are derived from the merged tool state alone: the adapter keeps the start's
+ * rawInput and title across progress, and drops repeated or late updates for a
+ * child it already finished.
  */
-import {
-  RuntimeTaskId,
-  type TurnId,
-  type ProviderRuntimeTaskStartedEvent,
-  type ProviderRuntimeTaskProgressEvent,
-  type ProviderRuntimeTaskUpdatedEvent,
-  type ProviderRuntimeTaskCompletedEvent,
-} from "@t3tools/contracts";
+import type { OrchestrationV2SubagentUsage } from "@t3tools/contracts";
 
 import type { AcpToolCallState } from "./AcpRuntimeModel.ts";
 
-type TaskEvent = (
-  | Pick<ProviderRuntimeTaskStartedEvent, "type" | "payload">
-  | Pick<ProviderRuntimeTaskProgressEvent, "type" | "payload">
-  | Pick<ProviderRuntimeTaskUpdatedEvent, "type" | "payload">
-  | Pick<ProviderRuntimeTaskCompletedEvent, "type" | "payload">
-) & { readonly turnId?: TurnId };
+/** Structurally an `AcpAdapterV2SubagentUpdate`. */
+export interface HermesSubagentUpdate {
+  readonly nativeTaskId: string;
+  readonly prompt: string;
+  readonly title: string | null;
+  readonly model: string | null;
+  readonly status:
+    | "pending"
+    | "running"
+    | "idle"
+    | "completed"
+    | "failed"
+    | "interrupted"
+    | "cancelled";
+  readonly childSessionId: null;
+  readonly result: string | null;
+  readonly role: string | null;
+  readonly usage: OrchestrationV2SubagentUsage | null;
+}
 
 type Child = {
   readonly index: number;
-  title: string;
-  role?: string;
-  model?: string;
-  settled: boolean;
-  /** Cancelled with its turn before Hermes acknowledged a background dispatch. */
-  awaitingDispatch?: boolean;
-  fingerprint?: string;
-  providerId?: string;
+  readonly title: string;
+  readonly role?: string;
+  readonly model?: string;
 };
 
 function record(value: unknown): Record<string, unknown> {
@@ -66,6 +72,32 @@ function count(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
+/**
+ * Hermes counts a child's tokens only once it finishes: flat on a live
+ * `subagent.complete`, nested under `tokens` in a result entry. Its output
+ * count already includes reasoning. Duration comes from either, or from the
+ * stock header's `1.5s` bit, and is Hermes's own measure of the child.
+ */
+function childUsage(result: Record<string, unknown>): OrchestrationV2SubagentUsage | null {
+  const tokens = record(result.tokens);
+  const round = (value: number | undefined) =>
+    value === undefined ? undefined : Math.round(value);
+  const input = round(count(result.input_tokens) ?? count(tokens.input));
+  const output = round(count(result.output_tokens) ?? count(tokens.output));
+  const reasoning = round(count(result.reasoning_tokens));
+  const duration = count(result.duration_seconds);
+  const usage = {
+    ...(input !== undefined || output !== undefined
+      ? { totalTokens: (input ?? 0) + (output ?? 0) }
+      : {}),
+    ...(input !== undefined ? { inputTokens: input } : {}),
+    ...(output !== undefined ? { outputTokens: output } : {}),
+    ...(reasoning !== undefined ? { reasoningOutputTokens: reasoning } : {}),
+    ...(duration !== undefined ? { durationMs: Math.round(duration * 1000) } : {}),
+  };
+  return Object.keys(usage).length > 0 ? usage : null;
+}
+
 function contentText(tool: AcpToolCallState): string {
   return (Array.isArray(tool.data.content) ? tool.data.content : [])
     .flatMap((item) => {
@@ -95,8 +127,8 @@ function isHermesDelegation(tool: AcpToolCallState): boolean {
   );
 }
 
-/** Child lifecycles must not be coalesced across siblings on their parent tool. */
-export function isHermesDelegationProgress(tool: AcpToolCallState): boolean {
+/** A patched Hermes child lifecycle event, reported on its parent delegate_task call. */
+function isHermesDelegationProgress(tool: AcpToolCallState): boolean {
   return typeof record(record(tool.data.rawOutput).hermesDelegation).event === "string";
 }
 
@@ -114,7 +146,6 @@ function startChildren(tool: AcpToolCallState): Child[] {
         title: text(input.goal) ?? `Delegated task ${index + 1}`,
         ...(role ? { role } : {}),
         ...(model ? { model } : {}),
-        settled: false,
       };
     });
   }
@@ -134,7 +165,6 @@ function startChildren(tool: AcpToolCallState): Child[] {
         index,
         title: roleMatch?.[1] ?? line ?? `Delegated task ${index + 1}`,
         ...(roleMatch?.[2] ? { role: roleMatch[2] } : {}),
-        settled: false,
       };
     });
   }
@@ -145,7 +175,6 @@ function startChildren(tool: AcpToolCallState): Child[] {
         text(content.replace(/^Delegating task:?\n?/, "")) ??
         text((text(tool.data.title) ?? tool.title)?.replace(/^delegate(?:_task)?: /, "")) ??
         "Delegated task",
-      settled: false,
     },
   ];
 }
@@ -177,7 +206,7 @@ function stockResults(content: string): Record<string, unknown>[] {
   });
 }
 
-function terminalStatus(status: unknown) {
+function terminalStatus(status: unknown): HermesSubagentUpdate["status"] | undefined {
   switch (status) {
     case "completed":
       return "completed";
@@ -187,258 +216,183 @@ function terminalStatus(status: unknown) {
     case "stalled":
       return "failed";
     case "interrupted":
+      return "interrupted";
     case "cancelled":
-      return "stopped";
+      return "cancelled";
     default:
       return undefined;
   }
 }
 
-/** Keep background children attached to their launch turn, even after that prompt returns. */
-export class HermesDelegations {
-  private readonly finished = new Set<string>();
-  private readonly calls = new Map<
-    string,
-    { children: Map<number, Child>; turnId: TurnId | undefined; background: boolean; live: boolean }
-  >();
+const STOCK_DISPATCH_NOTE =
+  "Dispatched in background; stock Hermes ACP does not report child completion.";
 
-  update(tool: AcpToolCallState, turnId?: TurnId): TaskEvent[] | undefined {
-    if (this.finished.has(tool.toolCallId)) return [];
-    let call = this.calls.get(tool.toolCallId);
-    if (!call && isHermesDelegationProgress(tool)) return [];
-    if (!call && (!turnId || !isHermesDelegation(tool))) return undefined;
-    const events: TaskEvent[] = [];
-    if (!call) {
-      call = {
-        children: new Map(startChildren(tool).map((child) => [child.index, child])),
-        turnId,
-        background: false,
-        live: tool.data.rawInput !== undefined,
-      };
-      this.calls.set(tool.toolCallId, call);
-      for (const child of call.children.values()) {
-        events.push({
-          type: "task.started",
-          payload: { ...this.linkage(tool.toolCallId, child), description: child.title },
-        });
-        events.push({
-          type: "task.progress",
-          payload: {
-            ...this.linkage(tool.toolCallId, child),
-            description: child.title,
-            status: "pending",
+function childUpdate(
+  toolCallId: string,
+  child: Child | undefined,
+  index: number,
+  status: HermesSubagentUpdate["status"],
+  fields: {
+    readonly model?: string | undefined;
+    readonly role?: string | undefined;
+    readonly result?: string | undefined;
+    readonly usage?: OrchestrationV2SubagentUsage | null;
+  } = {},
+): HermesSubagentUpdate {
+  return {
+    nativeTaskId: `${toolCallId}:task:${index}`,
+    // Late progress for a child the adapter already knows carries no goal;
+    // an empty prompt and title only update that child, never start one.
+    prompt: child?.title ?? "",
+    title: child?.title ?? null,
+    model: fields.model ?? child?.model ?? null,
+    status,
+    childSessionId: null,
+    result: fields.result ?? null,
+    role: fields.role ?? child?.role ?? null,
+    usage: fields.usage ?? null,
+  };
+}
+
+/** Patched results name the role `_child_role`; stock headers carry `role=`. */
+function resultRole(result: Record<string, unknown>): string | undefined {
+  return text(result._child_role) ?? text(result.role);
+}
+
+function resultUpdate(
+  toolCallId: string,
+  child: Child | undefined,
+  index: number,
+  result: Record<string, unknown>,
+): HermesSubagentUpdate {
+  const status = terminalStatus(result.status) ?? "interrupted";
+  const summary = text(result.summary) ?? text(result.text);
+  const error = text(result.error);
+  return childUpdate(toolCallId, child, index, status, {
+    model: text(result.model),
+    role: resultRole(result),
+    result: (status === "completed" ? (summary ?? error) : (error ?? summary)) ?? undefined,
+    usage: childUsage(result),
+  });
+}
+
+/** Launches remembered at once; a call's children outlive its own updates. */
+const REMEMBERED_LAUNCHES = 256;
+
+/**
+ * Returns the subagent updates for a Hermes delegation tool call, or undefined
+ * when the call is not a delegation spawn. An empty array claims the call
+ * without moving any child (spinner frames, nested grandchildren).
+ *
+ * Stock Hermes names the children only in the start's content, which the
+ * completion replaces, so each launch's children are remembered by call id.
+ */
+export function makeHermesSubagentExtractor() {
+  const launches = new Map<string, ReadonlyArray<Child>>();
+  return (tool: AcpToolCallState): ReadonlyArray<HermesSubagentUpdate> | undefined => {
+    let children = launches.get(tool.toolCallId);
+    if (children === undefined && isHermesDelegation(tool)) {
+      children = startChildren(tool);
+      launches.set(tool.toolCallId, children);
+      if (launches.size > REMEMBERED_LAUNCHES) launches.delete(launches.keys().next().value!);
+    }
+    if (children === undefined && !isHermesDelegationProgress(tool)) return undefined;
+    return delegationUpdates(tool, children ?? []);
+  };
+}
+
+function delegationUpdates(
+  tool: AcpToolCallState,
+  children: ReadonlyArray<Child>,
+): ReadonlyArray<HermesSubagentUpdate> {
+  const output = record(tool.data.rawOutput);
+  const progress = record(output.hermesDelegation);
+  const childAt = (index: number) => children.find((child) => child.index === index);
+  const id = tool.toolCallId;
+
+  if (tool.status === "completed" || tool.status === "failed") {
+    if (children.length === 0) return [];
+    const content = contentText(tool);
+    // Stock clips fallback JSON at 5,000 characters. The dispatch header
+    // precedes the potentially long goals; clipping is not a child failure.
+    const dispatched =
+      output.status === "dispatched" ||
+      record(content).status === "dispatched" ||
+      /^\{\s*"status"\s*:\s*"dispatched"\s*,\s*"mode"\s*:\s*"background"/.test(content);
+    if (dispatched) {
+      // The patch (which also fills rawInput) reports each child's end later.
+      const live = tool.data.rawInput !== undefined;
+      return children.map((child) =>
+        childUpdate(
+          id,
+          child,
+          child.index,
+          live ? "running" : "idle",
+          live ? {} : { result: STOCK_DISPATCH_NOTE },
+        ),
+      );
+    }
+    const results = Array.isArray(output.results)
+      ? output.results.map(record)
+      : stockResults(content);
+    const error = text(output.error) ?? /^Delegation failed: ([\s\S]*)$/.exec(content)?.[1];
+    const updates: Array<HermesSubagentUpdate> = [];
+    const reported = new Set<number>();
+    for (const result of results) {
+      const index = count(result.task_index);
+      if (index === undefined || !Number.isInteger(index) || reported.has(index)) continue;
+      reported.add(index);
+      updates.push(
+        resultUpdate(
+          id,
+          childAt(index) ?? { index, title: text(result.goal) ?? `Delegated task ${index + 1}` },
+          index,
+          result,
+        ),
+      );
+    }
+    for (const child of children) {
+      if (reported.has(child.index)) continue;
+      updates.push(
+        childUpdate(
+          id,
+          child,
+          child.index,
+          error || tool.status === "failed" ? "failed" : "interrupted",
+          {
+            result: error ?? "Hermes returned without a result for this task.",
           },
-        });
-      }
+        ),
+      );
     }
-    const { children } = call;
-    const output = record(tool.data.rawOutput);
-    const progress = record(output.hermesDelegation);
-    if (tool.status === "completed" || tool.status === "failed") {
-      const content = contentText(tool);
-      // Stock clips fallback JSON at 5,000 characters. The dispatch header
-      // precedes the potentially long goals; clipping is not a child failure.
-      const dispatched =
-        output.status === "dispatched" ||
-        record(content).status === "dispatched" ||
-        /^\{\s*"status"\s*:\s*"dispatched"\s*,\s*"mode"\s*:\s*"background"/.test(content);
-      if (dispatched) {
-        call.background = true;
-        for (const child of children.values()) {
-          // Detached children outlive their parent's cancellation, so the
-          // acknowledgement reopens any the cancelled turn settled.
-          if (child.settled && !child.awaitingDispatch) continue;
-          child.settled = false;
-          child.awaitingDispatch = false;
-          events.push({
-            type: "task.progress",
-            payload: {
-              ...this.linkage(tool.toolCallId, child),
-              description: child.title,
-              status: call.live ? "running" : "idle",
-              ...(!call.live
-                ? {
-                    summary:
-                      "Dispatched in background; stock Hermes ACP does not report child completion.",
-                  }
-                : {}),
-            },
-          });
-        }
-        if (!call.live || [...children.values()].every((child) => child.settled))
-          this.forget(tool.toolCallId);
-        return events.map((event) => ({
-          ...event,
-          ...(call.turnId ? { turnId: call.turnId } : {}),
-        }));
-      }
-      const results = Array.isArray(output.results)
-        ? output.results.map(record)
-        : stockResults(content);
-      const error = text(output.error) ?? /^Delegation failed: ([\s\S]*)$/.exec(content)?.[1];
-      for (const result of results) {
-        const index = count(result.task_index);
-        if (index === undefined || !Number.isInteger(index)) continue;
-        let child = children.get(index);
-        if (!child) {
-          child = {
-            index,
-            title: text(result.goal) ?? `Delegated task ${index + 1}`,
-            settled: false,
-          };
-          children.set(index, child);
-        }
-        // A live child already reported its own subagent.complete.
-        if (child.settled) continue;
-        events.push(...this.complete(tool.toolCallId, child, result));
-      }
-      for (const child of children.values()) {
-        child.awaitingDispatch = false;
-        if (child.settled) continue;
-        events.push(
-          ...this.complete(tool.toolCallId, child, {
-            status: error || tool.status === "failed" ? "failed" : "interrupted",
-            error: error ?? "Hermes returned without a result for this task.",
-          }),
-        );
-      }
-    } else if (typeof progress.event === "string") {
-      const index = count(progress.task_index);
-      const child = index === undefined ? undefined : children.get(index);
-      const providerId = text(progress.subagent_id);
-      if (
-        child &&
-        !child.settled &&
-        (count(progress.depth) ?? 0) === 0 &&
-        (!child.providerId || !providerId || child.providerId === providerId)
-      ) {
-        if (providerId) child.providerId = providerId;
-        this.metadata(child, progress);
-        if (progress.event === "subagent.complete") {
-          events.push(...this.complete(tool.toolCallId, child, progress));
-        } else {
-          const summary = text(progress.text)?.slice(-2000);
-          const lastToolName = text(progress.tool);
-          const event: TaskEvent = {
-            type: "task.progress",
-            payload: {
-              ...this.linkage(tool.toolCallId, child),
-              description: child.title,
-              status: progress.event === "subagent.spawn_requested" ? "pending" : "running",
-              ...(summary ? { summary } : {}),
-              ...(lastToolName ? { lastToolName } : {}),
-            },
-          };
-          const fingerprint = JSON.stringify(event);
-          if (fingerprint !== child.fingerprint) {
-            child.fingerprint = fingerprint;
-            events.push(event);
-          }
-        }
-      }
+    return updates;
+  }
+
+  if (typeof progress.event === "string") {
+    const index = count(progress.task_index);
+    // Grandchildren report through the same call with a depth; only direct
+    // children are rows. Thinking ticks are spinner frames, not progress.
+    if (
+      index === undefined ||
+      !Number.isInteger(index) ||
+      (count(progress.depth) ?? 0) !== 0 ||
+      progress.event === "subagent.thinking"
+    ) {
+      return [];
     }
-    if ([...children.values()].every((child) => child.settled && !child.awaitingDispatch))
-      this.forget(tool.toolCallId);
-    return events.map((event) => ({ ...event, ...(call.turnId ? { turnId: call.turnId } : {}) }));
-  }
-
-  finish(
-    status: "cancelled" | "failed" | "interrupted",
-    error?: string,
-    options?: { turnId: TurnId; preserveBackground: boolean },
-  ): TaskEvent[] {
-    const events: TaskEvent[] = [];
-    for (const [id, call] of this.calls) {
-      if (
-        options &&
-        (call.turnId !== options.turnId ||
-          (options.preserveBackground &&
-            call.background &&
-            [...call.children.values()].some((child) => !child.settled)))
-      )
-        continue;
-      // Cancelling a turn can race Hermes's dispatch acknowledgement; keep the
-      // call so a late acknowledgement can reopen its still-running children.
-      const awaitDispatch = status === "cancelled" && options !== undefined && !call.background;
-      for (const child of call.children.values()) {
-        if (child.settled) continue;
-        events.push({
-          type: "task.updated",
-          ...(call.turnId ? { turnId: call.turnId } : {}),
-          payload: { ...this.linkage(id, child), status, ...(error ? { error } : {}) },
-        });
-        if (awaitDispatch) {
-          child.settled = true;
-          child.awaitingDispatch = true;
-        }
-      }
-      if (!awaitDispatch) this.forget(id);
+    if (progress.event === "subagent.complete") {
+      return [resultUpdate(id, childAt(index), index, progress)];
     }
-    return events;
+    return [
+      childUpdate(
+        id,
+        childAt(index),
+        index,
+        progress.event === "subagent.spawn_requested" ? "pending" : "running",
+        { model: text(progress.model), role: resultRole(progress) },
+      ),
+    ];
   }
 
-  private forget(id: string) {
-    this.calls.delete(id);
-    this.finished.add(id);
-    if (this.finished.size > 256) this.finished.delete(this.finished.values().next().value!);
-  }
-
-  private linkage(id: string, child: Child) {
-    return {
-      taskId: RuntimeTaskId.make(`${id}:task:${child.index}`),
-      taskType: "subagent",
-      toolUseId: id,
-      title: child.title,
-      agentIndex: child.index,
-      ...(child.role ? { role: child.role } : {}),
-      ...(child.model ? { model: child.model } : {}),
-    };
-  }
-
-  private metadata(child: Child, result: Record<string, unknown>) {
-    child.title = text(result.goal) ?? child.title;
-    const role = text(result._child_role) ?? text(result.role);
-    const model = text(result.model);
-    if (role) child.role = role;
-    if (model) child.model = model;
-  }
-
-  private complete(id: string, child: Child, result: Record<string, unknown>): TaskEvent[] {
-    this.metadata(child, result);
-    const status = terminalStatus(result.status) ?? "stopped";
-    const summary = text(result.summary) ?? text(result.text);
-    const error = text(result.error);
-    const duration = count(result.duration_seconds);
-    const toolUses = Array.isArray(result.tool_trace)
-      ? result.tool_trace.length
-      : count(result.tool_count);
-    child.settled = true;
-    const events: TaskEvent[] = [];
-    if (error)
-      events.push({
-        type: "task.updated",
-        payload: {
-          ...this.linkage(id, child),
-          status: status === "stopped" ? "interrupted" : status,
-          error,
-        },
-      });
-    events.push({
-      type: "task.completed",
-      payload: {
-        ...this.linkage(id, child),
-        status,
-        ...(summary || error ? { summary: summary ?? error! } : {}),
-        ...(duration !== undefined || toolUses !== undefined
-          ? {
-              typedUsage: {
-                ...(duration !== undefined ? { durationMs: Math.round(duration * 1000) } : {}),
-                ...(toolUses !== undefined ? { toolUses } : {}),
-              },
-            }
-          : {}),
-      },
-    });
-    return events;
-  }
+  return children.map((child) => childUpdate(id, child, child.index, "running"));
 }

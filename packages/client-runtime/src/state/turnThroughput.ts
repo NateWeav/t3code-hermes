@@ -2,9 +2,10 @@
  * Live output-token throughput for the running turn, estimated on the client.
  *
  * No provider streams a per-token count: usage snapshots land at step
- * boundaries and assistant text reaches the client in paragraph-sized flushes
- * (see `ProviderRuntimeIngestion`). So the rate comes from the text that does
- * stream. Each flush is charged with the time since the previous flush, or
+ * boundaries and assistant text reaches the client in batched turn-item
+ * updates, each carrying the item's text so far. So the rate comes from the
+ * text that does stream: a flush is the growth of an assistant or reasoning
+ * item since the projection last saw it. Each flush is charged with the time since the previous flush, or
  * since the last tool activity when the model was busy elsewhere, and the
  * displayed rate is total tokens over total charged time across a short
  * window. Summing spans rather than rating flushes one by one keeps a pair
@@ -18,7 +19,7 @@
  *
  * @module state/turnThroughput
  */
-import type { OrchestrationEvent, ScopedThreadRef, TurnId } from "@t3tools/contracts";
+import type { OrchestrationV2TurnItem, RunId, ScopedThreadRef } from "@t3tools/contracts";
 
 import { threadKey } from "./entities.ts";
 
@@ -37,7 +38,7 @@ interface FlushSample {
 }
 
 interface ThreadThroughputState {
-  turnId: TurnId;
+  runId: RunId;
   /** When the model last demonstrably started or continued generating. */
   referenceAtMs: number | null;
   samples: FlushSample[];
@@ -54,14 +55,14 @@ const MAX_TRACKED_THREADS = 64;
 
 const stateByThread = new Map<string, ThreadThroughputState>();
 
-function stateFor(key: string, turnId: TurnId): ThreadThroughputState {
+function stateFor(key: string, runId: RunId): ThreadThroughputState {
   const existing = stateByThread.get(key);
-  if (existing?.turnId === turnId) return existing;
+  if (existing?.runId === runId) return existing;
   if (existing === undefined && stateByThread.size >= MAX_TRACKED_THREADS) {
     const oldest = stateByThread.keys().next().value;
     if (oldest !== undefined) stateByThread.delete(oldest);
   }
-  const next: ThreadThroughputState = { turnId, referenceAtMs: null, samples: [], history: [] };
+  const next: ThreadThroughputState = { runId, referenceAtMs: null, samples: [], history: [] };
   stateByThread.set(key, next);
   return next;
 }
@@ -90,28 +91,30 @@ function observeText(state: ThreadThroughputState, chars: number, nowMs: number)
 }
 
 /**
- * Feed one live thread event. Replayed history must not come through here:
- * its timing is the replay's, not the model's.
+ * Feed one live turn-item update, with the projection's copy of the item from
+ * before it. Replayed history must not come through here: its timing is the
+ * replay's, not the model's.
  */
-export function observeTurnThroughputEvent(
+export function observeTurnThroughputItem(
   ref: ScopedThreadRef,
-  event: OrchestrationEvent,
+  item: OrchestrationV2TurnItem,
+  previous: OrchestrationV2TurnItem | undefined,
   nowMs: number,
 ): void {
-  if (event.type === "thread.message-sent") {
-    const message = event.payload;
-    if (!message.streaming || message.turnId === null) return;
-    if (message.role !== "assistant" && message.role !== "reasoning") return;
-    observeText(stateFor(threadKey(ref), message.turnId), message.text.length, nowMs);
+  // The prompt starts the run but not generation; charging the first reply
+  // with time to first token would understate the model's pace.
+  if (item.runId === null || item.type === "user_message") return;
+  if (item.type === "assistant_message" || item.type === "reasoning") {
+    // The final update closing a stream may still carry its last chunk.
+    const wasStreaming = previous?.type === item.type && previous.streaming;
+    if (!item.streaming && !wasStreaming) return;
+    const chars = item.text.length - (previous?.type === item.type ? previous.text.length : 0);
+    if (chars > 0) observeText(stateFor(threadKey(ref), item.runId), chars, nowMs);
     return;
   }
-  if (event.type === "thread.activity-appended") {
-    const activity = event.payload.activity;
-    // Usage snapshots land beside the text they describe; anything else means
-    // the model was running a tool, not generating, until now.
-    if (activity.turnId === null || activity.kind === "context-window.updated") return;
-    stateFor(threadKey(ref), activity.turnId).referenceAtMs = nowMs;
-  }
+  // Anything else in the run means the model was busy elsewhere (a tool call,
+  // an approval) rather than generating, until now.
+  stateFor(threadKey(ref), item.runId).referenceAtMs = nowMs;
 }
 
 /**
@@ -121,10 +124,10 @@ export function observeTurnThroughputEvent(
  */
 export function readTurnThroughput(
   ref: ScopedThreadRef,
-  turnId: TurnId,
+  runId: RunId,
   nowMs: number,
 ): TurnThroughput | null {
   const state = stateByThread.get(threadKey(ref));
-  if (state === undefined || state.turnId !== turnId || state.samples.length === 0) return null;
+  if (state === undefined || state.runId !== runId || state.samples.length === 0) return null;
   return { tokensPerSecond: windowRate(state.samples, nowMs), history: state.history };
 }

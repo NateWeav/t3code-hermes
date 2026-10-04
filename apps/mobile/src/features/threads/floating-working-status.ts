@@ -1,5 +1,5 @@
 import type { EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
-import type { ScopedThreadRef, TurnId } from "@t3tools/contracts";
+import type { RunId, ScopedThreadRef } from "@t3tools/contracts";
 
 /**
  * What the floating pill says. Connection, syncing, and working share one
@@ -10,12 +10,20 @@ export type FloatingWorkingStatus =
   | {
       readonly kind: "working";
       readonly startedAt: string;
-      /** The turn whose output rate the label shows beside the timer. */
+      /** The run whose output rate the label shows beside the timer. */
       readonly threadRef: ScopedThreadRef;
-      readonly turnId: TurnId | null;
+      readonly runId: RunId | null;
     }
   | { readonly kind: "syncing"; readonly label: string }
   | { readonly kind: "compacting" }
+  // The turn settled while background work it started still runs. `waiting`
+  // is false when only commands remain, such as a dev server: the agent is done.
+  | {
+      readonly kind: "background";
+      readonly label: string;
+      readonly accessibilityLabel: string;
+      readonly waiting: boolean;
+    }
   // A task whose thread the server has not created yet: the worktree may
   // still be checking out, so there is no turn to time.
   | { readonly kind: "preparing"; readonly label: string }

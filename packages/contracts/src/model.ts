@@ -148,6 +148,8 @@ const CLAUDE_DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
 const CURSOR_DRIVER_KIND = ProviderDriverKind.make("cursor");
 const GROK_DRIVER_KIND = ProviderDriverKind.make("grok");
 const HERMES_DRIVER_KIND = ProviderDriverKind.make("hermes");
+const PI_DRIVER_KIND = ProviderDriverKind.make("pi");
+const ACP_REGISTRY_DRIVER_KIND = ProviderDriverKind.make("acpRegistry");
 const OPENCODE_DRIVER_KIND = ProviderDriverKind.make("opencode");
 
 export const DEFAULT_MODEL = "gpt-6-astra";
@@ -176,6 +178,9 @@ export const DEFAULT_MODEL_BY_PROVIDER: Partial<Record<ProviderDriverKind, strin
   // Hermes builds its model picker from the user's own `~/.hermes/.env`
   // provider config, so this is only the pre-discovery placeholder.
   [HERMES_DRIVER_KIND]: "hermes-4",
+  [ACP_REGISTRY_DRIVER_KIND]: "default",
+  // "default" defers to the user's own Pi settings.json model selection.
+  [PI_DRIVER_KIND]: "default",
   [OPENCODE_DRIVER_KIND]: "openai/gpt-5",
   [ProviderDriverKind.make("antigravity")]: ANTIGRAVITY_DEFAULT_MODEL,
 };
@@ -226,5 +231,7 @@ export const PROVIDER_DISPLAY_NAMES: Partial<Record<ProviderDriverKind, string>>
   [CURSOR_DRIVER_KIND]: "Cursor",
   [GROK_DRIVER_KIND]: "Grok",
   [HERMES_DRIVER_KIND]: "Hermes",
+  [ACP_REGISTRY_DRIVER_KIND]: "ACP Registry",
+  [PI_DRIVER_KIND]: "Pi",
   [OPENCODE_DRIVER_KIND]: "OpenCode",
 };

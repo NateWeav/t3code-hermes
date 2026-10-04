@@ -256,6 +256,12 @@ export interface HindsightAgentMemoryRow {
   readonly status: string | null;
   readonly tone: "ready" | "attention" | "idle";
   readonly detail: string | null;
+  /**
+   * The row as one line: the name, a failure if any, then the detail. The
+   * detail shows even on a wired agent, where it names the instances with
+   * their own config home that the wiring does not reach.
+   */
+  readonly text: string;
 }
 
 export interface HindsightAgentMemorySummary {
@@ -276,13 +282,19 @@ export function describeHindsightAgentMemory(
   options: { readonly enabled: boolean },
 ): HindsightAgentMemorySummary {
   if (state === null) return { tone: "idle", label: "Checking…", detail: null, agents: [] };
-  const agents = state.agents.map((agent): HindsightAgentMemoryRow => ({
-    target: agent.target,
-    label: HINDSIGHT_AGENT_LABELS[agent.target],
-    status: agent.state === "failed" ? "Failed" : null,
-    tone: agent.state === "installed" ? "ready" : agent.state === "failed" ? "attention" : "idle",
-    detail: agent.detail,
-  }));
+  const agents = state.agents.map((agent): HindsightAgentMemoryRow => {
+    const label = HINDSIGHT_AGENT_LABELS[agent.target];
+    const status = agent.state === "failed" ? "Failed" : null;
+    const name = status === null ? label : `${label} ${status.toLowerCase()}`;
+    return {
+      target: agent.target,
+      label,
+      status,
+      tone: agent.state === "installed" ? "ready" : agent.state === "failed" ? "attention" : "idle",
+      detail: agent.detail,
+      text: agent.detail === null ? name : `${name} · ${agent.detail}`,
+    };
+  });
   const headline = (
     tone: HindsightAgentMemorySummary["tone"],
     label: string | null,

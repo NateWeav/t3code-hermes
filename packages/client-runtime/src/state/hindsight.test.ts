@@ -32,6 +32,29 @@ describe("describeHindsightAgentMemory", () => {
     expect(summary.agents[1]).toMatchObject({ label: "Hermes", status: "Failed" });
   });
 
+  it("spells out a wired agent's coverage gap, not just its name", () => {
+    const summary = describeHindsightAgentMemory(
+      {
+        ...base,
+        agents: [
+          { target: "codex", state: "installed", detail: null },
+          {
+            target: "claudeCode",
+            state: "installed",
+            detail: "Not covered: work (own config home).",
+          },
+          { target: "hermes", state: "failed", detail: "config.yaml did not parse" },
+        ],
+      },
+      { enabled: true },
+    );
+    expect(summary.agents.map((agent) => agent.text)).toEqual([
+      "Codex",
+      "Claude Code · Not covered: work (own config home).",
+      "Hermes failed · config.yaml did not parse",
+    ]);
+  });
+
   it("reports an in-flight pass instead of a stale verdict", () => {
     expect(
       describeHindsightAgentMemory(

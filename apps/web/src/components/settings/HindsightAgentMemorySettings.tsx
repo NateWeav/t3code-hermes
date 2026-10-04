@@ -98,16 +98,7 @@ function machineStatus(machine: Machine): {
     };
   }
   if (summary.agents.length === 0) return { text: "Checking…", tone: "idle" };
-  return {
-    text: summary.agents
-      .map((agent) =>
-        agent.status === null
-          ? agent.label
-          : `${agent.label} ${agent.status.toLowerCase()}${agent.detail === null ? "" : ` · ${agent.detail}`}`,
-      )
-      .join(" · "),
-    tone: summary.tone,
-  };
+  return { text: summary.agents.map((agent) => agent.text).join(" · "), tone: summary.tone };
 }
 
 export function HindsightAgentMemorySettings() {

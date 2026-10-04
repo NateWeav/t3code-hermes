@@ -43,11 +43,7 @@ function machineStatus(machine: Machine): string {
     return summary.detail === null ? summary.label : `${summary.label} · ${summary.detail}`;
   }
   if (summary.agents.length === 0) return "Checking…";
-  return summary.agents
-    .map((agent) =>
-      agent.status === null ? agent.label : `${agent.label} ${agent.status.toLowerCase()}`,
-    )
-    .join(" · ");
+  return summary.agents.map((agent) => agent.text).join(" · ");
 }
 
 /**

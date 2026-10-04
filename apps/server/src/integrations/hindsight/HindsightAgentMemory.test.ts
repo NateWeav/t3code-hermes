@@ -12,6 +12,7 @@ import * as NodePath from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
+import { ProviderDriverKind, ProviderInstanceId } from "@t3tools/contracts";
 import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 import { CommandAvailability } from "@t3tools/shared/shell";
 import * as Effect from "effect/Effect";
@@ -53,10 +54,15 @@ function fakeInstaller(home: string, args: ReadonlyArray<string>) {
   if (args.includes("install")) {
     if (args.includes("claude-code")) writeJson(claudeSettings, { hooks: hooksFor(home) });
     if (args.includes("codex")) writeJson(codexHooks, { hooks: hooksFor(home) });
-    const apiUrl = args[args.indexOf("--api-url") + 1];
-    writeJson(NodePath.join(home, ".hindsight", "coding-agent.json"), {
+    // Like the real one: merged into what is there, and a token only set when given.
+    const configFile = NodePath.join(home, ".hindsight", "coding-agent.json");
+    const existing = NodeFS.existsSync(configFile) ? (readJson(configFile) as object) : {};
+    const token = args.includes("--api-token") ? args[args.indexOf("--api-token") + 1] : undefined;
+    writeJson(configFile, {
+      ...existing,
       serverMode: "self-hosted",
-      apiUrl,
+      apiUrl: args[args.indexOf("--api-url") + 1],
+      ...(token === undefined ? {} : { apiToken: token }),
     });
   } else {
     if (args.includes("claude-code")) writeJson(claudeSettings, { hooks: {} });
@@ -74,7 +80,7 @@ function setup(options: Options) {
   if (options.preinstalled)
     fakeInstaller(home, ["install", "claude-code", "codex", "--api-url", BASE_URL]);
   const calls: Array<ReadonlyArray<string>> = [];
-  const connection =
+  let connection =
     options.connection === undefined ? { baseUrl: BASE_URL, apiKey: null } : options.connection;
   const missing = new Set(options.missing ?? []);
 
@@ -155,7 +161,34 @@ function setup(options: Options) {
     (service) => service.apply,
   );
 
-  return { home, hermesHome, calls, layer, setAgentMemory, apply };
+  const setConnection = (next: { readonly baseUrl: string; readonly apiKey: string | null }) => {
+    connection = next;
+  };
+
+  /** Points the Hermes instance at another `HERMES_HOME`. */
+  const setHermesHome = (hermesHomePath: string) =>
+    Effect.flatMap(ServerSettings.ServerSettingsService, (service) =>
+      service.updateSettings({
+        providerInstances: {
+          [ProviderInstanceId.make("hermes")]: {
+            driver: ProviderDriverKind.make("hermes"),
+            enabled: true,
+            environment: [{ name: "HERMES_HOME", value: hermesHomePath, sensitive: false }],
+          },
+        },
+      }),
+    );
+
+  return {
+    home,
+    hermesHome,
+    calls,
+    layer,
+    setAgentMemory,
+    setConnection,
+    setHermesHome,
+    apply,
+  };
 }
 
 const hermesProvider = (hermesHome: string) =>
@@ -208,6 +241,13 @@ describe("installerArgs", () => {
     expect(HindsightAgentMemory.installerConfigMatches({ serverMode: "cloud" }, connection)).toBe(
       false,
     );
+    // A key the connection no longer has must not keep riding along.
+    expect(
+      HindsightAgentMemory.installerConfigMatches(
+        { serverMode: "self-hosted", apiUrl: BASE_URL, apiToken: "hsk_old" },
+        connection,
+      ),
+    ).toBe(false);
   });
 });
 
@@ -362,6 +402,103 @@ describe("HindsightAgentMemory", () => {
       expect(NodeFS.readFileSync(NodePath.join(harness.hermesHome, "config.yaml"), "utf8")).toBe(
         broken,
       );
+    }).pipe(Effect.provide(harness.layer));
+  });
+  it.effect("points a hand-made install back at its own server when switched off", () => {
+    const harness = setup({ agentMemory: true, preinstalled: true, missing: ["hermes"] });
+    const installerConfig = NodePath.join(harness.home, ".hindsight", "coding-agent.json");
+    const handMade = { serverMode: "self-hosted", apiUrl: "http://own-server:8888" };
+    writeJson(installerConfig, handMade);
+    return Effect.gen(function* () {
+      yield* harness.apply;
+      expect(readJson(installerConfig)).toMatchObject({ apiUrl: BASE_URL });
+
+      yield* harness.setAgentMemory(false);
+      yield* harness.apply;
+
+      // Its hooks were never T3 Code's, so only the config moves back.
+      expect(harness.calls.map((args) => args[2])).toEqual(["install"]);
+      expect(readJson(installerConfig)).toEqual(handMade);
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("clears an API key that was removed from the connection", () => {
+    const harness = setup({ agentMemory: true, missing: ["hermes"] });
+    const installerConfig = NodePath.join(harness.home, ".hindsight", "coding-agent.json");
+    return Effect.gen(function* () {
+      harness.setConnection({ baseUrl: BASE_URL, apiKey: "hsk_old" });
+      yield* harness.apply;
+      expect(readJson(installerConfig)).toMatchObject({ apiToken: "hsk_old" });
+
+      harness.setConnection({ baseUrl: BASE_URL, apiKey: null });
+      const state = yield* harness.apply;
+
+      expect(harness.calls).toHaveLength(2);
+      expect(readJson(installerConfig)).not.toHaveProperty("apiToken");
+      expect(state.agents.every((agent) => agent.state === "installed")).toBe(true);
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("rewrites the Hermes config it wrote when the connection moves", () => {
+    const harness = setup({ agentMemory: true, missing: ["claude", "codex"] });
+    const pluginConfig = NodePath.join(harness.hermesHome, "hindsight", "config.json");
+    return Effect.gen(function* () {
+      yield* harness.apply;
+      harness.setConnection({ baseUrl: "http://new-host:8888", apiKey: "hsk_new" });
+      yield* harness.apply;
+
+      expect(readJson(pluginConfig)).toMatchObject({
+        api_url: "http://new-host:8888",
+        api_key: "hsk_new",
+      });
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("keeps its Hermes ledger until the undo actually lands", () => {
+    const harness = setup({
+      agentMemory: true,
+      missing: ["claude", "codex"],
+      hermesYaml: "memory:\n  provider: holographic\n",
+    });
+    return Effect.gen(function* () {
+      yield* harness.apply;
+      yield* harness.setAgentMemory(false);
+      NodeFS.chmodSync(harness.hermesHome, 0o500);
+      const failed = yield* harness.apply;
+      NodeFS.chmodSync(harness.hermesHome, 0o700);
+
+      expect(failed.agents[0]?.state).toBe("failed");
+      expect(hermesProvider(harness.hermesHome)).toBe("hindsight");
+
+      yield* harness.apply;
+      expect(hermesProvider(harness.hermesHome)).toBe("holographic");
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("puts the old Hermes home back before wiring a new one", () => {
+    const harness = setup({
+      agentMemory: true,
+      missing: ["claude", "codex"],
+      hermesYaml: "memory:\n  provider: holographic\n",
+    });
+    const newHome = NodePath.join(harness.home, "other-hermes");
+    NodeFS.mkdirSync(newHome);
+    return Effect.gen(function* () {
+      yield* harness.apply;
+      expect(hermesProvider(harness.hermesHome)).toBe("hindsight");
+
+      yield* harness.setHermesHome(newHome);
+      yield* harness.apply;
+
+      expect(hermesProvider(harness.hermesHome)).toBe("holographic");
+      expect(NodeFS.existsSync(NodePath.join(harness.hermesHome, "hindsight", "config.json"))).toBe(
+        false,
+      );
+      expect(hermesProvider(newHome)).toBe("hindsight");
+
+      yield* harness.setAgentMemory(false);
+      yield* harness.apply;
+      expect(hermesProvider(newHome)).toBeUndefined();
     }).pipe(Effect.provide(harness.layer));
   });
 });

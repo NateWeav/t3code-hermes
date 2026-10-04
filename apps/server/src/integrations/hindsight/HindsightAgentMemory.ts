@@ -18,7 +18,9 @@
  * settings it depends on change, and on an explicit retry. Undoing is driven
  * by a ledger of what T3 Code itself changed, so an agent someone wired by
  * hand — or a Hermes install that already used Hindsight — is never torn down
- * by switching this off.
+ * by switching this off; it is only pointed back at the server it used before.
+ * A ledger entry is cleared only once its undo succeeds, so a failed one is
+ * retried by the next pass.
  *
  * @module HindsightAgentMemory
  */
@@ -109,6 +111,13 @@ const INITIAL_STATE: HindsightAgentMemoryState = {
 /** What T3 Code changed, so switching off undoes exactly that and nothing else. */
 const AgentMemoryLedger = Schema.Struct({
   codingAgents: Schema.Array(Schema.Literals(["claudeCode", "codex"])),
+  /**
+   * The installer's config as it was before T3 Code first ran the installer:
+   * its text, or null when there was none. The installer keeps the server and
+   * token only there, so putting it back returns a hand-made install to its
+   * own server. Absent while T3 Code has not touched it.
+   */
+  installerConfig: Schema.optionalKey(Schema.Struct({ previous: Schema.NullOr(Schema.String) })),
   hermes: Schema.NullOr(
     Schema.Struct({
       home: Schema.String,
@@ -120,6 +129,7 @@ const AgentMemoryLedger = Schema.Struct({
   ),
 });
 type AgentMemoryLedger = typeof AgentMemoryLedger.Type;
+type HermesLedger = NonNullable<AgentMemoryLedger["hermes"]>;
 
 const EMPTY_LEDGER: AgentMemoryLedger = { codingAgents: [], hermes: null };
 
@@ -169,8 +179,8 @@ export function installerArgs(
 /**
  * Whether the installer's own config still points where this connection does.
  * A stale one means the agents would write to the old server, so the pass
- * re-runs the installer. The token only counts when there is one to send:
- * the installer never clears a token it is not given.
+ * re-runs the installer. A token the connection no longer has is stale too;
+ * the installer never clears a token it is not given, so the pass removes it.
  */
 export function installerConfigMatches(
   config: unknown,
@@ -181,10 +191,30 @@ export function installerConfigMatches(
   const cloud = isHindsightCloud(connection.baseUrl);
   if (record["serverMode"] !== (cloud ? "cloud" : "self-hosted")) return false;
   if (!cloud && nonEmptyString(record["apiUrl"]) !== connection.baseUrl) return false;
-  if (connection.apiKey !== null && nonEmptyString(record["apiToken"]) !== connection.apiKey) {
-    return false;
-  }
-  return true;
+  return nonEmptyString(record["apiToken"]) === connection.apiKey;
+}
+
+/**
+ * Hermes' plugin config for this connection, as written to
+ * `<HERMES_HOME>/hindsight/config.json`.
+ */
+export function hermesHindsightConfigText(
+  connection: Pick<HindsightConnection, "baseUrl" | "apiKey">,
+): string {
+  const contents = {
+    mode: isHindsightCloud(connection.baseUrl) ? "cloud" : "local_external",
+    api_url: connection.baseUrl,
+    bank_id: "hermes",
+    ...(connection.apiKey === null ? {} : { api_key: connection.apiKey }),
+  };
+  return `${JSON.stringify(contents, null, 2)}\n`;
+}
+
+/** The installer's config text without its `apiToken`. */
+function withoutApiToken(record: Record<string, unknown>): string {
+  const rest = { ...record };
+  delete rest["apiToken"];
+  return `${JSON.stringify(rest, null, 2)}\n`;
 }
 
 /** Whether an agent's hook config carries an entry the installer wrote. */
@@ -276,11 +306,29 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
     ),
   );
 
+  /** Whether the file now holds `contents`. */
+  const writeText = (filePath: string, contents: string) =>
+    writeFileStringAtomically({ filePath, contents }).pipe(
+      Effect.provideService(FileSystem.FileSystem, fs),
+      Effect.provideService(Path.Path, path),
+      Effect.as(true),
+      Effect.orElseSucceed(() => false),
+    );
+
+  /** Whether `file` is gone afterwards; a missing file already is. */
+  const removeFile = (file: string) =>
+    fs.remove(file, { force: true }).pipe(
+      Effect.as(true),
+      Effect.orElseSucceed(() => false),
+    );
+
+  // Owner-only: the installer config it may hold carries the API key.
   const writeLedger = (ledger: AgentMemoryLedger) =>
     writeFileStringAtomically({
       filePath: ledgerPath,
       contents: `${JSON.stringify(ledger, null, 2)}\n`,
     }).pipe(
+      Effect.andThen(fs.chmod(ledgerPath, 0o600)),
       Effect.provideService(FileSystem.FileSystem, fs),
       Effect.provideService(Path.Path, path),
       Effect.catchCause((cause) =>
@@ -363,6 +411,17 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
         ),
       );
 
+  /** Drops `apiToken` from the installer's config; whether none is left. */
+  const clearInstallerToken = Effect.gen(function* () {
+    const record = asRecord(yield* readJson(installerConfigPath));
+    if (record === null || !("apiToken" in record)) return true;
+    return yield* writeText(installerConfigPath, withoutApiToken(record));
+  });
+
+  /** Puts the installer's config back as it was before T3 Code first ran it. */
+  const restoreInstallerConfig = (previous: string | null) =>
+    previous === null ? removeFile(installerConfigPath) : writeText(installerConfigPath, previous);
+
   const hermesConfigFile = (home: string) => path.join(home, "config.yaml");
   const hermesHindsightFile = (home: string) => path.join(home, "hindsight", "config.json");
 
@@ -393,45 +452,50 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
       }
       // A file left with nothing in it reads better empty than as `{}`.
       const emptied = isMap(document.contents) && document.contents.items.length === 0;
-      return yield* writeFileStringAtomically({
-        filePath: hermesConfigFile(home),
-        contents: emptied ? "" : document.toString(),
-      }).pipe(
-        Effect.provideService(FileSystem.FileSystem, fs),
-        Effect.provideService(Path.Path, path),
-        Effect.as(true),
-        Effect.orElseSucceed(() => false),
-      );
+      return yield* writeText(hermesConfigFile(home), emptied ? "" : document.toString());
     });
 
-  /**
-   * Hermes' plugin config for this connection. Written owner-only because a
-   * Hindsight Cloud key may ride in it.
-   */
-  const writeHermesHindsightConfig = (home: string, connection: HindsightConnection) => {
-    const cloud = isHindsightCloud(connection.baseUrl);
-    const contents = {
-      mode: cloud ? "cloud" : "local_external",
-      api_url: connection.baseUrl,
-      bank_id: "hermes",
-      ...(connection.apiKey === null ? {} : { api_key: connection.apiKey }),
-    };
+  /** Owner-only, because a Hindsight Cloud key may ride in it. */
+  const writeHermesHindsightConfig = (home: string, contents: string) => {
     const file = hermesHindsightFile(home);
-    return writeFileStringAtomically({
-      filePath: file,
-      contents: `${JSON.stringify(contents, null, 2)}\n`,
-    }).pipe(
-      Effect.andThen(fs.chmod(file, 0o600)),
-      Effect.provideService(FileSystem.FileSystem, fs),
-      Effect.provideService(Path.Path, path),
-      Effect.as(true),
-      Effect.orElseSucceed(() => false),
+    return writeText(file, contents).pipe(
+      Effect.flatMap((written) =>
+        written
+          ? fs.chmod(file, 0o600).pipe(
+              Effect.as(true),
+              Effect.orElseSucceed(() => false),
+            )
+          : Effect.succeed(false),
+      ),
     );
   };
 
   const state = yield* SubscriptionRef.make<HindsightAgentMemoryState>(INITIAL_STATE);
   const lock = yield* Semaphore.make(1);
   const markApplying = SubscriptionRef.update(state, (current) => ({ ...current, applying: true }));
+
+  /**
+   * Takes out what T3 Code put into one Hermes home. Answers with what is
+   * still left to undo, or null once nothing is.
+   */
+  const undoHermes = (owned: HermesLedger) =>
+    Effect.gen(function* () {
+      let changedProvider = owned.changedProvider;
+      if (changedProvider) {
+        const current = yield* readHermesProvider(owned.home);
+        if (current === "hindsight") {
+          yield* markApplying;
+          changedProvider = !(yield* writeHermesProvider(owned.home, owned.previousProvider));
+        } else {
+          // Someone has since picked another provider: theirs stays. A file
+          // that does not parse is retried rather than given up on.
+          changedProvider = current === undefined;
+        }
+      }
+      const wroteConfig =
+        owned.wroteConfig && !(yield* removeFile(hermesHindsightFile(owned.home)));
+      return changedProvider || wroteConfig ? { ...owned, changedProvider, wroteConfig } : null;
+    });
 
   const pass = Effect.gen(function* () {
     const settings = yield* settingsService.getSettings.pipe(Effect.orElseSucceed(() => null));
@@ -466,6 +530,12 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
             blocker = "nodeMissing";
           } else {
             yield* markApplying;
+            if (nextLedger.installerConfig === undefined) {
+              nextLedger = {
+                ...nextLedger,
+                installerConfig: { previous: yield* readText(installerConfigPath) },
+              };
+            }
             const failure = yield* runInstaller("install", coding, connection);
             if (failure === null) {
               const ownedByT3 = new Set([
@@ -473,22 +543,44 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
                 ...coding.filter((target) => !wiredBefore.has(target)),
               ]);
               nextLedger = { ...nextLedger, codingAgents: [...ownedByT3] };
+              if (connection.apiKey === null && !(yield* clearInstallerToken)) {
+                for (const target of coding) {
+                  failures.set(
+                    target,
+                    "The removed API key could not be cleared from Hindsight's config.",
+                  );
+                }
+              }
             } else {
               for (const target of coding) failures.set(target, failure);
             }
           }
         }
       }
-    } else if (ledger.codingAgents.length > 0) {
-      if (!(yield* isAvailable("npx", hostEnvironment))) {
-        blocker = "nodeMissing";
-      } else {
-        yield* markApplying;
-        const failure = yield* runInstaller("uninstall", ledger.codingAgents, null);
-        if (failure === null) {
-          nextLedger = { ...nextLedger, codingAgents: [] };
+    } else if (ledger.codingAgents.length > 0 || ledger.installerConfig !== undefined) {
+      let uninstalled = ledger.codingAgents.length === 0;
+      if (!uninstalled) {
+        if (!(yield* isAvailable("npx", hostEnvironment))) {
+          blocker = "nodeMissing";
         } else {
-          for (const target of ledger.codingAgents) failures.set(target, failure);
+          yield* markApplying;
+          const failure = yield* runInstaller("uninstall", ledger.codingAgents, null);
+          if (failure === null) {
+            nextLedger = { ...nextLedger, codingAgents: [] };
+            uninstalled = true;
+          } else {
+            for (const target of ledger.codingAgents) failures.set(target, failure);
+          }
+        }
+      }
+      // Only once T3 Code's own hooks are gone, so they never run against it.
+      if (uninstalled && ledger.installerConfig !== undefined) {
+        if (yield* restoreInstallerConfig(ledger.installerConfig.previous)) {
+          nextLedger = { codingAgents: nextLedger.codingAgents, hermes: nextLedger.hermes };
+        } else {
+          for (const target of coding) {
+            failures.set(target, "Hindsight's config could not be put back as it was.");
+          }
         }
       }
     }
@@ -496,41 +588,56 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
     const hermes = agents.find((agent) => agent.target === "hermes");
     if (desired && connection !== null && hermes?.hermesHome) {
       const home = hermes.hermesHome;
+      // A home T3 Code wired before `HERMES_HOME` moved is put back first.
+      let owned = nextLedger.hermes;
+      if (owned !== null && owned.home !== home) {
+        owned = yield* undoHermes(owned);
+        nextLedger = { ...nextLedger, hermes: owned };
+      }
       const provider = yield* readHermesProvider(home);
-      if (provider === undefined) {
+      if (owned !== null && owned.home !== home) {
+        failures.set(
+          "hermes",
+          `Hermes' previous home (${owned.home}) could not be put back, so this one was left alone.`,
+        );
+      } else if (provider === undefined) {
         failures.set("hermes", "Hermes' config.yaml could not be parsed, so it was left alone.");
       } else {
-        const wroteConfig =
-          resolved.hermes === null ? yield* writeHermesHindsightConfig(home, connection) : false;
+        // A config T3 Code wrote follows the connection; one Hermes had is left alone.
+        const ownsConfig = owned?.wroteConfig === true;
+        const configText = hermesHindsightConfigText(connection);
+        const configStale =
+          resolved.hermes === null ||
+          (ownsConfig && (yield* readText(hermesHindsightFile(home))) !== configText);
+        const wroteConfig = configStale
+          ? yield* writeHermesHindsightConfig(home, configText)
+          : false;
+        if (configStale && !wroteConfig) {
+          failures.set("hermes", "Hermes' Hindsight config could not be written.");
+        }
         const changedProvider =
           provider !== "hindsight" ? yield* writeHermesProvider(home, "hindsight") : false;
         if (provider !== "hindsight" && !changedProvider) {
           failures.set("hermes", "Hermes' config.yaml could not be updated.");
         }
         if (wroteConfig || changedProvider) {
-          const previous = ledger.hermes?.home === home ? ledger.hermes : null;
           nextLedger = {
             ...nextLedger,
             hermes: {
               home,
-              previousProvider: previous?.changedProvider ? previous.previousProvider : provider,
-              changedProvider: changedProvider || (previous?.changedProvider ?? false),
-              wroteConfig: wroteConfig || (previous?.wroteConfig ?? false),
+              previousProvider: owned?.changedProvider ? owned.previousProvider : provider,
+              changedProvider: changedProvider || (owned?.changedProvider ?? false),
+              wroteConfig: wroteConfig || ownsConfig,
             },
           };
         }
       }
     } else if (!desired && ledger.hermes !== null) {
-      const owned = ledger.hermes;
-      // Only put the provider back if it is still the one T3 Code set.
-      if (owned.changedProvider && (yield* readHermesProvider(owned.home)) === "hindsight") {
-        yield* markApplying;
-        yield* writeHermesProvider(owned.home, owned.previousProvider);
+      const remaining = yield* undoHermes(ledger.hermes);
+      nextLedger = { ...nextLedger, hermes: remaining };
+      if (remaining !== null) {
+        failures.set("hermes", "Hermes' config could not be put back yet. Retry to try again.");
       }
-      if (owned.wroteConfig) {
-        yield* fs.remove(hermesHindsightFile(owned.home)).pipe(Effect.ignore);
-      }
-      nextLedger = { ...nextLedger, hermes: null };
     }
 
     if (nextLedger !== ledger) yield* writeLedger(nextLedger);

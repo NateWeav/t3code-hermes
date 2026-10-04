@@ -347,6 +347,36 @@ describe("hermes patches", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("removes a file the applied version added", () =>
+    Effect.gen(function* () {
+      // The older version also adds a file, which `git apply` leaves
+      // untracked; the newer changes only the tracked one, the same way.
+      const fileSystem = yield* FileSystem.FileSystem;
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hermes-checkout-" });
+      git(root, "init", "--quiet");
+      const session = NodePath.join(root, "session.py");
+      const added = NodePath.join(root, "helper.py");
+      NodeFS.writeFileSync(session, "remote_cwd = None\n");
+      const base = commit(root, "base");
+      const newerVersion = diffAt(root, "session.py", "remote_cwd = configured()\n", base);
+      NodeFS.writeFileSync(added, "def helper(): pass\n");
+      git(root, "add", "--intent-to-add", "helper.py");
+      const olderVersion = diffAt(root, "session.py", "remote_cwd = configured()\n", base);
+      git(root, "rm", "--quiet", "--cached", "helper.py");
+      NodeFS.rmSync(added);
+      const patch = definition([newerVersion, olderVersion]);
+
+      NodeFS.writeFileSync(NodePath.join(root, "older.patch"), olderVersion.content);
+      git(root, "apply", "older.patch");
+      NodeFS.rmSync(NodePath.join(root, "older.patch"));
+      assert.isTrue(NodeFS.existsSync(added));
+      assert.strictEqual(yield* stateOf(root, patch), "applied");
+      assert.isTrue((yield* changeHermesPatch(root, patch, "reverse")).ok);
+      assert.isFalse(NodeFS.existsSync(added));
+      assert.strictEqual(git(root, "status", "--porcelain"), "");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("does not remove a change upstream now carries", () =>
     Effect.gen(function* () {
       const { root, patch } = yield* makeCheckout;

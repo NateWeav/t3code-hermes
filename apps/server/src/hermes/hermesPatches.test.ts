@@ -318,6 +318,35 @@ describe("hermes patches", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("restores the renamed file of the applied version", () =>
+    Effect.gen(function* () {
+      // Each version renames a different file to the same name, with the same
+      // content: only the source path tells them apart.
+      const fileSystem = yield* FileSystem.FileSystem;
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hermes-checkout-" });
+      git(root, "init", "--quiet");
+      NodeFS.writeFileSync(NodePath.join(root, "old_a.py"), "same = 1\n");
+      NodeFS.writeFileSync(NodePath.join(root, "old_b.py"), "same = 1\n");
+      const base = commit(root, "base");
+      const renameVersion = (from: string): HermesPatchVersion => {
+        git(root, "mv", from, "session.py");
+        const content = git(root, "diff", "--cached", "-M", "HEAD");
+        git(root, "reset", "--quiet", "--hard", base);
+        return { hermesCommit: base, hermesCommitDate: "2026-10-01T00:00:00Z", content };
+      };
+      const newerVersion = renameVersion("old_b.py");
+      const olderVersion = renameVersion("old_a.py");
+      const patch = definition([newerVersion, olderVersion]);
+
+      git(root, "mv", "old_a.py", "session.py");
+      git(root, "reset", "--quiet");
+      assert.strictEqual(yield* stateOf(root, patch), "applied");
+      assert.isTrue((yield* changeHermesPatch(root, patch, "reverse")).ok);
+      assert.isTrue(NodeFS.existsSync(NodePath.join(root, "old_a.py")));
+      assert.isFalse(NodeFS.existsSync(NodePath.join(root, "session.py")));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("does not remove a change upstream now carries", () =>
     Effect.gen(function* () {
       const { root, patch } = yield* makeCheckout;

@@ -238,6 +238,37 @@ describe("hermes patches", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("removes the applied version beside another patch in the same file", () =>
+    Effect.gen(function* () {
+      // As above, with a second patch applied further down the same file.
+      // Its change is in the checkout but in no candidate's scratch tree, so
+      // only once it is taken back out does the applied version match.
+      const fileSystem = yield* FileSystem.FileSystem;
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hermes-checkout-" });
+      git(root, "init", "--quiet");
+      const file = NodePath.join(root, "session.py");
+      const block = "k = 0\nk = 1\nk = 2\n";
+      const padding = "p = 0\np = 1\np = 2\np = 3\n";
+      const lines = (first: string, second: string, tail = "0") =>
+        `${block}v = ${first}\n${block}v = ${second}\n${block}${padding}tail = ${tail}\n`;
+      NodeFS.writeFileSync(file, lines("1", "3"));
+      const base = commit(root, "base");
+      const olderVersion = diffAt(root, "session.py", lines("2", "3"), base);
+      const newerVersion = diffAt(root, "session.py", lines("1", "2"), base);
+      const patch = definition([newerVersion, olderVersion]);
+      const other: HermesPatchDefinition = {
+        id: HermesPatchId.make("other-patch"),
+        title: "Other",
+        neededFor: "Tests.",
+        versions: [diffAt(root, "session.py", lines("1", "3", "1"), base)],
+      };
+
+      NodeFS.writeFileSync(file, lines("2", "3", "1"));
+      assert.isTrue((yield* changeHermesPatch(root, patch, "reverse", [patch, other])).ok);
+      assert.strictEqual(NodeFS.readFileSync(file, "utf8"), lines("1", "3", "1"));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("removes every file of the applied version when another touches fewer", () =>
     Effect.gen(function* () {
       // The older version changes two files, the newer only one of them the

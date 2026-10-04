@@ -1,6 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off - builds fixture git repos synchronously.
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
+import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -114,6 +115,8 @@ const makeHermesWith = (options: { readonly updateHelp: string }) =>
         "#!/bin/sh",
         `if [ "$2" = "--help" ]; then echo "${options.updateHelp}"; exit 0; fi`,
         `echo "$@" >> "${log}"`,
+        // Signals through a FIFO that the update is underway, then hangs.
+        `if [ -p "${NodePath.join(base, "started")}" ]; then echo started > "${NodePath.join(base, "started")}"; exec sleep 60; fi`,
         `if [ -f "${NodePath.join(base, "noisy")}" ]; then yes "resolving dependency" | head -c 2000000 >&2; fi`,
         `if [ -f "${NodePath.join(base, "fail")}" ]; then echo "network unreachable" >&2; exit 1; fi`,
         `cd "${root}" && git pull --quiet --ff-only`,
@@ -344,6 +347,29 @@ describe("HermesPatchService.updateHermes", () => {
         const output = result.failureOutput ?? "";
         assert.isTrue(output.trimEnd().endsWith("network unreachable"));
         assert.isBelow(output.length, 4_000);
+      }).pipe(withService(hermes.binaryPath, [patch]));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("puts the patches back when the request is interrupted mid-update", () =>
+    Effect.gen(function* () {
+      const hermes = yield* makeHermes;
+      const patch = hermes.patch([hermes.newerVersion, hermes.olderVersion]);
+      const started = NodePath.join(hermes.base, "started");
+      NodeChildProcess.execFileSync("mkfifo", [started]);
+      yield* Effect.gen(function* () {
+        const service = yield* HermesPatchService;
+        yield* service.apply({ patchId: patch.id });
+        const patched = hermes.read();
+
+        const update = yield* service.updateHermes.pipe(Effect.forkChild);
+        // Resolves once the fake `hermes update` is running, patches off.
+        yield* Effect.promise(() => NodeFSP.readFile(started, "utf8"));
+        assert.strictEqual(hermes.read(), "backend = local\nremote_cwd = None\n");
+        yield* Fiber.interrupt(update);
+
+        assert.strictEqual(hermes.read(), patched);
+        assert.strictEqual(hermes.head(), hermes.older);
       }).pipe(withService(hermes.binaryPath, [patch]));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );

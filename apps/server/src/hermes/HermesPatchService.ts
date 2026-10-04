@@ -468,42 +468,47 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
     if (userEdits.size > 0) return yield* refuseLocalChanges([...userEdits].sort());
 
     const removed: HermesPatchDefinition[] = [];
-    for (const patch of applied) {
-      const result = yield* provide(changeHermesPatch(checkoutRoot, patch, "reverse")).pipe(
-        Effect.orElseSucceed(() => ({ ok: false }) as const),
-      );
-      if (!result.ok) {
-        yield* reapply(checkout, removed);
-        return yield* new HermesPatchError({
-          reason: "commandFailed",
-          detail: `git refused to remove ${patch.title} before updating. Hermes was not updated.`,
-        });
+    // A dropped connection interrupts this request mid-update. Whatever was
+    // lifted off by then goes back on; reapplying is a no-op for a patch that
+    // already went back, so the normal path running it first is harmless.
+    return yield* Effect.gen(function* () {
+      for (const patch of applied) {
+        const result = yield* provide(changeHermesPatch(checkoutRoot, patch, "reverse")).pipe(
+          Effect.orElseSucceed(() => ({ ok: false }) as const),
+        );
+        if (!result.ok) {
+          yield* reapply(checkout, removed);
+          return yield* new HermesPatchError({
+            reason: "commandFailed",
+            detail: `git refused to remove ${patch.title} before updating. Hermes was not updated.`,
+          });
+        }
+        removed.push(patch);
       }
-      removed.push(patch);
-    }
-    // Whatever is still dirty is the user's own edit inside a patched file
-    // that the check above could not attribute.
-    const leftover = yield* provide(readHermesDirtyPaths(checkoutRoot)).pipe(
-      Effect.orElseSucceed(() => new Set<string>()),
-    );
-    if (leftover.size > 0) {
-      yield* reapply(checkout, removed);
-      return yield* refuseLocalChanges([...leftover].sort());
-    }
-
-    const update = yield* runHermesUpdate(checkout);
-    if (!update.ok) {
-      yield* Effect.logWarning("hermes update failed").pipe(
-        Effect.annotateLogs({ output: outputTail(update.output) }),
+      // Whatever is still dirty is the user's own edit inside a patched file
+      // that the check above could not attribute.
+      const leftover = yield* provide(readHermesDirtyPaths(checkoutRoot)).pipe(
+        Effect.orElseSucceed(() => new Set<string>()),
       );
-    }
-    const restored = yield* reapply(checkout, removed);
-    return {
-      ...restored,
-      previousHeadCommit: before.headCommit ?? null,
-      updateFailed: !update.ok,
-      failureOutput: update.ok ? null : outputTail(update.output),
-    } satisfies HermesPatchUpdateHermesResult;
+      if (leftover.size > 0) {
+        yield* reapply(checkout, removed);
+        return yield* refuseLocalChanges([...leftover].sort());
+      }
+
+      const update = yield* runHermesUpdate(checkout);
+      if (!update.ok) {
+        yield* Effect.logWarning("hermes update failed").pipe(
+          Effect.annotateLogs({ output: outputTail(update.output) }),
+        );
+      }
+      const restored = yield* reapply(checkout, removed);
+      return {
+        ...restored,
+        previousHeadCommit: before.headCommit ?? null,
+        updateFailed: !update.ok,
+        failureOutput: update.ok ? null : outputTail(update.output),
+      } satisfies HermesPatchUpdateHermesResult;
+    }).pipe(Effect.onInterrupt(() => reapply(checkout, removed).pipe(Effect.ignore)));
   }).pipe(changeLock.withPermits(1));
 
   /** The gateway answering once one other than `previousPid` does, or the last read. */

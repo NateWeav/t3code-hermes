@@ -212,6 +212,32 @@ describe("hermes patches", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("removes the version applied when two fit HEAD at different places", () =>
+    Effect.gen(function* () {
+      // One block, three times over. The older version sets the first `v` to
+      // 2, the newer one the second: once the older is applied both reverse
+      // cleanly, and both apply to HEAD. Reversing the newer would turn the
+      // first `v` into the second's original 3.
+      const fileSystem = yield* FileSystem.FileSystem;
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hermes-checkout-" });
+      git(root, "init", "--quiet");
+      const file = NodePath.join(root, "session.py");
+      const block = "k = 0\nk = 1\nk = 2\n";
+      const lines = (first: string, second: string) =>
+        `${block}v = ${first}\n${block}v = ${second}\n${block}`;
+      NodeFS.writeFileSync(file, lines("1", "3"));
+      const base = commit(root, "base");
+      const olderVersion = diffAt(root, "session.py", lines("2", "3"), base);
+      const newerVersion = diffAt(root, "session.py", lines("1", "2"), base);
+      const patch = definition([newerVersion, olderVersion]);
+
+      NodeFS.writeFileSync(file, lines("2", "3"));
+      assert.strictEqual(yield* stateOf(root, patch), "applied");
+      assert.isTrue((yield* changeHermesPatch(root, patch, "reverse")).ok);
+      assert.strictEqual(NodeFS.readFileSync(file, "utf8"), lines("1", "3"));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("refuses to guess which version to remove once it is committed", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

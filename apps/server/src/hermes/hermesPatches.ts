@@ -273,16 +273,16 @@ const readPathsBeyondVersions = Effect.fn("readHermesPathsBeyondVersions")(funct
  */
 const readUserEdits = Effect.fn("readHermesUserEdits")(function* (
   checkoutRoot: string,
-  applied: ReadonlyArray<{ readonly patch: HermesPatchDefinition; readonly file: string }>,
+  applied: ReadonlyArray<{ readonly patch: HermesPatchDefinition; readonly file: string | null }>,
 ) {
   const dirty = yield* readHermesDirtyPaths(checkoutRoot);
   const touched = new Set(applied.flatMap(({ patch }) => [...patchPaths(patch)]));
-  const beyond = [...dirty].some((path) => touched.has(path))
-    ? yield* readPathsBeyondVersions(
-        checkoutRoot,
-        applied.map(({ file }) => file),
-      )
-    : null;
+  // An applied patch whose version cannot be told cannot be replayed either.
+  const files = applied.flatMap(({ file }) => (file === null ? [] : [file]));
+  const beyond =
+    files.length === applied.length && [...dirty].some((path) => touched.has(path))
+      ? yield* readPathsBeyondVersions(checkoutRoot, files)
+      : null;
   return new Set([...dirty].filter((path) => !touched.has(path) || (beyond?.has(path) ?? false)));
 });
 
@@ -313,10 +313,7 @@ const appliedVersions = (
     readonly state: HermesPatchState;
     readonly file: string | null;
   }>,
-) =>
-  resolved.flatMap(({ patch, state, file }) =>
-    state === "applied" && file !== null ? [{ patch, file }] : [],
-  );
+) => resolved.flatMap(({ patch, state, file }) => (state === "applied" ? [{ patch, file }] : []));
 
 /** The checkout's HEAD, abbreviated, or null in a repository without commits. */
 export const readHermesHeadCommit = (checkoutRoot: string) =>

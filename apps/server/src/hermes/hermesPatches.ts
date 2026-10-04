@@ -124,18 +124,40 @@ const writePatchFiles = Effect.fn("writeHermesPatchFiles")(function* (
 const GIT_CHECK_CONCURRENCY = 4;
 
 /**
- * The first version file, newest first, that git accepts. `--check` only reads
- * the checkout, so the versions are checked side by side rather than one git
- * process after another.
+ * The version files, newest first, that git accepts. `--check` only reads, so
+ * the versions are checked side by side rather than one git process after
+ * another.
  */
-const firstFitting = (
+const fitting = (
   checkoutRoot: string,
   versionFiles: ReadonlyArray<string>,
   args: ReadonlyArray<string>,
+  env?: { readonly GIT_INDEX_FILE: string },
 ) =>
-  Effect.forEach(versionFiles, (file) => runGit(checkoutRoot, [...args, file]), {
+  Effect.forEach(versionFiles, (file) => runGit(checkoutRoot, [...args, file], env), {
     concurrency: GIT_CHECK_CONCURRENCY,
-  }).pipe(Effect.map((results) => versionFiles.find((_, index) => results[index]?.code === 0)));
+  }).pipe(Effect.map((results) => versionFiles.filter((_, index) => results[index]?.code === 0)));
+
+/**
+ * Which of several versions that all reverse cleanly is the one applied. Two
+ * versions can patch different upstream text into the same result, and
+ * reversing the wrong one would write the other commit's original text back.
+ * The applied one is the version that applies to HEAD itself, checked in a
+ * scratch index so the checkout's own index is untouched. When none does (the
+ * user has committed on top, say), the newest is the best guess.
+ */
+const pickAppliedVersion = Effect.fn("pickHermesAppliedVersion")(function* (
+  checkoutRoot: string,
+  candidates: ReadonlyArray<string>,
+) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-hermes-index-" });
+  const env = { GIT_INDEX_FILE: path.join(directory, "index") };
+  if ((yield* runGit(checkoutRoot, ["read-tree", "HEAD"], env)).code !== 0) return candidates[0];
+  const onHead = yield* fitting(checkoutRoot, candidates, ["apply", "--check", "--cached"], env);
+  return onHead[0] ?? candidates[0];
+}, Effect.scoped);
 
 /**
  * Where one patch stands, and the version file that got it there: the version
@@ -148,9 +170,12 @@ const resolvePatchState = Effect.fn("resolveHermesPatchState")(function* (
   const result = (state: HermesPatchState, file: string | null) => ({ state, file });
   // Reverse first, over every version: a checkout that already has a change
   // must read as applied, not as a conflict of a forward patch with itself.
-  const reverse = yield* firstFitting(checkoutRoot, versionFiles, ["apply", "--check", "-R"]);
-  if (reverse !== undefined) return result("applied", reverse);
-  const forward = yield* firstFitting(checkoutRoot, versionFiles, ["apply", "--check"]);
+  const reverse = yield* fitting(checkoutRoot, versionFiles, ["apply", "--check", "-R"]);
+  if (reverse.length === 1) return result("applied", reverse[0]!);
+  if (reverse.length > 1) {
+    return result("applied", (yield* pickAppliedVersion(checkoutRoot, reverse)) ?? reverse[0]!);
+  }
+  const [forward] = yield* fitting(checkoutRoot, versionFiles, ["apply", "--check"]);
   if (forward !== undefined) return result("notApplied", forward);
   return result("doesNotApply", null);
 });

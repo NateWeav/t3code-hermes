@@ -210,58 +210,45 @@ const pickAppliedVersion = Effect.fn("pickHermesAppliedVersion")(function* (
     ).pipe(Effect.map((sets) => sets.flatMap((set) => [...set])));
   // Compared over every path any candidate touches, both sides of a rename
   // included: a version that changes fewer files would otherwise match while
-  // another's change sits elsewhere. Only other patches sharing one of those
-  // files matter, and their paths are taken too so they come out whole; the
-  // rest, and any edit in their files, have no bearing on this patch.
+  // another's change sits elsewhere. Only other patches' versions sharing one
+  // of those files matter; the rest, and any edit in their files, have no
+  // bearing on this patch.
   const candidatePaths = new Set(yield* pathsOf(candidates));
   if (candidatePaths.size === 0) return null;
-  const overlapping: ReadonlyArray<string>[] = [];
-  const paths = new Set(candidatePaths);
+  // Each other patch sharing a file with the candidates may have one of its
+  // versions applied, or none: its change can be upstream's own, or absent.
+  // Every way of choosing is tried.
+  const choices: ReadonlyArray<string | null>[] = [];
   for (const versionFiles of allOthers) {
-    const otherPaths = yield* pathsOf(versionFiles);
-    if (!otherPaths.some((touched) => candidatePaths.has(touched))) continue;
-    overlapping.push(versionFiles);
-    for (const touched of otherPaths) paths.add(touched);
-  }
-  const others = overlapping;
-  // The working tree over those paths, as a tree. Built through its own
-  // scratch index so files a patch added, which `git apply` leaves
-  // untracked, count too; a plain `git diff` would skip them.
-  const worktreeEnv = { GIT_INDEX_FILE: path.join(directory, "index-worktree") };
-  if ((yield* runGit(checkoutRoot, ["read-tree", "HEAD"], worktreeEnv)).code !== 0) return null;
-  const staged = yield* runGit(
-    checkoutRoot,
-    ["update-index", "--add", "--remove", "--", ...paths],
-    worktreeEnv,
-  );
-  if (staged.code !== 0) return null;
-  const worktreeTree = yield* runGit(checkoutRoot, ["write-tree"], worktreeEnv);
-  if (worktreeTree.code !== 0) return null;
-  // Out with every other patch applied here. Another patch can itself have
-  // several versions that reverse, and only the applied one leaves the right
-  // text behind, so each choice is tried: one per reversing version, across
-  // the few patches that share these files.
-  const choices: ReadonlyArray<string>[] = [];
-  for (const versionFiles of others) {
-    const reversing = yield* fitting(
-      checkoutRoot,
-      versionFiles,
-      ["apply", "--check", "--cached", "-R"],
-      worktreeEnv,
-    );
-    if (reversing.length > 0) choices.push(reversing);
+    const options: (string | null)[] = [null];
+    for (const file of versionFiles) {
+      const touched = yield* pathsOf([file]);
+      if (touched.some((path) => candidatePaths.has(path))) options.push(file);
+    }
+    if (options.length > 1) choices.push(options);
   }
   const combinations = choices.reduce<ReadonlyArray<ReadonlyArray<string>>>(
-    (acc, options) => acc.flatMap((combo) => options.map((file) => [...combo, file])),
+    (acc, options) =>
+      acc.flatMap((combo) => options.map((file) => (file === null ? combo : [...combo, file]))),
     [[]],
   );
   if (combinations.length > MAX_OTHER_COMBINATIONS) return null;
+  // Per choice, the working tree over the candidates' paths and the chosen
+  // versions' own, as a tree, with the chosen versions reversed out. Built
+  // through a scratch index so files a patch added, which `git apply` leaves
+  // untracked, count too; a plain `git diff` would skip them. Paths no
+  // chosen version touches stay at HEAD, so edits there have no bearing.
   const normalized = new Set<string>();
   for (const [index, combo] of combinations.entries()) {
-    const env = { GIT_INDEX_FILE: path.join(directory, `index-others-${index}`) };
-    if ((yield* runGit(checkoutRoot, ["read-tree", worktreeTree.stdout.trim()], env)).code !== 0) {
-      continue;
-    }
+    const env = { GIT_INDEX_FILE: path.join(directory, `index-worktree-${index}`) };
+    const paths = new Set([...candidatePaths, ...(yield* pathsOf(combo))]);
+    if ((yield* runGit(checkoutRoot, ["read-tree", "HEAD"], env)).code !== 0) continue;
+    const staged = yield* runGit(
+      checkoutRoot,
+      ["update-index", "--add", "--remove", "--", ...paths],
+      env,
+    );
+    if (staged.code !== 0) continue;
     let reversedAll = true;
     for (const file of combo) {
       if ((yield* runGit(checkoutRoot, ["apply", "--cached", "-R", file], env)).code !== 0) {

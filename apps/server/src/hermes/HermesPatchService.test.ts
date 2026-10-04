@@ -67,9 +67,13 @@ const withInstance = (binaryPath: string, home: string) =>
 
 /**
  * A checkout whose `hermes` stands in for `hermes gateway restart`: it
- * replaces the gateway by writing a new pid, or fails with `exitCode`.
+ * replaces the gateway by writing a new pid, or fails with `exitCode`, first
+ * taking the old gateway's socket down when `stopsGateway` is set.
  */
-const makeRestartableCheckout = (restart: { readonly exitCode: number }) =>
+const makeRestartableCheckout = (restart: {
+  readonly exitCode: number;
+  readonly stopsGateway?: boolean;
+}) =>
   Effect.gen(function* () {
     const { root, binaryPath } = yield* makeHermesCheckout;
     const fileSystem = yield* FileSystem.FileSystem;
@@ -78,9 +82,10 @@ const makeRestartableCheckout = (restart: { readonly exitCode: number }) =>
       directory: NodePath.dirname(binaryPath),
       name: "hermes",
       source: [
-        'import { writeFileSync } from "node:fs";',
+        'import { rmSync, writeFileSync } from "node:fs";',
         'import { join } from "node:path";',
         'if (process.argv.slice(2).join(" ") !== "gateway restart") process.exit(64);',
+        `if (${restart.stopsGateway === true}) rmSync(join(process.env.HERMES_HOME, "gateway.sock"));`,
         `if (${restart.exitCode} !== 0) {`,
         '  console.error("✗ Gateway service restart failed.");',
         `  process.exit(${restart.exitCode});`,
@@ -171,7 +176,7 @@ describe("HermesPatchService", () => {
       // The restart command returns while the old process still answers.
       gateway.answerPid(4242);
       yield* Effect.sleep("1500 millis").pipe(
-        Effect.andThen(() => gateway.answerPid(null)),
+        Effect.andThen(Effect.sync(() => gateway.answerPid(null))),
         Effect.forkScoped,
       );
 
@@ -204,6 +209,35 @@ describe("HermesPatchService", () => {
           "hermes gateway restart exited with code 1. ✗ Gateway service restart failed.",
         );
         assert.strictEqual(after.gateway?.state, "upToDate");
+      }).pipe(withInstance(binaryPath, home));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("keeps a restart failure that left no gateway until another one answers", () =>
+    Effect.gen(function* () {
+      const { binaryPath, home } = yield* makeRestartableCheckout({
+        exitCode: 1,
+        stopsGateway: true,
+      });
+      const old = yield* Effect.promise(() => startFakeGateway({ home, pid: 4242 }));
+
+      yield* Effect.gen(function* () {
+        const service = yield* HermesPatchService;
+        yield* service.restartGateway;
+        yield* service.awaitGatewayRestart;
+        yield* Effect.promise(old.close);
+        const down = yield* service.list;
+        assert.isNull(down.gateway);
+        assert.include(down.gatewayRestartFailure ?? "", "exited with code 1");
+
+        // Started by hand on the host: the failure no longer describes anything.
+        yield* Effect.acquireRelease(
+          Effect.promise(() => startFakeGateway({ home, pid: 6161 })),
+          (fake) => Effect.promise(fake.close),
+        );
+        const back = yield* service.list;
+        assert.strictEqual(back.gateway?.state, "upToDate");
+        assert.isNull(back.gatewayRestartFailure);
       }).pipe(withInstance(binaryPath, home));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );

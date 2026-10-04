@@ -31,4 +31,14 @@ describe("describeHermesGateway", () => {
       restart: true,
     });
   });
+
+  it("keeps a failed restart visible after the gateway stopped and did not come back", () => {
+    expect(describeHermesGateway(null, "The gateway stopped and did not come back.")).toMatchObject(
+      {
+        tone: "warning",
+        text: "The gateway restart failed: The gateway stopped and did not come back.",
+        restart: false,
+      },
+    );
+  });
 });

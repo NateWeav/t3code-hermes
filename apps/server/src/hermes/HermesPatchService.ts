@@ -97,7 +97,8 @@ const REPLACEMENT_RETRY_DELAY = "1 second";
 
 interface GatewayRestart {
   readonly running: boolean;
-  readonly failure: string | null;
+  /** Why the last restart failed, and the gateway pid it left answering (null: none). */
+  readonly failure: { readonly detail: string; readonly gatewayPid: number | null } | null;
   readonly fiber: Fiber.Fiber<void> | null;
 }
 
@@ -169,10 +170,16 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const restart = yield* Ref.get(restartRef);
       const gateway = yield* readGateway(checkout.hermesHome);
-      if (gateway === null) {
-        return restart.running ? ({ state: "restarting", canRestart: true } as const) : null;
+      // A failure describes the gateway it left behind. Once another one
+      // answers, say one started by hand, the failure is history.
+      const failure =
+        restart.failure !== null && restart.failure.gatewayPid === (gateway?.pid ?? null)
+          ? restart.failure.detail
+          : null;
+      if (restart.running) {
+        return { status: { state: "restarting", canRestart: true } as const, failure: null };
       }
-      if (restart.running) return { state: "restarting", canRestart: true } as const;
+      if (gateway === null) return { status: null, failure };
       const changedAtMs = yield* Effect.promise(() =>
         latestModifiedMs(checkout.checkoutRoot, PATCHED_SOURCE_FILES),
       ).pipe(Effect.orElseSucceed(() => null));
@@ -180,7 +187,7 @@ export const make = Effect.gen(function* () {
         state: changedAtMs !== null && changedAtMs > gateway.startedAtMs ? "outdated" : "upToDate",
         canRestart: isRestartable(gateway),
       };
-      return status;
+      return { status, failure };
     });
 
   const readSnapshot = (checkout: Checkout) =>
@@ -189,16 +196,15 @@ export const make = Effect.gen(function* () {
         patches: readHermesPatches(checkout.checkoutRoot),
         detachedHead: isHermesCheckoutDetached(checkout.checkoutRoot),
         gateway: readGatewayStatus(checkout),
-        restart: Ref.get(restartRef),
       }),
     ).pipe(
-      Effect.map(({ patches, detachedHead, gateway, restart }): HermesPatchesSnapshot => ({
+      Effect.map(({ patches, detachedHead, gateway }): HermesPatchesSnapshot => ({
         availability: "ready",
         checkoutPath: checkout.checkoutRoot,
         detachedHead,
         patches,
-        gateway,
-        gatewayRestartFailure: restart.failure,
+        gateway: gateway.status,
+        gatewayRestartFailure: gateway.failure,
       })),
       Effect.mapError(
         (cause) =>
@@ -302,20 +308,35 @@ export const make = Effect.gen(function* () {
       );
       // The replacement can be alive before its control socket answers.
       const after =
-        result.code === 0 ? yield* awaitReplacement(checkout.hermesHome, previousPid) : null;
+        result.code === 0
+          ? yield* awaitReplacement(checkout.hermesHome, previousPid)
+          : yield* readGateway(checkout.hermesHome);
       if (result.code === 0 && after !== null && after.pid !== previousPid) return null;
       yield* Effect.logWarning("hermes gateway restart did not replace the gateway").pipe(
         Effect.annotateLogs({ exitCode: result.code, replaced: after?.pid !== previousPid }),
       );
+      const gatewayPid = after?.pid ?? null;
       const output = describeRestartOutput(result.stdout, result.stderr);
       if (result.code !== 0) {
-        return `hermes gateway restart exited with code ${result.code}.${output ? ` ${output}` : ""}`;
+        return {
+          detail: `hermes gateway restart exited with code ${result.code}.${output ? ` ${output}` : ""}`,
+          gatewayPid,
+        };
       }
-      return after === null
-        ? "The gateway stopped and did not come back. Start it with hermes gateway start."
-        : "The gateway is still the one from before. Check hermes gateway status on the host.";
+      return {
+        detail:
+          after === null
+            ? "The gateway stopped and did not come back. Start it with hermes gateway start."
+            : "The gateway is still the one from before. Check hermes gateway status on the host.",
+        gatewayPid,
+      };
     }).pipe(
-      Effect.catchCause(() => Effect.succeed("Could not run hermes gateway restart.")),
+      Effect.catchCause(() =>
+        Effect.succeed({
+          detail: "Could not run hermes gateway restart.",
+          gatewayPid: previousPid,
+        }),
+      ),
       Effect.flatMap((failure) =>
         Ref.update(restartRef, (current) => ({ ...current, running: false, failure })),
       ),

@@ -58,7 +58,13 @@ export function describeHermesGateway(
   gateway: HermesGatewayStatus | null,
   restartFailure: string | null,
 ): { readonly tone: "warning" | "info"; readonly text: string; readonly restart: boolean } | null {
-  if (gateway === null) return null;
+  if (gateway === null) {
+    // A restart that stopped the gateway and never brought it back. There is
+    // nothing left to restart, so the failure itself says how to start it.
+    return restartFailure === null
+      ? null
+      : { tone: "warning", text: `The gateway restart failed: ${restartFailure}`, restart: false };
+  }
   if (gateway.state === "restarting") {
     return {
       tone: "info",

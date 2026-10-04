@@ -29,9 +29,11 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Option from "effect/Option";
+import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
+import { HttpClient } from "effect/unstable/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { providerUpdateLock } from "../provider/providerMaintenanceCommandCoordinator.ts";
@@ -46,7 +48,12 @@ import {
   type RunningHermesGateway,
 } from "./hermesGateway.ts";
 import {
+  optInHermesFastModeEndpoints,
+  optOutHermesFastModeEndpoints,
+} from "./hermesFastModeConfig.ts";
+import {
   changeHermesPatch,
+  HERMES_FAST_MODE_PATCH_ID,
   HERMES_PATCHES,
   HERMES_UPDATE_LOCK_KEY,
   hermesPatchedSourceFiles,
@@ -70,6 +77,8 @@ export class HermesPatchService extends Context.Service<
       input: HermesPatchChangeInput,
     ) => Effect.Effect<HermesPatchesSnapshot, HermesPatchError>;
     readonly updateHermes: Effect.Effect<HermesPatchUpdateHermesResult, HermesPatchError>;
+    /** Emits after a patch was applied or removed, so provider snapshots can re-probe. */
+    readonly changes: Stream.Stream<void>;
     /**
      * Starts `hermes gateway restart` and returns at once. The gateway drains
      * its in-flight work first, which can take minutes; the snapshot reads
@@ -156,6 +165,8 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const httpClient = yield* HttpClient.HttpClient;
+  const changesPubSub = yield* PubSub.unbounded<void>();
   // Two clicks racing on one checkout would both pass the state check, and a
   // provider update from Settings changes the same checkout, so both share the
   // Hermes update lock.
@@ -328,6 +339,19 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
               : "git refused to remove the patch. The checkout was left unchanged.",
         });
       }
+      if (patch.id === HERMES_FAST_MODE_PATCH_ID) {
+        const configFile = path.join(checkout.hermesHome, "config.yaml");
+        yield* (
+          direction === "forward"
+            ? optInHermesFastModeEndpoints(configFile)
+            : optOutHermesFastModeEndpoints(configFile)
+        ).pipe(
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(Path.Path, path),
+          Effect.provideService(HttpClient.HttpClient, httpClient),
+        );
+      }
+      yield* PubSub.publish(changesPubSub, undefined);
       return yield* readSnapshot(checkout);
     }).pipe(changeLock.withPermits(1));
 
@@ -507,6 +531,10 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
         );
       }
       const restored = yield* reapply(checkout, removed);
+      // Hermes and its patches changed, so provider snapshots re-probe. The
+      // fast mode config opt-in stays: the patch went back on, or comes back
+      // once a T3 Code update brings a version that fits.
+      yield* PubSub.publish(changesPubSub, undefined);
       return {
         ...restored,
         previousHeadCommit: before.headCommit ?? null,
@@ -638,6 +666,7 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
     apply: (input) => change(input, "forward"),
     revert: (input) => change(input, "reverse"),
     updateHermes,
+    changes: Stream.fromPubSub(changesPubSub),
     restartGateway,
     awaitGatewayRestart: Ref.get(restartRef).pipe(
       Effect.flatMap(({ fiber }) => (fiber === null ? Effect.void : Fiber.await(fiber))),

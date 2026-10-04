@@ -10,7 +10,11 @@ import * as NodeHttp from "node:http";
 
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { EnvironmentHttpApi, type RepositoryIdentity } from "@t3tools/contracts";
+import {
+  EnvironmentHttpApi,
+  ProviderDriverKind,
+  type RepositoryIdentity,
+} from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Duration from "effect/Duration";
 import * as Deferred from "effect/Deferred";
@@ -498,21 +502,29 @@ const ProviderInstallationRefreshLive = Layer.effectDiscard(
     const codex = yield* CodexInstallation.CodexInstallation;
     const instances = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
     const providers = yield* ProviderRegistry.ProviderRegistry;
-    yield* Stream.merge(
-      antigravity.changes.pipe(
-        Stream.changesWith((a, b) => a.installedVersion === b.installedVersion),
-        Stream.drop(1),
-      ),
-      codex.changes.pipe(
-        Stream.changesWith((a, b) => a.installedVersion === b.installedVersion),
-        Stream.drop(1),
-      ),
+    const hermesPatches = yield* HermesPatchService.HermesPatchService;
+    yield* Stream.mergeAll(
+      [
+        antigravity.changes.pipe(
+          Stream.changesWith((a, b) => a.installedVersion === b.installedVersion),
+          Stream.drop(1),
+          Stream.map((state) => state.driver),
+        ),
+        codex.changes.pipe(
+          Stream.changesWith((a, b) => a.installedVersion === b.installedVersion),
+          Stream.drop(1),
+          Stream.map((state) => state.driver),
+        ),
+        // A patch can change what Hermes advertises, such as fast-mode models.
+        hermesPatches.changes.pipe(Stream.map(() => ProviderDriverKind.make("hermes"))),
+      ],
+      { concurrency: "unbounded" },
     ).pipe(
-      Stream.runForEach((state) =>
+      Stream.runForEach((driver) =>
         instances.listInstances.pipe(
           Effect.flatMap((entries) =>
             Effect.forEach(
-              entries.filter((instance) => instance.driverKind === state.driver),
+              entries.filter((instance) => instance.driverKind === driver),
               (instance) => providers.refreshInstance(instance.instanceId),
               { discard: true },
             ),

@@ -11,6 +11,7 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import { FetchHttpClient } from "effect/unstable/http";
 
 import { providerUpdateLock } from "../provider/providerMaintenanceCommandCoordinator.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -26,7 +27,7 @@ const withService = (hermes: { readonly enabled: boolean; readonly binaryPath?: 
   Effect.provide(
     Layer.effect(HermesPatchService, make).pipe(
       Layer.provide(ServerSettings.layerTest({ providers: { hermes } })),
-      Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(Layer.merge(NodeServices.layer, FetchHttpClient.layer)),
     ),
   );
 
@@ -64,7 +65,7 @@ const withInstance = (binaryPath: string, home: string) =>
           },
         } as never),
       ),
-      Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(Layer.merge(NodeServices.layer, FetchHttpClient.layer)),
     ),
   );
 

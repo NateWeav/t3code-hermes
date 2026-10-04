@@ -41,6 +41,9 @@ export interface HermesPatchDefinition {
 /** Serializes everything that changes a Hermes checkout: updates and patches. */
 export const HERMES_UPDATE_LOCK_KEY = "hermes";
 
+/** Applying it also opts CLIProxyAPI endpoints in (`hermesFastModeConfig.ts`). */
+export const HERMES_FAST_MODE_PATCH_ID = HermesPatchId.make("acp-fast-mode");
+
 export const HERMES_PATCHES: ReadonlyArray<HermesPatchDefinition> = HERMES_PATCH_FILES.map(
   (patch) => ({
     id: HermesPatchId.make(patch.id),

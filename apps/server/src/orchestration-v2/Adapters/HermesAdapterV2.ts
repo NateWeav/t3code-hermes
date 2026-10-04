@@ -25,6 +25,10 @@ import * as Semaphore from "effect/Semaphore";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import * as ServerConfig from "../../config.ts";
+import {
+  HERMES_FAST_MODE_CONFIG_ID,
+  resolveHermesFastModeSelection,
+} from "../../hermes/hermesFastMode.ts";
 import { applyHermesReasoningSelection } from "../../hermes/hermesReasoningOptions.ts";
 import type { HermesReasoningLevel } from "../../hermes/hermesReasoning.ts";
 import { makeAcpNativeLoggerFactory } from "../../provider/acp/AcpNativeLogging.ts";
@@ -129,6 +133,7 @@ export function makeHermesAcpAdapterFlavor(options: HermesAdapterV2Options): Acp
     AcpSessionRuntime.AcpSessionRuntime["Service"],
     HermesReasoningLevel | null
   >();
+  const sentFastModes = new WeakMap<AcpSessionRuntime.AcpSessionRuntime["Service"], boolean>();
 
   const spawnRuntime = (input: AcpAdapterV2RuntimeInput) => {
     const { runtimePolicy, processEnvironment, ...runtimeInput } = input;
@@ -165,7 +170,8 @@ export function makeHermesAcpAdapterFlavor(options: HermesAdapterV2Options): Acp
      * and an unchanged model is re-sent when only the level moved. Hermes also
      * exposes its edit-approval policy as session modes; a build that offers
      * no matching mode, or rejects the switch, still runs, because T3's own
-     * permission policy is what enforces approvals.
+     * permission policy is what enforces approvals. Fast mode is a session
+     * option Hermes re-pins on every turn, so it survives the model rebuild.
      */
     applyModelSelection: ({ runtime, startResult, modelSelection }) =>
       Effect.gen(function* () {
@@ -183,7 +189,7 @@ export function makeHermesAcpAdapterFlavor(options: HermesAdapterV2Options): Acp
               ),
             );
         }
-        return yield* reasoningConfigPermit.withPermit(
+        const model = yield* reasoningConfigPermit.withPermit(
           Effect.gen(function* () {
             const level = yield* applyHermesReasoningSelection({
               model: modelSelection.model,
@@ -217,6 +223,16 @@ export function makeHermesAcpAdapterFlavor(options: HermesAdapterV2Options): Acp
             return model;
           }),
         );
+        const fastMode = resolveHermesFastModeSelection(modelSelection);
+        if (fastMode !== undefined && sentFastModes.get(runtime) !== fastMode) {
+          yield* runtime.setConfigOption(HERMES_FAST_MODE_CONFIG_ID, fastMode ? "on" : "off").pipe(
+            Effect.andThen(Effect.sync(() => sentFastModes.set(runtime, fastMode))),
+            Effect.catchCause((cause) =>
+              Effect.logWarning("Hermes fast mode selection failed.", { cause, fastMode }),
+            ),
+          );
+        }
+        return model;
       }),
     normalizeToolCall: (toolCall) =>
       preserveHermesAgentActivityTitle(normalizeHermesTerminalResult(toolCall)),

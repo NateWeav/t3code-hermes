@@ -47,6 +47,18 @@
           "file": "gateway-multiplex-webhook-session-close/5a8dea85fbb6.patch"
         }
       ]
+    },
+    {
+      "id": "acp-fast-mode",
+      "title": "Fast mode",
+      "neededFor": "Fast Mode on Hermes models. Applying it also turns fast mode on for CLIProxyAPI endpoints in your Hermes config. Without it, the Fast Mode toggle does not appear.",
+      "versions": [
+        {
+          "hermesCommit": "439334127f012e1ee0685acd5dba288e459af0ec",
+          "hermesCommitDate": "2026-10-04T19:49:39Z",
+          "file": "acp-fast-mode/439334127f01.patch"
+        }
+      ]
     }
   ]
 }

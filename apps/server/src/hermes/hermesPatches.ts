@@ -341,6 +341,38 @@ export const readHermesUserEdits = Effect.fn("readHermesUserEditsForPatches")(fu
   return yield* readUserEdits(checkoutRoot, appliedVersions(resolved));
 }, Effect.scoped);
 
+/**
+ * The given patches whose change sits in HEAD itself (committed, or carried
+ * upstream) rather than only in the working tree: some version reverses
+ * against HEAD in a scratch index. Removing one of those would leave a
+ * reverse diff behind, not a clean tree.
+ */
+export const readHermesPatchesInHead = Effect.fn("readHermesPatchesInHead")(function* (
+  checkoutRoot: string,
+  patches: ReadonlyArray<HermesPatchDefinition>,
+) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const files = yield* writePatchFiles(patches);
+  const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-hermes-index-" });
+  const env = { GIT_INDEX_FILE: path.join(directory, "index") };
+  if ((yield* runGit(checkoutRoot, ["read-tree", "HEAD"], env)).code !== 0) {
+    return new Set<HermesPatchId>();
+  }
+  const inHead = yield* Effect.forEach(
+    patches,
+    (patch) =>
+      fitting(
+        checkoutRoot,
+        files.get(patch.id) ?? [],
+        ["apply", "--check", "--cached", "-R"],
+        env,
+      ).pipe(Effect.map((reversing) => (reversing.length > 0 ? [patch.id] : []))),
+    { concurrency: "unbounded" },
+  );
+  return new Set(inHead.flat());
+}, Effect.scoped);
+
 /** The applied ones, in manifest order, which is the order they stack in. */
 const appliedVersions = (
   resolved: ReadonlyArray<{

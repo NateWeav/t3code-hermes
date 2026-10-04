@@ -61,6 +61,7 @@ import {
   readHermesDirtyPaths,
   readHermesHeadCommit,
   readHermesPatches,
+  readHermesPatchesInHead,
   readHermesUserEdits,
   resolveHermesGitCheckout,
   type HermesPatchDefinition,
@@ -481,8 +482,15 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
           "The Hermes checkout is on a detached HEAD, so updating cannot move it. Check out main in the checkout first.",
       });
     }
-    const applied = shippedPatches.filter((patch) =>
-      before.patches.some((status) => status.id === patch.id && status.state === "applied"),
+    // A patch whose change HEAD already holds (committed, or now carried
+    // upstream) stays put: `hermes update` moves HEAD, not the working tree.
+    const inHead = yield* provide(readHermesPatchesInHead(checkoutRoot, shippedPatches)).pipe(
+      Effect.mapError(gitFailed("Could not read the Hermes checkout with git.")),
+    );
+    const applied = shippedPatches.filter(
+      (patch) =>
+        !inHead.has(patch.id) &&
+        before.patches.some((status) => status.id === patch.id && status.state === "applied"),
     );
     const refuseLocalChanges = (paths: ReadonlyArray<string>) =>
       new HermesPatchError({

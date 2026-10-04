@@ -66,7 +66,8 @@ const NEWEST_DATE = "2026-09-30T00:00:00Z";
  * A Hermes stand-in: an upstream bare repo with two commits (upstream rewrote
  * the line next to the patched one in between), and a checkout cloned from it
  * sitting at the older commit. Its `venv/bin/hermes` handles `update` with a
- * `git pull --ff-only`, as `hermes update` would. `newerVersion` is the patch
+ * `git pull --rebase`, which carries any local commit along as `hermes update`
+ * does. `newerVersion` is the patch
  * version made for the newer commit, `olderVersion` the one for the older.
  */
 const CURRENT_UPDATE_HELP =
@@ -122,7 +123,8 @@ const makeHermesWith = (options: { readonly updateHelp: string }) =>
         `if [ -p "${NodePath.join(base, "started")}" ]; then echo started > "${NodePath.join(base, "started")}"; exec sleep 60; fi`,
         `if [ -f "${NodePath.join(base, "noisy")}" ]; then yes "resolving dependency" | head -c 2000000 >&2; fi`,
         `if [ -f "${NodePath.join(base, "fail")}" ]; then echo "network unreachable" >&2; exit 1; fi`,
-        `cd "${root}" && git pull --quiet --ff-only`,
+        // Rebases, as a local commit on top of Hermes would be carried along.
+        `cd "${root}" && git -c user.name=t -c user.email=t@t pull --quiet --rebase`,
         "",
       ].join("\n"),
       { mode: 0o755 },
@@ -211,6 +213,36 @@ describe("HermesPatchService.updateHermes", () => {
         // Nothing parked: the patch was off the tree while Hermes updated.
         assert.strictEqual(git(hermes.root, "stash", "list"), "");
       }).pipe(withService(hermes.binaryPath, [patch]));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("updates past a patch whose change is already committed", () =>
+    Effect.gen(function* () {
+      const hermes = yield* makeHermes;
+      const patch = hermes.patch([hermes.newerVersion, hermes.olderVersion]);
+      // Another patch, committed to the checkout by hand; nothing removes it.
+      const committed: HermesPatchDefinition = {
+        id: HermesPatchId.make("committed"),
+        title: "Committed",
+        neededFor: "Tests.",
+        versions: [
+          versionAt(hermes.root, "notes.txt", "notes, patched\n", hermes.older, OLDER_DATE),
+        ],
+      };
+      NodeFS.writeFileSync(NodePath.join(hermes.root, "notes.txt"), "notes, patched\n");
+      commit(hermes.root, "carry the patch", OLDER_DATE);
+      yield* Effect.gen(function* () {
+        const service = yield* HermesPatchService;
+        yield* service.apply({ patchId: patch.id });
+        const result = yield* service.updateHermes;
+        assert.isFalse(result.updateFailed);
+        assert.deepStrictEqual(result.reapplied, [patch.id]);
+        assert.strictEqual(hermes.read(), "backend = resolve()\nremote_cwd = configured()\n");
+        assert.strictEqual(
+          NodeFS.readFileSync(NodePath.join(hermes.root, "notes.txt"), "utf8"),
+          "notes, patched\n",
+        );
+      }).pipe(withService(hermes.binaryPath, [committed, patch]));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 

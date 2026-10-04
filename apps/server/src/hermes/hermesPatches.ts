@@ -106,6 +106,24 @@ const writePatchFiles = Effect.fn("writeHermesPatchFiles")(function* (
   return files;
 });
 
+// Every patch is read at once, so this keeps a full read to a few dozen git
+// processes however many versions the manifest retains.
+const GIT_CHECK_CONCURRENCY = 4;
+
+/**
+ * The first version file, newest first, that git accepts. `--check` only reads
+ * the checkout, so the versions are checked side by side rather than one git
+ * process after another.
+ */
+const firstFitting = (
+  checkoutRoot: string,
+  versionFiles: ReadonlyArray<string>,
+  args: ReadonlyArray<string>,
+) =>
+  Effect.forEach(versionFiles, (file) => runGit(checkoutRoot, [...args, file]), {
+    concurrency: GIT_CHECK_CONCURRENCY,
+  }).pipe(Effect.map((results) => versionFiles.find((_, index) => results[index]?.code === 0)));
+
 /**
  * Where one patch stands, and the version file that got it there: the version
  * whose change the checkout contains, or the one that applies cleanly.
@@ -117,14 +135,10 @@ const resolvePatchState = Effect.fn("resolveHermesPatchState")(function* (
   const result = (state: HermesPatchState, file: string | null) => ({ state, file });
   // Reverse first, over every version: a checkout that already has a change
   // must read as applied, not as a conflict of a forward patch with itself.
-  for (const file of versionFiles) {
-    const reverse = yield* runGit(checkoutRoot, ["apply", "--check", "-R", file]);
-    if (reverse.code === 0) return result("applied", file);
-  }
-  for (const file of versionFiles) {
-    const forward = yield* runGit(checkoutRoot, ["apply", "--check", file]);
-    if (forward.code === 0) return result("notApplied", file);
-  }
+  const reverse = yield* firstFitting(checkoutRoot, versionFiles, ["apply", "--check", "-R"]);
+  if (reverse !== undefined) return result("applied", reverse);
+  const forward = yield* firstFitting(checkoutRoot, versionFiles, ["apply", "--check"]);
+  if (forward !== undefined) return result("notApplied", forward);
   return result("doesNotApply", null);
 });
 
@@ -133,12 +147,20 @@ export const readHermesPatches = Effect.fn("readHermesPatches")(function* (
   patches: ReadonlyArray<HermesPatchDefinition> = HERMES_PATCHES,
 ) {
   const files = yield* writePatchFiles(patches);
-  const statuses: HermesPatch[] = [];
-  for (const patch of patches) {
-    const { state } = yield* resolvePatchState(checkoutRoot, files.get(patch.id) ?? []);
-    statuses.push({ id: patch.id, title: patch.title, neededFor: patch.neededFor, state });
-  }
-  return statuses;
+  // Patches are read independently, so read them all at once.
+  return yield* Effect.forEach(
+    patches,
+    (patch) =>
+      resolvePatchState(checkoutRoot, files.get(patch.id) ?? []).pipe(
+        Effect.map(({ state }): HermesPatch => ({
+          id: patch.id,
+          title: patch.title,
+          neededFor: patch.neededFor,
+          state,
+        })),
+      ),
+    { concurrency: "unbounded" },
+  );
 }, Effect.scoped);
 
 /** True when HEAD is not on a branch, which `hermes update` cannot move. */

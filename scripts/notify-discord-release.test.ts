@@ -558,7 +558,9 @@ it.layer(NodeServices.layer)("Discord release CLI and workflow", (it) => {
       assert.ok(
         workflow
           .split("      - name: Announce prerelease on Discord\n")[1]
-          ?.startsWith("        if: needs.preflight.outputs.is_prerelease == 'true'\n"),
+          ?.startsWith(
+            "        if: steps.discord.outputs.configured == 'true' && needs.preflight.outputs.is_prerelease == 'true'\n",
+          ),
       );
       assert.ok(workflow.includes("GH_REPO: ${{ github.repository }}"));
       assert.ok(workflow.includes("RELEASE_TAG: ${{ needs.preflight.outputs.tag }}"));

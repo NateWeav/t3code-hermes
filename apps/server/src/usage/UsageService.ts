@@ -618,30 +618,46 @@ export const make = Effect.gen(function* () {
         ...(result.error ? { message: "Some OpenCode history could not be read." } : {}),
       });
     }
-    // Hermes session counters are canonical and cumulative, so the whole
-    // database is one source rather than per-message transcript records.
+    // Hermes session counters are canonical and cumulative, so each database
+    // is one source rather than per-message transcript records. Every profile
+    // under `<home>/profiles/<name>` keeps its own state.db and sessions.
     const hermesHome = path.resolve(
       expandHomePath(hostEnvironment["HERMES_HOME"]?.trim() || path.join(home, ".hermes")),
     );
-    const hermesDb = path.join(hermesHome, "state.db");
-    const hermesExists = yield* fileSystem
-      .exists(hermesDb)
-      .pipe(Effect.catchCause(() => Effect.succeed(false)));
-    const hermesRecords = hermesExists
-      ? yield* Effect.sync(() => readHermesUsageRecords(hermesDb, windowStartMs))
-      : [];
-    scanned.push({
-      provider: "hermes",
-      dir: hermesDb,
-      volumeId: yield* Effect.promise(() => readDirectoryVolumeId(hermesHome)),
-      files: hermesExists ? [{ path: hermesDb, records: hermesRecords ?? [] }] : null,
-      status: hermesRecords === null ? "failed" : "ok",
-      ...(hermesExists
-        ? hermesRecords === null
-          ? { message: "Hermes state database could not be read." }
-          : {}
-        : { message: "No Hermes state database on this environment." }),
-    });
+    const hermesProfilesDir = path.join(hermesHome, "profiles");
+    const hermesProfiles = yield* fileSystem
+      .readDirectory(hermesProfilesDir)
+      .pipe(Effect.orElseSucceed((): string[] => []));
+    const hermesHomes = [
+      hermesHome,
+      ...hermesProfiles
+        .filter((name) => !name.startsWith("."))
+        .toSorted()
+        .map((name) => path.join(hermesProfilesDir, name)),
+    ];
+    for (const profileHome of hermesHomes) {
+      const hermesDb = path.join(profileHome, "state.db");
+      const hermesExists = yield* fileSystem
+        .exists(hermesDb)
+        .pipe(Effect.catchCause(() => Effect.succeed(false)));
+      // A profile that never ran has no database and is not a source.
+      if (!hermesExists && profileHome !== hermesHome) continue;
+      const hermesRecords = hermesExists
+        ? yield* Effect.sync(() => readHermesUsageRecords(hermesDb, windowStartMs))
+        : [];
+      scanned.push({
+        provider: "hermes",
+        dir: hermesDb,
+        volumeId: yield* Effect.promise(() => readDirectoryVolumeId(profileHome)),
+        files: hermesExists ? [{ path: hermesDb, records: hermesRecords ?? [] }] : null,
+        status: hermesRecords === null ? "failed" : "ok",
+        ...(hermesExists
+          ? hermesRecords === null
+            ? { message: "Hermes state database could not be read." }
+            : {}
+          : { message: "No Hermes state database on this environment." }),
+      });
+    }
     const antigravityRoots = yield* envRoots("ANTIGRAVITY_DATA_DIR", [
       ...["antigravity", "antigravity-cli", "antigravity-ide", "antigravity-backup"].map((name) =>
         path.join(home, ".gemini", name),

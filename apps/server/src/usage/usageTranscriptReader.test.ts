@@ -528,6 +528,33 @@ describe("SQLite usage readers", () => {
     }
   });
 
+  it("leaves legacy OpenCode JSON last written before the window unread", async () => {
+    const sinceMs = 1780000000000;
+    const legacy = NodePath.join(dir, "storage", "message", "session-1");
+    await NodeFSP.mkdir(legacy, { recursive: true });
+    const message = (id: string) =>
+      JSON.stringify({
+        id,
+        sessionID: "session-1",
+        role: "assistant",
+        modelID: "claude-sonnet-4-5",
+        time: { created: sinceMs },
+        tokens: { input: 100, output: 20 },
+      });
+    const stale = NodePath.join(legacy, "msg-old.json");
+    await NodeFSP.writeFile(stale, message("msg-old"));
+    await NodeFSP.utimes(stale, sinceMs / 1000 - 60, sinceMs / 1000 - 60);
+    await NodeFSP.writeFile(NodePath.join(legacy, "msg-new.json"), message("msg-new"));
+
+    const result = await readOpenCodeUsage(dir, sinceMs);
+    assert.isFalse(result.error);
+    assert.isFalse(result.missing);
+    assert.deepStrictEqual(
+      result.files.flatMap((file) => file.records).map((record) => record.dedupeKey),
+      ["opencode:msg-new"],
+    );
+  });
+
   it("deduplicates Antigravity generation and step usage while preserving retry model and token buckets", async () => {
     const db = new NodeSqlite.DatabaseSync(NodePath.join(dir, "session-1.db"));
     const stamp = protoNumber(1, 1780000000);

@@ -115,6 +115,16 @@ describe("hermes patches", () => {
     }));
     // Regenerate with `node scripts/generate-hermes-patches.ts`.
     assert.deepStrictEqual(HERMES_PATCH_FILES, expected);
+    // A version saved under infra/hermes but left out of the manifest would
+    // otherwise never ship, and nothing else in CI would say so.
+    const onDisk = NodeFS.readdirSync(INFRA_HERMES, { recursive: true, encoding: "utf8" })
+      .filter((file) => file.endsWith(".patch"))
+      .map((file) => file.split(NodePath.sep).join("/"))
+      .sort();
+    assert.deepStrictEqual(
+      onDisk,
+      manifest.patches.flatMap((patch) => patch.versions.map((version) => version.file)).sort(),
+    );
     assert.deepStrictEqual(
       HERMES_PATCHES.map((patch) => patch.id),
       manifest.patches.map((patch) => patch.id),

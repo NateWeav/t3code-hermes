@@ -57,7 +57,6 @@ import { resolveEnabledHermesInstance, resolveHermesHome } from "../../hermes/he
 import * as ProcessRunner from "../../processRunner.ts";
 import { deriveProviderInstanceConfigMap } from "../../provider/Layers/ProviderInstanceRegistryHydration.ts";
 import { mergeProviderInstanceEnvironment } from "../../provider/ProviderInstanceEnvironment.ts";
-import { expandHomePath } from "../../pathExpansion.ts";
 import * as ServerSettingsService from "../../serverSettings.ts";
 import { HindsightService, type HindsightConnection } from "./HindsightService.ts";
 
@@ -88,6 +87,8 @@ const CODING_AGENTS: ReadonlyArray<{
   readonly installerId: string;
   /** The variable a provider instance uses for its own config home. */
   readonly homeVariable: string;
+  /** The home the installer writes to, under the user's home directory. */
+  readonly defaultHome: string;
 }> = [
   {
     target: "claudeCode",
@@ -95,6 +96,7 @@ const CODING_AGENTS: ReadonlyArray<{
     binary: "claude",
     installerId: "claude-code",
     homeVariable: "CLAUDE_CONFIG_DIR",
+    defaultHome: ".claude",
   },
   {
     target: "codex",
@@ -102,6 +104,7 @@ const CODING_AGENTS: ReadonlyArray<{
     binary: "codex",
     installerId: "codex",
     homeVariable: "CODEX_HOME",
+    defaultHome: ".codex",
   },
 ];
 
@@ -258,6 +261,48 @@ function withoutApiToken(record: Record<string, unknown>): string {
   return `${JSON.stringify(rest, null, 2)}\n`;
 }
 
+/** The Hermes Hindsight config fields that say where memory goes; the only ones the pass manages. */
+const HERMES_CONNECTION_FIELDS = ["mode", "api_url", "api_key"] as const;
+
+function hermesConnectionFields(
+  connection: Pick<HindsightConnection, "baseUrl" | "apiKey">,
+): Record<string, unknown> {
+  return {
+    mode: isHindsightCloud(connection.baseUrl) ? "cloud" : "local_external",
+    api_url: connection.baseUrl,
+    ...(connection.apiKey === null ? {} : { api_key: connection.apiKey }),
+  };
+}
+
+/**
+ * The config with its connection fields set for `connection` and every other
+ * field as it is, or null when they already match, so edits Hermes or its
+ * owner made to the rest are kept.
+ */
+function reconcileHermesConnection(
+  current: Record<string, unknown>,
+  connection: Pick<HindsightConnection, "baseUrl" | "apiKey">,
+): string | null {
+  const wanted = hermesConnectionFields(connection);
+  const drifted = HERMES_CONNECTION_FIELDS.some((key) => current[key] !== wanted[key]);
+  if (!drifted) return null;
+  const next: Record<string, unknown> = { ...current };
+  for (const key of HERMES_CONNECTION_FIELDS) delete next[key];
+  return `${JSON.stringify({ ...next, ...wanted }, null, 2)}\n`;
+}
+
+/**
+ * The config without its connection fields, or null when nothing beyond
+ * what T3 Code wrote is left in it and the file can go.
+ */
+function withoutHermesConnection(current: Record<string, unknown>): string | null {
+  const rest: Record<string, unknown> = { ...current };
+  for (const key of HERMES_CONNECTION_FIELDS) delete rest[key];
+  const keys = Object.keys(rest);
+  if (keys.length === 0 || (keys.length === 1 && rest["bank_id"] === "hermes")) return null;
+  return `${JSON.stringify(rest, null, 2)}\n`;
+}
+
 /** Whether an agent's hook config carries an entry the installer wrote. */
 function hasInstallerHook(hooks: unknown): boolean {
   return hooks !== null && hooks !== undefined && JSON.stringify(hooks).includes(INSTALLER_MARKER);
@@ -380,6 +425,14 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
       ),
     );
 
+  /** A configured home as an absolute path, `~` meaning this host's home. */
+  const resolveHomePath = (value: string) =>
+    value === "~"
+      ? homeDir
+      : value.startsWith("~/") || value.startsWith("~\\")
+        ? path.join(homeDir, value.slice(2))
+        : path.resolve(value);
+
   /**
    * Whether a Codex shadow home still runs the shared `hooks.json`. A shadow
    * links it from the shared home when Codex starts, unless it already holds
@@ -387,7 +440,7 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
    */
   const shadowSharesHooks = (shadowHome: string) =>
     Effect.gen(function* () {
-      const shadowHooks = path.join(path.resolve(expandHomePath(shadowHome)), "hooks.json");
+      const shadowHooks = path.join(resolveHomePath(shadowHome), "hooks.json");
       // Missing, or a link to a shared file not written yet: linked on the next start.
       if (!(yield* fs.exists(shadowHooks).pipe(Effect.orElseSucceed(() => false)))) return true;
       const own = yield* fs.realPath(shadowHooks).pipe(Effect.orElseSucceed(() => null));
@@ -415,8 +468,14 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
           found = true;
           // The same environment the provider is launched with, so a home
           // inherited from T3 Code's own counts too.
-          const ownHome =
+          const configuredHome =
             nonEmptyString(instanceConfig["homePath"]) ?? nonEmptyString(env[agent.homeVariable]);
+          // One spelled out as the default home is the home the installer writes.
+          const ownHome =
+            configuredHome !== null &&
+            resolveHomePath(configuredHome) !== path.join(homeDir, agent.defaultHome)
+              ? configuredHome
+              : null;
           const shadowHome =
             agent.target === "codex" ? nonEmptyString(instanceConfig["shadowHomePath"]) : null;
           if (
@@ -559,6 +618,21 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
   const markApplying = SubscriptionRef.update(state, (current) => ({ ...current, applying: true }));
 
   /**
+   * Takes T3 Code's connection back out of a Hermes Hindsight config it
+   * created, keeping anything added since; whether that is done. A file that
+   * no longer parses is left for its owner, and retried later.
+   */
+  const removeHermesConnection = (home: string) =>
+    Effect.gen(function* () {
+      const file = hermesHindsightFile(home);
+      if (!(yield* fs.exists(file).pipe(Effect.orElseSucceed(() => true)))) return true;
+      const current = asRecord(yield* readJson(file));
+      if (current === null) return false;
+      const rest = withoutHermesConnection(current);
+      return rest === null ? yield* removeFile(file) : yield* writeText(file, rest, 0o600);
+    });
+
+  /**
    * Takes out what T3 Code put into one Hermes home. Answers with what is
    * still left to undo, or null once nothing is.
    */
@@ -576,8 +650,7 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
           changedProvider = current === undefined;
         }
       }
-      const wroteConfig =
-        owned.wroteConfig && !(yield* removeFile(hermesHindsightFile(owned.home)));
+      const wroteConfig = owned.wroteConfig && !(yield* removeHermesConnection(owned.home));
       return changedProvider || wroteConfig ? { ...owned, changedProvider, wroteConfig } : null;
     });
 
@@ -722,45 +795,53 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
       } else if (provider === undefined) {
         failures.set("hermes", "Hermes' config.yaml could not be parsed, so it was left alone.");
       } else {
-        // A config T3 Code wrote follows the connection; one Hermes had is left alone.
+        // A config T3 Code created follows the connection, in its connection
+        // fields only. Hermes' own is never written, and one that does not read
+        // (or no longer parses) is left alone with Hermes not switched onto it.
         const ownsConfig = owned?.wroteConfig === true;
-        const configText = hermesHindsightConfigText(connection);
-        // A file that is there but does not resolve is still Hermes' own: it is
-        // never overwritten, since switching off would then delete it.
-        const configFileExists = yield* fs
-          .exists(hermesHindsightFile(home))
-          .pipe(Effect.orElseSucceed(() => true));
-        const foreignConfig = resolved.hermes === null && configFileExists && !ownsConfig;
-        if (foreignConfig) {
+        const configFile = hermesHindsightFile(home);
+        const configExists = yield* fs.exists(configFile).pipe(Effect.orElseSucceed(() => true));
+        const current = configExists ? asRecord(yield* readJson(configFile)) : null;
+        const unusable =
+          configExists && (current === null || (!ownsConfig && resolved.hermes === null));
+        if (unusable) {
           failures.set(
             "hermes",
-            "Hermes' own Hindsight config could not be read, so it was left alone.",
+            "Hermes' Hindsight config could not be read, so Hermes was left alone.",
           );
         }
-        // Hermes is only switched to Hindsight once it has a config to read.
-        const switchProvider = !foreignConfig && provider !== "hindsight";
-        const configStale =
-          !foreignConfig &&
-          (resolved.hermes === null ||
-            (ownsConfig && (yield* readText(hermesHindsightFile(home))) !== configText));
+        const nextConfig = unusable
+          ? null
+          : !configExists
+            ? resolved.hermes === null
+              ? hermesHindsightConfigText(connection)
+              : null
+            : ownsConfig && current !== null
+              ? reconcileHermesConnection(current, connection)
+              : null;
+        const intendSwitch = !unusable && provider !== "hindsight";
         const previousProvider = owned?.changedProvider ? owned.previousProvider : provider;
         const claimed =
-          configStale || switchProvider
+          nextConfig !== null || intendSwitch
             ? yield* persist({
                 ...nextLedger,
                 hermes: {
                   home,
                   previousProvider,
-                  changedProvider: switchProvider || (owned?.changedProvider ?? false),
-                  wroteConfig: configStale || ownsConfig,
+                  changedProvider: intendSwitch || (owned?.changedProvider ?? false),
+                  wroteConfig: nextConfig !== null || ownsConfig,
                 },
               })
             : true;
         const wroteConfig =
-          claimed && configStale ? yield* writeHermesHindsightConfig(home, configText) : false;
-        if (configStale && !wroteConfig) {
+          claimed && nextConfig !== null
+            ? yield* writeHermesHindsightConfig(home, nextConfig)
+            : false;
+        if (nextConfig !== null && !wroteConfig) {
           failures.set("hermes", "Hermes' Hindsight config could not be written.");
         }
+        // Only onto a config that says where to go.
+        const switchProvider = intendSwitch && (nextConfig === null || wroteConfig);
         const changedProvider =
           claimed && switchProvider ? yield* writeHermesProvider(home, "hindsight") : false;
         if (switchProvider && !changedProvider) {

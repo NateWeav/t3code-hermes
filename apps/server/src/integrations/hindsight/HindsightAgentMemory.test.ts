@@ -770,4 +770,62 @@ describe("HindsightAgentMemory", () => {
       expect(state.agents[0]?.detail).toContain("hermes_work");
     }).pipe(Effect.provide(harness.layer));
   });
+  it.effect(
+    "keeps edits to the Hermes config it created, and only takes its connection back",
+    () => {
+      const harness = setup({ agentMemory: true, missing: ["claude", "codex"] });
+      const pluginConfig = NodePath.join(harness.hermesHome, "hindsight", "config.json");
+      return Effect.gen(function* () {
+        yield* harness.apply;
+        writeJson(pluginConfig, {
+          ...(readJson(pluginConfig) as object),
+          bank_id: "work",
+          budget: "low",
+        });
+        harness.setConnection({ baseUrl: "http://new-host:8888", apiKey: null });
+        yield* harness.apply;
+
+        expect(readJson(pluginConfig)).toMatchObject({
+          api_url: "http://new-host:8888",
+          bank_id: "work",
+          budget: "low",
+        });
+
+        yield* harness.setAgentMemory(false);
+        yield* harness.apply;
+        expect(readJson(pluginConfig)).toEqual({ bank_id: "work", budget: "low" });
+      }).pipe(Effect.provide(harness.layer));
+    },
+  );
+
+  it.effect("leaves Hermes on its own provider when its Hindsight config cannot be written", () => {
+    const harness = setup({
+      agentMemory: true,
+      missing: ["claude", "codex"],
+      hermesYaml: "memory:\n  provider: holographic\n",
+    });
+    const pluginDir = NodePath.join(harness.hermesHome, "hindsight");
+    NodeFS.mkdirSync(pluginDir);
+    NodeFS.chmodSync(pluginDir, 0o500);
+    return Effect.gen(function* () {
+      const state = yield* harness.apply;
+      NodeFS.chmodSync(pluginDir, 0o700);
+
+      expect(state.agents[0]?.state).toBe("failed");
+      expect(hermesProvider(harness.hermesHome)).toBe("holographic");
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("counts a config home spelled out as the default one as covered", () => {
+    const harness = setup({
+      agentMemory: true,
+      missing: ["codex", "hermes"],
+      hostEnv: { CLAUDE_CONFIG_DIR: "~/.claude" },
+    });
+    return Effect.gen(function* () {
+      const state = yield* harness.apply;
+
+      expect(state.agents).toEqual([{ target: "claudeCode", state: "installed", detail: null }]);
+    }).pipe(Effect.provide(harness.layer));
+  });
 });

@@ -206,7 +206,12 @@ describe("handing a machine the shared server", () => {
     });
     expect(
       hindsightSharedPatch(onOverride, open, { kind: "server", url: "http://old:8888" }),
-    ).toEqual({ baseUrl: "http://old:8888" });
+    ).toBeNull();
+    // Already on it through Hermes, with Hermes' key: no override, so that key stays in use.
+    const viaHermes = { ...keyedSource, serverUrl: "http://old:8888" };
+    expect(
+      hindsightSharedPatch(viaHermes, open, { kind: "server", url: "http://old:8888/" }),
+    ).toBeNull();
   });
 
   it("treats spellings of one server as the same server", () => {

@@ -534,8 +534,8 @@ export function hindsightSharedPatch(
       if (write.url.length === 0) {
         return machine.savedUrl.length > 0 ? { baseUrl: "", apiKey: "" } : null;
       }
-      return isOnHindsightServer(machine, write.url)
-        ? { baseUrl: write.url }
-        : { baseUrl: write.url, apiKey: "" };
+      // A machine already on it is left as it is: an override there would
+      // cut it off from a key it inherits from Hermes.
+      return isOnHindsightServer(machine, write.url) ? null : { baseUrl: write.url, apiKey: "" };
   }
 }

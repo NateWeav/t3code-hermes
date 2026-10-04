@@ -24,12 +24,18 @@ reverse-apply (which means upstream now carries it), must stack in manifest orde
 fail a patch-relevant Hermes test that passes on unpatched `main`. Drift files a
 `hermes-patch-drift` issue, and the Hermes resolver in [`automation/`](./automation) answers it with
 a PR that adds a rebased version, or deletes a patch upstream made obsolete, and applies the 30-day
-rule. To run the same check locally against a clean Hermes checkout:
+rule. To run the same check locally against a clean Hermes checkout outside `~/.hermes` (Hermes's
+test guard fails tests run from under it):
 
 ```bash
 node .github/scripts/hermes-patch-drift.cjs check --hermes <checkout> --state /tmp/state.json
+(cd <checkout> && uv sync --locked --python 3.14 --extra all --group dev)
+node .github/scripts/hermes-patch-drift.cjs test --hermes <checkout> --state /tmp/state.json \
+  --python <checkout>/.venv/bin/python
 node .github/scripts/hermes-patch-drift.cjs report --state /tmp/state.json --body /tmp/drift.md
 ```
+
+Skip the two middle commands for an apply-only check; `report` then reports no test results.
 
 To add a version, rebase the patch onto a newer Hermes commit, save it as
 `<patch-id>/<first 12 characters of the commit>.patch`, and list it first under that patch in

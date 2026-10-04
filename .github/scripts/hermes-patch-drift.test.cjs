@@ -85,6 +85,9 @@ test("only failures absent from the baseline count, and flakes drop out on rerun
   assert.deepEqual(newFailures(ok, fails("b", "c"), fails("c")), ["c"]);
   assert.deepEqual(newFailures(ok, fails("b"), ok), []);
   assert.deepEqual(newFailures(ok, fails("b"), crashed), ["b"]);
+  assert.deepEqual(newFailures(ok, crashed, fails("b")), ["b"]);
+  assert.deepEqual(newFailures(ok, crashed, crashed), [WHOLE_FILE]);
+  assert.deepEqual(newFailures(ok, crashed, ok), []);
 });
 
 test("failing test files are charged to the patches that own them", () => {

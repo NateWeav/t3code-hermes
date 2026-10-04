@@ -123,9 +123,12 @@ function newFailures(baseline, patched, rerun) {
   };
   const first = fresh(patched);
   if (first.length === 0 || !rerun) return first;
-  const again = new Set(fresh(rerun));
-  if (again.has(WHOLE_FILE)) return first;
-  return first.filter((id) => again.has(id));
+  const again = fresh(rerun);
+  // A file that broke in both runs stays broken, even when one run crashed
+  // and the other named its failures: report the named ones.
+  if (again.includes(WHOLE_FILE)) return first;
+  if (first.includes(WHOLE_FILE)) return again;
+  return first.filter((id) => again.includes(id));
 }
 
 /** Per-patch statuses from a state file written by `check` and `test`. */

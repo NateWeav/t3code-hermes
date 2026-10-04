@@ -29,6 +29,19 @@ it.layer(NodeServices.layer)("writeFileStringAtomically", (it) => {
     }),
   );
 
+  it.effect("publishes a file with its mode already set", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-atomic-write-" });
+      const file = path.join(root, "secret.json");
+
+      yield* writeFileStringAtomically({ filePath: file, contents: "key", mode: 0o600 });
+
+      assert.strictEqual((yield* fs.stat(file)).mode & 0o777, 0o600);
+    }),
+  );
+
   it.effect("keeps a dangling symlink linked and creates its destination", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

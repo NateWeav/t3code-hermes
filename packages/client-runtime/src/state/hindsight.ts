@@ -11,7 +11,10 @@
  * @module state/hindsight
  */
 import {
+  canonicalHindsightUrl,
   HINDSIGHT_TARGET_API_VERSION,
+  type HindsightAgentMemoryState,
+  type HindsightAgentTarget,
   type HindsightBanksResult,
   type HindsightBankStats,
   type HindsightPathway,
@@ -239,4 +242,362 @@ export function describeHindsightRetainResult(itemsCount: number): string {
   return itemsCount === 1
     ? "Hindsight extracted 1 memory from it."
     : `Hindsight extracted ${itemsCount} memories from it.`;
+}
+
+const HINDSIGHT_AGENT_LABELS: Record<HindsightAgentTarget, string> = {
+  claudeCode: "Claude Code",
+  codex: "Codex",
+  hermes: "Hermes",
+};
+
+export interface HindsightAgentMemoryRow {
+  readonly target: HindsightAgentTarget;
+  readonly label: string;
+  /** Only a failure gets a word; the dot already says wired or not. */
+  readonly status: string | null;
+  readonly tone: "ready" | "attention" | "idle";
+  readonly detail: string | null;
+  /**
+   * The row as one line: the name, a failure if any, then the detail. The
+   * detail shows even on a wired agent, where it names the instances with
+   * their own config home that the wiring does not reach.
+   */
+  readonly text: string;
+}
+
+export interface HindsightAgentMemorySummary {
+  readonly tone: "ready" | "attention" | "idle";
+  /** Null when the switch already says it all: plainly on, or plainly off. */
+  readonly label: string | null;
+  readonly detail: string | null;
+  readonly agents: ReadonlyArray<HindsightAgentMemoryRow>;
+  /**
+   * Running the pass again could change the answer: something failed or is
+   * blocked. A coverage gap needs attention but not a retry.
+   */
+  readonly retryable: boolean;
+}
+
+/**
+ * The Providers settings' account of agent memory: one headline for the
+ * switch, then one row per agent configured on the environment. `state` is
+ * null until the environment answers, or when it predates agent memory.
+ */
+export function describeHindsightAgentMemory(
+  state: HindsightAgentMemoryState | null,
+  options: { readonly enabled: boolean },
+): HindsightAgentMemorySummary {
+  if (state === null) {
+    return { tone: "idle", label: "Checking…", detail: null, agents: [], retryable: false };
+  }
+  const agents = state.agents.map((agent): HindsightAgentMemoryRow => {
+    const label = HINDSIGHT_AGENT_LABELS[agent.target];
+    const status = agent.state === "failed" ? "Failed" : null;
+    const name = status === null ? label : `${label} ${status.toLowerCase()}`;
+    return {
+      target: agent.target,
+      label,
+      status,
+      // Wired with a detail means wired somewhere the agent does not look:
+      // the detail names what is not covered.
+      tone:
+        agent.state === "installed"
+          ? agent.detail === null
+            ? "ready"
+            : "attention"
+          : agent.state === "failed"
+            ? "attention"
+            : "idle",
+      detail: agent.detail,
+      text: agent.detail === null ? name : `${name} · ${agent.detail}`,
+    };
+  });
+  const retryable =
+    !state.applying &&
+    (state.blocker !== null ||
+      state.detail !== null ||
+      state.agents.some((agent) => agent.state === "failed"));
+  const headline = (
+    tone: HindsightAgentMemorySummary["tone"],
+    label: string | null,
+    detail: string | null,
+  ): HindsightAgentMemorySummary => ({ tone, label, detail, agents, retryable });
+
+  if (state.applying) return headline("idle", "Applying…", null);
+  if (state.blocker === "notConfigured") {
+    return headline(
+      "attention",
+      "No Hindsight server",
+      "Set one up in Settings → Integrations → Memory first.",
+    );
+  }
+  if (state.blocker === "nodeMissing") {
+    return headline(
+      "attention",
+      "Node.js not found",
+      "Hindsight's installer and the hooks it adds need Node.js 18+ on this machine's PATH.",
+    );
+  }
+  if (state.detail !== null) return headline("attention", "Needs attention", state.detail);
+  // Off, a failed row is cleanup still to finish: it needs attention, and the
+  // rows themselves say what failed.
+  if (!options.enabled) {
+    return headline(
+      agents.some((agent) => agent.tone === "attention") ? "attention" : "idle",
+      null,
+      null,
+    );
+  }
+  if (agents.length === 0) {
+    return headline(
+      "idle",
+      "No supported agents",
+      "Claude Code, Codex, and Hermes aren't set up on this environment.",
+    );
+  }
+  // The rows say what needs attention; a headline would only hide them.
+  return headline(
+    agents.every((agent) => agent.tone === "ready") ? "ready" : "attention",
+    null,
+    null,
+  );
+}
+
+/** One connected machine, as the all-machines switch needs to see it. */
+export interface HindsightMachineInput {
+  /** `integrations.hindsight.agentMemory` on that machine. */
+  readonly enabled: boolean;
+  /** This client may change settings there. */
+  readonly writable: boolean;
+  /** Its agent memory state, or null until the machine has answered. */
+  readonly state: HindsightAgentMemoryState | null;
+}
+
+export interface HindsightMachinesSummary {
+  /** Every writable machine has it on. */
+  readonly checked: boolean;
+  /** Some writable machines have it on and some do not. */
+  readonly mixed: boolean;
+  /** The switch is useless until a machine can be written to. */
+  readonly canToggle: boolean;
+  readonly tone: "ready" | "attention" | "idle";
+  /** One line for the switch; null whenever the switch and the rows say it all. */
+  readonly label: string | null;
+}
+
+/**
+ * The one switch over every connected machine. It reads as on only when every
+ * machine this client can write to has agent memory on; a partial set shows as
+ * mixed so one click finishes the job rather than undoing it.
+ */
+export function summarizeHindsightMachines(
+  machines: ReadonlyArray<HindsightMachineInput>,
+): HindsightMachinesSummary {
+  const writable = machines.filter((machine) => machine.writable);
+  const on = writable.filter((machine) => machine.enabled).length;
+  const checked = writable.length > 0 && on === writable.length;
+  const mixed = on > 0 && on < writable.length;
+  const summaries = machines.map((machine) =>
+    describeHindsightAgentMemory(machine.state, { enabled: machine.enabled }),
+  );
+  const tone: HindsightMachinesSummary["tone"] = summaries.some(
+    (summary) => summary.tone === "attention",
+  )
+    ? "attention"
+    : summaries.some((summary) => summary.label === "Applying…")
+      ? "idle"
+      : checked
+        ? "ready"
+        : "idle";
+  // Only what the rows cannot say themselves; each row carries its own state.
+  const label =
+    machines.length === 0
+      ? "No connected machines"
+      : writable.length === 0
+        ? "No machine lets this client change settings"
+        : mixed
+          ? `On for ${on} of ${writable.length} machines`
+          : null;
+  return { checked, mixed, canToggle: writable.length > 0, tone, label };
+}
+
+/** A connected machine, as handing it the shared server needs to see it. */
+export interface HindsightHandoffMachine {
+  /** `integrations.hindsight.agentMemory` on that machine. */
+  readonly enabled: boolean;
+  /** It resolves a server of its own; null until it has answered. */
+  readonly hasServer: boolean | null;
+  /** The server it resolves, if any. */
+  readonly serverUrl: string | null;
+  /** Its saved server override, or empty. */
+  readonly savedUrl: string;
+  /**
+   * It has an API key saved. Only ever shown, never trusted to belong to
+   * any particular server.
+   */
+  readonly hasSavedKey: boolean;
+  /** That server is reached with an API key. */
+  readonly serverHasKey: boolean;
+}
+
+export interface HindsightServerHandoff {
+  /** What a machine with no server of its own is handed, or null when there is nothing to hand. */
+  readonly url: string | null;
+  /**
+   * That server takes an API key. Clients never see a saved key, so it is
+   * only handed on together with a key entered here: a key a machine already
+   * has may belong to some other server.
+   */
+  readonly needsKey: boolean;
+}
+
+/** The shared server: the saved override, else one some machine already resolves. */
+export function planHindsightServerHandoff(
+  saved: { readonly url: string; readonly hasKey: boolean },
+  machines: ReadonlyArray<HindsightHandoffMachine>,
+): HindsightServerHandoff {
+  if (saved.url.length > 0) return { url: saved.url, needsKey: saved.hasKey };
+  const source = machines.find((machine) => machine.serverUrl !== null);
+  return source === undefined
+    ? { url: null, needsKey: false }
+    : { url: source.serverUrl, needsKey: source.serverHasKey };
+}
+
+/**
+ * Whether a write should hand `machine` the shared server. `enabling` is set
+ * when the write itself switches agent memory on, `withKey` when it carries
+ * an API key. A machine is never handed a keyed server without a key, so its
+ * agents do not start calling it unauthenticated.
+ */
+export function shouldHandOffHindsightServer(
+  machine: HindsightHandoffMachine,
+  handoff: HindsightServerHandoff,
+  options: { readonly enabling: boolean; readonly withKey: boolean },
+): boolean {
+  return (
+    (options.enabling || machine.enabled) &&
+    machine.hasServer === false &&
+    handoff.url !== null &&
+    (!handoff.needsKey || options.withKey)
+  );
+}
+
+/** The switch's line while switched-on machines wait for the server's key, else null. */
+export function describeHindsightKeyWait(
+  machines: ReadonlyArray<HindsightHandoffMachine>,
+  handoff: HindsightServerHandoff,
+): string | null {
+  const waiting = machines.filter(
+    (machine) =>
+      machine.enabled && machine.hasServer === false && handoff.url !== null && handoff.needsKey,
+  ).length;
+  if (waiting === 0) return null;
+  return `Enter the API key below to finish ${waiting === 1 ? "1 machine" : `${waiting} machines`}`;
+}
+
+/** One change the clients make on every machine they can write to. */
+export type HindsightSharedWrite =
+  | { readonly kind: "switch"; readonly agentMemory: boolean }
+  /** An empty key removes it. */
+  | { readonly kind: "apiKey"; readonly apiKey: string }
+  /** An empty URL puts each machine back on its own server. */
+  | { readonly kind: "server"; readonly url: string }
+  /** Removes the key from every machine that has one, whatever its server. */
+  | { readonly kind: "clearKeys" };
+
+export interface HindsightSharedPatch {
+  readonly agentMemory?: boolean;
+  readonly baseUrl?: string;
+  readonly apiKey?: string;
+}
+
+function isOnHindsightServer(machine: HindsightHandoffMachine, url: string | null): boolean {
+  if (url === null || url.trim().length === 0) return false;
+  const target = canonicalHindsightUrl(url);
+  return [machine.savedUrl, machine.serverUrl].some(
+    (candidate) =>
+      candidate !== null && candidate.length > 0 && canonicalHindsightUrl(candidate) === target,
+  );
+}
+
+/**
+ * What one shared write changes on one machine, or null for nothing. A
+ * machine's server and key move together, so a key only ever reaches the
+ * server it was entered for: a key goes to machines on the shared server,
+ * and a machine moved to another server loses the key it had.
+ */
+export function hindsightSharedPatch(
+  machine: HindsightHandoffMachine,
+  handoff: HindsightServerHandoff,
+  write: HindsightSharedWrite,
+): HindsightSharedPatch | null {
+  switch (write.kind) {
+    case "switch":
+      // Only an open server is handed on here; a keyed one waits for its key.
+      return write.agentMemory &&
+        handoff.url !== null &&
+        shouldHandOffHindsightServer(machine, handoff, { enabling: true, withKey: false })
+        ? { agentMemory: true, baseUrl: handoff.url, apiKey: "" }
+        : { agentMemory: write.agentMemory };
+    case "apiKey":
+      if (isOnHindsightServer(machine, handoff.url)) return { apiKey: write.apiKey };
+      return write.apiKey.length > 0 &&
+        handoff.url !== null &&
+        shouldHandOffHindsightServer(machine, handoff, { enabling: false, withKey: true })
+        ? { baseUrl: handoff.url, apiKey: write.apiKey }
+        : null;
+    case "clearKeys":
+      // Removing a key sends it nowhere, so it may reach every machine.
+      return machine.hasSavedKey ? { apiKey: "" } : null;
+    case "server":
+      if (write.url.length === 0) {
+        return machine.savedUrl.length > 0 ? { baseUrl: "", apiKey: "" } : null;
+      }
+      // A machine already on it is left as it is: an override there would
+      // cut it off from a key it inherits from Hermes.
+      return isOnHindsightServer(machine, write.url) ? null : { baseUrl: write.url, apiKey: "" };
+  }
+}
+
+/** What the shared server and key controls show, across every machine they write to. */
+export interface HindsightSharedSettings {
+  /** The override the machines that have one agree on; empty when none has one or they differ. */
+  readonly url: string;
+  /** Machines hold different overrides, so no one URL stands for them. */
+  readonly urlsDiffer: boolean;
+  /** Some machine has an override, which a reset clears. */
+  readonly hasOverride: boolean;
+  /** Some machine on the shared server has a key saved, which Remove clears. */
+  readonly hasKey: boolean;
+  /**
+   * Some machine on another server has a key saved, which only a
+   * remove-everywhere reaches.
+   */
+  readonly keysElsewhere: boolean;
+}
+
+/**
+ * The shared controls' state from all the machines they write to, not one
+ * stand-in, so an override or key saved on any of them stays visible and
+ * can be taken back.
+ */
+export function summarizeHindsightSharedSettings(
+  machines: ReadonlyArray<HindsightHandoffMachine>,
+): HindsightSharedSettings {
+  const overrides = machines.filter((machine) => machine.savedUrl.length > 0);
+  const distinct = new Set(overrides.map((machine) => canonicalHindsightUrl(machine.savedUrl)));
+  const url = distinct.size === 1 ? (overrides[0]?.savedUrl ?? "") : "";
+  const target =
+    url.length > 0
+      ? url
+      : (machines.find((machine) => machine.serverUrl !== null)?.serverUrl ?? null);
+  return {
+    url,
+    urlsDiffer: distinct.size > 1,
+    hasOverride: overrides.length > 0,
+    hasKey: machines.some((machine) => machine.hasSavedKey && isOnHindsightServer(machine, target)),
+    keysElsewhere: machines.some(
+      (machine) => machine.hasSavedKey && !isOnHindsightServer(machine, target),
+    ),
+  };
 }

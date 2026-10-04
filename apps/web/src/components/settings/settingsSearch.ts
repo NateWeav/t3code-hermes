@@ -612,6 +612,15 @@ export const SETTINGS_SEARCH_ITEMS = [
     macProviderSettingsOnly: true,
   },
   {
+    id: "agent-memory",
+    title: "Hindsight for every agent",
+    to: "/settings/providers",
+    searchTerms: [
+      "hindsight memory agents claude codex hermes install hooks recall retain remember long-term",
+    ],
+    providerSettingsOnly: true,
+  },
+  {
     id: "provider-health-check-interval",
     title: "Health check interval",
     to: "/settings/providers",

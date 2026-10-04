@@ -30,6 +30,12 @@ const KNOWN_SHARED_DIRECTORIES = [
 ] as const;
 
 const PRIVATE_ENTRY_NAMES = new Set(["auth.json", "models_cache.json"]);
+/**
+ * Shared files linked even before they exist, so one created later (Hindsight
+ * agent memory writes `hooks.json`) reaches shadows built earlier. A real file
+ * already in the shadow is left alone rather than treated as a conflict.
+ */
+const OPTIONAL_SHARED_FILE_NAMES = new Set(["hooks.json"]);
 const SHADOW_LOCAL_ENTRY_NAMES = new Set(["log", "memories", "tmp"]);
 const REPLACEABLE_SHARED_RUNTIME_DIRECTORIES = new Set(["mcp-oauth-locks"]);
 
@@ -370,7 +376,7 @@ export const materializeCodexShadowHome = Effect.fn("materializeCodexShadowHome"
         }),
     }),
   );
-  const entries = new Set<string>(KNOWN_SHARED_DIRECTORIES);
+  const entries = new Set<string>([...KNOWN_SHARED_DIRECTORIES, ...OPTIONAL_SHARED_FILE_NAMES]);
   for (const entryName of sharedEntryNames) {
     if (!PRIVATE_ENTRY_NAMES.has(entryName) && !SHADOW_LOCAL_ENTRY_NAMES.has(entryName)) {
       entries.add(entryName);
@@ -397,12 +403,15 @@ export const materializeCodexShadowHome = Effect.fn("materializeCodexShadowHome"
       if (PRIVATE_ENTRY_NAMES.has(entryName)) {
         return Effect.void;
       }
-      return ensureSymlink({
+      const link = ensureSymlink({
         fileSystem,
         sharedHomePath: layout.sharedHomePath,
         effectiveHomePath,
         entryName,
       });
+      return OPTIONAL_SHARED_FILE_NAMES.has(entryName)
+        ? link.pipe(Effect.catchTag("CodexShadowHomeEntryConflictError", () => Effect.void))
+        : link;
     },
     { discard: true },
   );

@@ -498,10 +498,14 @@ function parseModelOverrides(raw: string | undefined): ReadonlyArray<AcpCompat.M
       return { modelId: modelId ?? entry, name: name ?? modelId ?? entry };
     });
   if (entries.length === 0) return grokAcpModels;
+  // `T3_ACP_HERMES_FAST_MODELS=id,id` marks rows the way Hermes's fast-mode patch does.
+  const fastModels = new Set((process.env.T3_ACP_HERMES_FAST_MODELS ?? "").split(","));
   return entries.map((model) =>
     model.modelId === "grok-build" && initialGrokReasoningEffort
       ? { ...model, _meta: { reasoningEffort: initialGrokReasoningEffort } }
-      : model,
+      : fastModels.has(model.modelId)
+        ? { ...model, _meta: { hermes: { fastMode: true } } }
+        : model,
   );
 }
 

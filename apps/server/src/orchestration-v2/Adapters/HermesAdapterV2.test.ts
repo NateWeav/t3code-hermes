@@ -12,6 +12,7 @@ import {
   ThreadId,
   type OrchestrationV2ProviderThread,
   type OrchestrationV2Subagent,
+  type ProviderOptionSelection,
   type RuntimeMode,
 } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
@@ -79,11 +80,16 @@ function turnInput(input: {
   readonly runtimePolicy: ProviderAdapterV2RuntimePolicy;
   readonly now: DateTime.Utc;
   readonly model: string;
+  readonly options?: ReadonlyArray<ProviderOptionSelection>;
   readonly ordinal?: number;
 }): ProviderAdapterV2TurnInput {
   const ordinal = input.ordinal ?? 1;
   const suffix = `${input.threadId}:${ordinal}`;
-  const modelSelection = { instanceId, model: input.model } as const;
+  const modelSelection = {
+    instanceId,
+    model: input.model,
+    ...(input.options === undefined ? {} : { options: input.options }),
+  };
   return {
     appThread: {
       createdBy: "user",
@@ -136,6 +142,7 @@ const runMockTurn = (input: {
   readonly mockEnvironment: Record<string, string>;
   readonly runtimeMode?: RuntimeMode;
   readonly model?: string;
+  readonly options?: ReadonlyArray<ProviderOptionSelection>;
   readonly continuationRequests?: HermesAdapterV2Options["continuationRequests"];
   /**
    * Session updates the prompt delivers instead of the mock's own reply, for
@@ -212,7 +219,11 @@ const runMockTurn = (input: {
     });
     const threadId = ThreadId.make(`hermes-v2-${input.name}`);
     const policy = runtimePolicy(input.runtimeMode ?? "approval-required");
-    const modelSelection = { instanceId, model: input.model ?? "hermes-4" } as const;
+    const modelSelection = {
+      instanceId,
+      model: input.model ?? "hermes-4",
+      ...(input.options === undefined ? {} : { options: input.options }),
+    };
     const session = yield* adapter.openSession({
       threadId,
       providerSessionId: ProviderSessionId.make(`hermes-v2-session-${input.name}`),
@@ -231,6 +242,7 @@ const runMockTurn = (input: {
         runtimePolicy: policy,
         now: yield* DateTime.now,
         model: modelSelection.model,
+        ...(input.options === undefined ? {} : { options: input.options }),
       }),
     );
     const events: ReadonlyArray<ProviderAdapterV2Event> = Array.from(
@@ -315,6 +327,42 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
           : [],
       );
       assert.deepInclude(usage.at(-1) ?? {}, { usedTokens: 48_120, maxTokens: 200_000 });
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+
+  it.effect("sends the fast-mode choice as Hermes's session option once", () =>
+    Effect.gen(function* () {
+      const { events, requests } = yield* runMockTurn({
+        name: "fast",
+        model: "openai/gpt-5",
+        options: [{ id: "fastMode", value: true }],
+        mockEnvironment: {},
+      });
+      const fastMode = requests.filter(
+        (request) =>
+          request.method === "session/set_config_option" &&
+          (request.params as { readonly configId?: unknown }).configId === "fast_mode",
+      );
+      // Session open and turn start both apply the selection; Hermes hears it once.
+      assert.deepEqual(
+        fastMode.map((request) => (request.params as { readonly value?: unknown }).value),
+        ["on"],
+      );
+      const terminal = events.find((event) => event.type === "turn.terminal");
+      assert.equal(terminal?.type === "turn.terminal" ? terminal.status : undefined, "completed");
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+
+  it.effect("leaves Hermes's fast mode alone when the toggle was never touched", () =>
+    Effect.gen(function* () {
+      const { requests } = yield* runMockTurn({ name: "no-fast", mockEnvironment: {} });
+      assert.isFalse(
+        requests.some(
+          (request) =>
+            request.method === "session/set_config_option" &&
+            (request.params as { readonly configId?: unknown }).configId === "fast_mode",
+        ),
+      );
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 

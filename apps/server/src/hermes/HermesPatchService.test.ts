@@ -9,6 +9,7 @@ import { HermesPatchId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import { FetchHttpClient } from "effect/unstable/http";
 
 import * as ServerSettings from "../serverSettings.ts";
 import { writeFakeCli } from "../testUtils/fakeCli.ts";
@@ -23,7 +24,7 @@ const withService = (hermes: { readonly enabled: boolean; readonly binaryPath?: 
   Effect.provide(
     Layer.effect(HermesPatchService, make).pipe(
       Layer.provide(ServerSettings.layerTest({ providers: { hermes } })),
-      Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(Layer.merge(NodeServices.layer, FetchHttpClient.layer)),
     ),
   );
 
@@ -61,7 +62,7 @@ const withInstance = (binaryPath: string, home: string) =>
           },
         } as never),
       ),
-      Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(Layer.merge(NodeServices.layer, FetchHttpClient.layer)),
     ),
   );
 

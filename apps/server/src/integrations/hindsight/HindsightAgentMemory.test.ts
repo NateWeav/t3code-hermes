@@ -1037,4 +1037,36 @@ describe("HindsightAgentMemory", () => {
       expect(hermesProvider(harness.hermesHome)).toBe("holographic");
     }).pipe(Effect.provide(harness.layer));
   });
+  it.effect("never repoints the hooks while the old server's key is still in place", () => {
+    const harness = setup({ agentMemory: true, missing: ["hermes"] });
+    const installerDir = NodePath.join(harness.home, ".hindsight");
+    const installerConfig = NodePath.join(installerDir, "coding-agent.json");
+    return Effect.gen(function* () {
+      harness.setConnection({ baseUrl: BASE_URL, apiKey: "hsk_old" });
+      yield* harness.apply;
+      // The file stays writable, but a safe rewrite needs the directory.
+      NodeFS.chmodSync(installerDir, 0o500);
+      harness.setConnection({ baseUrl: "http://open-host:8888", apiKey: null });
+      const state = yield* harness.apply;
+      NodeFS.chmodSync(installerDir, 0o700);
+
+      expect(harness.calls).toHaveLength(1);
+      expect(readJson(installerConfig)).toMatchObject({ apiUrl: BASE_URL, apiToken: "hsk_old" });
+      expect(state.agents.every((agent) => agent.state === "failed")).toBe(true);
+    }).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("ignores an inherited CODEX_HOME that managed Codex replaces anyway", () => {
+    const harness = setup({
+      agentMemory: true,
+      codexManaged: true,
+      missing: ["codex", "claude", "hermes"],
+      hostEnv: { CODEX_HOME: "/srv/other-codex" },
+    });
+    return Effect.gen(function* () {
+      const state = yield* harness.apply;
+
+      expect(state.agents).toEqual([{ target: "codex", state: "installed", detail: null }]);
+    }).pipe(Effect.provide(harness.layer));
+  });
 });

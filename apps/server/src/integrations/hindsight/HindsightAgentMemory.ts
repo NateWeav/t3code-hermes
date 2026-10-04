@@ -512,7 +512,8 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
           // A configured `homePath` takes `~`; an inherited variable is not
           // shell-expanded, so its `~` stays literal, as the drivers read it.
           const configuredHome = nonEmptyString(instanceConfig["homePath"]);
-          const inheritedHome = nonEmptyString(env[agent.homeVariable]);
+          // Managed Codex replaces any inherited CODEX_HOME with its own layout.
+          const inheritedHome = managed ? null : nonEmptyString(env[agent.homeVariable]);
           const effectiveHome =
             configuredHome !== null
               ? resolveHomePath(configuredHome)
@@ -861,20 +862,17 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
             installerConnection:
               nextLedger.installerConnection ?? (yield* snapshotInstallerConnection),
           };
-          const failure = (yield* persist(claimed))
-            ? yield* runInstaller("install", coding, connection)
-            : "T3 Code could not save what it changes, so the installer was not run.";
+          const saved = yield* persist(claimed);
           if (persisted === claimed) nextLedger = claimed;
-          if (failure === null) {
-            if (connection.apiKey === null && !(yield* clearInstallerToken)) {
-              for (const target of coding) {
-                failures.set(
-                  target,
-                  "The removed API key could not be cleared from Hindsight's config.",
-                );
-              }
-            }
-          } else {
+          // The installer never clears a token it is not given, so one the
+          // connection no longer has goes first: the hooks must never point at
+          // a new server while still holding the old server's key.
+          const failure = !saved
+            ? "T3 Code could not save what it changes, so the installer was not run."
+            : connection.apiKey === null && !(yield* clearInstallerToken)
+              ? "The removed API key could not be cleared from Hindsight's config, so the installer was not run."
+              : yield* runInstaller("install", coding, connection);
+          if (failure !== null) {
             for (const target of coding) failures.set(target, failure);
           }
         }

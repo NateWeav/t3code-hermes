@@ -1,6 +1,6 @@
+import * as KeyedLock from "@t3tools/shared/KeyedLock";
 import * as Effect from "effect/Effect";
 import * as Ref from "effect/Ref";
-import * as Semaphore from "effect/Semaphore";
 
 export interface ProviderMaintenanceCommandCoordinatorShape<E> {
   readonly withCommandLock: <A, R>(input: {
@@ -17,7 +17,7 @@ export const makeProviderMaintenanceCommandCoordinator = Effect.fn(
   "makeProviderMaintenanceCommandCoordinator",
 )(function* <E>(input: { readonly makeAlreadyRunningError: (targetKey: string) => E }) {
   const runningTargetsRef = yield* Ref.make<ReadonlySet<string>>(new Set());
-  const locksRef = yield* Ref.make<ReadonlyMap<string, Semaphore.Semaphore>>(new Map());
+  const locks = yield* KeyedLock.make<string>();
 
   const acquireTarget = Effect.fn("acquireTarget")(function* (targetKey: string) {
     return yield* Ref.modify(runningTargetsRef, (runningTargets) => {
@@ -37,24 +37,6 @@ export const makeProviderMaintenanceCommandCoordinator = Effect.fn(
       return next;
     });
 
-  const getLock = Effect.fn("getProviderMaintenanceCommandLock")(function* (lockKey: string) {
-    const existing = (yield* Ref.get(locksRef)).get(lockKey);
-    if (existing) {
-      return existing;
-    }
-
-    const lock = yield* Semaphore.make(1);
-    return yield* Ref.modify(locksRef, (locks) => {
-      const current = locks.get(lockKey);
-      if (current) {
-        return [current, locks] as const;
-      }
-      const next = new Map(locks);
-      next.set(lockKey, lock);
-      return [lock, next] as const;
-    });
-  });
-
   const withCommandLock: ProviderMaintenanceCommandCoordinatorShape<E>["withCommandLock"] = ({
     targetKey,
     lockKey,
@@ -68,13 +50,7 @@ export const makeProviderMaintenanceCommandCoordinator = Effect.fn(
         return yield* Effect.fail(input.makeAlreadyRunningError(targetKey));
       }
 
-      const locked = Effect.gen(function* () {
-        const lock = yield* getLock(lockKey);
-        if (onQueued) {
-          yield* onQueued;
-        }
-        return yield* lock.withPermits(1)(run);
-      });
+      const locked = (onQueued ?? Effect.void).pipe(Effect.andThen(locks.withLock(lockKey, run)));
       return yield* (
         onInterrupt ? locked.pipe(Effect.onInterrupt(() => onInterrupt)) : locked
       ).pipe(Effect.ensuring(releaseTarget(targetKey)));

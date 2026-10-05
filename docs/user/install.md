@@ -28,6 +28,14 @@ This starts the server and opens the local web app. Run
 only nightly builds, so always ask for `@nightly`. To keep a server running
 after you log out, use the [background service](./background-service.md).
 
+Run `npx t3-hermes@nightly help` for the same reference. To start in a new
+working directory, use an explicit path such as `npx t3-hermes@nightly ./my-project`.
+A bare directory name is accepted only if it already exists.
+
+If `t3-hermes` or `t3-hermes start` reports an already running server, connect
+to that server instead. Stop it before starting a replacement, or use a
+different `--base-dir` for an independent server.
+
 The executable is built for Apple Silicon Macs, Linux, and Windows. There is
 no Intel Mac build of it, because Node cannot produce a single executable for
 that platform; the Intel desktop app is unaffected. To run a standalone server

@@ -32,7 +32,7 @@ import {
   HINDSIGHT_DEFAULT_REFLECT_QUERY,
 } from "@t3tools/client-runtime/state/hindsight";
 import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 import { useCallback, useMemo, useRef, useState } from "react";
 
 import { toastManager } from "../components/ui/toast";

@@ -17,7 +17,7 @@ import {
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
-import { ChildProcess } from "effect/unstable/process";
+import { ChildProcess } from "effect/process";
 
 import { spawnAndCollect } from "../provider/providerSnapshot.ts";
 import { HERMES_PATCH_FILES } from "./hermesPatchFiles.generated.ts";

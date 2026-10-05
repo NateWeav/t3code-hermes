@@ -54,6 +54,7 @@ function watchesEqual(left: ThreadPullRequestWatch, right: ThreadPullRequestWatc
     left.headSha === right.headSha &&
     left.failedChecks.join("\n") === right.failedChecks.join("\n") &&
     left.passed === right.passed &&
+    left.passedChecks.join("\n") === right.passedChecks.join("\n") &&
     left.remarksThrough === right.remarksThrough &&
     left.remarkIds.join("\n") === right.remarkIds.join("\n") &&
     left.conflicting === right.conflicting &&
@@ -64,8 +65,8 @@ function watchesEqual(left: ThreadPullRequestWatch, right: ThreadPullRequestWatc
 /**
  * Wakes a thread's agent when a pull request it watches (`watch_pull_request`) needs a look:
  * checks finished on the head commit, someone else commented, or the branch started to
- * conflict. One pass a minute reads each watched pull request; settled threads wait until
- * they are active again, and a merged or closed pull request ends its watch.
+ * conflict. One pass a minute reads each watched pull request; settling a thread ends its
+ * watches, and a merged or closed pull request ends its watch.
  */
 export class PullRequestWatchReactor extends Context.Service<
   PullRequestWatchReactor,
@@ -192,10 +193,13 @@ export const make = Effect.gen(function* () {
   const check = Effect.fn("PullRequestWatchReactor.check")(function* (target: WatchTarget) {
     const { thread, link, watch } = target;
     const pullRequest = identityOf(link);
-    // A merged pull request cannot reopen, so its watch ends without a host read, even on a
-    // settled thread. A closed one can, so the host decides below.
+    // A merged pull request cannot reopen, so its watch ends without a host read. A closed one
+    // can, so the host decides below. Settling ends watches; one left from before that rule
+    // ends here, so the thread does not show as working while settled.
     if (link.snapshot?.state === "merged") return yield* record(target, null);
-    if (thread.settledOverride === "settled" || thread.settledAt !== null) return;
+    if (thread.settledOverride === "settled" || thread.settledAt !== null) {
+      return yield* record(target, null);
+    }
 
     const reference = { projectId: thread.projectId, ...pullRequest };
     const read = yield* Effect.exit(

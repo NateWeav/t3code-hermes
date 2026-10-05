@@ -4,7 +4,7 @@ import { deriveActiveWorkStartedAt } from "../session-logic.ts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { defaultAnimateLayoutChanges, type AnimateLayoutChanges } from "@dnd-kit/sortable";
 import * as Cause from "effect/Cause";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import {
   animateSidebarLayoutChanges,
   archiveSelectedThreadEntries,
@@ -2185,6 +2185,7 @@ describe("pull request watch", () => {
       headSha: null,
       failedChecks: [],
       passed: false,
+      passedChecks: [],
       remarksThrough: "2026-06-20T00:00:00.000Z",
       remarkIds: [],
       conflicting: false,

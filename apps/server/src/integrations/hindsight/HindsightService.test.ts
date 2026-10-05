@@ -17,7 +17,7 @@ import { HindsightBankId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import { HttpClient, HttpClientResponse, UrlParams } from "effect/unstable/http";
+import { HttpClient, HttpClientResponse, UrlParams } from "effect/http";
 
 import * as ServerSettings from "../../serverSettings.ts";
 import { resolveHermesHindsightPaths } from "./hermesHindsightConfig.ts";

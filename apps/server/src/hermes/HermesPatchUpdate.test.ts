@@ -14,7 +14,7 @@ import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
-import { FetchHttpClient } from "effect/unstable/http";
+import { FetchHttpClient } from "effect/http";
 
 import { providerUpdateLock } from "../provider/providerMaintenanceCommandCoordinator.ts";
 import * as ServerSettings from "../serverSettings.ts";

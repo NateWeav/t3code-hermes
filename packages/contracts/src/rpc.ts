@@ -337,6 +337,8 @@ import {
   HermesPatchUpdateHermesResult,
 } from "./hermesPatches.ts";
 import {
+  HindsightAgentMemoryInput,
+  HindsightAgentMemoryState,
   HindsightBanksResult,
   HindsightBrowseInput,
   HindsightError,
@@ -541,6 +543,8 @@ export const WS_METHODS = {
   hindsightStats: "hindsight.stats",
   hindsightRetain: "hindsight.retain",
   hindsightReflect: "hindsight.reflect",
+  hindsightSubscribeAgentMemory: "hindsight.subscribeAgentMemory",
+  hindsightApplyAgentMemory: "hindsight.applyAgentMemory",
   serverRefreshUsageRates: "server.refreshUsageRates",
 
   // Scheduled tasks
@@ -1050,6 +1054,21 @@ const WsHindsightReflectRpc = Rpc.make(WS_METHODS.hindsightReflect, {
   payload: HindsightReflectInput,
   success: HindsightReflectResult,
   error: Schema.Union([EnvironmentAuthorizationError, HindsightError]),
+});
+
+/** Where the agents stand against `integrations.hindsight.agentMemory`, live. */
+const WsHindsightSubscribeAgentMemoryRpc = Rpc.make(WS_METHODS.hindsightSubscribeAgentMemory, {
+  payload: HindsightAgentMemoryInput,
+  success: HindsightAgentMemoryState,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
+
+/** Re-runs the agent memory pass now, as a retry after a failure. */
+const WsHindsightApplyAgentMemoryRpc = Rpc.make(WS_METHODS.hindsightApplyAgentMemory, {
+  payload: HindsightAgentMemoryInput,
+  success: HindsightAgentMemoryState,
+  error: EnvironmentAuthorizationError,
 });
 
 /**
@@ -1991,6 +2010,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsHindsightStatsRpc,
   WsHindsightRetainRpc,
   WsHindsightReflectRpc,
+  WsHindsightSubscribeAgentMemoryRpc,
+  WsHindsightApplyAgentMemoryRpc,
   WsServerRefreshUsageRatesRpc,
   WsServerSignalProcessRpc,
   WsScheduledTasksListRpc,

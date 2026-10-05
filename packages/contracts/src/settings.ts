@@ -1062,6 +1062,12 @@ export const HindsightSettings = Schema.Struct({
   apiKey: Schema.optionalKey(TrimmedString),
   /** Preselected in the bank picker. Falls back to the first bank Hindsight lists. */
   defaultBank: Schema.optionalKey(TrimmedString),
+  /**
+   * Wire this connection into the coding agents on this environment's host, so
+   * they recall from and retain to Hindsight on their own. The environment
+   * keeps the agents in line with this flag; see `HindsightAgentMemory`.
+   */
+  agentMemory: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
 });
 export type HindsightSettings = typeof HindsightSettings.Type;
 
@@ -1762,6 +1768,7 @@ export const ServerSettingsPatch = Schema.Struct({
           baseUrl: Schema.optionalKey(TrimmedString),
           apiKey: Schema.optionalKey(TrimmedString),
           defaultBank: Schema.optionalKey(TrimmedString),
+          agentMemory: Schema.optionalKey(Schema.Boolean),
         }),
       ),
     }),

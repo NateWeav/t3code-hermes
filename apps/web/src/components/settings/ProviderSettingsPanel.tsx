@@ -86,6 +86,7 @@ import { stackedThreadToast, toastManager } from "../ui/toast";
 import { AddProviderInstanceDialog } from "./AddProviderInstanceDialog";
 import { ExpandableText } from "./ExpandableText";
 import { ProviderInstanceCard } from "./ProviderInstanceCard";
+import { HindsightAgentMemorySettings } from "./HindsightAgentMemorySettings";
 import { UsageProviderSettings } from "./UsageProviderSettings";
 import { ProviderSetupSection, readAntigravityAuthMethod } from "./ProviderSetupSection";
 import { ProviderAuthenticationSection } from "./ProviderAuthenticationSection";
@@ -452,6 +453,8 @@ function ProviderSettingsPanelContent(target: ProviderSettingsTarget) {
           }
         />
       ) : null}
+      {/* Spans every connected device, whichever one is selected above. */}
+      {options.length > 0 ? <HindsightAgentMemorySettings /> : null}
     </>
   );
 }

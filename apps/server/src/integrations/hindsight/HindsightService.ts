@@ -123,7 +123,7 @@ interface HindsightProbe {
 }
 
 /** Effective connection settings, or `null` when the integration is off. */
-interface HindsightConnection {
+export interface HindsightConnection {
   readonly source: HindsightConnectionSource;
   readonly baseUrl: string;
   readonly apiKey: string | null;
@@ -131,7 +131,7 @@ interface HindsightConnection {
 }
 
 /** Everything the environment knows about where Hindsight is. */
-interface ResolvedHindsight {
+export interface ResolvedHindsight {
   readonly connection: HindsightConnection | null;
   readonly hermes: HermesHindsightConfig | null;
   readonly enabled: boolean;
@@ -146,6 +146,8 @@ function notConfigured(enabled: boolean): HindsightProbe {
     apiVersion: null,
   };
 }
+
+const NOT_CONFIGURED = notConfigured(true);
 
 function trimmedOrNull(value: string | undefined): string | null {
   const trimmed = value?.trim() ?? "";
@@ -303,6 +305,12 @@ export class HindsightService extends Context.Service<
     readonly reflect: (
       input: HindsightReflectInput,
     ) => Effect.Effect<HindsightReflectResult, HindsightError>;
+
+    /**
+     * The connection this environment resolves, key included. Server-side
+     * only: agent memory hands it to the agents on this host.
+     */
+    readonly resolveConnection: Effect.Effect<ResolvedHindsight>;
   }
 >()("t3-hermes/integrations/hindsight/HindsightService") {}
 
@@ -801,7 +809,30 @@ export const make = Effect.gen(function* () {
       ),
     );
 
-  return HindsightService.of({ listBanks, browse, recall, stats, retain, reflect });
+  return HindsightService.of({
+    listBanks,
+    browse,
+    recall,
+    stats,
+    retain,
+    reflect,
+    resolveConnection: resolve,
+  });
 });
 
 export const layer = Layer.effect(HindsightService, make);
+
+/** Unconfigured service, for suites that only need the RPC surface to resolve. */
+export const layerTest = Layer.succeed(
+  HindsightService,
+  HindsightService.of({
+    listBanks: () =>
+      Effect.succeed({ status: statusOf(NOT_CONFIGURED), banks: [], defaultBank: null }),
+    browse: () => Effect.succeed(emptyMemoryResult(NOT_CONFIGURED)),
+    recall: () => Effect.succeed(emptyMemoryResult(NOT_CONFIGURED)),
+    stats: () => Effect.succeed({ status: statusOf(NOT_CONFIGURED), stats: null }),
+    retain: () => Effect.fail(probeFailure(NOT_CONFIGURED)),
+    reflect: () => Effect.fail(probeFailure(NOT_CONFIGURED)),
+    resolveConnection: Effect.succeed({ connection: null, hermes: null, enabled: false }),
+  }),
+);

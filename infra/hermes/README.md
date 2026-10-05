@@ -106,7 +106,8 @@ overlapping delegations can have identical goals and batch-local indices, and un
 ownership is dropped. Registry-forced stalls and worker crashes report through the same child relay,
 so detached work cannot stay falsely active. A parent result with `status: "dispatched"` only
 acknowledges launch; child lifecycle events settle each subagent. The original ACP process must stay
-connected; missed results are not recovered from disk.
+connected unless `acp-durable-completion-receipts` is also applied, which recovers missed results
+from disk.
 
 Restart the T3 Code server after applying the patch so provider sessions spawn patched Hermes. No
 configuration changes are required.
@@ -189,3 +190,28 @@ Restart the T3 Code server after applying the patch. The patch's
 `tests/acp_adapter/test_fast_mode.py` drives the real config, gate, and ACP server with a stubbed
 agent; run it with the rest of `tests/acp_adapter/` in a scratch checkout, as for
 `acp-delegation-progress`.
+
+## `acp-durable-completion-receipts`
+
+**Needed by:** background results that survive the trip to the agent. Stock Hermes (with
+`acp-delegation-progress` and `acp-background-reports`) counts a finished subagent's result as
+delivered the moment it writes `_hermes/notification`, so a result is lost if T3 Code restarts, the
+ACP process reconnects, or the wake turn fails before the agent sees it.
+
+T3 Code advertises `_meta["hermes.backgroundNotifications"]` during `initialize`; Hermes keeps
+clients without it on synchronous delegation. Capable clients receive stable `notificationIds` with
+each detached result and hand them back in the wake turn's `session/prompt` `_meta` under
+`hermes.notificationIds`. Hermes settles a receipt only for its owning session, after that prompt
+finished uninterrupted and its history was saved. Until then the result stays pending: a reconnect
+restores it from disk, and a previous ACP delivery claim is reclaimed only when its process is
+demonstrably dead. A sent receipt is not re-sent within one Hermes process, only restored after a
+reconnect. T3 Code drops a re-sent notice while its ids are queued or prompting and reopens them once
+the wake prompt settles, because its stop reason does not say whether Hermes settled them.
+
+Verified against hermes-agent `4d3555e5ca` and `af8839df10` (`main`, 2026-10-04) after
+`acp-delegation-progress` and `acp-background-reports`, with or without `acp-fast-mode` in either
+order.
+
+Restart the T3 Code server after applying the patch. Run the patch's
+`tests/acp_adapter/test_background_reports.py` and `tests/tools/test_async_delegation.py` in a
+scratch checkout, as for `acp-delegation-progress`.

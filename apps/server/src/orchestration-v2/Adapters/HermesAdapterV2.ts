@@ -157,6 +157,10 @@ export function makeHermesAcpAdapterFlavor(options: HermesAdapterV2Options): Acp
     supportsImagePrompts: true,
     supportsCompaction: true,
     compactionCommand: "/compress",
+    // The receipts patch keeps a background result pending until a prompt
+    // hands its notice's ids back; Hermes compares the capability with `== 1`.
+    clientCapabilitiesMeta: { "hermes.backgroundNotifications": true },
+    wakeReceiptPromptMetaKey: "hermes.notificationIds",
     resolveModelId: (selection) => resolveHermesAcpBaseModelId(selection.model),
     makeRuntime: (input) =>
       (options.makeRuntime ?? spawnRuntime)(input).pipe(
@@ -252,6 +256,9 @@ export function makeHermesAcpAdapterFlavor(options: HermesAdapterV2Options): Acp
                   sessionId: notice.sessionId,
                   text: notice.text,
                   report: hermesNotificationReport(notice),
+                  ...(notice.notificationIds === undefined
+                    ? {}
+                    : { receiptIds: notice.notificationIds }),
                 }),
             ),
           ),

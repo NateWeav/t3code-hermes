@@ -59,6 +59,18 @@
           "file": "acp-fast-mode/439334127f01.patch"
         }
       ]
+    },
+    {
+      "id": "acp-durable-completion-receipts",
+      "title": "Durable background results",
+      "neededFor": "Apply after Live subagent progress and Background process reports. Keeps a finished subagent's result until the agent has actually been woken with it, and redelivers results missed while T3 Code was disconnected or restarting.",
+      "versions": [
+        {
+          "hermesCommit": "af8839df1038cc026075fb254afa22edc19d911d",
+          "hermesCommitDate": "2026-10-04T22:20:18Z",
+          "file": "acp-durable-completion-receipts/af8839df1038.patch"
+        }
+      ]
     }
   ]
 }

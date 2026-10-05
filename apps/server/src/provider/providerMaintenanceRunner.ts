@@ -14,10 +14,13 @@ import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import * as Scope from "effect/Scope";
 import { HttpClient } from "effect/unstable/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
@@ -223,6 +226,11 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const httpClient = yield* HttpClient.HttpClient;
   const versionCache = yield* ProviderVersionCache;
+  // Update fibers outlive the RPC that started them but not the server. A
+  // dropped websocket interrupts its handler; that must not kill `hermes update`
+  // halfway through or leave the provider stuck on "Updating".
+  const updateScope = yield* Scope.make("parallel");
+  yield* Effect.addFinalizer(() => Scope.close(updateScope, Exit.void));
   const runMaintenanceCommand = (update: ProviderMaintenanceCommandAction) =>
     runProviderMaintenanceCommandWithSpawner({
       spawner,
@@ -330,12 +338,18 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
       });
     }
 
+    const lastStatusRef = yield* Ref.make<ServerProviderUpdateState["status"] | null>(null);
+    const startedAtRef = yield* Ref.make<string | null>(null);
+    // Uninterruptible so the recorded status always matches what the registry
+    // last saw; the interrupt handler below decides from it.
     const setUpdateState = (state: ServerProviderUpdateState | null) =>
-      providerRegistry.setProviderMaintenanceActionState({
-        instanceId,
-        action: "update",
-        state,
-      });
+      providerRegistry
+        .setProviderMaintenanceActionState({
+          instanceId,
+          action: "update",
+          state,
+        })
+        .pipe(Effect.tap(Ref.set(lastStatusRef, state?.status ?? null)), Effect.uninterruptible);
     const setQueuedState = setUpdateState(
       makeUpdateState({
         status: "queued",
@@ -349,7 +363,6 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
       function* () {
         const finish = (state: ServerProviderUpdateState) =>
           setUpdateState(state).pipe(Effect.map((providers) => ({ providers })));
-        const startedAtRef = yield* Ref.make<string | null>(null);
 
         const runCommandAndVerify = Effect.fn("ProviderMaintenanceRunner.runCommandAndVerify")(
           function* () {
@@ -496,23 +509,45 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
       },
     );
 
-    return yield* commandCoordinator
+    // `catchCause` above never sees interruption, so a server shutdown mid-update
+    // would otherwise leave the in-memory state on queued/running forever.
+    const recordInterruptedUpdate = Effect.gen(function* () {
+      const lastStatus = yield* Ref.get(lastStatusRef);
+      if (lastStatus !== "queued" && lastStatus !== "running") {
+        return;
+      }
+      yield* setUpdateState(
+        makeUpdateState({
+          status: "failed",
+          startedAt: yield* Ref.get(startedAtRef),
+          finishedAt: yield* nowIso,
+          message: "Update was interrupted before it finished.",
+        }),
+      );
+    });
+
+    const updateFiber = yield* commandCoordinator
       .withCommandLock({
         targetKey,
         lockKey: update.lockKey,
         onQueued: setQueuedState,
+        onInterrupt: recordInterruptedUpdate,
         run: runProviderUpdate(),
       })
-      .pipe(
-        Effect.mapError((error) =>
-          isServerProviderUpdateError(error)
-            ? new ServerProviderUpdateError({
-                provider,
-                reason: error.reason,
-              })
-            : error,
-        ),
-      );
+      .pipe(Effect.forkIn(updateScope));
+
+    // Joining only observes the update: interrupting this caller detaches it
+    // and leaves the update running.
+    return yield* Fiber.join(updateFiber).pipe(
+      Effect.mapError((error) =>
+        isServerProviderUpdateError(error)
+          ? new ServerProviderUpdateError({
+              provider,
+              reason: error.reason,
+            })
+          : error,
+      ),
+    );
   });
 
   return ProviderMaintenanceRunner.of({

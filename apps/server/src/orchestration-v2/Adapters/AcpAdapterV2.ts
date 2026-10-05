@@ -117,6 +117,7 @@ import {
   subagentThreadTitle,
 } from "../SubagentProjection.ts";
 import * as ProviderAdapter from "../ProviderAdapter.ts";
+import { AcpWakeReceipts } from "./AcpWakeReceipts.ts";
 
 export const ACP_PROTOCOL = "acp.ndjson-jsonrpc" as const;
 
@@ -216,6 +217,8 @@ export interface AcpAdapterV2ExtensionContext {
     readonly sessionId: string;
     readonly text: string;
     readonly report?: BackgroundWorkReport;
+    /** Handed back on the wake turn's prompt; see `wakeReceiptPromptMetaKey`. */
+    readonly receiptIds?: ReadonlyArray<string>;
   }) => Effect.Effect<void>;
   /** Surfaces plan markdown as this turn's proposed-plan card (#8358). */
   readonly captureProposedPlan: (input: { readonly planMarkdown: string }) => Effect.Effect<void>;
@@ -229,6 +232,12 @@ export interface AcpAdapterV2Flavor {
   readonly driver: ProviderDriverKind;
   readonly capabilities: OrchestrationV2ProviderCapabilities;
   readonly clientCapabilitiesMeta?: Record<string, boolean>;
+  /**
+   * Prompt `_meta` key that hands a wake's `receiptIds` back to the agent on
+   * the wake turn's prompt. A notice whose ids were all admitted is a re-send
+   * and starts no second wake. See AcpWakeReceipts.
+   */
+  readonly wakeReceiptPromptMetaKey?: string;
   readonly normalizeSessionUpdate?: (
     notification: EffectAcpSchema.SessionNotification,
   ) => EffectAcpSchema.SessionNotification;
@@ -1964,6 +1973,7 @@ export function makeAcpAdapterV2(
           readonly providerThreadId: ProviderThreadId;
         } | null>(null);
         const wakeBuffer = yield* Ref.make<Array<EffectAcpSchema.SessionNotification>>([]);
+        const wakeReceipts = new AcpWakeReceipts();
         // Background work that ended after the prompt settled, keyed by task or
         // child session id. The next continuation offer names it for the user;
         // `offered` holds the keys that offer named. Work that ends while the
@@ -5927,6 +5937,7 @@ export function makeAcpAdapterV2(
                     if ((yield* Ref.get(activeSessionId)) !== wake.sessionId) return;
                     const route = yield* Ref.get(lastTurnRoute);
                     if (route === null) return;
+                    if (!wakeReceipts.admit(wake.text, wake.receiptIds ?? [])) return;
                     const notification =
                       wake.report === undefined ? null : backgroundWorkNotification([wake.report]);
                     yield* continuationRequests.offer({
@@ -7142,7 +7153,24 @@ export function makeAcpAdapterV2(
               return;
             }
             const promptGeneration = yield* Ref.get(runtimeCallbackGeneration);
-            yield* runtime.prompt({ prompt: promptParts!.prompt }).pipe(
+            const receiptMetaKey = flavor.wakeReceiptPromptMetaKey;
+            const receiptIds =
+              receiptMetaKey !== undefined && isAppOwnedWakeTurn
+                ? wakeReceipts.take(turnInput.message.text)
+                : [];
+            const promptRequest = {
+              prompt: promptParts!.prompt,
+              ...(receiptIds.length === 0 ? {} : { _meta: { [receiptMetaKey!]: receiptIds } }),
+            };
+            yield* runtime.prompt(promptRequest).pipe(
+              // The agent settles receipts only for a prompt that finished
+              // uninterrupted; reopen the rest for its redelivery.
+              Effect.tap((result) =>
+                Effect.sync(() => {
+                  if (result.stopReason === "cancelled") wakeReceipts.forget(receiptIds);
+                }),
+              ),
+              Effect.tapCause(() => Effect.sync(() => wakeReceipts.forget(receiptIds))),
               Effect.tap(() =>
                 Ref.update(promptInstructionStates, (current) => {
                   if (promptParts?.instructionState === undefined) return current;

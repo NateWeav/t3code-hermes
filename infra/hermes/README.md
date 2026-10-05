@@ -64,7 +64,7 @@ overlapping delegations can have identical goals and batch-local indices, and un
 ownership is dropped. Registry-forced stalls and worker crashes report through the same child relay,
 so detached work cannot stay falsely active. A parent result with `status: "dispatched"` only
 acknowledges launch; child lifecycle events settle each subagent. The original ACP process must stay
-connected; missed results are not recovered from disk.
+connected unless `0007` is also applied, which recovers missed results from disk.
 
 Verified against hermes-agent `ac0cfa7db9` (`main`, 2026-09-29), together with `0002`. It does not
 apply to `08b140d14e` or older checkouts; update first.
@@ -179,3 +179,31 @@ git apply /path/to/t3code/infra/hermes/0006-acp-fast-mode.patch
 Restart the T3 Code server after applying the patch. The patch's
 `tests/acp_adapter/test_fast_mode.py` drives the real config, gate, and ACP server with a stubbed
 agent; run it with the rest of `tests/acp_adapter/` in a scratch checkout, as for `0003`.
+
+## `0007-acp-durable-completion-receipts.patch`
+
+**Needed by:** background results that survive the trip to the agent. Stock Hermes (with `0003` and
+`0004`) counts a finished subagent's result as delivered the moment it writes `_hermes/notification`,
+so a result is lost if T3 Code restarts, the ACP process reconnects, or the wake turn fails before
+the agent sees it.
+
+T3 Code advertises `_meta["hermes.backgroundNotifications"]` during `initialize`; Hermes keeps
+clients without it on synchronous delegation. Capable clients receive stable `notificationIds` with
+each detached result and hand them back in the wake turn's `session/prompt` `_meta` under
+`hermes.notificationIds`. Hermes settles a receipt only for its owning session, after that prompt
+finished uninterrupted and its history was saved. Until then the result stays pending: a reconnect
+restores it from disk, and a previous ACP delivery claim is reclaimed only when its process is
+demonstrably dead. T3 Code drops a re-sent notice while its ids are queued, prompting, or settled,
+and reopens them when the wake turn fails or is stopped, so a redelivery wakes the agent again.
+
+Verified against hermes-agent `4d3555e5ca` and `af8839df10` (`main`, 2026-10-04) after `0003` and
+`0004`, with or without `0006` in either order.
+
+```bash
+cd ~/.hermes/hermes-agent
+git apply /path/to/t3code/infra/hermes/0007-acp-durable-completion-receipts.patch
+```
+
+Restart the T3 Code server after applying the patch. Run the patch's
+`tests/acp_adapter/test_background_reports.py` and `tests/tools/test_async_delegation.py` in a
+scratch checkout, as for `0003`.

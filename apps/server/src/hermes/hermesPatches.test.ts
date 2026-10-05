@@ -598,6 +598,12 @@ describe("hermes patches", () => {
 
       assert.isFalse((yield* changeHermesPatch(root, patch, "reverse")).ok);
       assert.strictEqual(NodeFS.readFileSync(file, "utf8"), lines("1", "2"));
+
+      // An unrelated edit in the same file changes nothing.
+      const edited = lines("1", "2").replace("a\n", "mine\n");
+      NodeFS.writeFileSync(file, edited);
+      assert.isFalse((yield* changeHermesPatch(root, patch, "reverse")).ok);
+      assert.strictEqual(NodeFS.readFileSync(file, "utf8"), edited);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 

@@ -21,6 +21,8 @@
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
+import { resolveHermesHome } from "../../hermes/hermesCronState.ts";
+
 /** Hermes' defaults for a local (external or embedded) and a cloud Hindsight. */
 const HERMES_DEFAULT_LOCAL_URL = "http://localhost:8888";
 const HERMES_DEFAULT_CLOUD_URL = "https://api.hindsight.vectorize.io";
@@ -41,15 +43,23 @@ export interface HermesHindsightPaths {
   readonly dotenvFile: string;
 }
 
+/**
+ * `~` for a Hermes instance. Python's `Path.home()` honours HOME
+ * (USERPROFILE on Windows), so an instance given its own home is followed there.
+ */
+export function hermesUserHome(
+  environment: NodeJS.ProcessEnv,
+  fallback: string = NodeOS.homedir(),
+): string {
+  return environment["HOME"]?.trim() || environment["USERPROFILE"]?.trim() || fallback;
+}
+
 export function resolveHermesHindsightPaths(
   environment: NodeJS.ProcessEnv,
-  // Python's `Path.home()` honours HOME (USERPROFILE on Windows), so a Hermes
-  // instance given its own home is followed there.
-  homedir: string = environment["HOME"]?.trim() ||
-    environment["USERPROFILE"]?.trim() ||
-    NodeOS.homedir(),
+  homedir: string = hermesUserHome(environment),
 ): HermesHindsightPaths {
-  const hermesHome = environment["HERMES_HOME"]?.trim() || NodePath.join(homedir, ".hermes");
+  // The same resolution agent memory writes with, `~/…` included.
+  const hermesHome = resolveHermesHome(environment, homedir);
   return {
     configFiles: [
       NodePath.join(hermesHome, "hindsight", "config.json"),

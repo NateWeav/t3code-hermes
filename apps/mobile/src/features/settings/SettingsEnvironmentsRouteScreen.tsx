@@ -1,3 +1,4 @@
+import { EnvironmentAgentMemorySettings } from "./EnvironmentAgentMemorySettings";
 import { EnvironmentHubSettings } from "./EnvironmentHubSettings";
 import { ScreenScrollView as ScrollView } from "../../components/ScreenScrollView";
 import { useNavigation } from "@react-navigation/native";
@@ -191,6 +192,9 @@ export function SettingsEnvironmentsRouteScreen() {
               }
             : {})}
         />
+        <View className="mt-6">
+          <EnvironmentAgentMemorySettings />
+        </View>
         <View className="mt-6">
           <EnvironmentHubSettings />
         </View>

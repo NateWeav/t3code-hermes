@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { parseDotenv, resolveHermesHindsightConfig } from "./hermesHindsightConfig.ts";
+import {
+  parseDotenv,
+  resolveHermesHindsightPaths,
+  resolveHermesHindsightConfig,
+} from "./hermesHindsightConfig.ts";
 
 const CONFIG_PATH = "/home/me/.hermes/hindsight/config.json";
 
@@ -71,6 +75,15 @@ describe("resolveHermesHindsightConfig", () => {
         environment: {},
       }),
     ).toBeNull();
+  });
+});
+
+describe("resolveHermesHindsightPaths", () => {
+  it("expands a ~/ HERMES_HOME against the instance's own home, as agent memory does", () => {
+    expect(
+      resolveHermesHindsightPaths({ HERMES_HOME: "~/custom", HOME: "/home/hermes-user" })
+        .configFiles[0],
+    ).toBe("/home/hermes-user/custom/hindsight/config.json");
   });
 });
 

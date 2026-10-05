@@ -109,6 +109,9 @@ export const RPC_REQUIRED_SCOPES = {
   // long-term memory, which changes how it behaves in later turns.
   [WS_METHODS.hindsightRetain]: AuthOrchestrationOperateScope,
   [WS_METHODS.hindsightReflect]: AuthOrchestrationOperateScope,
+  [WS_METHODS.hindsightSubscribeAgentMemory]: AuthOrchestrationReadScope,
+  // Rewrites the agents' own config on the host, like a provider update.
+  [WS_METHODS.hindsightApplyAgentMemory]: AuthOrchestrationOperateScope,
   [WS_METHODS.serverRefreshUsageRates]: AuthOrchestrationReadScope,
   [WS_METHODS.serverSignalProcess]: AuthOrchestrationOperateScope,
   [WS_METHODS.serverReportClientActivity]: AuthOrchestrationReadScope,

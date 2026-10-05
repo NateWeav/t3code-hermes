@@ -7,10 +7,13 @@ import { resolveSymlinkTarget } from "@t3tools/shared/symlink";
  * Replaces a file's contents via a sibling temp file and rename. A symlinked
  * target is resolved first so the link survives and its destination is
  * rewritten, since renaming over the link itself would swap it for a regular file.
+ * A `mode` is set before the rename, so the file is never published with any
+ * other, and a failure to set it leaves the old file in place.
  */
 export const writeFileStringAtomically = (input: {
   readonly filePath: string;
   readonly contents: string;
+  readonly mode?: number;
 }) =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -27,6 +30,7 @@ export const writeFileStringAtomically = (input: {
       const tempPath = path.join(tempDirectory, "contents.tmp");
 
       yield* fs.writeFileString(tempPath, input.contents);
+      if (input.mode !== undefined) yield* fs.chmod(tempPath, input.mode);
       yield* fs.rename(tempPath, targetPath);
     }),
   );

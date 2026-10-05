@@ -194,6 +194,36 @@ function shellRuntime(thread: OrchestrationV2ThreadShell): ThreadRuntimeSummary 
   };
 }
 
+/**
+ * The agent's turn is over but something will wake it with news: a pull request
+ * the server watches for it, or provider monitors that are the only work holding
+ * its completion. Lists show these threads as Monitoring and the Working section
+ * folds them. A running or failed run, held subagent work, or a plan waiting on
+ * the user outranks it. Settled threads are not monitoring: the server holds their
+ * pull request watches until the thread is active again.
+ */
+export function threadIsMonitoring(
+  thread: Pick<
+    EnvironmentThreadShell,
+    | "hasActionableProposedPlan"
+    | "interactionMode"
+    | "pendingBackgroundTasks"
+    | "pullRequests"
+    | "runtime"
+    | "settledAt"
+    | "settledOverride"
+  >,
+): boolean {
+  if (threadRuntimeIsActive(thread.runtime) || thread.runtime?.status === "failed") return false;
+  if (thread.interactionMode === "plan" && thread.hasActionableProposedPlan) return false;
+  if (thread.settledOverride === "settled" || thread.settledAt !== null) return false;
+  const held = thread.pendingBackgroundTasks.filter((task) =>
+    backgroundWorkHoldsCompletion([task]),
+  );
+  if (held.length > 0) return held.every((task) => task.kind === "monitor");
+  return thread.pullRequests.some((link) => link.watch !== undefined);
+}
+
 export function scopeProject(
   environmentId: EnvironmentId,
   project: OrchestrationProjectShell,

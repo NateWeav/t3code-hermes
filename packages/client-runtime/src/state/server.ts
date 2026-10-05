@@ -1225,6 +1225,18 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:hindsight-reflect",
       tag: WS_METHODS.hindsightReflect,
     }),
+    hindsightAgentMemory: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:server:hindsight-agent-memory",
+      tag: WS_METHODS.hindsightSubscribeAgentMemory,
+    }),
+    applyHindsightAgentMemory: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:hindsight-agent-memory-apply",
+      tag: WS_METHODS.hindsightApplyAgentMemory,
+      concurrency: {
+        mode: "singleFlight",
+        key: ({ environmentId }) => environmentId,
+      },
+    }),
     configProjection,
     welcome,
     legacyThreadMigration: createEnvironmentRpcSubscriptionAtomFamily(runtime, {

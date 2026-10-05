@@ -126,10 +126,11 @@ function EnvironmentNotifications({
           : null;
       const completedAt = Date.parse(thread.latestRun?.completedAt ?? "");
       // Commands left running (a dev server) read as ready; subagents and monitors wait.
+      // A watched pull request will wake the agent later, but its turn is over.
+      const turnOver =
+        status === "ready" || (status === "monitoring" && thread.runtime?.status !== "idle");
       const completion =
-        status === "ready" &&
-        thread.latestRun?.status === "completed" &&
-        Number.isFinite(completedAt)
+        turnOver && thread.latestRun?.status === "completed" && Number.isFinite(completedAt)
           ? completedAt
           : (prior?.completion ?? null);
       next.set(thread.id, { attention, completion });

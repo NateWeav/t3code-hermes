@@ -47,6 +47,34 @@ Hermes' key is only ever sent to Hermes' own Hindsight address, never to one you
 Switch Memory off in the same place to stop the environment from contacting Hindsight at all.
 Without Hindsight configured, you can still browse and edit Hermes memory above it.
 
+### Give every agent Hindsight memory
+
+To have Claude Code, Codex, and Hermes on every machine you are connected to recall from and retain
+to one Hindsight server, turn on **Hindsight for every agent** in **Settings → Providers** on web
+and desktop, or in **Settings → Environments** on mobile. One switch covers every connected
+machine: each one wires the agents on its own machine and reports back, so a remote machine needs
+nothing but the click. The rows under the switch show every machine and where its agents stand.
+
+The server comes from Memory above. A machine that has no Hindsight server yet is handed the
+shared one when you switch on; a machine that already has one keeps it. If the shared server needs
+an API key, T3 Code cannot copy it from another machine, so the switch asks you to enter it once
+below and finishes those machines when you save it. To put every machine on the
+same server, enter it in the **Hindsight server** field, which writes to all of them, and add an
+**API key** there if the server needs one. Every machine must be able to reach that address, so a
+tailnet address works and a loopback one only does on the machine Hindsight runs on. The key goes only to
+machines on that server, and a machine moved to another server drops the key it had, so a key is
+never sent anywhere it was not entered for.
+
+Claude Code and Codex are wired by Hindsight's own installer, which adds hooks and a `hindsight`
+MCP server to `~/.claude` and `~/.codex`; that machine needs Node.js 18 or newer on its `PATH`.
+Hermes is switched to its built-in Hindsight memory provider. Only agents whose CLI is installed on
+a machine are wired. A Claude Code or Codex account with its own config directory is not covered
+yet, and the row names it.
+
+Turning it off removes only what T3 Code added, on every machine. If you had already wired an agent
+yourself, or Hermes already used Hindsight, it stays as it was. Your memories stay in Hindsight
+either way.
+
 ## Recalling and browsing
 
 A line above the search box sizes up the bank you are looking at: how many memories and links it

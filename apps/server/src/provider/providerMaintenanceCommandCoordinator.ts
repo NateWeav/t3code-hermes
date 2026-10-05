@@ -7,6 +7,8 @@ export interface ProviderMaintenanceCommandCoordinatorShape<E> {
     readonly targetKey: string;
     readonly lockKey: string;
     readonly onQueued?: Effect.Effect<void, E, R>;
+    /** Runs if the command is interrupted after it claimed `targetKey`, queued or running. */
+    readonly onInterrupt?: Effect.Effect<void, never, R>;
     readonly run: Effect.Effect<A, E, R>;
   }) => Effect.Effect<A, E, R>;
 }
@@ -54,6 +56,7 @@ export const makeProviderMaintenanceCommandCoordinator = Effect.fn(
     targetKey,
     lockKey,
     onQueued,
+    onInterrupt,
     run,
   }) =>
     Effect.gen(function* () {
@@ -62,13 +65,16 @@ export const makeProviderMaintenanceCommandCoordinator = Effect.fn(
         return yield* Effect.fail(input.makeAlreadyRunningError(targetKey));
       }
 
-      return yield* Effect.gen(function* () {
+      const locked = Effect.gen(function* () {
         const lock = providerUpdateLock(lockKey);
         if (onQueued) {
           yield* onQueued;
         }
         return yield* lock.withPermits(1)(run);
-      }).pipe(Effect.ensuring(releaseTarget(targetKey)));
+      });
+      return yield* (
+        onInterrupt ? locked.pipe(Effect.onInterrupt(() => onInterrupt)) : locked
+      ).pipe(Effect.ensuring(releaseTarget(targetKey)));
     });
 
   return {

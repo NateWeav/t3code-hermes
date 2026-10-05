@@ -34,6 +34,8 @@ export const HermesNotification = Schema.Struct({
   kind: Schema.String,
   title: Schema.optional(Schema.NullOr(Schema.String)),
   text: Schema.String,
+  /** Receipts for the durable results the notice reports (receipts patch). */
+  notificationIds: Schema.optional(Schema.Array(Schema.String)),
 });
 export type HermesNotification = typeof HermesNotification.Type;
 

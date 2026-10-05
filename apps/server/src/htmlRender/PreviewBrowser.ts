@@ -141,7 +141,7 @@ export class PreviewBrowser extends Context.Service<
     /** The installed headless shell, if any. Never starts or waits on an install. */
     readonly installed: Effect.Effect<Option.Option<string>>;
   }
->()("t3/htmlRender/PreviewBrowser") {}
+>()("t3-hermes/htmlRender/PreviewBrowser") {}
 
 export interface PreviewBrowserOptions {
   readonly baseDir: string;

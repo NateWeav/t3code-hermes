@@ -35,14 +35,14 @@ const ledger = Effect.gen(function* () {
 });
 
 describe("fork migration ledger", () => {
-  it.effect("runs upstream's 55 and 56 on a database that recorded the fork's 55", () =>
+  it.effect("runs upstream's 55 and later on a database that recorded the fork's 55", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       yield* seedForkLedger;
-      assert.deepStrictEqual(yield* runMigrations(), [
-        [55, "OrchestrationV2"],
-        [56, "RemoveRedundantProjectionIndexes"],
-      ]);
+      assert.deepStrictEqual(
+        yield* runMigrations(),
+        migrationManifest.filter(([id]) => id >= 55),
+      );
       assert.deepStrictEqual(yield* ledger, migrationManifest);
       assert.strictEqual(
         (yield* sql`SELECT name FROM sqlite_master WHERE name = 'orchestration_v2_projection_threads'`)

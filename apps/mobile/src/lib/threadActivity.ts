@@ -1760,7 +1760,7 @@ export function buildThreadFeed(
         runId: item.runId,
         render,
       };
-      projectedEntriesCache.set(row, { attemptId, entry });
+      projectedEntriesCache.set(row, { attemptId, agentActivityKey, entry });
       entries.push(entry);
       continue;
     }

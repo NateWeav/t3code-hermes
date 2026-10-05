@@ -6,7 +6,7 @@ import {
 } from "@t3tools/client-runtime/state/hermes-cron";
 import { ProviderDriverKind } from "@t3tools/contracts";
 import type { EnvironmentId, HermesCronJobId } from "@t3tools/contracts";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 import { useCallback, useMemo } from "react";
 
 import { deriveProviderInstanceEntries } from "../providerInstances";

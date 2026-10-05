@@ -12,7 +12,7 @@ import {
 } from "@t3tools/client-runtime/state/hindsight";
 import type { HindsightAgentMemoryState, HindsightSettings } from "@t3tools/contracts";
 import * as Option from "effect/Option";
-import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 import { useContext, useMemo, useState } from "react";
 import { Pressable, View } from "react-native";
 

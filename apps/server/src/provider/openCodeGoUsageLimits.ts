@@ -5,7 +5,7 @@ import * as NodePath from "node:path";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
+import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 
 import { readOpenCodeGoApiKey, readOpenCodeGoLocalQuota } from "./openCodeGoLocal.ts";
 import { parseOpenCodeGoDocument, parseOpenCodeGoUsage } from "./openCodeGoReaders.ts";

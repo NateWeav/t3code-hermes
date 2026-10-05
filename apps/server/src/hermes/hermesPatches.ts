@@ -287,14 +287,21 @@ const pickAppliedVersion = Effect.fn("pickHermesAppliedVersion")(function* (
   if (exact.length > 0) {
     return exact.every((check) => check.tree === exact[0]!.tree) ? exact[0]!.file : null;
   }
-  // Failing that, the one version that applies to HEAD, but only when the
-  // working tree differs from HEAD there at all: a clean checkout can hold a
-  // patch's before and after text in different places, so it fits both ways
-  // without the patch having been applied.
-  const headTree = yield* runGit(checkoutRoot, ["rev-parse", "HEAD^{tree}"]);
-  if (headTree.code !== 0 || normalized.has(headTree.stdout.trim())) return null;
+  // Failing that (the user also edited those files), the one version that
+  // applies to HEAD, unless it also reverses from HEAD itself. HEAD can hold
+  // a patch's before and after text in different places, so it fits both
+  // ways without having been applied, and reversing would rewrite upstream
+  // text; no edit elsewhere tells those apart.
   const onHead = checks.filter((check) => check.onHead);
-  return onHead.length === 1 ? onHead[0]!.file : null;
+  if (onHead.length !== 1) return null;
+  const headEnv = { GIT_INDEX_FILE: path.join(directory, "index-head") };
+  if ((yield* runGit(checkoutRoot, ["read-tree", "HEAD"], headEnv)).code !== 0) return null;
+  const reversesOnHead = yield* runGit(
+    checkoutRoot,
+    ["apply", "--check", "--cached", "-R", onHead[0]!.file],
+    headEnv,
+  );
+  return reversesOnHead.code === 0 ? null : onHead[0]!.file;
 }, Effect.scoped);
 
 /**

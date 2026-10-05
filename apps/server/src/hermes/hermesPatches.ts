@@ -182,8 +182,8 @@ const patchFilePaths = (content: string): ReadonlySet<string> => {
  * The applied one is a version that, applied to HEAD, gives exactly the files
  * the checkout has now once the other applied patches are taken back out:
  * patches can share a file, and their changes are not this one's. Failing
- * that (the user also edited those files), the one version that applies to
- * HEAD at all. Each check runs in its own
+ * that (the user also edited those files), a lone version that applies to
+ * HEAD. Each check runs in its own
  * scratch index, so the checkout's own index is untouched. When neither picks
  * out exactly one, there is no telling, so null: the patch still reads as
  * applied, and Remove refuses rather than guess.
@@ -279,11 +279,13 @@ const pickAppliedVersion = Effect.fn("pickHermesAppliedVersion")(function* (
   if (exact.length > 0) {
     return exact.every((check) => check.tree === exact[0]!.tree) ? exact[0]!.file : null;
   }
-  // Failing that (the user also edited those files), the one version that
-  // applies to HEAD, unless it also reverses from HEAD itself. HEAD can hold
-  // a patch's before and after text in different places, so it fits both
-  // ways without having been applied, and reversing would rewrite upstream
-  // text; no edit elsewhere tells those apart.
+  // Failing that (the user also edited those files), only a lone version is
+  // taken, and only if it applies to HEAD but does not also reverse from HEAD
+  // itself. With several versions that reverse, an edit can make one fit
+  // where another was applied, so none is proven. HEAD can also hold a
+  // patch's before and after text in different places, so it fits both ways
+  // without having been applied, and reversing would rewrite upstream text.
+  if (candidates.length !== 1) return null;
   const onHead = checks.filter((check) => check.onHead);
   if (onHead.length !== 1) return null;
   const headEnv = { GIT_INDEX_FILE: path.join(directory, "index-head") };

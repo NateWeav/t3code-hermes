@@ -30,6 +30,8 @@ let pendingHermesDelegation: string | undefined;
  * `T3_ACP_HERMES_BACKGROUND=1`: the first prompt leaves a patched-Hermes background process
  * running. `T3_ACP_HERMES_BACKGROUND_FINISH` says when it exits: `next-prompt` (default, reported
  * silently), `after-turn` or `cancel` (both followed by Hermes's idle `_hermes/notification`).
+ * `T3_ACP_HERMES_NOTIFICATION_ID` gives that notice a receipt id, as the receipts patch does, and
+ * `T3_ACP_HERMES_REPEAT_NOTIFICATION=1` sends it three times.
  */
 const hermesBackground = process.env.T3_ACP_HERMES_BACKGROUND === "1";
 const hermesBackgroundFinish = process.env.T3_ACP_HERMES_BACKGROUND_FINISH ?? "next-prompt";
@@ -50,12 +52,18 @@ function finishHermesProcess(notify: boolean) {
     reason: "exited",
   });
   if (notify) {
-    writeJsonRpcNotification("_hermes/notification", {
+    const receiptId = process.env.T3_ACP_HERMES_NOTIFICATION_ID;
+    const notice = {
       sessionId: finished.sessionId,
       kind: "completion",
       title: "Background Process Failed (exit 1): gh pr checks 94 --watch echo done",
       text: "[IMPORTANT: Background process proc_ci000001 exited (exit code 1).\nCommand: gh pr checks 94 --watch\nOutput:\nX  Test Server 1]",
-    });
+      ...(receiptId ? { notificationIds: [receiptId] } : {}),
+    };
+    const sends = process.env.T3_ACP_HERMES_REPEAT_NOTIFICATION === "1" ? 3 : 1;
+    for (let send = 0; send < sends; send++) {
+      writeJsonRpcNotification("_hermes/notification", notice);
+    }
   }
 }
 const hermesDelegation = process.env.T3_ACP_HERMES_DELEGATION;

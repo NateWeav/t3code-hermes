@@ -607,6 +607,25 @@ describe("hermes patches", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("removes a lone version beside the user's own edit in the same file", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hermes-checkout-" });
+      git(root, "init", "--quiet");
+      const file = NodePath.join(root, "session.py");
+      const padding = Array.from({ length: 8 }, (_, index) => `p = ${index}\n`).join("");
+      const lines = (patched: string, mine: string) =>
+        `remote_cwd = ${patched}\n${padding}user = ${mine}\n`;
+      NodeFS.writeFileSync(file, lines("None", "0"));
+      const base = commit(root, "base");
+      const patch = definition([diffAt(root, "session.py", lines("configured()", "0"), base)]);
+
+      NodeFS.writeFileSync(file, lines("configured()", "mine"));
+      assert.isTrue((yield* changeHermesPatch(root, patch, "reverse")).ok);
+      assert.strictEqual(NodeFS.readFileSync(file, "utf8"), lines("None", "mine"));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("does not remove a change upstream now carries", () =>
     Effect.gen(function* () {
       const { root, patch } = yield* makeCheckout;

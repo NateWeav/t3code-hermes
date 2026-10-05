@@ -99,6 +99,7 @@ export const RPC_REQUIRED_SCOPES = {
   // Patching rewrites the Hermes install itself, like a provider update.
   [WS_METHODS.hermesPatchApply]: AuthOrchestrationOperateScope,
   [WS_METHODS.hermesPatchRevert]: AuthOrchestrationOperateScope,
+  [WS_METHODS.hermesPatchUpdateHermes]: AuthOrchestrationOperateScope,
   // Interrupts the gateway's in-flight chats, cron runs, and webhooks.
   [WS_METHODS.hermesGatewayRestart]: AuthOrchestrationOperateScope,
   [WS_METHODS.hindsightListBanks]: AuthOrchestrationReadScope,

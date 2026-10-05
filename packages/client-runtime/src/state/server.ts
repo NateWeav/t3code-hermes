@@ -1190,6 +1190,10 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:hermes-patch-revert",
       tag: WS_METHODS.hermesPatchRevert,
     }),
+    hermesPatchUpdateHermes: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:hermes-patch-update-hermes",
+      tag: WS_METHODS.hermesPatchUpdateHermes,
+    }),
     hermesGatewayRestart: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:hermes-gateway-restart",
       tag: WS_METHODS.hermesGatewayRestart,

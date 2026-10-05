@@ -1,6 +1,6 @@
-import * as KeyedLock from "@t3tools/shared/KeyedLock";
 import * as Effect from "effect/Effect";
 import * as Ref from "effect/Ref";
+import * as Semaphore from "effect/Semaphore";
 
 export interface ProviderMaintenanceCommandCoordinatorShape<E> {
   readonly withCommandLock: <A, R>(input: {
@@ -13,11 +13,26 @@ export interface ProviderMaintenanceCommandCoordinatorShape<E> {
   }) => Effect.Effect<A, E, R>;
 }
 
+const updateLocks = new Map<string, Semaphore.Semaphore>();
+
+/**
+ * The process-wide lock for one update lock key. Shared across coordinators
+ * (each WebSocket connection builds its own) and with anything else that
+ * mutates the same installation, such as the Hermes Patches tab.
+ */
+export const providerUpdateLock = (lockKey: string) => {
+  let lock = updateLocks.get(lockKey);
+  if (lock === undefined) {
+    lock = Semaphore.makeUnsafe(1);
+    updateLocks.set(lockKey, lock);
+  }
+  return lock;
+};
+
 export const makeProviderMaintenanceCommandCoordinator = Effect.fn(
   "makeProviderMaintenanceCommandCoordinator",
 )(function* <E>(input: { readonly makeAlreadyRunningError: (targetKey: string) => E }) {
   const runningTargetsRef = yield* Ref.make<ReadonlySet<string>>(new Set());
-  const locks = yield* KeyedLock.make<string>();
 
   const acquireTarget = Effect.fn("acquireTarget")(function* (targetKey: string) {
     return yield* Ref.modify(runningTargetsRef, (runningTargets) => {
@@ -50,7 +65,11 @@ export const makeProviderMaintenanceCommandCoordinator = Effect.fn(
         return yield* Effect.fail(input.makeAlreadyRunningError(targetKey));
       }
 
-      const locked = (onQueued ?? Effect.void).pipe(Effect.andThen(locks.withLock(lockKey, run)));
+      // The process-wide lock, not one per coordinator: every connection
+      // builds its own coordinator, and an update must still exclude the rest.
+      const locked = (onQueued ?? Effect.void).pipe(
+        Effect.andThen(providerUpdateLock(lockKey).withPermits(1)(run)),
+      );
       return yield* (
         onInterrupt ? locked.pipe(Effect.onInterrupt(() => onInterrupt)) : locked
       ).pipe(Effect.ensuring(releaseTarget(targetKey)));

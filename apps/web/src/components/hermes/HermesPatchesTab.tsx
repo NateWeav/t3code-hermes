@@ -5,9 +5,13 @@
 import {
   describeHermesGateway,
   describeHermesPatchesUnavailable,
+  describeHermesPatchHint,
   HERMES_DETACHED_HEAD_WARNING,
-  HERMES_PATCH_STATE_HINTS,
   HERMES_PATCH_STATE_LABELS,
+  HERMES_UPDATE_DESCRIPTION,
+  HERMES_UPDATE_LABEL,
+  HERMES_UPDATE_PENDING_LABEL,
+  shouldOfferHermesUpdate,
 } from "@t3tools/client-runtime/state/hermes-patches";
 import type { HermesPatch, HermesPatchState } from "@t3tools/contracts";
 import { InfoIcon, RefreshCwIcon, RotateCwIcon, TriangleAlertIcon } from "lucide-react";
@@ -29,14 +33,20 @@ function PatchRow({
   patch,
   busy,
   disabled,
+  updating,
+  canUpdateHermes,
   onApply,
   onRemove,
+  onUpdateHermes,
 }: {
   readonly patch: HermesPatch;
   readonly busy: boolean;
   readonly disabled: boolean;
+  readonly updating: boolean;
+  readonly canUpdateHermes: boolean;
   readonly onApply: () => void;
   readonly onRemove: () => void;
+  readonly onUpdateHermes: () => void;
 }) {
   return (
     <li className="flex items-start gap-3 rounded-lg border border-border/60 px-3 py-2">
@@ -46,9 +56,7 @@ function PatchRow({
           <Badge variant={STATE_BADGE[patch.state]}>{HERMES_PATCH_STATE_LABELS[patch.state]}</Badge>
         </div>
         <p className="mt-1 text-sm text-muted-foreground">Needed for {patch.neededFor}</p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {HERMES_PATCH_STATE_HINTS[patch.state]}
-        </p>
+        <p className="mt-1 text-xs text-muted-foreground">{describeHermesPatchHint(patch)}</p>
       </div>
       {patch.state === "notApplied" ? (
         <Button size="sm" disabled={disabled} onClick={onApply}>
@@ -57,6 +65,10 @@ function PatchRow({
       ) : patch.state === "applied" ? (
         <Button size="sm" variant="outline" disabled={disabled} onClick={onRemove}>
           {busy ? "Removing…" : "Remove"}
+        </Button>
+      ) : patch.reason === "hermesTooOld" && canUpdateHermes ? (
+        <Button size="sm" variant="outline" disabled={disabled} onClick={onUpdateHermes}>
+          {updating ? HERMES_UPDATE_PENDING_LABEL : HERMES_UPDATE_LABEL}
         </Button>
       ) : null}
     </li>
@@ -69,7 +81,11 @@ export function HermesPatchesTab() {
     isPending,
     error,
     changingPatchId,
+    updating,
+    updateSummary,
+    busy,
     refresh,
+    updateHermes,
     apply,
     remove,
     requestingRestart,
@@ -122,11 +138,27 @@ export function HermesPatchesTab() {
         <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
           Hermes checkout: <span className="font-mono">{snapshot.checkoutPath}</span>
         </p>
-        <Button size="xs" variant="ghost" onClick={refresh}>
+        <Button size="xs" variant="ghost" disabled={updating} onClick={refresh}>
           <RefreshCwIcon />
           Check again
         </Button>
       </div>
+      {shouldOfferHermesUpdate(snapshot) || updating ? (
+        <Alert variant="info">
+          <InfoIcon />
+          <AlertDescription>{HERMES_UPDATE_DESCRIPTION}</AlertDescription>
+          <AlertAction>
+            <Button size="sm" disabled={busy} onClick={updateHermes}>
+              {updating ? HERMES_UPDATE_PENDING_LABEL : HERMES_UPDATE_LABEL}
+            </Button>
+          </AlertAction>
+        </Alert>
+      ) : null}
+      {updateSummary === null ? null : (
+        <p className="text-xs text-muted-foreground" role="status">
+          {updateSummary}
+        </p>
+      )}
       {snapshot.detachedHead ? (
         <Alert variant="warning">
           <TriangleAlertIcon />
@@ -142,7 +174,7 @@ export function HermesPatchesTab() {
               <Button
                 size="xs"
                 variant="outline"
-                disabled={requestingRestart || changingPatchId !== null}
+                disabled={requestingRestart || busy}
                 onClick={restartGateway}
               >
                 <RotateCwIcon />
@@ -163,9 +195,12 @@ export function HermesPatchesTab() {
               key={patch.id}
               patch={patch}
               busy={changingPatchId === patch.id}
-              disabled={changingPatchId !== null}
+              disabled={busy}
+              updating={updating}
+              canUpdateHermes={snapshot.canUpdateHermes === true}
               onApply={() => apply(patch.id)}
               onRemove={() => remove(patch.id)}
+              onUpdateHermes={updateHermes}
             />
           ))}
         </ul>

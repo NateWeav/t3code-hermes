@@ -11,9 +11,13 @@ import {
 import {
   describeHermesGateway,
   describeHermesPatchesUnavailable,
+  describeHermesPatchHint,
   HERMES_DETACHED_HEAD_WARNING,
-  HERMES_PATCH_STATE_HINTS,
   HERMES_PATCH_STATE_LABELS,
+  HERMES_UPDATE_DESCRIPTION,
+  HERMES_UPDATE_LABEL,
+  HERMES_UPDATE_PENDING_LABEL,
+  shouldOfferHermesUpdate,
 } from "@t3tools/client-runtime/state/hermes-patches";
 import {
   describeHindsightEmptyList,
@@ -472,6 +476,12 @@ function HermesPatchesScreen({ environmentId }: { readonly environmentId: Enviro
     }
   };
 
+  const updateHermes = async () => {
+    const failure = await patches.updateHermes();
+    if (failure !== null) Alert.alert("Hermes not updated", failure);
+  };
+  const updateLabel = patches.updating ? HERMES_UPDATE_PENDING_LABEL : HERMES_UPDATE_LABEL;
+
   if (patches.isPending) {
     return <CenteredState title="Loading patches" description="Reading the Hermes checkout…" />;
   }
@@ -504,13 +514,24 @@ function HermesPatchesScreen({ environmentId }: { readonly environmentId: Enviro
       showsVerticalScrollIndicator={false}
     >
       {snapshot.detachedHead ? <NoticeText text={HERMES_DETACHED_HEAD_WARNING} /> : null}
+      {shouldOfferHermesUpdate(snapshot) || patches.updating ? (
+        <View className="gap-2">
+          <NoticeText text={HERMES_UPDATE_DESCRIPTION} />
+          <ActionButton
+            label={updateLabel}
+            disabled={patches.busy}
+            onPress={() => void updateHermes()}
+          />
+        </View>
+      ) : null}
+      {patches.updateSummary === null ? null : <NoticeText text={patches.updateSummary} />}
       {gateway !== null ? (
         <View className="gap-2 rounded-[20px] border border-border bg-card p-4">
           <Text className="text-sm text-foreground-muted">{gateway.text}</Text>
           {gateway.restart ? (
             <ActionButton
               label={patches.requestingRestart ? "Restarting…" : "Restart gateway"}
-              disabled={patches.requestingRestart || patches.changingPatchId !== null}
+              disabled={patches.requestingRestart || patches.busy}
               onPress={() => void restartGateway()}
             />
           ) : null}
@@ -521,7 +542,7 @@ function HermesPatchesScreen({ environmentId }: { readonly environmentId: Enviro
       ) : (
         snapshot.patches.map((patch) => {
           const busy = patches.changingPatchId === patch.id;
-          const disabled = patches.changingPatchId !== null;
+          const disabled = patches.busy;
           return (
             <View key={patch.id} className="gap-2 rounded-[20px] border border-border bg-card p-4">
               <View className="flex-row items-center gap-2">
@@ -535,7 +556,7 @@ function HermesPatchesScreen({ environmentId }: { readonly environmentId: Enviro
               </View>
               <Text className="text-sm text-foreground-muted">Needed for {patch.neededFor}</Text>
               <Text className="text-xs text-foreground-muted">
-                {HERMES_PATCH_STATE_HINTS[patch.state]}
+                {describeHermesPatchHint(patch)}
               </Text>
               {patch.state === "notApplied" ? (
                 <ActionButton
@@ -549,6 +570,12 @@ function HermesPatchesScreen({ environmentId }: { readonly environmentId: Enviro
                   disabled={disabled}
                   onPress={() => void change(patch, "remove")}
                 />
+              ) : patch.reason === "hermesTooOld" && snapshot.canUpdateHermes === true ? (
+                <ActionButton
+                  label={updateLabel}
+                  disabled={disabled}
+                  onPress={() => void updateHermes()}
+                />
               ) : null}
             </View>
           );
@@ -560,6 +587,7 @@ function HermesPatchesScreen({ environmentId }: { readonly environmentId: Enviro
       <ActionButton
         label="Check again"
         icon={<IconRefresh size={18} color={String(iconColor)} />}
+        disabled={patches.updating}
         onPress={patches.refresh}
       />
     </ScreenScrollView>

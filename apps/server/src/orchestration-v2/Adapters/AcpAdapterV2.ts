@@ -234,8 +234,8 @@ export interface AcpAdapterV2Flavor {
   readonly clientCapabilitiesMeta?: Record<string, boolean>;
   /**
    * Prompt `_meta` key that hands a wake's `receiptIds` back to the agent on
-   * the wake turn's prompt. A notice whose ids were all admitted is a re-send
-   * and starts no second wake. See AcpWakeReceipts.
+   * the wake turn's prompt. A notice whose ids are queued or prompting is a
+   * re-send and starts no second wake. See AcpWakeReceipts.
    */
   readonly wakeReceiptPromptMetaKey?: string;
   readonly normalizeSessionUpdate?: (
@@ -7163,14 +7163,7 @@ export function makeAcpAdapterV2(
               ...(receiptIds.length === 0 ? {} : { _meta: { [receiptMetaKey!]: receiptIds } }),
             };
             yield* runtime.prompt(promptRequest).pipe(
-              // The agent settles receipts only for a prompt that finished
-              // uninterrupted; reopen the rest for its redelivery.
-              Effect.tap((result) =>
-                Effect.sync(() => {
-                  if (result.stopReason === "cancelled") wakeReceipts.forget(receiptIds);
-                }),
-              ),
-              Effect.tapCause(() => Effect.sync(() => wakeReceipts.forget(receiptIds))),
+              Effect.ensuring(Effect.sync(() => wakeReceipts.forget(receiptIds))),
               Effect.tap(() =>
                 Ref.update(promptInstructionStates, (current) => {
                   if (promptParts?.instructionState === undefined) return current;

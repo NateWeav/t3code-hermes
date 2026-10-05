@@ -193,8 +193,9 @@ each detached result and hand them back in the wake turn's `session/prompt` `_me
 `hermes.notificationIds`. Hermes settles a receipt only for its owning session, after that prompt
 finished uninterrupted and its history was saved. Until then the result stays pending: a reconnect
 restores it from disk, and a previous ACP delivery claim is reclaimed only when its process is
-demonstrably dead. T3 Code drops a re-sent notice while its ids are queued, prompting, or settled,
-and reopens them when the wake turn fails or is stopped, so a redelivery wakes the agent again.
+demonstrably dead. A sent receipt is not re-sent within one Hermes process, only restored after a
+reconnect. T3 Code drops a re-sent notice while its ids are queued or prompting and reopens them once
+the wake prompt settles, because its stop reason does not say whether Hermes settled them.
 
 Verified against hermes-agent `4d3555e5ca` and `af8839df10` (`main`, 2026-10-04) after `0003` and
 `0004`, with or without `0006` in either order.

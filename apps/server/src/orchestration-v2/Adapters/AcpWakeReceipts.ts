@@ -8,9 +8,10 @@ const SEEN_LIMIT = 1024;
  * with the notice text, so ids wait here, matched by that text, until the
  * wake turn prompts.
  *
- * `admit` drops a re-sent notice while its ids are queued, prompting, or were
- * handed back by a prompt that finished. `forget` reopens ids whose prompt
- * did not finish, so the agent's redelivery wakes the session again.
+ * `admit` drops a re-sent notice while its ids are queued or prompting. Once
+ * the wake prompt settles, `forget` reopens them whatever the outcome: the
+ * stop reason does not say whether the agent settled them, and an agent never
+ * re-sends a receipt it settled, so a later notice is a real redelivery.
  */
 export class AcpWakeReceipts {
   private readonly seen = new Set<string>();

@@ -3,15 +3,16 @@ import { assert, describe, it } from "@effect/vitest";
 import { AcpWakeReceipts } from "./AcpWakeReceipts.ts";
 
 describe("AcpWakeReceipts", () => {
-  it("drops a re-sent notice until its wake prompt fails", () => {
+  it("drops a re-sent notice until its wake prompt settles", () => {
     const receipts = new AcpWakeReceipts();
     assert.isTrue(receipts.admit("child done", ["r1"]));
     assert.isFalse(receipts.admit("child done", ["r1"]));
     const ids = receipts.take("child done");
     assert.deepEqual(ids, ["r1"]);
-    // Still a re-send while the wake prompts and after it finishes.
+    // Still a re-send while the wake prompts.
     assert.isFalse(receipts.admit("child done", ["r1"]));
     receipts.forget(ids);
+    // A redelivery after the prompt settled wakes the session again.
     assert.isTrue(receipts.admit("child done", ["r1"]));
   });
 

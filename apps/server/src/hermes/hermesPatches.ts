@@ -65,6 +65,13 @@ export const HERMES_PATCHES: ReadonlyArray<HermesPatchDefinition> = [
       "Fast Mode on Hermes models. Applying it also turns fast mode on for CLIProxyAPI endpoints in your Hermes config. Without it, the Fast Mode toggle does not appear.",
     content: bundledPatch("0006-acp-fast-mode.patch"),
   },
+  {
+    id: HermesPatchId.make("acp-durable-completion-receipts"),
+    title: "Durable background results",
+    neededFor:
+      "Apply after Live subagent progress and Background process reports. Keeps a finished subagent's result until the agent has actually been woken with it, and redelivers results missed while T3 Code was disconnected or restarting.",
+    content: bundledPatch("0007-acp-durable-completion-receipts.patch"),
+  },
 ];
 
 /**

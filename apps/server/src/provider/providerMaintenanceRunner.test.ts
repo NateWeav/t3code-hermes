@@ -7,11 +7,14 @@ import {
 } from "@t3tools/contracts";
 import { ServerProviderUpdateError } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
+import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
+import * as Scope from "effect/Scope";
 import * as Schema from "effect/Schema";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
@@ -110,12 +113,13 @@ function mockHandle(result: {
   readonly stderr?: string;
   readonly code?: number;
   readonly exitCode?: Effect.Effect<ChildProcessSpawner.ExitCode>;
+  readonly kill?: Effect.Effect<void>;
 }) {
   return ChildProcessSpawner.makeHandle({
     pid: ChildProcessSpawner.ProcessId(1),
     exitCode: result.exitCode ?? Effect.succeed(ChildProcessSpawner.ExitCode(result.code ?? 0)),
     isRunning: Effect.succeed(false),
-    kill: () => Effect.void,
+    kill: () => result.kill ?? Effect.void,
     unref: Effect.succeed(Effect.void),
     stdin: Sink.drain,
     stdout: Stream.make(encoder.encode(result.stdout ?? "")),
@@ -223,23 +227,27 @@ const makeTestRunner = (
     })),
   },
 ) =>
-  Effect.service(ProviderMaintenanceRunner.ProviderMaintenanceRunner).pipe(
-    Effect.provide(
-      ProviderMaintenanceRunner.layer.pipe(
-        Layer.provide(
-          Layer.mergeAll(
-            Layer.succeed(ProviderRegistry.ProviderRegistry, registry),
-            Layer.succeed(ModelManifest.ModelManifest, {
-              current: Effect.succeed(manifest),
-              refresh: Effect.succeed(manifest),
-              forceRefresh: Effect.succeed(manifest),
-              refreshInBackground: Effect.void,
-            }),
-            // Fresh per runner so a version cached by one test cannot leak into another.
-            Layer.sync(ProviderVersionCache, () => new Map()),
-          ),
+  // Build into the test's scope: the runner's update fibers live as long as
+  // its layer, so `Effect.provide` would close them as soon as it returned.
+  Layer.build(
+    ProviderMaintenanceRunner.layer.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          Layer.succeed(ProviderRegistry.ProviderRegistry, registry),
+          Layer.succeed(ModelManifest.ModelManifest, {
+            current: Effect.succeed(manifest),
+            refresh: Effect.succeed(manifest),
+            forceRefresh: Effect.succeed(manifest),
+            refreshInBackground: Effect.void,
+          }),
+          // Fresh per runner so a version cached by one test cannot leak into another.
+          Layer.sync(ProviderVersionCache, () => new Map()),
         ),
       ),
+    ),
+  ).pipe(
+    Effect.map((context) =>
+      Context.get(context, ProviderMaintenanceRunner.ProviderMaintenanceRunner),
     ),
   );
 
@@ -816,56 +824,185 @@ describe("providerMaintenanceRunner", () => {
     );
   });
 
-  it.effect(
-    "releases the running-provider marker when interrupted after queuing but before the lock run starts",
-    () =>
-      Effect.gen(function* () {
-        const { registry } = yield* makeRegistry(baseProvider);
-        let blockQueuedState = true;
-        const queuedStateWrittenLatch: { resolve: () => void } = { resolve: () => {} };
-        const releaseQueuedStateLatch: { resolve: () => void } = { resolve: () => {} };
-        const queuedStateWritten = new Promise<void>((resolve) => {
-          queuedStateWrittenLatch.resolve = resolve;
-        });
-        const releaseQueuedState = new Promise<void>((resolve) => {
-          releaseQueuedStateLatch.resolve = resolve;
-        });
+  it.live("records a failed update and frees the provider when interrupted while queued", () =>
+    Effect.gen(function* () {
+      const { registry, updateStatesRef } = yield* makeRegistry(baseProvider);
+      const queuedStateWritten = yield* Deferred.make<void>();
+      const releaseQueuedState = yield* Deferred.make<void>();
+      let blockQueuedState = true;
+      const blockingRegistry: ProviderRegistry.ProviderRegistryShape = {
+        ...registry,
+        setProviderMaintenanceActionState: Effect.fn(
+          "providerMaintenanceRunner.test.blockQueuedState",
+        )(function* (input) {
+          const providers = yield* registry.setProviderMaintenanceActionState(input);
+          if (input.state?.status === "queued" && blockQueuedState) {
+            blockQueuedState = false;
+            yield* Deferred.succeed(queuedStateWritten, undefined);
+            yield* Deferred.await(releaseQueuedState);
+          }
+          return providers;
+        }),
+      };
+      // Owning the runner's scope stands in for a server shutdown.
+      const runnerScope = yield* Scope.make();
+      const updater = yield* makeTestRunner(blockingRegistry).pipe(Scope.provide(runnerScope));
 
-        const updater = yield* makeTestRunner({
-          ...registry,
-          setProviderMaintenanceActionState: Effect.fn(
-            "providerMaintenanceRunner.test.blockQueuedState",
-          )(function* (input) {
-            const providers = yield* registry.setProviderMaintenanceActionState(input);
-            if (input.state?.status === "queued" && blockQueuedState) {
-              queuedStateWrittenLatch.resolve();
-              yield* Effect.promise(() => releaseQueuedState);
-            }
-            return providers;
-          }),
-        });
+      const first = yield* updater.updateProvider(CODEX_DRIVER).pipe(Effect.forkScoped);
+      yield* Deferred.await(queuedStateWritten);
+      // Start closing now so the interrupt lands before the queued write returns.
+      const closing = yield* Scope.close(runnerScope, Exit.void).pipe(
+        Effect.forkScoped({ startImmediately: true }),
+      );
+      yield* Deferred.succeed(releaseQueuedState, undefined);
+      yield* Fiber.join(closing);
 
-        const first = yield* updater.updateProvider(CODEX_DRIVER).pipe(Effect.forkScoped);
-        yield* Effect.promise(() => queuedStateWritten);
-        blockQueuedState = false;
+      assert.strictEqual(Exit.hasInterrupts(yield* Fiber.await(first)), true);
+      assert.deepStrictEqual(
+        (yield* Ref.get(updateStatesRef)).map((state) => state.status),
+        ["queued", "failed"],
+      );
 
-        yield* Fiber.interrupt(first);
-        releaseQueuedStateLatch.resolve();
-
-        const second = yield* updater.updateProvider(CODEX_DRIVER).pipe(Effect.exit);
-        assert.strictEqual(Exit.isSuccess(second), true);
-        if (Exit.isSuccess(second)) {
-          assert.strictEqual(second.value.providers[0]?.updateState?.status, "succeeded");
-        }
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            NonWindowsPlatform,
-            latestVersionHttpClient("0.0.0"),
-            mockSpawnerLayer(() => ({ stdout: "updated" })),
-          ),
+      // A runner built on the same registry starts cleanly afterwards.
+      const nextUpdater = yield* makeTestRunner(registry);
+      const second = yield* nextUpdater.updateProvider(CODEX_DRIVER);
+      assert.strictEqual(second.providers[0]?.updateState?.status, "succeeded");
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          NonWindowsPlatform,
+          latestVersionHttpClient("0.0.0"),
+          mockSpawnerLayer(() => ({ stdout: "updated" })),
         ),
       ),
+    ),
+  );
+
+  it.live("lets a caller interrupted while queued leave the update running", () =>
+    Effect.gen(function* () {
+      const { registry } = yield* makeRegistry(baseProvider);
+      const queuedStateWritten = yield* Deferred.make<void>();
+      const releaseQueuedState = yield* Deferred.make<void>();
+      const finished = yield* Deferred.make<ServerProviderUpdateState>();
+      let blockQueuedState = true;
+      const updater = yield* makeTestRunner({
+        ...registry,
+        setProviderMaintenanceActionState: Effect.fn(
+          "providerMaintenanceRunner.test.blockQueuedState",
+        )(function* (input) {
+          const providers = yield* registry.setProviderMaintenanceActionState(input);
+          if (input.state?.status === "queued" && blockQueuedState) {
+            blockQueuedState = false;
+            yield* Deferred.succeed(queuedStateWritten, undefined);
+            yield* Deferred.await(releaseQueuedState);
+          }
+          if (input.state && input.state.status !== "queued" && input.state.status !== "running") {
+            yield* Deferred.succeed(finished, input.state);
+          }
+          return providers;
+        }),
+      });
+
+      const first = yield* updater.updateProvider(CODEX_DRIVER).pipe(Effect.forkScoped);
+      yield* Deferred.await(queuedStateWritten);
+      yield* Fiber.interrupt(first);
+      yield* Deferred.succeed(releaseQueuedState, undefined);
+
+      assert.strictEqual((yield* Deferred.await(finished)).status, "succeeded");
+      const second = yield* updater.updateProvider(CODEX_DRIVER);
+      assert.strictEqual(second.providers[0]?.updateState?.status, "succeeded");
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          NonWindowsPlatform,
+          latestVersionHttpClient("0.0.0"),
+          mockSpawnerLayer(() => ({ stdout: "updated" })),
+        ),
+      ),
+    ),
+  );
+
+  it.live("keeps updating after the caller is interrupted mid-command", () =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const finished = yield* Deferred.make<ServerProviderUpdateState>();
+      let killed = 0;
+      const { registry, updateStatesRef } = yield* makeRegistry(baseProvider);
+      const spawner = ChildProcessSpawner.make(() =>
+        Deferred.succeed(started, undefined).pipe(
+          Effect.as(
+            mockHandle({
+              stdout: "updated",
+              exitCode: Deferred.await(release).pipe(Effect.as(ChildProcessSpawner.ExitCode(0))),
+              kill: Effect.sync(() => {
+                killed += 1;
+              }),
+            }),
+          ),
+        ),
+      );
+      const updater = yield* makeTestRunner({
+        ...registry,
+        setProviderMaintenanceActionState: (input) =>
+          registry
+            .setProviderMaintenanceActionState(input)
+            .pipe(
+              Effect.tap(() =>
+                input.state && input.state.status !== "queued" && input.state.status !== "running"
+                  ? Deferred.succeed(finished, input.state)
+                  : Effect.void,
+              ),
+            ),
+      }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
+
+      const caller = yield* updater.updateProvider(CODEX_DRIVER).pipe(Effect.forkScoped);
+      yield* Deferred.await(started);
+      // The websocket dropped: effect-rpc interrupts the handler fiber.
+      yield* Fiber.interrupt(caller);
+      assert.strictEqual(killed, 0);
+
+      yield* Deferred.succeed(release, undefined);
+      const finalState = yield* Deferred.await(finished);
+      assert.strictEqual(finalState.status, "succeeded");
+      assert.deepStrictEqual(
+        (yield* Ref.get(updateStatesRef)).map((state) => state.status),
+        ["queued", "running", "succeeded"],
+      );
+      assert.strictEqual(killed, 1);
+    }).pipe(Effect.provide(Layer.mergeAll(NonWindowsPlatform, latestVersionHttpClient("0.0.0")))),
+  );
+
+  it.live("records a failed update when the update fiber itself is interrupted", () =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>();
+      const { registry, updateStatesRef } = yield* makeRegistry(baseProvider);
+      const spawner = ChildProcessSpawner.make(() =>
+        Deferred.succeed(started, undefined).pipe(
+          Effect.as(mockHandle({ stdout: "updated", exitCode: Effect.never })),
+        ),
+      );
+      // Owning the runner's scope stands in for a server shutdown.
+      const runnerScope = yield* Scope.make();
+      const updater = yield* makeTestRunner(registry).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Scope.provide(runnerScope),
+      );
+
+      const caller = yield* updater.updateProvider(CODEX_DRIVER).pipe(Effect.forkScoped);
+      yield* Deferred.await(started);
+      yield* Scope.close(runnerScope, Exit.void);
+
+      const callerExit = yield* Fiber.await(caller);
+      assert.strictEqual(Exit.hasInterrupts(callerExit), true);
+      const states = yield* Ref.get(updateStatesRef);
+      assert.deepStrictEqual(
+        states.map((state) => state.status),
+        ["queued", "running", "failed"],
+      );
+      assert.strictEqual(states.at(-1)?.message, "Update was interrupted before it finished.");
+      assert.isNotNull(states.at(-1)?.startedAt ?? null);
+    }).pipe(Effect.provide(Layer.mergeAll(NonWindowsPlatform, latestVersionHttpClient("0.0.0")))),
   );
 
   it.effect("resolves npm to a .cmd shim and routes through the shell on win32", () => {

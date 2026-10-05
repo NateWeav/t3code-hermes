@@ -65,13 +65,11 @@ export const makeProviderMaintenanceCommandCoordinator = Effect.fn(
         return yield* Effect.fail(input.makeAlreadyRunningError(targetKey));
       }
 
-      const locked = Effect.gen(function* () {
-        const lock = providerUpdateLock(lockKey);
-        if (onQueued) {
-          yield* onQueued;
-        }
-        return yield* lock.withPermits(1)(run);
-      });
+      // The process-wide lock, not one per coordinator: every connection
+      // builds its own coordinator, and an update must still exclude the rest.
+      const locked = (onQueued ?? Effect.void).pipe(
+        Effect.andThen(providerUpdateLock(lockKey).withPermits(1)(run)),
+      );
       return yield* (
         onInterrupt ? locked.pipe(Effect.onInterrupt(() => onInterrupt)) : locked
       ).pipe(Effect.ensuring(releaseTarget(targetKey)));

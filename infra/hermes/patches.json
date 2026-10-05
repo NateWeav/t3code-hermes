@@ -1,0 +1,76 @@
+{
+  "patches": [
+    {
+      "id": "acp-central-ssh-execution",
+      "title": "Central SSH execution",
+      "neededFor": "Hermes instances that run tools on an SSH host without copying credentials, skills, or cache to it.",
+      "versions": [
+        {
+          "hermesCommit": "5a8dea85fbb636ae09adafa2272d511ae1e227a3",
+          "hermesCommitDate": "2026-10-01T19:37:31Z",
+          "file": "acp-central-ssh-execution/5a8dea85fbb6.patch"
+        }
+      ]
+    },
+    {
+      "id": "acp-delegation-progress",
+      "title": "Live subagent progress",
+      "neededFor": "Live progress and background results for subagents Hermes delegates to. Without it, background subagents show as idle once dispatched.",
+      "versions": [
+        {
+          "hermesCommit": "5a8dea85fbb636ae09adafa2272d511ae1e227a3",
+          "hermesCommitDate": "2026-10-01T19:37:31Z",
+          "file": "acp-delegation-progress/5a8dea85fbb6.patch"
+        }
+      ]
+    },
+    {
+      "id": "acp-background-reports",
+      "title": "Background process reports",
+      "neededFor": "Monitoring status while Hermes's background processes run, and waking the agent when they finish. Without it, a background command reads as finished the moment it starts, and the agent never hears that it is done.",
+      "versions": [
+        {
+          "hermesCommit": "5a8dea85fbb636ae09adafa2272d511ae1e227a3",
+          "hermesCommitDate": "2026-10-01T19:37:31Z",
+          "file": "acp-background-reports/5a8dea85fbb6.patch"
+        }
+      ]
+    },
+    {
+      "id": "gateway-multiplex-webhook-session-close",
+      "title": "Finished webhook runs in profiles",
+      "neededFor": "Multi-profile gateways, so webhook runs in a profile are marked finished. Without it, T3 Code shows those runs as failed after two hours.",
+      "versions": [
+        {
+          "hermesCommit": "5a8dea85fbb636ae09adafa2272d511ae1e227a3",
+          "hermesCommitDate": "2026-10-01T19:37:31Z",
+          "file": "gateway-multiplex-webhook-session-close/5a8dea85fbb6.patch"
+        }
+      ]
+    },
+    {
+      "id": "acp-fast-mode",
+      "title": "Fast mode",
+      "neededFor": "Fast Mode on Hermes models. Applying it also turns fast mode on for CLIProxyAPI endpoints in your Hermes config. Without it, the Fast Mode toggle does not appear.",
+      "versions": [
+        {
+          "hermesCommit": "439334127f012e1ee0685acd5dba288e459af0ec",
+          "hermesCommitDate": "2026-10-04T19:49:39Z",
+          "file": "acp-fast-mode/439334127f01.patch"
+        }
+      ]
+    },
+    {
+      "id": "acp-durable-completion-receipts",
+      "title": "Durable background results",
+      "neededFor": "Apply after Live subagent progress and Background process reports. Keeps a finished subagent's result until the agent has actually been woken with it, and redelivers results missed while T3 Code was disconnected or restarting.",
+      "versions": [
+        {
+          "hermesCommit": "af8839df1038cc026075fb254afa22edc19d911d",
+          "hermesCommitDate": "2026-10-04T22:20:18Z",
+          "file": "acp-durable-completion-receipts/af8839df1038.patch"
+        }
+      ]
+    }
+  ]
+}

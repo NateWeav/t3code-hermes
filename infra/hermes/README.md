@@ -2,14 +2,45 @@
 
 Patches this fork carries against [Hermes Agent](https://github.com/NousResearch/hermes-agent)
 itself, for behaviour T3 Code depends on that stock Hermes does not provide. They are here rather
-than vendored because Hermes is a separate project on its own release cadence — apply them to your
-own checkout, and drop them once upstream carries the change.
+than vendored because Hermes is a separate project on its own release cadence; drop each one once
+upstream carries the change.
 
-The server embeds these files, and the Hermes panel's Patches tab applies them for you. After
-changing, adding, or removing a patch here, run `node scripts/generate-hermes-patches.ts` and add or
-drop its entry in `apps/server/src/hermes/hermesPatches.ts`; a test fails until both match.
+The server embeds them, and the Hermes panel's Patches tab applies and removes them for you.
 
-## `0002-acp-central-ssh-execution.patch`
+## Versions
+
+`hermes update` follows Hermes `main`, so users' checkouts sit anywhere along it, and one patch
+text stops fitting within days. Each patch therefore ships several versions, one directory per
+patch, listed in [`patches.json`](./patches.json). Each version records the Hermes commit it was
+made and verified against: applied there alone and together with the other patches, and its tests
+passed. The server reverses an applied version, or applies the newest version that fits the
+checkout, so an older checkout keeps working with an older version. Versions other than the newest
+are dropped once their commit is more than 30 days old.
+
+To add a version, rebase the patch onto a newer Hermes commit, save it as
+`<patch-id>/<first 12 characters of the commit>.patch`, and list it first under that patch in
+`patches.json` with the commit and its UTC committer date
+(`TZ=UTC git log -1 --format=%cd --date=format-local:%Y-%m-%dT%H:%M:%SZ <commit>`). A new patch also
+needs its id, title, and `neededFor` text there; patch order is the order the tab shows and the
+order the patches stack in. Then run `node scripts/generate-hermes-patches.ts`, which rejects an
+inconsistent manifest; a server test fails until the generated file matches.
+
+The Patches tab picks the version for you, and is the easier way. To apply one by hand, go through
+the versions listed in `patches.json` in order and use the first that both fits and has a
+`hermesCommit` your checkout already contains:
+
+```bash
+cd ~/.hermes/hermes-agent
+git merge-base --is-ancestor <hermesCommit> HEAD && echo contained
+git apply --check /path/to/t3code/infra/hermes/<patch-id>/<version>.patch
+git apply /path/to/t3code/infra/hermes/<patch-id>/<version>.patch
+```
+
+If no version passes both checks, apply a version only when it is the one version that passes
+`--check`. When several pass, they can be changing different code, so use the Patches tab,
+which refuses when it can't tell them apart.
+
+## `acp-central-ssh-execution`
 
 **Needed by:** a single central T3/Hermes server that executes terminal and file tools on a remote
 SSH host without launching T3 or Hermes on that target.
@@ -37,20 +68,11 @@ Node, T3, the Hermes binary, provider credentials, memories, or a `.hermes` dire
 Upstream already carries half of this: `SSHEnvironment` takes `sync_files`, used by Hermes's own SSH
 workspace browser. The patch exposes it as config and roots ACP tools at the remote cwd.
 
-Verified against hermes-agent `ac0cfa7db9` (`main`, 2026-09-29), which is where `hermes update`
-takes a source checkout by default. Tagged releases up to v2026.9.24 predate a reorganisation of the
-terminal config code, so the patch does not apply to them or to older checkouts; update first.
-
-```bash
-cd ~/.hermes/hermes-agent
-git apply /path/to/t3code/infra/hermes/0002-acp-central-ssh-execution.patch
-```
-
 Restart the T3 Code server after applying the patch. Configure each approved SSH target as a
 separate Hermes provider instance; do not change the default Hermes instance away from local
 execution.
 
-## `0003-acp-delegation-progress.patch`
+## `acp-delegation-progress`
 
 **Needed by:** live progress and background results for the subagents Hermes delegates to. Without
 it, stock Hermes suppresses `delegate_task`'s structured arguments and results and never reports
@@ -64,15 +86,8 @@ overlapping delegations can have identical goals and batch-local indices, and un
 ownership is dropped. Registry-forced stalls and worker crashes report through the same child relay,
 so detached work cannot stay falsely active. A parent result with `status: "dispatched"` only
 acknowledges launch; child lifecycle events settle each subagent. The original ACP process must stay
-connected unless `0007` is also applied, which recovers missed results from disk.
-
-Verified against hermes-agent `ac0cfa7db9` (`main`, 2026-09-29), together with `0002`. It does not
-apply to `08b140d14e` or older checkouts; update first.
-
-```bash
-cd ~/.hermes/hermes-agent
-git apply /path/to/t3code/infra/hermes/0003-acp-delegation-progress.patch
-```
+connected unless `acp-durable-completion-receipts` is also applied, which recovers missed results
+from disk.
 
 Restart the T3 Code server after applying the patch so provider sessions spawn patched Hermes. No
 configuration changes are required.
@@ -82,7 +97,7 @@ drive the real executor, child relays, stale monitor, and background worker. Run
 `tests/acp_adapter/test_tools.py` and `test_events.py` in a scratch checkout with an isolated
 `HERMES_HOME` and `PYTHONDONTWRITEBYTECODE=1`, never in the live install.
 
-## `0004-acp-background-reports.patch`
+## `acp-background-reports`
 
 **Needed by:** the sidebar's Monitoring status for background processes Hermes starts, such as a CI
 watcher, and the agent picking its work back up when they finish. Stock Hermes reports a background
@@ -99,22 +114,13 @@ whether to prompt. T3 Code prompts with the notification once no turn is running
 pressed Stop, in which case it waits for their next message. Clients that do not know the methods
 ignore them.
 
-Verified against hermes-agent `645bb146c6` (`main`, 2026-10-01), alone and together with `0002` and
-`0003` in either order. Like `0003`, it does not apply to `08b140d14e` or older checkouts; update
-first.
-
-```bash
-cd ~/.hermes/hermes-agent
-git apply /path/to/t3code/infra/hermes/0004-acp-background-reports.patch
-```
-
 Restart the T3 Code server after applying the patch. `display.background_process_notifications: off`
 in Hermes's `config.yaml` still suppresses process notifications; process status is always reported.
 
 The patch's `tests/acp_adapter/test_background_reports.py` spawns real processes against an isolated
-process registry. Run it with the rest of `tests/acp_adapter/` in a scratch checkout, as for `0003`.
+process registry. Run it with the rest of `tests/acp_adapter/` in a scratch checkout, as for `acp-delegation-progress`.
 
-## `0005-gateway-multiplex-webhook-session-close.patch`
+## `gateway-multiplex-webhook-session-close`
 
 **Needed by:** gateways with `gateway.multiplex_profiles: true` that serve webhook routes for a
 named profile (`/p/<profile>/webhooks/...`). Without it, those runs never get `ended_at`, so T3
@@ -125,20 +131,12 @@ The run writes its session row to `profiles/<profile>/state.db`, but the webhook
 completion hook runs outside the profile scope and ended the session in the launch home's
 `state.db`, which has no such row. The patch closes it in the store `SessionStore._db_for_key`
 resolves from the session key. Single-profile gateways and default-profile keys are unchanged.
-
-Verified against hermes-agent `357f51c491` (`main`, 2026-10-01) and `8d30c4eaab` with `0003`
-applied. It touches only the gateway, so it is independent of `0002` through `0004`.
-
-```bash
-cd ~/.hermes/hermes-agent
-git apply /path/to/t3code/infra/hermes/0005-gateway-multiplex-webhook-session-close.patch
-hermes gateway restart
-```
+Restart the gateway with `hermes gateway restart` after applying it.
 
 The patch's test in `tests/gateway/test_webhook_session_close.py` runs a profile webhook delivery
 through the real adapter pipeline on a multiplexed store.
 
-## `0006-acp-fast-mode.patch`
+## `acp-fast-mode`
 
 **Needed by:** the Fast Mode toggle for Hermes models. Stock Hermes applies `/fast` only in its CLI,
 TUI, and gateway, never in ACP sessions, and sends fast-mode parameters only to the first-party
@@ -168,24 +166,17 @@ The opt-in covers `service_tier: priority` (OpenAI and xAI models) only. Anthrop
 is a Messages API parameter, and custom endpoints speak chat completions, so Claude models behind a
 proxy stay ungated.
 
-Verified against hermes-agent `439334127f` (`main`, 2026-10-04), alone and together with `0002`
-through `0005` in either order.
-
-```bash
-cd ~/.hermes/hermes-agent
-git apply /path/to/t3code/infra/hermes/0006-acp-fast-mode.patch
-```
-
 Restart the T3 Code server after applying the patch. The patch's
 `tests/acp_adapter/test_fast_mode.py` drives the real config, gate, and ACP server with a stubbed
-agent; run it with the rest of `tests/acp_adapter/` in a scratch checkout, as for `0003`.
+agent; run it with the rest of `tests/acp_adapter/` in a scratch checkout, as for
+`acp-delegation-progress`.
 
-## `0007-acp-durable-completion-receipts.patch`
+## `acp-durable-completion-receipts`
 
-**Needed by:** background results that survive the trip to the agent. Stock Hermes (with `0003` and
-`0004`) counts a finished subagent's result as delivered the moment it writes `_hermes/notification`,
-so a result is lost if T3 Code restarts, the ACP process reconnects, or the wake turn fails before
-the agent sees it.
+**Needed by:** background results that survive the trip to the agent. Stock Hermes (with
+`acp-delegation-progress` and `acp-background-reports`) counts a finished subagent's result as
+delivered the moment it writes `_hermes/notification`, so a result is lost if T3 Code restarts, the
+ACP process reconnects, or the wake turn fails before the agent sees it.
 
 T3 Code advertises `_meta["hermes.backgroundNotifications"]` during `initialize`; Hermes keeps
 clients without it on synchronous delegation. Capable clients receive stable `notificationIds` with
@@ -197,14 +188,10 @@ demonstrably dead. A sent receipt is not re-sent within one Hermes process, only
 reconnect. T3 Code drops a re-sent notice while its ids are queued or prompting and reopens them once
 the wake prompt settles, because its stop reason does not say whether Hermes settled them.
 
-Verified against hermes-agent `4d3555e5ca` and `af8839df10` (`main`, 2026-10-04) after `0003` and
-`0004`, with or without `0006` in either order.
-
-```bash
-cd ~/.hermes/hermes-agent
-git apply /path/to/t3code/infra/hermes/0007-acp-durable-completion-receipts.patch
-```
+Verified against hermes-agent `4d3555e5ca` and `af8839df10` (`main`, 2026-10-04) after
+`acp-delegation-progress` and `acp-background-reports`, with or without `acp-fast-mode` in either
+order.
 
 Restart the T3 Code server after applying the patch. Run the patch's
 `tests/acp_adapter/test_background_reports.py` and `tests/tools/test_async_delegation.py` in a
-scratch checkout, as for `0003`.
+scratch checkout, as for `acp-delegation-progress`.

@@ -175,9 +175,9 @@
       "types": "./src/state/hermesCronSeen.ts",
       "default": "./src/state/hermesCronSeen.ts"
     },
-    "./state/turn-throughput": {
-      "types": "./src/state/turnThroughput.ts",
-      "default": "./src/state/turnThroughput.ts"
+    "./state/run-throughput": {
+      "types": "./src/state/runThroughput.ts",
+      "default": "./src/state/runThroughput.ts"
     },
     "./state/hermes-patches": {
       "types": "./src/state/hermesPatches.ts",

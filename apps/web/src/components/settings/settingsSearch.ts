@@ -419,6 +419,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["composer rich text tiptap bold italic markdown styled wysiwyg"],
   },
   {
+    id: "composer-throughput",
+    title: "Output speed in composer",
+    to: "/settings/general",
+    searchTerms: ["tok/s tokens per second throughput speed rate tps composer context ring"],
+  },
+  {
     id: "composer-collapse",
     title: "Collapse composer on scroll",
     to: "/settings/general",

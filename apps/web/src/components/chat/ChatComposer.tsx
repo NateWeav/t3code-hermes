@@ -289,6 +289,7 @@ import {
   renderProviderTraitsPicker,
 } from "./composerProviderState";
 import { ContextWindowMeter, ContextWindowMeterPlaceholder } from "./ContextWindowMeter";
+import { RunThroughputChip, RunThroughputSection } from "./RunThroughput";
 import {
   providerSupportsManualCompaction,
   resolveContextWindowModelDisplayName,
@@ -1350,6 +1351,10 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   compact: boolean;
   activeContextWindow: ContextWindowSnapshot | null;
   reserveContextWindowMeter: boolean;
+  /** The thread whose running turn's output rate to show; null while no turn runs. */
+  runningThreadRef: ScopedThreadRef | null;
+  /** Shows the rate as a chip in the footer, not only in the context ring's popover. */
+  throughputChipEnabled: boolean;
   activeThreadModelDisplayName: string | null;
   isPreparingWorktree: boolean;
   pendingAction: {
@@ -1384,6 +1389,9 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
 }) {
   return (
     <>
+      {props.runningThreadRef && props.throughputChipEnabled && !props.compact ? (
+        <RunThroughputChip threadRef={props.runningThreadRef} />
+      ) : null}
       {props.activeContextWindow ? (
         <ContextWindowMeter
           usage={props.activeContextWindow}
@@ -1391,7 +1399,11 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
           onCompact={props.onCompactContext}
           compactDisabled={props.compactDisabled}
           compactDisabledReason={props.compactDisabledReason}
-        />
+        >
+          {props.runningThreadRef ? (
+            <RunThroughputSection threadRef={props.runningThreadRef} />
+          ) : null}
+        </ContextWindowMeter>
       ) : props.reserveContextWindowMeter ? (
         <ContextWindowMeterPlaceholder />
       ) : null}
@@ -7517,6 +7529,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       settings.contextWindowIndicatorEnabled ? activeContextWindow : null
                     }
                     reserveContextWindowMeter={reserveContextWindowMeter}
+                    runningThreadRef={
+                      routeKind === "server" && phase === "running" ? routeThreadRef : null
+                    }
+                    throughputChipEnabled={settings.composerThroughputEnabled}
                     activeThreadModelDisplayName={activeThreadModelDisplayName}
                     pendingAction={pendingPrimaryAction}
                     isRunning={phase === "running"}

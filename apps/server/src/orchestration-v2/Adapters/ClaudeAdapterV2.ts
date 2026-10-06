@@ -71,6 +71,7 @@ import {
 } from "@t3tools/contracts";
 
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -2749,6 +2750,28 @@ function formatClaudeUsageLimitWait(waitMs: number): string {
   return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
 }
 
+type ClaudeStreamEvent = Extract<SDKMessage, { readonly type: "stream_event" }>["event"];
+
+/**
+ * Characters of visible model output a raw stream frame carries: text or tool
+ * input. Thinking is left out: what streams is a summary trickling behind the
+ * real thinking, which only the message's final usage counts.
+ */
+function claudeStreamOutputChars(event: ClaudeStreamEvent): number {
+  if (event.type !== "content_block_delta") return 0;
+  switch (event.delta.type) {
+    case "text_delta":
+      return event.delta.text.length;
+    case "input_json_delta":
+      return event.delta.partial_json.length;
+    default:
+      return 0;
+  }
+}
+
+/** Raw deltas arrive per token; the throughput meter only needs them this often. */
+const OUTPUT_PROGRESS_INTERVAL_MS = 100;
+
 interface ActiveClaudeTurnContext {
   readonly input: ProviderAdapter.ProviderAdapterV2TurnInput;
   readonly nativeTurnId: string;
@@ -4909,6 +4932,36 @@ export function makeClaudeAdapterV2(
           return { node, request, turnItem };
         });
 
+        // Output not yet reported to the throughput meter. Text and tool input
+        // only land as finished blocks, so the meter counts these deltas instead,
+        // then takes each message's exact usage once it ends.
+        const pendingOutput = {
+          chars: 0,
+          reportedAtMs: 0,
+          messageStartedAtMs: 0,
+          heldBack: false,
+        };
+        const reportOutputProgress = Effect.fnUntraced(function* (
+          context: ActiveClaudeTurnContext,
+          chars: number,
+          flush: boolean,
+        ) {
+          pendingOutput.chars += chars;
+          if (pendingOutput.chars === 0) return;
+          const nowMs = yield* Clock.currentTimeMillis;
+          if (!flush && nowMs - pendingOutput.reportedAtMs < OUTPUT_PROGRESS_INTERVAL_MS) return;
+          const reported = pendingOutput.chars;
+          pendingOutput.chars = 0;
+          pendingOutput.reportedAtMs = nowMs;
+          yield* emitProviderEvent({
+            type: "output.progress",
+            driver: CLAUDE_PROVIDER,
+            threadId: context.input.threadId,
+            runId: context.input.runId,
+            chars: reported,
+          });
+        });
+
         const ensureReasoningBlock = Effect.fnUntraced(function* (
           context: ActiveClaudeTurnContext,
           itemId: string,
@@ -5866,6 +5919,49 @@ export function makeClaudeAdapterV2(
           // Subagent narration belongs to its child thread, never the parent log.
           if (message.type === "stream_event" && !message.parent_tool_use_id) {
             const event = message.event;
+            if (event.type === "message_start") {
+              pendingOutput.messageStartedAtMs = yield* Clock.currentTimeMillis;
+              pendingOutput.heldBack = false;
+              // Tells the meter this run's output comes from these reports, not
+              // from the reasoning items streamed below.
+              yield* emitProviderEvent({
+                type: "output.progress",
+                driver: CLAUDE_PROVIDER,
+                threadId: context.input.threadId,
+                runId: context.input.runId,
+                chars: 0,
+              });
+            } else if (
+              event.type === "content_block_start" &&
+              (event.content_block.type === "thinking" ||
+                event.content_block.type === "redacted_thinking")
+            ) {
+              // After thinking, Claude holds the message's text back and flushes it
+              // at the end, so the meter gets only the message's exact usage.
+              pendingOutput.heldBack = true;
+            }
+            const outputChars = pendingOutput.heldBack ? 0 : claudeStreamOutputChars(event);
+            if (outputChars > 0 || event.type === "content_block_stop") {
+              yield* reportOutputProgress(
+                context,
+                outputChars,
+                event.type === "content_block_stop",
+              );
+            }
+            if (event.type === "message_delta" && pendingOutput.messageStartedAtMs > 0) {
+              yield* reportOutputProgress(context, 0, true);
+              const durationMs =
+                (yield* Clock.currentTimeMillis) - pendingOutput.messageStartedAtMs;
+              pendingOutput.messageStartedAtMs = 0;
+              yield* emitProviderEvent({
+                type: "output.measured",
+                driver: CLAUDE_PROVIDER,
+                threadId: context.input.threadId,
+                runId: context.input.runId,
+                tokens: event.usage.output_tokens,
+                durationMs,
+              });
+            }
             const reasoning = context.reasoning;
             if (event.type === "message_start") {
               reasoning.messageId = event.message.id;

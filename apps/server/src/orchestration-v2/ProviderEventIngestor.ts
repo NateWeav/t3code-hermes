@@ -505,6 +505,10 @@ export const layer: Layer.Layer<
               }),
             ];
           }
+          case "output.progress":
+          case "output.measured":
+            // Live throughput only; RunExecutionService consumes it before ingestion.
+            return [];
           case "turn.terminal":
             const dismissed = yield* dismissNativeUserInputs(input, input.event.providerTurnId);
             if (input.event.status !== "failed") {

@@ -207,6 +207,7 @@ import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts
 import * as ProjectCloneTracker from "./project/ProjectCloneTracker.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
 import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
+import { RunThroughputMeter } from "./orchestration-v2/RunThroughputMeter.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as DirectEndpoints from "./environment/DirectEndpoints.ts";
 import * as RemoteOpenTargets from "./environment/RemoteOpenTargets.ts";
@@ -1252,6 +1253,7 @@ const layerWsRpc = (
       const usageLimitSources = yield* UsageLimitSources.UsageLimitSources;
       const projectSetupScriptRunner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
       const worktreeSetupTracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
+      const runThroughputMeter = yield* RunThroughputMeter;
       const projectCloneTracker = yield* ProjectCloneTracker.ProjectCloneTracker;
       const repositoryIdentityResolver =
         yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
@@ -2074,6 +2076,15 @@ const layerWsRpc = (
           observeRpcStreamEffect(
             ORCHESTRATION_V2_WS_METHODS.subscribeThread,
             subscribeOrchestrationV2Thread(input),
+            {
+              "rpc.aggregate": "orchestrationV2",
+              "orchestration_v2.thread_id": input.threadId,
+            },
+          ),
+        [ORCHESTRATION_V2_WS_METHODS.subscribeRunThroughput]: (input) =>
+          observeRpcStream(
+            ORCHESTRATION_V2_WS_METHODS.subscribeRunThroughput,
+            runThroughputMeter.stream(input.threadId),
             {
               "rpc.aggregate": "orchestrationV2",
               "orchestration_v2.thread_id": input.threadId,

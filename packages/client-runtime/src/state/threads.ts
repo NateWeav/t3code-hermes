@@ -7,7 +7,6 @@ import {
   type ThreadId as ThreadIdType,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
-import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Scope from "effect/Scope";
@@ -33,7 +32,6 @@ import { subscribeDynamic } from "../rpc/client.ts";
 import { parseThreadKey, threadKey } from "./entities.ts";
 import { applyOrchestrationV2ProjectionEvent } from "./orchestrationV2Projection.ts";
 import { THREAD_SNAPSHOT_IDLE_TTL_MS } from "./threadRetention.ts";
-import { observeTurnThroughputItem } from "./turnThroughput.ts";
 import { followStreamInEnvironment } from "./runtime.ts";
 import * as ThreadHistoryController from "./threadHistoryController.ts";
 import { fetchEnvironmentThreadHistoryPage } from "./threadHistoryHttp.ts";
@@ -234,9 +232,6 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
   };
   if (resumeCache?.owner === owner) resumeCache.snapshot = committed;
   const awaitingCompletion = yield* Ref.make(false);
-  // Throughput needs to tell replayed events from live ones. A server without
-  // the completion marker replays with no boundary, so its threads show none.
-  const replayBoundaryKnown = yield* Ref.make(false);
   const applyLock = yield* Semaphore.make(1);
   // Save only completed data/cursor updates. A canceled scope must not cache
   // a cursor whose event has not reached the data yet.
@@ -474,8 +469,6 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     if (fresh.length === 0) return;
 
     const waiting = yield* Ref.get(awaitingCompletion);
-    const observesThroughput = !waiting && (yield* Ref.get(replayBoundaryKnown));
-    const nowMs = yield* Clock.currentTimeMillis;
     // Apply against the latest projection/history in one update so a concurrent
     // loadEarlier merge (or history-meta patch) cannot be clobbered by a stale
     // get-then-set rebuild.
@@ -515,16 +508,6 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
               latestLocalTurnOrdinal: current.history.latestLocalTurnOrdinal,
             }
           : undefined;
-      // Replayed events describe the model's past, not its current pace.
-      if (observesThroughput && item.event.type === "turn-item.updated") {
-        const updated = item.event.payload;
-        observeTurnThroughputItem(
-          { environmentId, threadId },
-          updated,
-          current.data.value.turnItems.find((candidate) => candidate.id === updated.id),
-          nowMs,
-        );
-      }
       const next = applyOrchestrationV2ProjectionEvent(current.data.value, item.event, partial);
       // True no-op when the reducer deliberately returns the current projection
       // reference (e.g. dropped old partial-timeline turn-item). Do not clear
@@ -859,7 +842,6 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
           Effect.orElseSucceed(() => false),
         );
         yield* Ref.set(awaitingCompletion, supportsCompletionMarker);
-        yield* Ref.set(replayBoundaryKnown, supportsCompletionMarker);
         yield* markSynchronizing;
         yield* Ref.set(resumingLive, false);
 

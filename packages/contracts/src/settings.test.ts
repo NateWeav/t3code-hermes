@@ -653,6 +653,18 @@ describe("ClientSettings sidebar", () => {
   });
 });
 
+describe("ClientSettings composer throughput", () => {
+  it("defaults off and preserves an explicit opt-in", () => {
+    expect(decodeClientSettings({}).composerThroughputEnabled).toBe(false);
+    expect(
+      decodeClientSettings({ composerThroughputEnabled: true }).composerThroughputEnabled,
+    ).toBe(true);
+    expect(
+      decodeClientSettingsPatch({ composerThroughputEnabled: true }).composerThroughputEnabled,
+    ).toBe(true);
+  });
+});
+
 describe("ClientSettings context window meter", () => {
   it("restores the indicator for settings saved with the retired hidden default", () => {
     expect(

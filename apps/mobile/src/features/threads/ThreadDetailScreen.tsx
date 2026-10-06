@@ -500,12 +500,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
       return { kind: "compacting" };
     }
     if (props.activeWorkStartedAt !== null && contentPresentationKind === "ready") {
-      return {
-        kind: "working",
-        startedAt: props.activeWorkStartedAt,
-        threadRef: { environmentId: props.environmentId, threadId: props.selectedThread.id },
-        runId: props.selectedThread.latestRun?.runId ?? null,
-      };
+      return { kind: "working", startedAt: props.activeWorkStartedAt };
     }
     if (pendingBackgroundWork !== null && contentPresentationKind === "ready") {
       return {

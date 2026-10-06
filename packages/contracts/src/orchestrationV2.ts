@@ -3178,6 +3178,7 @@ export const ORCHESTRATION_V2_WS_METHODS = {
   subscribeArchivedShell: "orchestration.subscribeArchivedShell",
   subscribeShell: "orchestration.subscribeShell",
   subscribeThread: "orchestration.subscribeThread",
+  subscribeRunThroughput: "orchestration.subscribeRunThroughput",
 } as const;
 
 export const OrchestrationV2ArchivedShellSnapshot = Schema.Struct({
@@ -3279,6 +3280,31 @@ export const OrchestrationV2SubscribeThreadInput = Schema.Struct({
   acceptBoundedSnapshot: Schema.optionalKey(Schema.Boolean),
 });
 export type OrchestrationV2SubscribeThreadInput = typeof OrchestrationV2SubscribeThreadInput.Type;
+
+export const OrchestrationV2SubscribeRunThroughputInput = Schema.Struct({
+  threadId: ThreadId,
+});
+export type OrchestrationV2SubscribeRunThroughputInput =
+  typeof OrchestrationV2SubscribeRunThroughputInput.Type;
+
+/**
+ * Live output rate of a thread's running turn, measured by the server from the
+ * provider's raw deltas. Memory only: never persisted or replayed.
+ */
+export const OrchestrationV2RunThroughput = Schema.Struct({
+  runId: RunId,
+  /** Recent tokens per second, else the last rate measured; null before the first. */
+  tokensPerSecond: Schema.NullOr(Schema.Number),
+  /** No output for a moment (a tool call, hidden thinking), so the rate is the last one measured. */
+  idle: Schema.Boolean,
+  /** Output over generation time across the whole run so far; null before it is measurable. */
+  averageTokensPerSecond: Schema.NullOr(Schema.Number),
+  /** Highest recent rate the run has reached; null before the first. */
+  peakTokensPerSecond: Schema.NullOr(Schema.Number),
+  /** Output tokens so far: exact where the provider reports them, otherwise estimated. */
+  outputTokens: NonNegativeInt,
+});
+export type OrchestrationV2RunThroughput = typeof OrchestrationV2RunThroughput.Type;
 
 export const OrchestrationV2ThreadDetailSnapshot = Schema.Struct({
   snapshotSequence: NonNegativeInt,
@@ -3561,6 +3587,11 @@ export const OrchestrationV2RpcSchemas = {
   subscribeThread: {
     input: OrchestrationV2SubscribeThreadInput,
     output: OrchestrationV2ThreadStreamItem,
+  },
+  /** Emits the thread's current rate (or null) first, then each change. */
+  subscribeRunThroughput: {
+    input: OrchestrationV2SubscribeRunThroughputInput,
+    output: Schema.NullOr(OrchestrationV2RunThroughput),
   },
 } as const;
 

@@ -51,10 +51,6 @@ import {
 } from "@t3tools/client-runtime/work-log/item-detail";
 import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
 import {
-  readTurnThroughput,
-  TURN_THROUGHPUT_HISTORY_LENGTH,
-} from "@t3tools/client-runtime/state/turn-throughput";
-import {
   subagentGroupSummary,
   summarizeSubagentStatuses,
 } from "@t3tools/client-runtime/state/subagent-display";
@@ -3248,92 +3244,6 @@ function WorkingTimer({ createdAt }: { createdAt: string }) {
   );
 }
 
-const THROUGHPUT_SPARKLINE_WIDTH = 44;
-const THROUGHPUT_SPARKLINE_HEIGHT = 12;
-
-/**
- * Live output rate beside the working timer. Polls the throughput tracker on
- * the same one-second cadence and writes straight to the DOM, like
- * `WorkingTimer`, so a streaming reply never re-renders the row. Hidden until
- * the run has streamed any text; reads "—" while the model is in a tool call.
- */
-function WorkingThroughput({ threadRef, runId }: { threadRef: ScopedThreadRef; runId: RunId }) {
-  const rootRef = useRef<HTMLSpanElement>(null);
-  const rateRef = useRef<HTMLSpanElement>(null);
-  const pathRef = useRef<SVGPathElement>(null);
-  // First paint only; the interval below owns the DOM from then on.
-  const [initial] = useState(() => readTurnThroughput(threadRef, runId, Date.now()));
-
-  useEffect(() => {
-    const update = () => {
-      const root = rootRef.current;
-      if (!root) return;
-      const throughput = readTurnThroughput(threadRef, runId, Date.now());
-      root.hidden = throughput === null;
-      if (throughput === null) return;
-      root.toggleAttribute("data-idle", throughput.tokensPerSecond === null);
-      if (rateRef.current) {
-        rateRef.current.textContent = formatTokensPerSecond(throughput.tokensPerSecond);
-      }
-      pathRef.current?.setAttribute("d", throughputSparklinePath(throughput.history));
-    };
-    update();
-    const id = setInterval(update, 1000);
-    return () => clearInterval(id);
-  }, [threadRef, runId]);
-
-  return (
-    <span
-      ref={rootRef}
-      hidden={initial === null}
-      data-idle={initial?.tokensPerSecond === null ? "" : undefined}
-      className="inline-flex shrink-0 items-center gap-1.5 font-mono text-2xs text-muted-foreground data-idle:opacity-60"
-    >
-      <svg
-        aria-hidden
-        className="h-3 w-11 shrink-0 opacity-80"
-        viewBox={`0 0 ${THROUGHPUT_SPARKLINE_WIDTH} ${THROUGHPUT_SPARKLINE_HEIGHT}`}
-        preserveAspectRatio="none"
-      >
-        <path
-          ref={pathRef}
-          d={throughputSparklinePath(initial?.history ?? [])}
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={1.25}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          vectorEffect="non-scaling-stroke"
-        />
-      </svg>
-      <span ref={rateRef}>{formatTokensPerSecond(initial?.tokensPerSecond ?? null)}</span>
-    </span>
-  );
-}
-
-function formatTokensPerSecond(tokensPerSecond: number | null): string {
-  return tokensPerSecond === null ? "— tok/s" : `${Math.round(tokensPerSecond)} tok/s`;
-}
-
-/** Path for the throughput sparkline; the newest sample sits at the right edge. */
-function throughputSparklinePath(history: ReadonlyArray<number>): string {
-  if (history.length < 2) return "";
-  const max = Math.max(...history, 1);
-  const stepX = THROUGHPUT_SPARKLINE_WIDTH / (TURN_THROUGHPUT_HISTORY_LENGTH - 1);
-  const startX = THROUGHPUT_SPARKLINE_WIDTH - stepX * (history.length - 1);
-  return history
-    .map((value, index) => {
-      const x = (startX + stepX * index).toFixed(1);
-      const y = (
-        THROUGHPUT_SPARKLINE_HEIGHT -
-        1 -
-        (value / max) * (THROUGHPUT_SPARKLINE_HEIGHT - 2)
-      ).toFixed(1);
-      return `${index === 0 ? "M" : "L"}${x},${y}`;
-    })
-    .join(" ");
-}
-
 // Matches the grouped WorkLog row's min-h-6.
 const compactWorkEntryHeight = 24;
 
@@ -3522,9 +3432,8 @@ function toolIconAcceptsTint(
 }
 
 function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "working" }> }) {
-  const { isCompacting, isPreparingWorktree, backgroundWorktreeSetup, latestRunId } =
+  const { isCompacting, isPreparingWorktree, backgroundWorktreeSetup } =
     use(TimelineRowActivityCtx);
-  const { threadRef } = use(TimelineRowCtx);
   // One span for every label so the setup-to-working handoff swaps text in
   // place instead of remounting the row.
   const shimmer = isPreparingWorktree || isCompacting;
@@ -3549,14 +3458,9 @@ function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "workin
           {label}
           {shimmer ? <ActivityShimmerOverlay>{label}</ActivityShimmerOverlay> : null}
         </span>
-        <span className="ml-auto flex min-w-0 items-center gap-2">
-          {backgroundWorktreeSetup ? (
-            <BackgroundWorktreeSetupChip snapshot={backgroundWorktreeSetup} />
-          ) : null}
-          {threadRef && latestRunId && !shimmer ? (
-            <WorkingThroughput threadRef={threadRef} runId={latestRunId} />
-          ) : null}
-        </span>
+        {backgroundWorktreeSetup ? (
+          <BackgroundWorktreeSetupChip snapshot={backgroundWorktreeSetup} />
+        ) : null}
       </div>
     </div>
   );

@@ -624,6 +624,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       DEFAULT_UNIFIED_SETTINGS.contextWindowIndicatorEnabled
         ? ["Context window indicator"]
         : []),
+      ...(settings.composerThroughputEnabled !== DEFAULT_UNIFIED_SETTINGS.composerThroughputEnabled
+        ? ["Output speed in composer"]
+        : []),
       ...(settings.responseStreamingMode !== DEFAULT_UNIFIED_SETTINGS.responseStreamingMode
         ? ["Response streaming"]
         : []),
@@ -692,6 +695,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.proactivePanelsEnabled,
       settings.environmentIdentificationMode,
       settings.contextWindowIndicatorEnabled,
+      settings.composerThroughputEnabled,
       settings.fontFamilyCode,
       settings.fontFamilyComposer,
       settings.fontFamilySans,
@@ -806,6 +810,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       showSkillsInSlashMenu: DEFAULT_UNIFIED_SETTINGS.showSkillsInSlashMenu,
       composerCollapseOnScroll: DEFAULT_UNIFIED_SETTINGS.composerCollapseOnScroll,
       contextWindowIndicatorEnabled: DEFAULT_UNIFIED_SETTINGS.contextWindowIndicatorEnabled,
+      composerThroughputEnabled: DEFAULT_UNIFIED_SETTINGS.composerThroughputEnabled,
       composerRichTextEnabled: DEFAULT_UNIFIED_SETTINGS.composerRichTextEnabled,
       environmentIdentificationMode: DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode,
       glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity,
@@ -2831,6 +2836,33 @@ export function GeneralSettingsPanel() {
                 updateSettings({ composerRichTextEnabled: Boolean(checked) })
               }
               aria-label="Rich text composer"
+            />
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("composer-throughput")}
+          description="Show the running turn's tokens per second beside the context window indicator. Its hover always shows throughput."
+          resetAction={
+            settings.composerThroughputEnabled !==
+            DEFAULT_UNIFIED_SETTINGS.composerThroughputEnabled ? (
+              <SettingResetButton
+                label="output speed in composer"
+                onClick={() =>
+                  updateSettings({
+                    composerThroughputEnabled: DEFAULT_UNIFIED_SETTINGS.composerThroughputEnabled,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.composerThroughputEnabled}
+              onCheckedChange={(checked) =>
+                updateSettings({ composerThroughputEnabled: Boolean(checked) })
+              }
+              aria-label="Output speed in composer"
             />
           }
         />

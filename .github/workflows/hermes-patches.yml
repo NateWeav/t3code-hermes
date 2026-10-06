@@ -38,10 +38,16 @@ jobs:
       HERMES_DIR: ${{ github.workspace }}/../hermes-agent
       STATE: ${{ github.workspace }}/../hermes-patches.json
     steps:
+      # Plain git instead of actions/checkout: with persist-credentials off,
+      # checkout runs `git submodule foreach` in the main step, which is fatal
+      # when the tree has gitlinks without a .gitmodules entry (upstream's
+      # .repos/alchemy-effect/submodules/*). The repo is public, so no token
+      # is needed and none is left on disk for the Hermes tests to read.
       - name: Checkout fork
-        uses: actions/checkout@v6
-        with:
-          persist-credentials: false
+        run: |
+          git init -q .
+          git fetch -q --depth 1 --no-recurse-submodules "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$GITHUB_SHA"
+          git checkout -q FETCH_HEAD
 
       - name: Test the checker
         run: node --test .github/scripts/hermes-patch-drift.test.cjs

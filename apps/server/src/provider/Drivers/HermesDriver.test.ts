@@ -13,7 +13,7 @@ import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import { ServerConfig } from "../../config.ts";
 import * as IdAllocator from "../../orchestration-v2/IdAllocator.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
-import { NoOpProviderEventLoggers, ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
+import { NoOpProviderEventLoggers, ProviderEventLoggers } from "../ProviderEventLoggers.ts";
 import { HermesDriver } from "./HermesDriver.ts";
 
 const testLayer = ServerConfig.layerTest(process.cwd(), {

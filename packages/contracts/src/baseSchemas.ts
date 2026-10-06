@@ -13,7 +13,18 @@ export const TrimmedString = Schema.String.pipe(
     }),
   ),
 );
-export const TrimmedNonEmptyString = TrimmedString.check(Schema.isNonEmpty());
+/**
+ * Non-empty once trimmed. A `TrimmedString` only trims when decoding or
+ * encoding, so `make` and encode see the untrimmed value: a plain
+ * `isNonEmpty` would accept `" "` there and encode it to `""`, which no
+ * longer decodes.
+ */
+const isNonBlank = Schema.makeFilter((value: string) => value.trim().length > 0, {
+  expected: "a non-blank string",
+  toJsonSchema: () => [{ minLength: 1 }, true],
+  arbitraryConstraint: { minLength: 1 },
+});
+export const TrimmedNonEmptyString = TrimmedString.check(isNonBlank);
 
 export const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 export const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
@@ -108,7 +119,7 @@ export const OmittedWhenNull = <Value extends Schema.Top>(value: Value) => {
  *
  * Decoding runs each value through its own schema, so transformations (dates,
  * trimming, decoding defaults) apply as usual. Only values that schema
- * rejects are dropped; encoding is the plain encoding.
+ * rejects are dropped, on either side.
  *
  * For a tagged union, prefer {@link ForwardCompatibleUnion}: it drops only
  * values whose tag this build does not know, so a known member with a broken
@@ -118,11 +129,20 @@ export const ForwardCompatibleArray = <Element extends Schema.Top>(element: Elem
   Schema.Array(
     Schema.UndefinedOr(element).pipe(
       // An element this build cannot read becomes a hole, filtered out below.
+      // Fork: no catchEncoding here. Upstream also put one on this side, but
+      // it made a nested ForwardCompatibleArray drop the whole outer element
+      // whenever it dropped one of its own (a Hermes cron job vanished when one
+      // run had an unknown status). The catch on the decoded side below already
+      // sends an unencodable element as a hole.
       Schema.catchDecoding(() => Effect.succeedSome(undefined)),
     ),
   ).pipe(
     Schema.decodeTo(
-      Schema.Array(Schema.toType(element)),
+      Schema.Array(
+        Schema.UndefinedOr(Schema.toType(element)).pipe(
+          Schema.catchEncoding(() => Effect.succeedSome(undefined)),
+        ),
+      ),
       SchemaTransformation.transform<
         ReadonlyArray<Element["Type"]>,
         ReadonlyArray<Element["Type"] | undefined>
@@ -349,6 +369,9 @@ export type RuntimeRequestId = typeof RuntimeRequestId.Type;
 export const RuntimeTaskId = makeEntityId("RuntimeTaskId");
 export type RuntimeTaskId = typeof RuntimeTaskId.Type;
 export const ScheduledTaskId = makeEntityId("ScheduledTaskId");
+/** A one-use handle to a secret the user entered for an agent; the agent never sees the value. */
+export const SecretRef = makeEntityId("SecretRef");
+export type SecretRef = typeof SecretRef.Type;
 export type ScheduledTaskId = typeof ScheduledTaskId.Type;
 export const ApprovalRequestId = makeEntityId("ApprovalRequestId");
 export type ApprovalRequestId = typeof ApprovalRequestId.Type;

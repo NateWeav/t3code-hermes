@@ -125,6 +125,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.scheduledTasksDelete]: AuthOrchestrationOperateScope,
   [WS_METHODS.scheduledTasksRunNow]: AuthOrchestrationOperateScope,
   [WS_METHODS.scheduledTasksRotateWebhookToken]: AuthOrchestrationOperateScope,
+  [WS_METHODS.secretsAnswerRequest]: AuthOrchestrationOperateScope,
   // Delivery logs hold request bodies, so they need the same scope as the URL.
   [WS_METHODS.scheduledTasksListWebhookDeliveries]: AuthOrchestrationOperateScope,
   [WS_METHODS.scheduledTasksGetWebhookDelivery]: AuthOrchestrationOperateScope,
@@ -260,7 +261,7 @@ export const rpcAuthorizationError = (requiredScope: AuthEnvironmentScope) =>
   });
 
 /** Authorizes every RPC on one connection against that connection's session scopes. */
-export const rpcScopeAuthorizationLayer = (scopes: ReadonlyArray<AuthEnvironmentScope>) =>
+export const layer = (scopes: ReadonlyArray<AuthEnvironmentScope>) =>
   Layer.succeed(RpcScopeAuthorization)((effect, { rpc }) => {
     const requiredScope = requiredScopeForRpcMethod(rpc._tag);
     return scopes.includes(requiredScope)

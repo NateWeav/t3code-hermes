@@ -21,8 +21,8 @@ import {
   buildInitialHermesProviderSnapshot,
   checkHermesProviderStatus,
   enrichHermesSnapshot,
-} from "../Layers/HermesProvider.ts";
-import * as ProviderEventLoggers from "../Layers/ProviderEventLoggers.ts";
+} from "../HermesProvider.ts";
+import * as ProviderEventLoggers from "../ProviderEventLoggers.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
 import {
   defaultProviderContinuationIdentity,

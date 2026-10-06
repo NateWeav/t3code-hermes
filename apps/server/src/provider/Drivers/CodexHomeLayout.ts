@@ -410,7 +410,7 @@ export const materializeCodexShadowHome = Effect.fn("materializeCodexShadowHome"
         entryName,
       });
       return OPTIONAL_SHARED_FILE_NAMES.has(entryName)
-        ? link.pipe(Effect.catchTag("CodexShadowHomeEntryConflictError", () => Effect.void))
+        ? link.pipe(Effect.catchTags({ CodexShadowHomeEntryConflictError: () => Effect.void }))
         : link;
     },
     { discard: true },

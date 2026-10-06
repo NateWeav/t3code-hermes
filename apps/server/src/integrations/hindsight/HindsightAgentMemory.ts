@@ -56,7 +56,7 @@ import { writeFileStringAtomically } from "../../atomicWrite.ts";
 import * as ServerConfig from "../../config.ts";
 import { resolveEnabledHermesInstance, resolveHermesHome } from "../../hermes/hermesCronState.ts";
 import * as ProcessRunner from "../../processRunner.ts";
-import { deriveProviderInstanceConfigMap } from "../../provider/Layers/ProviderInstanceRegistryHydration.ts";
+import { deriveProviderInstanceConfigMap } from "../../provider/ProviderInstanceRegistryHydration.ts";
 import { mergeProviderInstanceEnvironment } from "../../provider/ProviderInstanceEnvironment.ts";
 import * as ServerSettingsService from "../../serverSettings.ts";
 import { hermesUserHome } from "./hermesHindsightConfig.ts";

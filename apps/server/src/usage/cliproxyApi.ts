@@ -13,9 +13,9 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientRequest } from "effect/http";
 
-import { codexPlanLabel } from "../provider/Layers/CodexProvider.ts";
-import { codexRateLimitsToLimits } from "../provider/Layers/codexUsageLimits.ts";
-import { claudeUsageResponseToLimits } from "../provider/Layers/claudeUsageLimits.ts";
+import { codexPlanLabel } from "../provider/CodexProvider.ts";
+import { codexRateLimitsToLimits } from "../provider/codexUsageLimits.ts";
+import { claudeUsageResponseToLimits } from "../provider/claudeUsageLimits.ts";
 import { makeUnavailableUsageLimits } from "../provider/providerUsageLimits.ts";
 
 const AuthFile = Schema.Struct({
@@ -195,9 +195,10 @@ export const makeCliproxyApi = Effect.gen(function* () {
       );
     }).pipe(
       Effect.timeout("15 seconds"),
-      Effect.catchTag("TimeoutError", () =>
-        Effect.fail(new UsageLimitSourceError({ detail: "The hub did not answer in time." })),
-      ),
+      Effect.catchTags({
+        TimeoutError: () =>
+          Effect.fail(new UsageLimitSourceError({ detail: "The hub did not answer in time." })),
+      }),
     );
   });
 
@@ -360,9 +361,10 @@ export const makeCliproxyApi = Effect.gen(function* () {
     UsageLimitSourceError | CliproxyKeyRejectedError
   > {
     const accounts = yield* authFiles(config).pipe(
-      Effect.catchTag("SchemaError", () =>
-        Effect.fail(new UsageLimitSourceError({ detail: "The hub could not list accounts." })),
-      ),
+      Effect.catchTags({
+        SchemaError: () =>
+          Effect.fail(new UsageLimitSourceError({ detail: "The hub could not list accounts." })),
+      }),
     );
     return yield* Effect.forEach(
       accounts.filter(

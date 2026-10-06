@@ -107,13 +107,13 @@ import {
   boundProviderEventForLogging,
   type EventNdjsonLogger,
   shouldPersistProviderEvent,
-} from "../../provider/Layers/EventNdjsonLogger.ts";
-import * as ProviderEventLoggers from "../../provider/Layers/ProviderEventLoggers.ts";
+} from "../../provider/EventNdjsonLogger.ts";
+import * as ProviderEventLoggers from "../../provider/ProviderEventLoggers.ts";
 import {
   claudeRateLimitEventToUpdate,
   type ClaudeScopedLimitNames,
-} from "../../provider/Layers/claudeUsageLimits.ts";
-import type { ServerProviderShape } from "../../provider/Services/ServerProvider.ts";
+} from "../../provider/claudeUsageLimits.ts";
+import type { ServerProviderShape } from "../../provider/ServerProvider.ts";
 import { mergeProviderInstanceEnvironment } from "../../provider/ProviderInstanceEnvironment.ts";
 import { T3_CODE_ORCHESTRATION_INSTRUCTIONS } from "../../provider/T3OrchestrationInstructions.ts";
 import { buildRuntimeInstructions } from "../../provider/RuntimeInstructions.ts";
@@ -594,7 +594,7 @@ export function makeClaudeAgentSdkProtocolLogger(input: {
   };
 }
 
-export const claudeAgentSdkQueryRunnerLiveLayer: Layer.Layer<
+export const layerQueryRunner: Layer.Layer<
   ClaudeAgentSdkQueryRunner,
   never,
   Crypto.Crypto | ProviderEventLoggers.ProviderEventLoggers

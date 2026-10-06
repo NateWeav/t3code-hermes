@@ -333,7 +333,7 @@ const main = Command.make(
       installedBinary: installedBinary(platform, device, bundleId),
       readRecord: fs.readFileString(recordPath).pipe(
         Effect.flatMap(decodeRecord),
-        Effect.catchTag("SchemaError", () => Effect.succeed(null)),
+        Effect.catchTags({ SchemaError: () => Effect.succeed(null) }),
         Effect.catchIf(
           (error) => error.reason._tag === "NotFound",
           () => Effect.succeed(null),

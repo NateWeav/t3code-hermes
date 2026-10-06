@@ -23,7 +23,7 @@ current. Every three hours it checks each one against Hermes `main`: it must app
 the patches before it when it builds on them), must not
 reverse-apply (which means upstream now carries it), must stack in manifest order, and must not
 fail a patch-relevant Hermes test that passes on unpatched `main`. Drift files a
-`hermes-patch-drift` issue, and the Hermes resolver in [`automation/`](./automation) answers it with
+`hermes-patch-drift` issue, and the maintainer's Hermes resolver answers it with
 a PR that adds a rebased version, or deletes a patch upstream made obsolete, and applies the 30-day
 rule. To run the same check locally against a clean Hermes checkout outside `~/.hermes` (Hermes's
 test guard fails tests run from under it):

@@ -204,9 +204,15 @@ up Hermes's own Hindsight config with no setup. To point it elsewhere or switch 
 Syncing is **merge-based, not rebase-based**: this fork's history is public, so rewriting it would
 break every clone. [`.github/workflows/sync-upstream.yml`](./.github/workflows/sync-upstream.yml)
 runs every three hours at :50 (`workflow_dispatch` also works). It merges `upstream/main` onto an
-`automation/sync-upstream/<run>` branch, opens a PR, dispatches `ci.yml` on that branch (pushes
-made with `GITHUB_TOKEN` trigger no workflows), and enables auto-merge with a merge commit. While
-that PR is open, later runs reuse it instead of merging again.
+`automation/sync-upstream/<run>` branch, opens a PR, and enables auto-merge with a merge commit.
+While that PR is open, later runs reuse it instead of merging again.
+
+GitHub holds CI on a PR opened with `GITHUB_TOKEN` until a maintainer approves the runs, so the
+sync opens its PR through a GitHub App instead. Create a private app on your account with
+**Contents** and **Pull requests** set to read and write and nothing else (no **Workflows**: an
+upstream range that edits `.github/workflows/` still has to be merged by hand), install it on this
+repository, and set the `SYNC_APP_CLIENT_ID` variable and `SYNC_APP_PRIVATE_KEY` secret. Without
+them the sync falls back to `GITHUB_TOKEN`, and each sync PR waits for **Approve workflows to run**.
 
 Each run also dispatches `release.yml` with `follow_upstream`, passing the upstream history already
 merged into `main`. Under the nightly concurrency lock, the release continues only when that

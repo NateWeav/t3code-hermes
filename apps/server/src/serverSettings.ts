@@ -162,6 +162,11 @@ const BITBUCKET_SECRET_NAMES = {
 const BITBUCKET_SECRET_FIELDS = ["accessToken", "apiToken"] as const;
 const HINDSIGHT_API_KEY_SECRET_NAME = "hindsight-api-key";
 
+/** Hosts are case-insensitive; a patch can arrive before decoding lowercased its keys. */
+function gitHubTokenSecretName(host: string): string {
+  return `github-token-${Buffer.from(host.trim().toLowerCase(), "utf8").toString("base64url")}`;
+}
+
 const redactSecret = (value: string) => (value.length > 0 ? SECRET_REDACTED : "");
 
 function redactProviderEnvironmentVariable(
@@ -211,12 +216,19 @@ export function redactServerSettingsForClient(settings: ServerSettings): ServerS
     accessToken: redactSecret(settings.bitbucket.accessToken),
     apiToken: redactSecret(settings.bitbucket.apiToken),
   };
+  const github = {
+    ...settings.github,
+    tokens: Object.fromEntries(
+      Object.entries(settings.github.tokens).map(([host, token]) => [host, redactSecret(token)]),
+    ),
+  };
   return {
     ...settings,
     providerInstances,
     integrations: { ...settings.integrations, hindsight },
     usageLimitSources,
     bitbucket,
+    github,
   };
 }
 
@@ -720,7 +732,24 @@ const make = Effect.gen(function* () {
         bitbucket[field] = SECRET_REDACTED;
         moved = true;
       }
-      return moved ? { ...settings, bitbucket } : settings;
+      const tokens = { ...settings.github.tokens };
+      for (const [host, value] of Object.entries(tokens)) {
+        if (value.length === 0 || value === SECRET_REDACTED) continue;
+        const stored = yield* secretStore
+          .set(gitHubTokenSecretName(host), textEncoder.encode(value))
+          .pipe(
+            Effect.as(true),
+            Effect.catch(() =>
+              Effect.logWarning("failed to move a GitHub token into the secret store", {
+                host,
+              }).pipe(Effect.as(false)),
+            ),
+          );
+        if (!stored) continue;
+        tokens[host] = SECRET_REDACTED;
+        moved = true;
+      }
+      return moved ? { ...settings, bitbucket, github: { ...settings.github, tokens } } : settings;
     });
 
   const loadSettingsFromDisk = Effect.gen(function* () {
@@ -912,12 +941,28 @@ const make = Effect.gen(function* () {
             : hindsight,
         };
       }
+      const tokens: Record<string, string> = {};
+      for (const [host, value] of Object.entries(settings.github.tokens)) {
+        if (value !== SECRET_REDACTED) {
+          tokens[host] = value;
+          continue;
+        }
+        const secret = yield* secretStore
+          .get(gitHubTokenSecretName(host))
+          .pipe(
+            Effect.mapError(
+              (cause) => new ServerSettingsError({ settingsPath, operation: "read-secret", cause }),
+            ),
+          );
+        tokens[host] = Option.isSome(secret) ? textDecoder.decode(secret.value) : "";
+      }
       return {
         ...settings,
         providerInstances: providerInstances as ServerSettings["providerInstances"],
         usageLimitSources: usageLimitSources as ServerSettings["usageLimitSources"],
         bitbucket,
         integrations,
+        github: { ...settings.github, tokens },
       };
     });
 
@@ -1104,6 +1149,39 @@ const make = Effect.gen(function* () {
         hindsightApiKey = SECRET_REDACTED;
       }
 
+      const tokens: Record<string, string> = {};
+      for (const [rawHost, raw] of Object.entries(next.github.tokens)) {
+        const host = rawHost.trim().toLowerCase();
+        let value = raw;
+        if (value === SECRET_REDACTED) {
+          // The marker keeps what is saved; a hand-edited plaintext token moves into the store.
+          const inline = current.github.tokens[host];
+          if (inline === undefined || inline === SECRET_REDACTED || inline.length === 0) {
+            tokens[host] = SECRET_REDACTED;
+            continue;
+          }
+          value = inline;
+        }
+        const secretName = gitHubTokenSecretName(host);
+        if (value.length === 0) {
+          changes.push({ kind: "remove", secretName, operation: "remove-secret" });
+          continue;
+        }
+        changes.push({ kind: "write", secretName, value: textEncoder.encode(value) });
+        tokens[host] = SECRET_REDACTED;
+      }
+      const nextHosts = new Set(
+        Object.keys(next.github.tokens).map((host) => host.trim().toLowerCase()),
+      );
+      for (const host of Object.keys(current.github.tokens)) {
+        if (nextHosts.has(host.trim().toLowerCase())) continue;
+        changes.push({
+          kind: "remove",
+          secretName: gitHubTokenSecretName(host),
+          operation: "remove-stale-secret",
+        });
+      }
+
       return {
         settings: {
           ...next,
@@ -1115,6 +1193,7 @@ const make = Effect.gen(function* () {
             hindsight:
               hindsightApiKey === undefined ? hindsight : { ...hindsight, apiKey: hindsightApiKey },
           },
+          github: { ...next.github, tokens },
         },
         changes,
       };

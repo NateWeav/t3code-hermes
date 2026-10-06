@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -48,6 +49,7 @@ describe("UsageLimitSources", () => {
           Layer.provideMerge(ServerSettingsService.layerTest({ usageLimitSources: hub("wrong") })),
           Layer.provide(Layer.mock(BackgroundPolicy.BackgroundPolicy)({})),
           Layer.provide(Layer.succeed(HttpClient.HttpClient, http)),
+          Layer.provide(NodeCrypto.layer),
         ),
       ),
     );

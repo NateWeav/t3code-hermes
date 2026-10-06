@@ -16,6 +16,7 @@ import {
   ProviderDriverKind,
   type OrchestrationV2Notification,
   type OrchestrationV2TurnItem,
+  type OrchestrationV2Subagent,
   type ProviderInstanceId,
   type ServerProvider,
   type ThreadId,
@@ -211,6 +212,8 @@ export function V2LifecycleRow(props: {
       <SubagentTimelineLink
         parentRef={scopeThreadRef(props.environmentId, item.threadId)}
         subagentId={item.subagentId}
+        providerInstanceId={item.providerInstanceId}
+        origin={item.origin}
         status={item.status}
         driver={item.driver}
         provider={props.providerStatuses.find(
@@ -369,6 +372,8 @@ export function SubagentNotificationLink(props: {
     <SubagentTimelineLink
       parentRef={props.parentRef}
       subagentId={agent.id}
+      providerInstanceId={agent.providerInstanceId}
+      origin={agent.origin}
       status={agent.status}
       driver={agent.driver}
       provider={props.providerStatuses.find(
@@ -394,6 +399,8 @@ export function SubagentNotificationLink(props: {
 function SubagentTimelineLink(props: {
   readonly parentRef: ScopedThreadRef;
   readonly subagentId: NodeId;
+  readonly providerInstanceId: ProviderInstanceId;
+  readonly origin: OrchestrationV2Subagent["origin"];
   readonly driver: ProviderDriverKind;
   readonly provider: ServerProvider | undefined;
   readonly providers: ReadonlyArray<ServerProvider>;
@@ -545,6 +552,8 @@ function SubagentTimelineTooltip(
       model={props.model}
       role={props.role}
       usage={props.usage}
+      providerInstanceId={props.providerInstanceId}
+      origin={props.origin}
       provider={props.provider}
       providers={props.providers}
       driver={props.driver}

@@ -22,7 +22,8 @@ import { OrchestratorProjectionError } from "../../orchestration-v2/Orchestrator
 import * as ProviderAdapterRegistry from "../../orchestration-v2/ProviderAdapterRegistry.ts";
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
 import * as ProjectService from "../../project/ProjectService.ts";
-import * as ProviderRegistry from "../../provider/Services/ProviderRegistry.ts";
+import * as ProviderRegistry from "../../provider/ProviderRegistry.ts";
+import * as SecretRequests from "../../secrets/SecretRequests.ts";
 import * as ScheduledTaskService from "../../scheduledTasks/ScheduledTaskService.ts";
 import * as McpHttpServer from "../McpHttpServer.ts";
 import * as McpInvocationContext from "../McpInvocationContext.ts";
@@ -136,7 +137,7 @@ it.effect("checks capability before accessing services through the production re
     expect(declaredFailure(result)).toMatchObject({ code: "capability_denied" });
   }).pipe(
     Effect.provide(
-      McpHttpServer.ThreadToolkitRegistrationLive.pipe(
+      McpHttpServer.layerThreadToolkit.pipe(
         Layer.provideMerge(McpServer.McpServer.layer),
         Layer.provide(NodeCrypto.layer),
         Layer.provide(Layer.mock(ThreadManagement.ThreadManagementService)({})),
@@ -161,7 +162,7 @@ it.effect("returns a bounded public failure without serializing storage causes",
     });
   }).pipe(
     Effect.provide(
-      McpHttpServer.ThreadToolkitRegistrationLive.pipe(
+      McpHttpServer.layerThreadToolkit.pipe(
         Layer.provideMerge(McpServer.McpServer.layer),
         Layer.provide(NodeCrypto.layer),
         Layer.provide(
@@ -202,7 +203,7 @@ it.effect("returns an HTML render reference that Codex and Claude tool rows both
     ).toEqual(reference);
   }).pipe(
     Effect.provide(
-      McpHttpServer.HtmlToolkitRegistrationLive.pipe(
+      McpHttpServer.layerHtmlToolkit.pipe(
         Layer.provideMerge(McpServer.McpServer.layer),
         Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-mcp-html-render-" })),
         Layer.provide(NodeServices.layer),
@@ -331,7 +332,7 @@ it.effect("a client caller targets any thread within its ceiling and cannot act 
     expect(declaredFailure(forked)).toMatchObject({ code: "target_required" });
   }).pipe(
     Effect.provide(
-      McpHttpServer.ThreadToolkitRegistrationLive.pipe(
+      McpHttpServer.layerThreadToolkit.pipe(
         Layer.provideMerge(McpServer.McpServer.layer),
         Layer.provide(NodeCrypto.layer),
         Layer.provide(
@@ -378,7 +379,7 @@ it.effect("refuses act-as-caller tools to a client caller", () =>
     expect(declaredFailure(result)).toMatchObject({ code: "thread_credential_required" });
   }).pipe(
     Effect.provide(
-      McpHttpServer.OrchestratorToolkitRegistrationLive.pipe(
+      McpHttpServer.layerOrchestratorToolkit.pipe(
         Layer.provideMerge(McpServer.McpServer.layer),
         Layer.provide(NodeCrypto.layer),
         Layer.provide(Layer.mock(ThreadManagement.ThreadManagementService)({})),
@@ -386,6 +387,7 @@ it.effect("refuses act-as-caller tools to a client caller", () =>
         Layer.provide(Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({})),
         Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
         Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
+        Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
       ),
     ),
   ),
@@ -415,7 +417,7 @@ it.effect("a caller cannot rewrite a scheduled task that runs above its own mode
     expect(allowed.isError).toBe(false);
   }).pipe(
     Effect.provide(
-      McpHttpServer.OrchestratorToolkitRegistrationLive.pipe(
+      McpHttpServer.layerOrchestratorToolkit.pipe(
         Layer.provideMerge(McpServer.McpServer.layer),
         Layer.provide(NodeCrypto.layer),
         Layer.provide(Layer.mock(ThreadManagement.ThreadManagementService)({})),
@@ -437,6 +439,7 @@ it.effect("a caller cannot rewrite a scheduled task that runs above its own mode
           }),
         ),
         Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
+        Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
       ),
     ),
   ),
@@ -480,7 +483,7 @@ it.effect("a caller cannot interrupt a thread that runs above its own modes", ()
     expect(declaredFailure(result)).toMatchObject({ code: "runtime_mode_escalation_denied" });
   }).pipe(
     Effect.provide(
-      McpHttpServer.OrchestratorToolkitRegistrationLive.pipe(
+      McpHttpServer.layerOrchestratorToolkit.pipe(
         Layer.provideMerge(McpServer.McpServer.layer),
         Layer.provide(NodeCrypto.layer),
         Layer.provide(
@@ -505,6 +508,7 @@ it.effect("a caller cannot interrupt a thread that runs above its own modes", ()
         Layer.provide(Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({})),
         Layer.provide(Layer.mock(ScheduledTaskService.ScheduledTaskService)({})),
         Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
+        Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
       ),
     ),
   ),

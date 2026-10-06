@@ -51,7 +51,7 @@ import {
   hermesProcessMutation,
 } from "../../provider/acp/HermesBackground.ts";
 import { makeHermesSubagentExtractor } from "../../provider/acp/HermesDelegation.ts";
-import * as ProviderEventLoggers from "../../provider/Layers/ProviderEventLoggers.ts";
+import * as ProviderEventLoggers from "../../provider/ProviderEventLoggers.ts";
 import { mergeProviderInstanceEnvironment } from "../../provider/ProviderInstanceEnvironment.ts";
 import * as IdAllocator from "../IdAllocator.ts";
 import * as ProviderContinuationRequests from "../ProviderContinuationRequests.ts";

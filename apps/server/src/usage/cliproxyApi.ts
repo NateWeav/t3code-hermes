@@ -195,9 +195,10 @@ export const makeCliproxyApi = Effect.gen(function* () {
       );
     }).pipe(
       Effect.timeout("15 seconds"),
-      Effect.catchTag("TimeoutError", () =>
-        Effect.fail(new UsageLimitSourceError({ detail: "The hub did not answer in time." })),
-      ),
+      Effect.catchTags({
+        TimeoutError: () =>
+          Effect.fail(new UsageLimitSourceError({ detail: "The hub did not answer in time." })),
+      }),
     );
   });
 
@@ -360,9 +361,10 @@ export const makeCliproxyApi = Effect.gen(function* () {
     UsageLimitSourceError | CliproxyKeyRejectedError
   > {
     const accounts = yield* authFiles(config).pipe(
-      Effect.catchTag("SchemaError", () =>
-        Effect.fail(new UsageLimitSourceError({ detail: "The hub could not list accounts." })),
-      ),
+      Effect.catchTags({
+        SchemaError: () =>
+          Effect.fail(new UsageLimitSourceError({ detail: "The hub could not list accounts." })),
+      }),
     );
     return yield* Effect.forEach(
       accounts.filter(

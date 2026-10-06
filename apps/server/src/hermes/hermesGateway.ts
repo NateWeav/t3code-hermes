@@ -146,7 +146,7 @@ export async function latestModifiedMs(
 
 /** Bounded, plain-text tail of a failed `hermes gateway restart`. */
 export function describeRestartOutput(stdout: string, stderr: string): string | null {
-  // eslint-disable-next-line no-control-regex
+  // eslint-disable-next-line no-control-regex -- Strips ANSI escapes from the gateway's terminal output.
   const plain = `${stdout}\n${stderr}`.replace(/\u001b\[[0-9;?]*[A-Za-z]/g, "");
   const lines = plain
     .split("\n")

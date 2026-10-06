@@ -129,10 +129,12 @@ export const ForwardCompatibleArray = <Element extends Schema.Top>(element: Elem
   Schema.Array(
     Schema.UndefinedOr(element).pipe(
       // An element this build cannot read becomes a hole, filtered out below.
+      // Fork: no catchEncoding here. Upstream also put one on this side, but
+      // it made a nested ForwardCompatibleArray drop the whole outer element
+      // whenever it dropped one of its own (a Hermes cron job vanished when one
+      // run had an unknown status). The catch on the decoded side below already
+      // sends an unencodable element as a hole.
       Schema.catchDecoding(() => Effect.succeedSome(undefined)),
-      // Likewise an element that cannot be encoded is sent as a hole, so one
-      // bad element costs only itself rather than the whole payload.
-      Schema.catchEncoding(() => Effect.succeedSome(undefined)),
     ),
   ).pipe(
     Schema.decodeTo(

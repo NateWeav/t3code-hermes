@@ -8,10 +8,10 @@ name: Hermes Patches
 # manifest order, and must not fail any patch-relevant Hermes test that passes
 # on unpatched main.
 #
-# Drift files a `hermes-patch-drift` issue; the Hermes upstream-sync profile
-# picks it up from the webhook and opens a PR adding rebased versions (see
-# infra/hermes/automation/). The issue body is parsed there, so keep
-# .github/scripts/hermes-patch-drift.cjs's report format stable.
+# Drift files a `hermes-patch-drift` issue; the maintainer's Hermes resolver
+# picks it up from the webhook and opens a PR adding rebased versions. It parses
+# the issue body, so keep .github/scripts/hermes-patch-drift.cjs's report
+# format stable.
 #
 # This workflow only ever runs on a fork (see the job guard).
 

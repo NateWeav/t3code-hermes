@@ -13,8 +13,8 @@
 //   report --state <file> --body <file> [--run-url <url>]
 //          Writes the drift issue body and the `drift` step output.
 //
-// The issue body is parsed by infra/hermes/automation/hermes-patch-drift.py;
-// keep `Hermes main:` and the `- \`<id>\`: \`<status>\`` lines stable.
+// The maintainer's resolver automation parses the issue body; keep
+// `Hermes main:` and the `- \`<id>\`: \`<status>\`` lines stable.
 const childProcess = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -164,7 +164,7 @@ function decide(state) {
   });
 }
 
-/** The issue body. infra/hermes/automation/hermes-patch-drift.py parses it. */
+/** The issue body. The maintainer's resolver automation parses it. */
 function formatReport({ hermesSha, results, runUrl }) {
   const lines = [
     "The Hermes patches this fork carries no longer fit Hermes `main`.",

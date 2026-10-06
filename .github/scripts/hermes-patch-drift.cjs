@@ -4,7 +4,8 @@
 //
 //   check  --hermes <dir> --state <file> [--manifest <file>]
 //          Newest version of each patch: applies, reverse-applies (obsolete),
-//          and stacks in manifest order. Leaves the checkout untouched.
+//          and stacks in manifest order (a patch may build on earlier ones,
+//          so applying on the stack is enough). Leaves the checkout untouched.
 //   test   --hermes <dir> --state <file> --python <bin>
 //          Runs the patch-relevant test files on the clean checkout, applies
 //          the stack to it, and runs them again. Only failures absent from the
@@ -148,7 +149,8 @@ function decide(state) {
   return state.patches.map((patch) => {
     let status = "ok";
     if (patch.reverse) status = "obsolete";
-    else if (!patch.apply) status = "doesNotApply";
+    // Applying on the patches before it is enough: it may build on them.
+    else if (!patch.apply && !patch.stack) status = "doesNotApply";
     else if (patch.stack === false) status = "stackConflict";
     else if (failing.get(patch.id).length > 0) status = "testsFailed";
     return {
@@ -183,10 +185,10 @@ function formatReport({ hermesSha, results, runUrl }) {
   }
   lines.push(
     "",
-    "`doesNotApply`: the newest version no longer applies. `obsolete`: it reverse-applies, so",
-    "Hermes main already carries the change. `stackConflict`: it applies alone but not on top of",
-    "the patches listed before it. `testsFailed`: the listed test files fail with every patch",
-    "applied but not on unpatched main.",
+    "`doesNotApply`: the newest version applies neither alone nor on top of the patches listed",
+    "before it. `obsolete`: it reverse-applies, so Hermes main already carries the change.",
+    "`stackConflict`: it applies alone but not on top of the patches listed before it.",
+    "`testsFailed`: the listed test files fail with every patch applied but not on unpatched main.",
     "",
     "Add a rebased version (see `infra/hermes/README.md`), or delete an obsolete patch.",
   );
@@ -245,12 +247,14 @@ function check({ hermes, state: statePath, manifest: manifestPath }) {
   });
 
   // Stack in manifest order on a throwaway index, so the checkout stays clean
-  // for the baseline test run.
+  // for the baseline test run. A patch that does not apply alone is stacked
+  // too: it may build on the patches before it, such as one that edits a file
+  // an earlier patch creates.
   const index = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "hermes-stack-")), "index");
   const env = { GIT_INDEX_FILE: index };
   if (git(hermes, ["read-tree", "HEAD"], env).status !== 0) throw new Error("git read-tree failed");
   for (const patch of patches) {
-    if (!patch.apply || patch.reverse) continue;
+    if (patch.reverse) continue;
     const stacked = git(hermes, ["apply", "--cached", patch.path], env);
     patch.stack = stacked.status === 0;
     console.log(`${patch.id}: stack=${patch.stack}`);
@@ -258,7 +262,7 @@ function check({ hermes, state: statePath, manifest: manifestPath }) {
   }
   fs.rmSync(path.dirname(index), { recursive: true, force: true });
 
-  const applies = patches.every((patch) => patch.apply && !patch.reverse && patch.stack);
+  const applies = patches.every((patch) => !patch.reverse && patch.stack);
   const state = {
     hermesSha,
     patches,

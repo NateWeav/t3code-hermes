@@ -277,6 +277,25 @@ describe("RunThroughputMeter", () => {
     }),
   );
 
+  it.effect("ignores a finished run's late events instead of replacing the next run's meter", () =>
+    Effect.gen(function* () {
+      const meter = yield* make;
+      const first = { threadId, runId };
+      const next = { threadId, runId: RunId.make("run-2") };
+      yield* meter.observe(first, progress(400));
+      yield* meter.endRun(first);
+      for (const chars of [400, 400, 400, 400]) {
+        yield* meter.observe(next, progress(chars));
+        yield* TestClock.adjust(100);
+      }
+      // Background work the first run started reports after the next run began.
+      yield* meter.observe(first, progress(4_000));
+
+      const [current] = yield* meter.stream(threadId).pipe(Stream.take(1), Stream.runCollect);
+      expect(current).toMatchObject({ runId: next.runId, outputTokens: 400 });
+    }),
+  );
+
   it.effect(
     "pushes the rate while the run generates, once more when it idles, and null when it ends",
     () =>

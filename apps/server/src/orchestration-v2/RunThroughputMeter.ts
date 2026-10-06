@@ -241,6 +241,8 @@ export class RunThroughputMeter extends Context.Reference<RunThroughputMeterShap
 
 /** Threads whose last rate is kept for their next run. */
 const MAX_REMEMBERED_THREADS = 256;
+/** Ended runs remembered so their late events are ignored; far more than ever overlap. */
+const MAX_ENDED_RUNS = 1_024;
 
 interface ThroughputChange {
   readonly threadId: ThreadId;
@@ -253,6 +255,10 @@ export const make = Effect.gen(function* () {
   // A run that only thinks before answering (Claude holds its text back) has
   // nothing to show until it ends, so it starts from the thread's last rate.
   const lastRateByThread = new Map<ThreadId, number>();
+  // A run's subscription can outlive its terminal event while background work
+  // it started still reports. Those late events must not displace the meter
+  // of the thread's next run.
+  const endedRuns = new Set<RunId>();
   const changes = yield* PubSub.unbounded<ThroughputChange>();
   let ticking = false;
 
@@ -299,6 +305,7 @@ export const make = Effect.gen(function* () {
       ) {
         return;
       }
+      if (endedRuns.has(run.runId)) return;
       const nowMs = yield* Clock.currentTimeMillis;
       let meter = meters.get(run.threadId);
       if (meter?.runId !== run.runId) {
@@ -318,6 +325,13 @@ export const make = Effect.gen(function* () {
 
   const endRun: RunThroughputMeterShape["endRun"] = (run) =>
     Effect.gen(function* () {
+      if (!endedRuns.has(run.runId)) {
+        endedRuns.add(run.runId);
+        if (endedRuns.size > MAX_ENDED_RUNS) {
+          const oldest = endedRuns.values().next().value;
+          if (oldest !== undefined) endedRuns.delete(oldest);
+        }
+      }
       const meter = meters.get(run.threadId);
       if (meter?.runId !== run.runId) return;
       meters.delete(run.threadId);

@@ -96,6 +96,8 @@ jobs:
       - id: merge
         name: Merge upstream/main
         shell: bash
+        env:
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
         run: |
           set -uo pipefail
 
@@ -112,10 +114,21 @@ jobs:
             exit 0
           fi
 
-          pending_pr=$(gh pr list --repo "$GITHUB_REPOSITORY" --base main --state open \
+          sync_prs=$(gh pr list --repo "$GITHUB_REPOSITORY" --base main --state open \
             --limit 100 --json url,headRefName,author \
-            --jq '[.[] | select(.headRefName | startswith("automation/sync-upstream/")) | select(.author.is_bot)][0].url // empty') \
+            --jq '[.[] | select(.headRefName | startswith("automation/sync-upstream/")) | select(.author.is_bot)]') \
             || exit 1
+          # A sync PR opened before the app was configured never gets CI
+          # without a manual approval, and reusing it never fixes that.
+          # Close it so this run opens a fresh one through the app.
+          if [[ -n "$APP_SLUG" ]]; then
+            for stale in $(jq -r --arg me "app/$APP_SLUG" '.[] | select(.author.login != $me) | .url' <<<"$sync_prs"); do
+              gh pr close "$stale" --comment "Superseded: the sync now opens its PRs through the $APP_SLUG app so CI runs without approval." \
+                || exit 1
+            done
+            sync_prs=$(jq --arg me "app/$APP_SLUG" '[.[] | select(.author.login == $me)]' <<<"$sync_prs")
+          fi
+          pending_pr=$(jq -r '.[0].url // empty' <<<"$sync_prs")
           if [[ -n "$pending_pr" ]]; then
             echo "status=pending" >> "$GITHUB_OUTPUT"
             echo "pr_url=$pending_pr" >> "$GITHUB_OUTPUT"

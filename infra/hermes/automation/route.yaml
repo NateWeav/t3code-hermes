@@ -21,7 +21,8 @@ t3code-hermes-patch-drift:
     Per-patch status (JSON): {patches}
     Trigger: {trigger}
 
-    Statuses: doesNotApply (the newest version no longer applies), obsolete (it
+    Statuses: doesNotApply (the newest version applies neither alone nor on top of
+    the patches listed before it), obsolete (it
     reverse-applies, so Hermes main already carries the change), stackConflict (it
     applies alone but not on top of the patches listed before it), testsFailed (the
     listed test files fail with every patch applied but pass on unpatched main).
@@ -133,7 +134,8 @@ t3code-hermes-patch-drift:
     7. Verify, and record exact commands and results for the PR:
        - Rerun step 4's check/test/report on a fresh HERMES_SHA worktree against
          the updated manifest. Every patch must report ok: each newest version
-         applies alone and does not reverse-apply, the stack applies in manifest
+         applies (alone, or on the patches before it when it builds on them)
+         and does not reverse-apply, the stack applies in manifest
          order, and the patch-relevant tests show no failure absent from the
          unpatched baseline.
        - In apps/server: `vp test run src/hermes/hermesPatches.test.ts`.

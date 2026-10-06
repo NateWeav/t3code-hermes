@@ -2,8 +2,9 @@ name: Hermes Patches
 
 # Checks that the Hermes patches this fork carries (infra/hermes) still fit
 # Hermes main, which users follow with `hermes update`. Every three hours the
-# newest version of each patch must apply to a fresh checkout of Hermes main,
-# must not reverse-apply (that means upstream now carries it), must stack in
+# newest version of each patch must apply to a fresh checkout of Hermes main
+# (or, for one that builds on earlier patches, on top of them), must not
+# reverse-apply (that means upstream now carries it), must stack in
 # manifest order, and must not fail any patch-relevant Hermes test that passes
 # on unpatched main.
 #

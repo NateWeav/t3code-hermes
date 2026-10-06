@@ -211,9 +211,8 @@ the wake prompt settles, because its stop reason does not say whether Hermes set
 
 Verified against hermes-agent `4d3555e5ca` and `af8839df10` (`main`, 2026-10-04) after
 `acp-delegation-progress` and `acp-background-reports`, with or without `acp-fast-mode` in either
-order. Version `1212a7f18ce8` (`main`, 2026-10-06) is the same change re-cut on top of the
-patches before it, which `acp_adapter/server.py` grew around; it edits `acp_adapter/background.py`,
-which `acp-background-reports` creates, so it never applies to stock Hermes on its own.
+order. It edits `acp_adapter/background.py`, which `acp-background-reports` creates, so it applies
+only on top of the patches before it, never to stock Hermes alone.
 
 Restart the T3 Code server after applying the patch. Run the patch's
 `tests/acp_adapter/test_background_reports.py` and `tests/tools/test_async_delegation.py` in a

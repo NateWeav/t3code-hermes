@@ -66,11 +66,6 @@
       "neededFor": "Apply after Live subagent progress and Background process reports. Keeps a finished subagent's result until the agent has actually been woken with it, and redelivers results missed while T3 Code was disconnected or restarting.",
       "versions": [
         {
-          "hermesCommit": "1212a7f18ce88ab4cd5f66f22762d1cb1ed2428e",
-          "hermesCommitDate": "2026-10-06T21:03:26Z",
-          "file": "acp-durable-completion-receipts/1212a7f18ce8.patch"
-        },
-        {
           "hermesCommit": "af8839df1038cc026075fb254afa22edc19d911d",
           "hermesCommitDate": "2026-10-04T22:20:18Z",
           "file": "acp-durable-completion-receipts/af8839df1038.patch"

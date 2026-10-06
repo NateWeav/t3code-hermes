@@ -5,6 +5,7 @@ import {
   MessageId,
   ModelSelection,
   NodeId,
+  NonNegativeInt,
   OrchestrationV2AppThread,
   OrchestrationV2ConversationMessage,
   OrchestrationV2ExecutionNode,
@@ -127,6 +128,32 @@ export const ProviderAdapterV2Event = Schema.Union([
     type: Schema.Literal("plan.updated"),
     driver: ProviderDriverKind,
     plan: OrchestrationV2PlanArtifact,
+  }),
+  /**
+   * Characters of output the model just generated (0 as a response starts),
+   * from adapters whose raw deltas outrun their turn items (Claude streams text
+   * and tool input that only lands as a finished block). Feeds the live
+   * throughput meter, which then ignores the run's text items; never persisted.
+   */
+  Schema.Struct({
+    type: Schema.Literal("output.progress"),
+    driver: ProviderDriverKind,
+    threadId: ThreadId,
+    runId: RunId,
+    chars: NonNegativeInt,
+  }),
+  /**
+   * Exact output of a model response that just finished, from adapters whose
+   * provider reports it (Claude's per-message usage, hidden thinking included).
+   * Replaces the meter's estimate for the response's duration; never persisted.
+   */
+  Schema.Struct({
+    type: Schema.Literal("output.measured"),
+    driver: ProviderDriverKind,
+    threadId: ThreadId,
+    runId: RunId,
+    tokens: NonNegativeInt,
+    durationMs: NonNegativeInt,
   }),
   Schema.Struct({
     type: Schema.Literal("turn.terminal"),

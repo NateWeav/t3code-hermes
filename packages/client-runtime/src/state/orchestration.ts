@@ -1,5 +1,6 @@
 import { ORCHESTRATION_V2_WS_METHODS } from "@t3tools/contracts";
-import { Atom } from "effect/unstable/reactivity";
+import * as Stream from "effect/Stream";
+import { Atom } from "effect/reactivity";
 
 import {
   createEnvironmentRpcCommand,
@@ -7,6 +8,7 @@ import {
   createEnvironmentRpcSubscriptionAtomFamily,
 } from "./runtime.ts";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
+import { accumulateRunThroughput, type RunThroughputReadout } from "./runThroughput.ts";
 
 export function createOrchestrationEnvironmentAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>,
@@ -31,6 +33,22 @@ export function createOrchestrationEnvironmentAtoms<R, E>(
         label: "environment-data:orchestration-v2:thread",
         tag: ORCHESTRATION_V2_WS_METHODS.subscribeThread,
         idleTtlMs: 0,
+      }),
+      // Live output rate of the thread's running turn, with its recent history.
+      runThroughput: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+        label: "environment-data:orchestration-v2:run-throughput",
+        tag: ORCHESTRATION_V2_WS_METHODS.subscribeRunThroughput,
+        idleTtlMs: 0,
+        transform: (stream) =>
+          stream.pipe(
+            Stream.mapAccum(
+              () => null as RunThroughputReadout | null,
+              (previous, value) => {
+                const next = accumulateRunThroughput(previous, value);
+                return [next, [next]] as const;
+              },
+            ),
+          ),
       }),
     },
     turnDiff: createEnvironmentRpcQueryAtomFamily(runtime, {

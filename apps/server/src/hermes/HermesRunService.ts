@@ -444,7 +444,7 @@ const make = Effect.gen(function* () {
   const dispatch = (command: OrchestrationV2ServerCommand) =>
     orchestrator.dispatch(command).pipe(
       // A rejected command stays rejected; replaying it can never apply it.
-      Effect.catchTag("OrchestratorCommandPreviouslyRejectedError", () => Effect.void),
+      Effect.catchTags({ OrchestratorCommandPreviouslyRejectedError: () => Effect.void }),
       Effect.asVoid,
     );
 

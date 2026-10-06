@@ -20,7 +20,7 @@
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Result from "effect/Result";
-import { HttpClient, HttpClientRequest } from "effect/unstable/http";
+import { HttpClient, HttpClientRequest } from "effect/http";
 import { type Document, isMap, isScalar, isSeq, parseDocument, Scalar, YAMLMap } from "yaml";
 
 import { writeFileStringAtomically } from "../atomicWrite.ts";

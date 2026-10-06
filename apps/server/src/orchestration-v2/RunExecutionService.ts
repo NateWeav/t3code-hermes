@@ -51,6 +51,7 @@ import * as ProviderEventIngestor from "./ProviderEventIngestor.ts";
 import type { ProjectionStoreV2Error } from "./ProjectionStore.ts";
 import { makeProviderFailure, makeProviderFailureTurnItem } from "./ProviderFailure.ts";
 import * as RunFinalizationService from "./RunFinalizationService.ts";
+import { RunThroughputMeter } from "./RunThroughputMeter.ts";
 
 export interface ProviderEventRoutingState {
   readonly ownedThreadIds: ReadonlySet<ThreadId>;
@@ -451,6 +452,9 @@ export function routeProviderEvent(
             state.ownedProviderTurnIds.has(event.runtimeRequest.providerTurnId)),
         state,
       ];
+    case "output.progress":
+    case "output.measured":
+      return [ownsRun(event.runId) && event.threadId === input.threadId, state];
     case "turn.terminal":
       return event.providerTurnId === state.rootProviderTurnId
         ? [true, { ...state, rootTurnEnded: true }]
@@ -553,6 +557,7 @@ export const layer: Layer.Layer<
     const providerEventIngestor = yield* ProviderEventIngestor.ProviderEventIngestorV2;
     const serverSettings = yield* ServerSettings.ServerSettingsService;
     const finalizationObserver = yield* RunFinalizationService.RunFinalizationObserver;
+    const throughputMeter = yield* RunThroughputMeter;
 
     const writeFinalRunEvents = (input: {
       readonly run: OrchestrationV2Run;
@@ -783,6 +788,7 @@ export const layer: Layer.Layer<
             activeAttemptId: input.writeIfRunCurrent.activeAttemptId,
             expectedStatus: input.writeIfRunCurrent.expectedStatus,
             events: finalization.events,
+            effects: finalization.effects,
           });
           if (!result.committed) {
             return;
@@ -971,7 +977,15 @@ export const layer: Layer.Layer<
                 attempt: input.attempt,
                 ...(input.shouldFinalizeRun === undefined
                   ? {}
-                  : { shouldFinalizeRun: input.shouldFinalizeRun }),
+                  : {
+                      shouldFinalizeRun: input.shouldFinalizeRun,
+                      // Stop may commit between the ownership read and this
+                      // terminal write. Gate the events and checkpoint together.
+                      writeIfRunCurrent: {
+                        activeAttemptId: input.attempt.id,
+                        expectedStatus: "running" as const,
+                      },
+                    }),
                 ...(input.hasUnpairedRunInterruptRequest === undefined
                   ? {}
                   : {
@@ -1170,12 +1184,16 @@ export const layer: Layer.Layer<
             return true;
           });
           const filterAssistantEvent = makeAssistantStreamingFilter(responseStreamingMode);
+          const throughputRun = { threadId: input.run.threadId, runId: input.run.id };
           const providerEventFiber = yield* eventSubscription.events.pipe(
             Stream.filterEffect((event) =>
               Ref.modify(eventRouting, (state) => routeProviderEvent(event, routeIdentity, state)),
             ),
             Stream.tap((event) =>
               Effect.gen(function* () {
+                // Measured before the streaming filter holds text back from clients.
+                yield* throughputMeter.observe(throughputRun, event);
+                if (event.type === "output.progress" || event.type === "output.measured") return;
                 let storedEventCount = 0;
                 const deliveredEvent = filterAssistantEvent(
                   event,
@@ -1248,6 +1266,7 @@ export const layer: Layer.Layer<
                   );
                 }
                 if (event.type === "turn.terminal") {
+                  yield* throughputMeter.endRun(throughputRun);
                   yield* Ref.set(terminalEvent, event);
                   yield* Ref.set(rootTerminalSeen, true);
                   yield* finalizeRootRun(event);
@@ -1325,6 +1344,7 @@ export const layer: Layer.Layer<
               ),
             ),
             Effect.ensuring(eventSubscription.close),
+            Effect.ensuring(throughputMeter.endRun(throughputRun)),
             Effect.forkDetach,
           );
 
@@ -1437,7 +1457,7 @@ export const layer: Layer.Layer<
   }),
 );
 
-function makeInterruptResultTurnItem(input: {
+export function makeInterruptResultTurnItem(input: {
   readonly idAllocator: IdAllocator.IdAllocatorV2Shape;
   readonly run: OrchestrationV2Run;
   readonly rootNode: OrchestrationV2ExecutionNode;

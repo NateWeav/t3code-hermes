@@ -48,6 +48,7 @@ import {
   type OrchestrationV2ExecutionNode,
   type OrchestrationV2ProviderCapabilities,
   type OrchestrationV2ProviderFailure,
+  OrchestrationV2ProviderGoal,
   type OrchestrationV2PlanArtifact,
   type OrchestrationV2PlanStep,
   type OrchestrationV2PendingBackgroundTask,
@@ -70,6 +71,7 @@ import {
 } from "@t3tools/contracts";
 
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -106,13 +108,13 @@ import {
   boundProviderEventForLogging,
   type EventNdjsonLogger,
   shouldPersistProviderEvent,
-} from "../../provider/Layers/EventNdjsonLogger.ts";
-import * as ProviderEventLoggers from "../../provider/Layers/ProviderEventLoggers.ts";
+} from "../../provider/EventNdjsonLogger.ts";
+import * as ProviderEventLoggers from "../../provider/ProviderEventLoggers.ts";
 import {
   claudeRateLimitEventToUpdate,
   type ClaudeScopedLimitNames,
-} from "../../provider/Layers/claudeUsageLimits.ts";
-import type { ServerProviderShape } from "../../provider/Services/ServerProvider.ts";
+} from "../../provider/claudeUsageLimits.ts";
+import type { ServerProviderShape } from "../../provider/ServerProvider.ts";
 import { mergeProviderInstanceEnvironment } from "../../provider/ProviderInstanceEnvironment.ts";
 import { T3_CODE_ORCHESTRATION_INSTRUCTIONS } from "../../provider/T3OrchestrationInstructions.ts";
 import { buildRuntimeInstructions } from "../../provider/RuntimeInstructions.ts";
@@ -593,7 +595,7 @@ export function makeClaudeAgentSdkProtocolLogger(input: {
   };
 }
 
-export const claudeAgentSdkQueryRunnerLiveLayer: Layer.Layer<
+export const layerQueryRunner: Layer.Layer<
   ClaudeAgentSdkQueryRunner,
   never,
   Crypto.Crypto | ProviderEventLoggers.ProviderEventLoggers
@@ -946,6 +948,8 @@ export const CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
   "mcp__t3-code__t3_environment_read",
   "mcp__t3-code__t3_queue_list",
   "mcp__t3-code__t3_queue_read",
+  "mcp__t3-code__html_preview",
+  "mcp__t3-code__html_render",
 ];
 
 // Claude Code aborts an HTTP MCP call after 60 s ("The operation timed out.")
@@ -1015,6 +1019,64 @@ function providerSession(input: {
 function textFromClaudeContent(content: SDKAssistantMessage["message"]["content"]): string {
   return content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("");
 }
+
+// In SDK mode Claude reports `/goal` only through the transcript (its
+// `active_goal` event is remote-only): synthetic command output names the
+// goal, and each unmet evaluator check returns as Stop hook feedback.
+const CLAUDE_GOAL_SET_PREFIX = "Goal set: ";
+const CLAUDE_GOAL_ACTIVE = /^Goal active: ([\s\S]+?) \((?:not yet evaluated|(\d+) turns?)\)/u;
+
+/**
+ * The goal after one root SDK frame, or undefined when the frame says nothing
+ * about it. Completion has no frame of its own; see finalizeActiveTurn.
+ */
+function nextClaudeGoal(
+  current: OrchestrationV2ProviderGoal | null,
+  message: SDKMessage,
+): OrchestrationV2ProviderGoal | null | undefined {
+  if (message.type === "assistant") {
+    if (message.parent_tool_use_id !== null || message.message.model !== "<synthetic>") {
+      return undefined;
+    }
+    const text = textFromClaudeContent(message.message.content).trim();
+    if (text.startsWith(CLAUDE_GOAL_SET_PREFIX)) {
+      const objective = text.slice(CLAUDE_GOAL_SET_PREFIX.length).trim();
+      return objective.length === 0 ? undefined : { objective, status: "active", checks: 0 };
+    }
+    if (text.startsWith("Goal cleared: ") || text.startsWith("No goal set")) return null;
+    const active = CLAUDE_GOAL_ACTIVE.exec(text);
+    if (active?.[1] === undefined) return undefined;
+    return {
+      ...(current?.objective === active[1] ? current : {}),
+      objective: active[1],
+      status: "active",
+      checks: Number(active[2] ?? 0),
+    };
+  }
+  if (
+    message.type !== "user" ||
+    message.parent_tool_use_id !== null ||
+    message.isSynthetic !== true ||
+    current === null
+  ) {
+    return undefined;
+  }
+  const prefix = `Stop hook feedback:\n[${current.objective}]: `;
+  const content = message.message.content;
+  const text =
+    typeof content === "string"
+      ? content
+      : content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("");
+  if (!text.startsWith(prefix)) return undefined;
+  return {
+    ...current,
+    status: "active",
+    checks: (current.checks ?? 0) + 1,
+    lastCheck: text.slice(prefix.length).trim(),
+  };
+}
+
+const providerGoalsEqual = Schema.toEquivalence(Schema.NullOr(OrchestrationV2ProviderGoal));
 
 /** Compares a subagent result with its routed text regardless of block joins. */
 function normalizeClaudeResultText(text: string): string {
@@ -2688,6 +2750,28 @@ function formatClaudeUsageLimitWait(waitMs: number): string {
   return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
 }
 
+type ClaudeStreamEvent = Extract<SDKMessage, { readonly type: "stream_event" }>["event"];
+
+/**
+ * Characters of visible model output a raw stream frame carries: text or tool
+ * input. Thinking is left out: what streams is a summary trickling behind the
+ * real thinking, which only the message's final usage counts.
+ */
+function claudeStreamOutputChars(event: ClaudeStreamEvent): number {
+  if (event.type !== "content_block_delta") return 0;
+  switch (event.delta.type) {
+    case "text_delta":
+      return event.delta.text.length;
+    case "input_json_delta":
+      return event.delta.partial_json.length;
+    default:
+      return 0;
+  }
+}
+
+/** Raw deltas arrive per token; the throughput meter only needs them this often. */
+const OUTPUT_PROGRESS_INTERVAL_MS = 100;
+
 interface ActiveClaudeTurnContext {
   readonly input: ProviderAdapter.ProviderAdapterV2TurnInput;
   readonly nativeTurnId: string;
@@ -3096,6 +3180,10 @@ export function makeClaudeAdapterV2(
         const lastProviderThreadByNativeThread = yield* Ref.make(
           new Map<string, OrchestrationV2ProviderThread>(),
         );
+        // Native `/goal` per session, seeded from the persisted provider thread.
+        const goalsByNativeThread = new Map<string, OrchestrationV2ProviderGoal | null>();
+        // Turns whose model output met an active goal's Stop hook check at its end.
+        const goalCheckedTurns = new Set<string>();
         // Subagent registry that survives turn settle: a background subagent
         // (Agent with run_in_background) can complete after the root turn
         // ended, and its task_notification must both count as wake evidence
@@ -3519,6 +3607,9 @@ export function makeClaudeAdapterV2(
             providerSessionId: session.id,
             ...(input.status === undefined ? {} : { status: input.status }),
             pendingBackgroundTasks: claudePendingBackgroundTasksFromRoster(roster),
+            ...(goalsByNativeThread.has(input.nativeThreadId)
+              ? { goal: goalsByNativeThread.get(input.nativeThreadId) ?? null }
+              : {}),
             updatedAt: now,
           };
           yield* rememberProviderThread(providerThread);
@@ -3526,6 +3617,37 @@ export function makeClaudeAdapterV2(
             type: "provider_thread.updated",
             driver: CLAUDE_PROVIDER,
             providerThread,
+          });
+        });
+
+        /** Applies one root frame's goal signal and writes any change onto the provider thread. */
+        const trackClaudeGoal = Effect.fnUntraced(function* (input: {
+          readonly nativeThreadId: string;
+          readonly context: ActiveClaudeTurnContext;
+          readonly message: SDKMessage;
+        }) {
+          const current = goalsByNativeThread.get(input.nativeThreadId) ?? null;
+          if (
+            current?.status === "active" &&
+            input.message.type === "assistant" &&
+            input.message.parent_tool_use_id === null &&
+            input.message.message.model !== "<synthetic>"
+          ) {
+            goalCheckedTurns.add(input.context.providerTurnId);
+          }
+          const next = nextClaudeGoal(current, input.message);
+          if (next === undefined || providerGoalsEqual(current, next)) return;
+          goalsByNativeThread.set(input.nativeThreadId, next);
+          const providerThread = (yield* Ref.get(lastProviderThreadByNativeThread)).get(
+            input.nativeThreadId,
+          );
+          if (providerThread === undefined) return;
+          const updated = { ...providerThread, goal: next, updatedAt: yield* DateTime.now };
+          yield* rememberProviderThread(updated);
+          yield* emitProviderEvent({
+            type: "provider_thread.updated",
+            driver: CLAUDE_PROVIDER,
+            providerThread: updated,
           });
         });
 
@@ -4810,6 +4932,36 @@ export function makeClaudeAdapterV2(
           return { node, request, turnItem };
         });
 
+        // Output not yet reported to the throughput meter. Text and tool input
+        // only land as finished blocks, so the meter counts these deltas instead,
+        // then takes each message's exact usage once it ends.
+        const pendingOutput = {
+          chars: 0,
+          reportedAtMs: 0,
+          messageStartedAtMs: 0,
+          heldBack: false,
+        };
+        const reportOutputProgress = Effect.fnUntraced(function* (
+          context: ActiveClaudeTurnContext,
+          chars: number,
+          flush: boolean,
+        ) {
+          pendingOutput.chars += chars;
+          if (pendingOutput.chars === 0) return;
+          const nowMs = yield* Clock.currentTimeMillis;
+          if (!flush && nowMs - pendingOutput.reportedAtMs < OUTPUT_PROGRESS_INTERVAL_MS) return;
+          const reported = pendingOutput.chars;
+          pendingOutput.chars = 0;
+          pendingOutput.reportedAtMs = nowMs;
+          yield* emitProviderEvent({
+            type: "output.progress",
+            driver: CLAUDE_PROVIDER,
+            threadId: context.input.threadId,
+            runId: context.input.runId,
+            chars: reported,
+          });
+        });
+
         const ensureReasoningBlock = Effect.fnUntraced(function* (
           context: ActiveClaudeTurnContext,
           itemId: string,
@@ -5054,10 +5206,36 @@ export function makeClaudeAdapterV2(
                 const clearConversationHead =
                   input.status === "completed" &&
                   input.context.input.providerThread.nativeConversationHeadRef !== null;
+                // While a goal is set, Claude ends a turn on its own only after the
+                // goal's Stop hook passes. It defers that check while background
+                // work runs, and a hook that stops the turn reports another reason.
+                // SDK mode does not report an evaluator timeout or an impossible
+                // verdict, so those still read as complete.
+                const goal =
+                  nativeThreadId === null ? undefined : goalsByNativeThread.get(nativeThreadId);
+                const goalChecked = goalCheckedTurns.delete(input.context.providerTurnId);
+                const terminalReason = input.result?.terminal_reason;
+                if (
+                  nativeThreadId !== null &&
+                  goal?.status === "active" &&
+                  goalChecked &&
+                  input.status === "completed" &&
+                  (terminalReason === undefined || terminalReason === "completed") &&
+                  roster.size === 0
+                ) {
+                  goalsByNativeThread.set(nativeThreadId, {
+                    objective: goal.objective,
+                    status: "complete",
+                    ...(goal.checks === undefined ? {} : { checks: goal.checks }),
+                  });
+                }
                 const providerThread: OrchestrationV2ProviderThread = {
                   ...input.context.input.providerThread,
                   providerSessionId: session.id,
                   ...(clearConversationHead ? { nativeConversationHeadRef: null } : {}),
+                  ...(nativeThreadId !== null && goalsByNativeThread.has(nativeThreadId)
+                    ? { goal: goalsByNativeThread.get(nativeThreadId) ?? null }
+                    : {}),
                   firstRunOrdinal:
                     input.context.input.providerThread.firstRunOrdinal ??
                     input.context.input.runOrdinal,
@@ -5736,10 +5914,54 @@ export function makeClaudeAdapterV2(
             }
             return;
           }
+          yield* trackClaudeGoal({ nativeThreadId: liveQuery.nativeThreadId, context, message });
 
           // Subagent narration belongs to its child thread, never the parent log.
           if (message.type === "stream_event" && !message.parent_tool_use_id) {
             const event = message.event;
+            if (event.type === "message_start") {
+              pendingOutput.messageStartedAtMs = yield* Clock.currentTimeMillis;
+              pendingOutput.heldBack = false;
+              // Tells the meter this run's output comes from these reports, not
+              // from the reasoning items streamed below.
+              yield* emitProviderEvent({
+                type: "output.progress",
+                driver: CLAUDE_PROVIDER,
+                threadId: context.input.threadId,
+                runId: context.input.runId,
+                chars: 0,
+              });
+            } else if (
+              event.type === "content_block_start" &&
+              (event.content_block.type === "thinking" ||
+                event.content_block.type === "redacted_thinking")
+            ) {
+              // After thinking, Claude holds the message's text back and flushes it
+              // at the end, so the meter gets only the message's exact usage.
+              pendingOutput.heldBack = true;
+            }
+            const outputChars = pendingOutput.heldBack ? 0 : claudeStreamOutputChars(event);
+            if (outputChars > 0 || event.type === "content_block_stop") {
+              yield* reportOutputProgress(
+                context,
+                outputChars,
+                event.type === "content_block_stop",
+              );
+            }
+            if (event.type === "message_delta" && pendingOutput.messageStartedAtMs > 0) {
+              yield* reportOutputProgress(context, 0, true);
+              const durationMs =
+                (yield* Clock.currentTimeMillis) - pendingOutput.messageStartedAtMs;
+              pendingOutput.messageStartedAtMs = 0;
+              yield* emitProviderEvent({
+                type: "output.measured",
+                driver: CLAUDE_PROVIDER,
+                threadId: context.input.threadId,
+                runId: context.input.runId,
+                tokens: event.usage.output_tokens,
+                durationMs,
+              });
+            }
             const reasoning = context.reasoning;
             if (event.type === "message_start") {
               reasoning.messageId = event.message.id;
@@ -7325,6 +7547,9 @@ export function makeClaudeAdapterV2(
               return updated;
             });
             yield* rememberProviderThread(turnInput.providerThread);
+            if (!goalsByNativeThread.has(nativeThreadId)) {
+              goalsByNativeThread.set(nativeThreadId, turnInput.providerThread.goal ?? null);
+            }
             const context: ActiveClaudeTurnContext = {
               input: turnInput,
               nativeTurnId,

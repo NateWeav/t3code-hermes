@@ -1,6 +1,4 @@
 import type { SubagentPillSegment } from "@t3tools/client-runtime/state/thread-subagents";
-import { readTurnThroughput } from "@t3tools/client-runtime/state/turn-throughput";
-import type { RunId, ScopedThreadRef } from "@t3tools/contracts";
 import { formatDuration } from "@t3tools/shared/orchestrationTiming";
 import { GlassContainer, GlassView } from "expo-glass-effect";
 import { type ReactNode, useEffect, useRef, useState } from "react";
@@ -28,6 +26,7 @@ import { AppText as Text } from "../../components/AppText";
 import { SymbolView } from "../../components/AppSymbol";
 import { ControlPill } from "../../components/ControlPill";
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
+import { BrowserPreviewButton } from "../browser/browser-preview-button";
 import { DevicePreviewButton } from "../devices/device-preview-button";
 import type { FloatingWorkingStatus } from "./floating-working-status";
 import { ShimmeringWorkContent } from "./thread-work-log";
@@ -69,6 +68,7 @@ export function FloatingWorkingControl(props: {
   readonly colorScheme: "light" | "dark";
   readonly status: FloatingWorkingStatus | null;
   readonly devicePreview: { readonly count: number; readonly onPress: () => void } | null;
+  readonly browserPreview: { readonly count: number; readonly onPress: () => void } | null;
   readonly showScrollToEnd: boolean;
   readonly onScrollToEnd: () => void;
   readonly agents: SubagentPillSegment | null;
@@ -83,8 +83,8 @@ export function FloatingWorkingControl(props: {
   const [queueWidth, setQueueWidth] = useState(0);
   const [agentsWidth, setAgentsWidth] = useState(0);
   const hasQueue = props.queuedCount > 0;
-  const hasDevicePreview = props.devicePreview !== null;
-  const [deviceWidth, setDeviceWidth] = useState(0);
+  const hasPreview = props.devicePreview !== null || props.browserPreview !== null;
+  const [previewWidth, setPreviewWidth] = useState(0);
   const agents = props.agents;
   const hasAgents = agents !== null;
   // Segments keep their measured width; only the status label absorbs the
@@ -96,7 +96,7 @@ export function FloatingWorkingControl(props: {
       32 -
       (hasQueue ? queueWidth : 0) -
       (hasAgents ? agentsWidth : 0) -
-      (hasDevicePreview ? deviceWidth : 0),
+      (hasPreview ? previewWidth : 0),
   );
   const separationProgress = useSharedValue(props.showScrollToEnd ? 1 : 0);
 
@@ -133,7 +133,7 @@ export function FloatingWorkingControl(props: {
   // Forget the width while no label is shown so the next one appears at its
   // own size instead of animating from the previous label's.
   const hasStatus = props.status !== null;
-  const hasCapsule = hasStatus || hasQueue || hasAgents || hasDevicePreview;
+  const hasCapsule = hasStatus || hasQueue || hasAgents || hasPreview;
   useEffect(() => {
     if (!hasStatus) {
       measuredWidthRef.current = null;
@@ -153,9 +153,15 @@ export function FloatingWorkingControl(props: {
     return null;
   }
 
+  // Both preview buttons fit beside each other only as icons.
+  const previewCompact =
+    hasStatus ||
+    hasAgents ||
+    hasQueue ||
+    (props.devicePreview !== null && props.browserPreview !== null);
   // The queue, agents, and reconnect labels have separate tap targets.
   const statusInteractive = props.status?.kind === "connection";
-  const capsuleInteractive = statusInteractive || hasQueue || hasAgents || hasDevicePreview;
+  const capsuleInteractive = statusInteractive || hasQueue || hasAgents || hasPreview;
   // The host stays centered on the capsule, but its measurement constraint
   // comes from the overlay, independent of the capsule's current width.
   const statusContent =
@@ -186,16 +192,18 @@ export function FloatingWorkingControl(props: {
   const capsuleContent = (
     <View className="flex-row items-center">
       {statusContent}
-      {props.devicePreview !== null ? (
+      {hasPreview ? (
         <View
           className="h-11 flex-row items-center"
-          onLayout={(event) => setDeviceWidth(event.nativeEvent.layout.width)}
+          onLayout={(event) => setPreviewWidth(event.nativeEvent.layout.width)}
         >
           {hasStatus ? <View className="h-4 w-px bg-border" /> : null}
-          <DevicePreviewButton
-            {...props.devicePreview}
-            compact={hasStatus || hasAgents || hasQueue}
-          />
+          {props.devicePreview !== null ? (
+            <DevicePreviewButton {...props.devicePreview} compact={previewCompact} />
+          ) : null}
+          {props.browserPreview !== null ? (
+            <BrowserPreviewButton {...props.browserPreview} compact={previewCompact} />
+          ) : null}
         </View>
       ) : null}
       {agents !== null ? (
@@ -207,7 +215,7 @@ export function FloatingWorkingControl(props: {
           onLayout={(event) => setAgentsWidth(event.nativeEvent.layout.width)}
           className="h-11 flex-row items-center gap-1.5 px-3 active:opacity-70"
         >
-          {hasStatus || hasDevicePreview ? <View className="mr-1 h-4 w-px bg-border" /> : null}
+          {hasStatus || hasPreview ? <View className="mr-1 h-4 w-px bg-border" /> : null}
           <SymbolView name="person.2" size={13} tintColorClassName="accent-foreground-muted" />
           <Text className="font-t3-medium text-xs tabular-nums" numberOfLines={1}>
             {agents.label}
@@ -224,7 +232,7 @@ export function FloatingWorkingControl(props: {
           style={{ maxWidth: Math.min(overlayWidth, windowWidth) * 0.45 }}
           className="h-11 flex-row items-center gap-2 px-3 active:opacity-70"
         >
-          {hasStatus || hasDevicePreview || hasAgents ? (
+          {hasStatus || hasPreview || hasAgents ? (
             <View className="mr-1 h-4 w-px bg-border" />
           ) : null}
           <SymbolView name="list.number" size={13} tintColorClassName="accent-foreground-muted" />
@@ -409,6 +417,21 @@ function FloatingStatusLabel(props: {
       </StatusLabelRow>
     );
   }
+  if (props.status.kind === "goal") {
+    return (
+      <StatusLabelRow
+        key="goal"
+        accessibilityLabel={props.status.accessibilityLabel}
+        className="gap-2"
+        onLayout={props.onLayout}
+      >
+        <SymbolView name="target" size={13} tintColorClassName="foreground" type="monochrome" />
+        <Text className="shrink font-t3-medium text-xs text-foreground" numberOfLines={1}>
+          {props.status.label}
+        </Text>
+      </StatusLabelRow>
+    );
+  }
   if (props.status.kind === "preparing") {
     return (
       <StatusLabelRow
@@ -436,13 +459,7 @@ function FloatingStatusLabel(props: {
     );
   }
   return (
-    <WorkingDuration
-      key="working"
-      startedAt={props.status.startedAt}
-      threadRef={props.status.threadRef}
-      runId={props.status.runId}
-      onLayout={props.onLayout}
-    />
+    <WorkingDuration key="working" startedAt={props.status.startedAt} onLayout={props.onLayout} />
   );
 }
 
@@ -483,31 +500,21 @@ function StatusLabelRow(props: {
 
 function WorkingDuration(props: {
   readonly startedAt: string;
-  readonly threadRef: ScopedThreadRef;
-  readonly runId: RunId | null;
   readonly onLayout: (event: LayoutChangeEvent) => void;
 }) {
   return (
     <StatusLabelRow onLayout={props.onLayout}>
-      <WorkingTimer startedAt={props.startedAt} threadRef={props.threadRef} runId={props.runId} />
+      <WorkingTimer startedAt={props.startedAt} />
     </StatusLabelRow>
   );
 }
 
-export function WorkingTimer(props: {
-  readonly startedAt: string;
-  /** The run whose output rate follows the timer, when there is one. */
-  readonly threadRef?: ScopedThreadRef;
-  readonly runId?: RunId | null;
-}) {
+export function WorkingTimer(props: { readonly startedAt: string }) {
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
     const intervalId = setInterval(() => setNowMs(Date.now()), 1_000);
     return () => clearInterval(intervalId);
   }, []);
-  // Same once-a-second tick as the timer; the tracker is only ever polled.
-  const throughput =
-    props.threadRef && props.runId ? readTurnThroughput(props.threadRef, props.runId, nowMs) : null;
   return (
     <SystemText
       className="shrink text-xs text-foreground"
@@ -515,21 +522,8 @@ export function WorkingTimer(props: {
       style={{ fontVariant: ["tabular-nums"], fontWeight: "500" }}
     >
       Working {formatWorkingDuration(props.startedAt, nowMs)}
-      {throughput === null ? null : (
-        <SystemText
-          className="font-mono text-2xs text-foreground-muted"
-          style={{ fontWeight: "400" }}
-        >
-          {` · ${formatTokensPerSecond(throughput.tokensPerSecond)}`}
-        </SystemText>
-      )}
     </SystemText>
   );
-}
-
-/** Shown as "—" while the turn is live but no text has arrived for a while. */
-function formatTokensPerSecond(tokensPerSecond: number | null): string {
-  return tokensPerSecond === null ? "— tok/s" : `${Math.round(tokensPerSecond)} tok/s`;
 }
 
 function formatWorkingDuration(startedAt: string, nowMs: number): string {

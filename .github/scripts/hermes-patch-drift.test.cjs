@@ -108,7 +108,7 @@ test("statuses: obsolete beats doesNotApply beats stackConflict beats testsFaile
     tests: null,
     patches: [
       patch("gone", { apply: false, reverse: true, stack: null }),
-      patch("broken", { apply: false, stack: null }),
+      patch("broken", { apply: false, stack: false }),
       patch("clash", { stack: false }),
       patch("fine"),
     ],
@@ -116,6 +116,19 @@ test("statuses: obsolete beats doesNotApply beats stackConflict beats testsFaile
   assert.deepEqual(
     results.map((result) => result.status),
     ["obsolete", "doesNotApply", "stackConflict", "ok"],
+  );
+});
+
+test("a patch that builds on earlier ones is judged on the stack, not alone", () => {
+  const results = decide({
+    hermesSha: SHA,
+    testFiles: [],
+    tests: null,
+    patches: [patch("base"), patch("dependent", { apply: false, stack: true })],
+  });
+  assert.deepEqual(
+    results.map((result) => result.status),
+    ["ok", "ok"],
   );
 });
 

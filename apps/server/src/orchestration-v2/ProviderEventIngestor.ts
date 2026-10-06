@@ -79,7 +79,7 @@ export class ProviderTurnAnalytics extends Context.Reference<{
   defaultValue: () => ({ record: () => Effect.void }),
 }) {}
 
-export const analyticsLive = Layer.effect(
+export const layerAnalytics = Layer.effect(
   ProviderTurnAnalytics,
   Effect.gen(function* () {
     const analytics = yield* AnalyticsService.AnalyticsService;
@@ -505,6 +505,10 @@ export const layer: Layer.Layer<
               }),
             ];
           }
+          case "output.progress":
+          case "output.measured":
+            // Live throughput only; RunExecutionService consumes it before ingestion.
+            return [];
           case "turn.terminal":
             const dismissed = yield* dismissNativeUserInputs(input, input.event.providerTurnId);
             if (input.event.status !== "failed") {

@@ -9,10 +9,9 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import * as Schedule from "effect/Schedule";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
-import { RpcClientError } from "effect/unstable/rpc";
+import { RpcClientError } from "effect/rpc";
 
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
@@ -50,6 +49,7 @@ export type EnvironmentSubscriptionRpcTag =
   | typeof WS_METHODS.providerInstallSubscribe
   | typeof ORCHESTRATION_V2_WS_METHODS.subscribeShell
   | typeof ORCHESTRATION_V2_WS_METHODS.subscribeThread
+  | typeof ORCHESTRATION_V2_WS_METHODS.subscribeRunThroughput
   | typeof WS_METHODS.subscribeAuthAccess
   | typeof WS_METHODS.subscribeServerConfig
   | typeof WS_METHODS.subscribeServerLifecycle
@@ -65,7 +65,6 @@ export type EnvironmentSubscriptionRpcTag =
   | typeof WS_METHODS.subscribeHermesSkills
   | typeof WS_METHODS.hindsightSubscribeAgentMemory
   | typeof WS_METHODS.pullRequestsSubscribeRefreshes
-  | typeof WS_METHODS.previewAutomationConnect
   | typeof WS_METHODS.subscribeVcsStatus
   | typeof WS_METHODS.subscribeWorktreeSetup
   | typeof WS_METHODS.subscribeProjectClones
@@ -276,14 +275,7 @@ function subscribeDynamicMapped<TTag extends EnvironmentSubscriptionRpcTag, A>(
                           }),
                         ),
                       );
-                      // An evicted preview host completes its registration stream.
-                      // Re-register only after completion; failures still follow the
-                      // session recovery policy and browser actions are never replayed.
-                      return (
-                        tag === WS_METHODS.previewAutomationConnect
-                          ? stream.pipe(Stream.repeat(Schedule.spaced("1 second")))
-                          : stream
-                      ).pipe(Stream.ensuring(completeObservation));
+                      return stream.pipe(Stream.ensuring(completeObservation));
                     }),
                   ).pipe(
                     Stream.tapCause((cause) =>

@@ -30,7 +30,7 @@ import {
   resolveEnvironmentMachineKind,
 } from "@t3tools/contracts";
 import * as Option from "effect/Option";
-import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 import { RefreshCwIcon } from "lucide-react";
 import { useContext, useMemo, useState } from "react";
 

@@ -19,7 +19,8 @@ every version other than a patch's newest whose `hermesCommitDate` is more than 
 deleted.
 
 [`hermes-patches.yml`](../../.github/workflows/hermes-patches.yml) keeps the newest versions
-current. Every three hours it checks each one against Hermes `main`: it must apply, must not
+current. Every three hours it checks each one against Hermes `main`: it must apply (alone, or on
+the patches before it when it builds on them), must not
 reverse-apply (which means upstream now carries it), must stack in manifest order, and must not
 fail a patch-relevant Hermes test that passes on unpatched `main`. Drift files a
 `hermes-patch-drift` issue, and the Hermes resolver in [`automation/`](./automation) answers it with
@@ -210,7 +211,8 @@ the wake prompt settles, because its stop reason does not say whether Hermes set
 
 Verified against hermes-agent `4d3555e5ca` and `af8839df10` (`main`, 2026-10-04) after
 `acp-delegation-progress` and `acp-background-reports`, with or without `acp-fast-mode` in either
-order.
+order. It edits `acp_adapter/background.py`, which `acp-background-reports` creates, so it applies
+only on top of the patches before it, never to stock Hermes alone.
 
 Restart the T3 Code server after applying the patch. Run the patch's
 `tests/acp_adapter/test_background_reports.py` and `tests/tools/test_async_delegation.py` in a

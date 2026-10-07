@@ -88,7 +88,9 @@ import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkBreaks from "remark-breaks";
 import { parseAssistantCitationHref } from "@t3tools/shared/assistantCitations";
 import { parseComposerContextHref } from "@t3tools/shared/composerContextReferences";
+import { parseThreadLinkHref, THREAD_LINK_PROTOCOL } from "@t3tools/shared/threadLinks";
 import { AssistantCitationChip } from "./chat/AssistantCitationChip";
+import { MarkdownThreadLink } from "./chat/MarkdownThreadLink";
 import remarkGfm from "remark-gfm";
 import type { Processor } from "unified";
 import { isWindowsAbsolutePath } from "@t3tools/shared/path";
@@ -525,6 +527,7 @@ function rehypePreserveImageSourceMeta() {
 export function transformChatMarkdownUrl(url: string, key: string): string {
   if (parseAssistantCitationHref(url)) return url;
   if (parseComposerContextHref(url)) return url;
+  if (parseThreadLinkHref(url)) return url;
   if (isWindowsDrivePathHref(url)) return url;
   const fileHref = rewriteMarkdownFileUriHref(url);
   if (fileHref !== null) return fileHref;
@@ -550,7 +553,13 @@ const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
   },
   protocols: {
     ...defaultSchema.protocols,
-    href: [...(defaultSchema.protocols?.href ?? []), "file", "t3-citation", "t3-context"],
+    href: [
+      ...(defaultSchema.protocols?.href ?? []),
+      "file",
+      "t3-citation",
+      "t3-context",
+      THREAD_LINK_PROTOCOL,
+    ],
     src: [...(defaultSchema.protocols?.src ?? []), "data", "file", "t3-context"],
   },
 } satisfies Parameters<typeof rehypeSanitize>[0];
@@ -3117,6 +3126,15 @@ const CHAT_MARKDOWN_COMPONENTS = {
     } = use(ChatMarkdownRendererContext);
     const citation = href ? parseAssistantCitationHref(href) : null;
     if (citation) return <AssistantCitationChip citation={citation} />;
+    // A thread link opens the thread here, never a browser.
+    const threadLink = href ? parseThreadLinkHref(href) : null;
+    if (threadLink) {
+      return (
+        <MarkdownThreadLink {...threadLink}>
+          <MarkdownLinkContext value>{children}</MarkdownLinkContext>
+        </MarkdownThreadLink>
+      );
+    }
     const contextReference = href ? parseComposerContextHref(href) : null;
     if (contextReference) {
       const label = hastPlainTextDeep(node) || contextReference.contextId;

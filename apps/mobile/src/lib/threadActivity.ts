@@ -1824,7 +1824,7 @@ export function buildThreadFeed(
         revision: turnItemDetailRevision(item),
         app,
       };
-      projectedEntriesCache.set(row, { attemptId, entry });
+      projectedEntriesCache.set(row, { attemptId, agentActivityKey, entry });
       entries.push(entry);
       continue;
     }

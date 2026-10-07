@@ -63,6 +63,15 @@ The `.deb` updates itself like the other desktop builds. It asks for your
 password to install each update. If your desktop has no password prompt, the
 update fails. Download the new `.deb` and install it the same way.
 
+### The `t3-hermes` command
+
+The desktop app includes the `t3-hermes` command-line tool. To run it from any
+terminal, open **Settings → General → About** and choose **Install** next to
+**t3-hermes command**. On macOS and Linux it adds a `t3-hermes` link to a folder on your
+`PATH`; on Windows it adds the app's command folder to your `PATH`. Open a new
+terminal afterwards. **Remove** takes it off again. If you already have
+`t3-hermes` from npm, it stays as it is.
+
 ### Windows Subsystem for Linux
 
 Choose a WSL distro in **Settings → Connections** to run agents and projects

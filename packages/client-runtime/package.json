@@ -422,6 +422,14 @@
     "./state/hermes-memory": {
       "types": "./src/state/hermesMemory.ts",
       "default": "./src/state/hermesMemory.ts"
+    },
+    "./mcp-apps": {
+      "types": "./src/mcpApps/host.ts",
+      "default": "./src/mcpApps/host.ts"
+    },
+    "./state/mcp-apps": {
+      "types": "./src/state/mcpApps.ts",
+      "default": "./src/state/mcpApps.ts"
     }
   },
   "scripts": {

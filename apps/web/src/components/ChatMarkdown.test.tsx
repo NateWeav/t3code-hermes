@@ -938,6 +938,11 @@ describe("Hermes markdown images", () => {
       "/tmp/pairing%20qr.png",
     );
   });
+
+  it("keeps in-app thread links", () => {
+    const threadHref = "t3-thread://v1/env-1/thread-1";
+    expect(transformChatMarkdownUrl(threadHref, "href")).toBe(threadHref);
+  });
 });
 
 describe("ChatMarkdown Windows file links", () => {

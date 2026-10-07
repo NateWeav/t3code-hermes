@@ -3,7 +3,11 @@
  * web agent rows render.
  */
 import * as DateTime from "effect/DateTime";
-import type { OrchestrationV2Subagent, OrchestrationV2SubagentUsage } from "@t3tools/contracts";
+import type {
+  OrchestrationV2Subagent,
+  OrchestrationV2SubagentUsage,
+  OrchestrationV2TurnItem,
+} from "@t3tools/contracts";
 import { isOrchestrationV2WorkActive } from "@t3tools/contracts";
 
 export type RuntimeSubagentStatus =
@@ -81,6 +85,15 @@ export function isTerminalSubagentStatus(status: RuntimeSubagentStatus): boolean
  * but resumable; waiting counts as active because it needs the user. */
 export function isActiveSubagentStatus(status: RuntimeSubagentStatus): boolean {
   return isOrchestrationV2WorkActive(status);
+}
+
+/**
+ * A subagent card whose child is still working. The card outlives its
+ * launching turn: once that turn settles, the waiting footer counts the child,
+ * so the card stays out of the turn's fold until the child finishes.
+ */
+export function isLiveSubagentTurnItem(item: OrchestrationV2TurnItem): boolean {
+  return item.type === "subagent" && isOrchestrationV2WorkActive(item.status);
 }
 
 /**

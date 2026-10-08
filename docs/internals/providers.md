@@ -7,7 +7,7 @@ instead of spreading provider checks through orchestration and clients.
 
 A driver kind identifies an integration; an instance identifies one configuration and account
 lifecycle. Route work by instance, so two accounts using the same driver do not share mutable
-session or catalog state.
+session or catalog state. For a new driver, start with [adding a provider](./adding-a-provider.md).
 
 The Hermes fork adds the `hermes` driver alongside the upstream built-ins. Its
 [adapter](../../apps/server/src/orchestration-v2/Adapters/HermesAdapterV2.ts) runs `hermes acp`

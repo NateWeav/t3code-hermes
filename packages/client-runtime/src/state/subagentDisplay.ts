@@ -6,7 +6,7 @@ import type {
 } from "@t3tools/contracts";
 import { formatModelSlugName, resolveSelectableModel } from "@t3tools/shared/model";
 import { formatTokens } from "@t3tools/shared/usageFormat";
-import { fileBasename } from "../markdownLinks.ts";
+import { fileBasename } from "@t3tools/shared/path";
 import { isTerminalSubagentStatus } from "./subagentRuntime.ts";
 
 /** Summarizes one adjacent group, without changing its member identities or order. */

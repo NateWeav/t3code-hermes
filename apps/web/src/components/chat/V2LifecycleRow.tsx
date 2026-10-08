@@ -524,6 +524,7 @@ function SubagentTimelineLink(props: {
           model={agent?.model ?? null}
           role={agent?.role}
           usage={agent?.usage}
+          modelSelection={agent?.modelSelection}
           status={liveStatus}
           result={agent?.result ?? props.result}
           progress={agent?.progress ?? props.progress}
@@ -535,7 +536,10 @@ function SubagentTimelineLink(props: {
 
 function SubagentTimelineTooltip(
   props: Parameters<typeof SubagentTimelineLink>[0] &
-    Pick<Parameters<typeof SubagentTooltipContent>[0], "model" | "role" | "usage" | "elapsed">,
+    Pick<
+      Parameters<typeof SubagentTooltipContent>[0],
+      "model" | "role" | "usage" | "modelSelection" | "elapsed"
+    >,
 ) {
   const environmentId = props.parentRef.environmentId;
   const parent = useThreadShell(props.parentRef)?.source;
@@ -554,6 +558,7 @@ function SubagentTimelineTooltip(
       usage={props.usage}
       providerInstanceId={props.providerInstanceId}
       origin={props.origin}
+      modelSelection={props.modelSelection}
       provider={props.provider}
       providers={props.providers}
       driver={props.driver}

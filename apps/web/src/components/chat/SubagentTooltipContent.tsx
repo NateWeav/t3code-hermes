@@ -39,6 +39,7 @@ export function SubagentTooltipContent(props: {
   usage?: SubagentUsage | null | undefined;
   providerInstanceId: ProviderInstanceId;
   origin: OrchestrationV2Subagent["origin"];
+  modelSelection?: OrchestrationV2Subagent["modelSelection"];
   provider?: ServerProvider | undefined;
   /** The environment's instances; with several accounts on one provider, the card names this one. */
   providers?: ReadonlyArray<ServerProvider> | undefined;
@@ -62,7 +63,9 @@ export function SubagentTooltipContent(props: {
     ? resolveSelectableModel(props.provider.driver, model, props.provider.models)
     : model;
   const providerModel = props.provider?.models.find((candidate) => candidate.slug === modelSlug);
-  const childSelection = props.childThread?.modelSelection;
+  const childSelection =
+    props.modelSelection ??
+    (props.origin === "app_owned" ? props.childThread?.modelSelection : undefined);
   const childModel = props.provider
     ? (resolveSelectableModel(
         props.provider.driver,
@@ -72,9 +75,7 @@ export function SubagentTooltipContent(props: {
     : childSelection?.model.trim();
   const provider = props.provider;
   const matchingSelection =
-    props.origin === "app_owned" &&
-    childModel === (modelSlug ?? model) &&
-    childSelection?.instanceId === props.providerInstanceId
+    childModel === (modelSlug ?? model) && childSelection?.instanceId === props.providerInstanceId
       ? childSelection
       : undefined;
   const effort = ["reasoningEffort", "effort", "reasoning", "variant"]

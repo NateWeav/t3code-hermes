@@ -9,6 +9,7 @@ import { ServerProviderUpdateError } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
@@ -18,6 +19,7 @@ import * as Scope from "effect/Scope";
 import * as Schema from "effect/Schema";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
 import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
@@ -251,6 +253,13 @@ const makeTestRunner = (
     ),
   );
 
+// A running update reports several progress messages; these tests only care
+// which statuses it moved through.
+const statusTransitions = (states: ReadonlyArray<ServerProviderUpdateState>) =>
+  states
+    .map((state) => state.status)
+    .filter((status, index, statuses) => index === 0 || statuses[index - 1] !== status);
+
 describe("providerMaintenanceRunner", () => {
   it.effect("runs the allowlisted provider update command and records success", () => {
     const calls: Array<{ command: string; args: ReadonlyArray<string> }> = [];
@@ -267,8 +276,14 @@ describe("providerMaintenanceRunner", () => {
       ]);
       assert.strictEqual(result.providers[0]?.updateState?.status, "succeeded");
       assert.deepStrictEqual(
-        (yield* Ref.get(updateStatesRef)).map((state) => state.status),
-        ["queued", "running", "succeeded"],
+        (yield* Ref.get(updateStatesRef)).map((state) => [state.status, state.message]),
+        [
+          ["queued", "Waiting for another provider update to finish."],
+          ["running", "Checking for the latest version"],
+          ["running", "Running native-agent update"],
+          ["running", "Verifying the installed version"],
+          ["succeeded", "Provider updated."],
+        ],
       );
     }).pipe(
       Effect.provide(
@@ -412,6 +427,66 @@ describe("providerMaintenanceRunner", () => {
         ),
       ),
     );
+  });
+
+  it.effect("reports the installer's latest output line while the update runs", () => {
+    const exited = Deferred.makeUnsafe<ChildProcessSpawner.ExitCode>();
+    // The update runs on the runner's own fiber, so wait for it to reach the
+    // installer before advancing the clock past the first progress sample.
+    const spawned = Deferred.makeUnsafe<void>();
+    return Effect.gen(function* () {
+      const { registry, updateStatesRef } = yield* makeRegistry(baseNativeCliProvider);
+      const updater = yield* makeTestRunner(registry);
+      const runningMessages = Ref.get(updateStatesRef).pipe(
+        Effect.map((states) =>
+          states.filter((state) => state.status === "running").map((state) => state.message),
+        ),
+      );
+
+      const fiber = yield* updater.updateProvider(NATIVE_CLI_DRIVER).pipe(Effect.forkChild);
+      yield* Deferred.await(spawned);
+      yield* TestClock.adjust(Duration.seconds(1));
+      assert.deepStrictEqual(yield* runningMessages, [
+        "Checking for the latest version",
+        "Running native-agent update",
+        "80%",
+      ]);
+
+      yield* Deferred.succeed(exited, ChildProcessSpawner.ExitCode(0));
+      const result = yield* Fiber.join(fiber);
+      assert.strictEqual(result.providers[0]?.updateState?.status, "succeeded");
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          layerNonWindowsPlatform,
+          layerLatestVersionHttpClient("0.0.0"),
+          layerMockSpawner(() => {
+            Deferred.doneUnsafe(spawned, Exit.void);
+            return {
+              stdout: "Checking for updates\nDownloading 2.1.293\n\u001b[32m 40%\u001b[0m\r 80%",
+              exitCode: Deferred.await(exited),
+            };
+          }),
+        ),
+      ),
+    );
+  });
+
+  it("splits installer output into clean status lines", () => {
+    assert.deepStrictEqual(ProviderMaintenanceRunner.splitOutputLines("Down", "loading\r\n 5"), {
+      lines: ["Downloading"],
+      partialLine: " 5",
+    });
+    assert.strictEqual(
+      ProviderMaintenanceRunner.toProgressLine("\u001b[1m==>\u001b[0m  Pouring"),
+      "==> Pouring",
+    );
+    assert.strictEqual(ProviderMaintenanceRunner.toProgressLine(" \t "), null);
+    assert.strictEqual(
+      ProviderMaintenanceRunner.splitOutputLines("x".repeat(5_000), "y").partialLine.length,
+      4_096,
+    );
+    assert.strictEqual(ProviderMaintenanceRunner.toProgressLine("x".repeat(300))?.length, 200);
   });
 
   it.effect("aborts without running when the installation changed since the advisory", () => {
@@ -965,10 +1040,11 @@ describe("providerMaintenanceRunner", () => {
       yield* Deferred.succeed(release, undefined);
       const finalState = yield* Deferred.await(finished);
       assert.strictEqual(finalState.status, "succeeded");
-      assert.deepStrictEqual(
-        (yield* Ref.get(updateStatesRef)).map((state) => state.status),
-        ["queued", "running", "succeeded"],
-      );
+      assert.deepStrictEqual(statusTransitions(yield* Ref.get(updateStatesRef)), [
+        "queued",
+        "running",
+        "succeeded",
+      ]);
       assert.strictEqual(killed, 1);
     }).pipe(
       Effect.provide(
@@ -1000,10 +1076,7 @@ describe("providerMaintenanceRunner", () => {
       const callerExit = yield* Fiber.await(caller);
       assert.strictEqual(Exit.hasInterrupts(callerExit), true);
       const states = yield* Ref.get(updateStatesRef);
-      assert.deepStrictEqual(
-        states.map((state) => state.status),
-        ["queued", "running", "failed"],
-      );
+      assert.deepStrictEqual(statusTransitions(states), ["queued", "running", "failed"]);
       assert.strictEqual(states.at(-1)?.message, "Update was interrupted before it finished.");
       assert.isNotNull(states.at(-1)?.startedAt ?? null);
     }).pipe(

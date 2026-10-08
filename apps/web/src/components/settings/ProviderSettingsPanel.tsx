@@ -218,7 +218,10 @@ function ProviderSettingsPlaceholder({
       ) : null}
       <SettingsGroup
         divided={false}
-        className={cn(providerCardHeightClassName, "flex overflow-x-hidden overflow-y-auto")}
+        className={cn(
+          providerCardHeightClassName,
+          "scrollbar-gutter-both flex overflow-x-hidden overflow-y-auto",
+        )}
       >
         <Empty>
           <EmptyMedia variant="icon">{icon}</EmptyMedia>

@@ -92,12 +92,7 @@ export interface HermesAdapterV2Options {
   readonly settings: HermesSettings;
   readonly environment: NodeJS.ProcessEnv;
   readonly childProcessSpawner: ChildProcessSpawner.ChildProcessSpawner["Service"];
-  readonly crypto: Crypto.Crypto;
   readonly selfInvocation: SelfInvocation;
-  readonly fileSystem: FileSystem.FileSystem;
-  readonly path: Path.Path;
-  readonly idAllocator: IdAllocator.IdAllocatorV2["Service"];
-  readonly host: ProviderHost.ProviderHostShape;
   readonly nativeLogging?: Parameters<typeof makeAcpAdapterV2>[0]["nativeLogging"];
   readonly continuationRequests?: Parameters<typeof makeAcpAdapterV2>[0]["continuationRequests"];
   /** Replaces the `hermes acp` spawn; tests point it at the mock agent. */
@@ -122,7 +117,15 @@ export function hermesSpawnEnvironment(
   };
 }
 
-export function makeHermesAcpAdapterFlavor(options: HermesAdapterV2Options): AcpAdapterV2Flavor {
+/** The services the Hermes flavor writes reasoning config with. */
+interface HermesFlavorServices {
+  readonly fileSystem: FileSystem.FileSystem;
+  readonly path: Path.Path;
+}
+
+export function makeHermesAcpAdapterFlavor(
+  options: HermesAdapterV2Options & HermesFlavorServices,
+): AcpAdapterV2Flavor {
   // Hermes reads reasoning effort from one `config.yaml` per profile, so
   // concurrent sessions serialize the write and the rebuild that reads it.
   const reasoningConfigPermit = Semaphore.makeUnsafe(1);
@@ -266,21 +269,23 @@ export function makeHermesAcpAdapterFlavor(options: HermesAdapterV2Options): Acp
   };
 }
 
-export function makeHermesAdapterV2(options: HermesAdapterV2Options) {
-  return makeAcpAdapterV2({
+export const makeHermesAdapterV2 = Effect.fn("makeHermesAdapterV2")(function* (
+  options: HermesAdapterV2Options,
+) {
+  const services: HermesFlavorServices = {
+    fileSystem: yield* FileSystem.FileSystem,
+    path: yield* Path.Path,
+  };
+  return yield* makeAcpAdapterV2({
     instanceId: options.instanceId,
-    flavor: makeHermesAcpAdapterFlavor(options),
-    crypto: options.crypto,
-    fileSystem: options.fileSystem,
-    idAllocator: options.idAllocator,
-    host: options.host,
+    flavor: makeHermesAcpAdapterFlavor({ ...options, ...services }),
     selfInvocation: options.selfInvocation,
     ...(options.nativeLogging === undefined ? {} : { nativeLogging: options.nativeLogging }),
     ...(options.continuationRequests === undefined
       ? {}
       : { continuationRequests: options.continuationRequests }),
   });
-}
+});
 
 export type HermesAdapterV2DriverEnv =
   | ChildProcessSpawner.ChildProcessSpawner
@@ -303,17 +308,12 @@ export const HermesAdapterV2Driver: ProviderAdapterDriver<
       const hostEnvironment = yield* HostProcessEnvironment;
       const providerEventLoggers = yield* ProviderEventLoggers.ProviderEventLoggers;
       const makeNativeLogger = yield* makeAcpNativeLoggerFactory();
-      return makeHermesAdapterV2({
+      return yield* makeHermesAdapterV2({
         instanceId: input.instanceId,
         settings: { ...input.config, enabled: input.enabled },
         environment: mergeProviderInstanceEnvironment(input.environment, hostEnvironment),
         childProcessSpawner: yield* ChildProcessSpawner.ChildProcessSpawner,
-        crypto: yield* Crypto.Crypto,
         selfInvocation: yield* resolveSelfInvocation(),
-        fileSystem: yield* FileSystem.FileSystem,
-        path: yield* Path.Path,
-        idAllocator: yield* IdAllocator.IdAllocatorV2,
-        host: yield* ProviderHost.ProviderHost,
         continuationRequests: yield* ProviderContinuationRequests.ProviderContinuationRequests,
         nativeLogging: (threadId) =>
           makeNativeLogger({

@@ -52,7 +52,7 @@ import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import { isMap, parseDocument } from "yaml";
 
-import { writeFileStringAtomically } from "../../atomicWrite.ts";
+import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
 import * as ServerConfig from "../../config.ts";
 import { resolveEnabledHermesInstance, resolveHermesHome } from "../../hermes/hermesCronState.ts";
 import * as ProcessRunner from "../../processRunner.ts";

@@ -23,7 +23,7 @@ import * as Result from "effect/Result";
 import { HttpClient, HttpClientRequest } from "effect/http";
 import { type Document, isMap, isScalar, isSeq, parseDocument, Scalar, YAMLMap } from "yaml";
 
-import { writeFileStringAtomically } from "../atomicWrite.ts";
+import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
 
 const CAPABILITIES_KEY = "capabilities";
 const FAST_MODE_KEY = "fast_mode";

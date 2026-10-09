@@ -11,7 +11,7 @@
  */
 import type { OrchestrationV2SubagentUsage } from "@t3tools/contracts";
 
-import type { AcpToolCallState } from "./AcpRuntimeModel.ts";
+import type { AcpToolCallState } from "@t3tools/provider-acp/server/runtimeModel";
 
 /** Structurally an `AcpAdapterV2SubagentUpdate`. */
 export interface HermesSubagentUpdate {

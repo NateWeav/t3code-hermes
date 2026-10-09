@@ -7,7 +7,7 @@ import {
   mergeToolCallState,
   parseSessionUpdateEvent,
   type AcpToolCallState,
-} from "./AcpRuntimeModel.ts";
+} from "@t3tools/provider-acp/server/runtimeModel";
 import { makeHermesSubagentExtractor } from "./HermesDelegation.ts";
 import fixture from "./fixtures/hermes-delegation.json" with { type: "json" };
 import olderFixture from "./fixtures/hermes-delegation-08b140d1.json" with { type: "json" };

@@ -26,7 +26,7 @@ import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 import { isMap, parseDocument } from "yaml";
 
-import { writeFileStringAtomically } from "../atomicWrite.ts";
+import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
 import {
   isHermesReasoningLevel,
   parseHermesModelSlug,

@@ -24,15 +24,15 @@ import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import { ChildProcessSpawner } from "effect/process";
 
-import * as ServerConfig from "../../config.ts";
+import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
 import {
   HERMES_FAST_MODE_CONFIG_ID,
   resolveHermesFastModeSelection,
 } from "../../hermes/hermesFastMode.ts";
 import { applyHermesReasoningSelection } from "../../hermes/hermesReasoningOptions.ts";
 import type { HermesReasoningLevel } from "../../hermes/hermesReasoning.ts";
-import { makeAcpNativeLoggerFactory } from "../../provider/acp/AcpNativeLogging.ts";
-import type * as AcpSessionRuntime from "../../provider/acp/AcpSessionRuntime.ts";
+import { makeAcpNativeLoggerFactory } from "@t3tools/provider-acp/server/nativeLogging";
+import type * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 import {
   applyHermesAcpModelSelection,
   currentHermesModelIdFromSessionSetup,
@@ -65,7 +65,7 @@ import {
   makeAcpAdapterV2,
   type AcpAdapterV2Flavor,
   type AcpAdapterV2RuntimeInput,
-} from "./AcpAdapterV2.ts";
+} from "@t3tools/provider-acp/server/adapter";
 
 const HERMES_PROVIDER = ProviderDriverKind.make("hermes");
 const DEFAULT_HERMES_SETTINGS = Schema.decodeSync(HermesSettings)({});
@@ -97,7 +97,7 @@ export interface HermesAdapterV2Options {
   readonly fileSystem: FileSystem.FileSystem;
   readonly path: Path.Path;
   readonly idAllocator: IdAllocator.IdAllocatorV2["Service"];
-  readonly serverConfig: ServerConfig.ServerConfig["Service"];
+  readonly host: ProviderHost.ProviderHostShape;
   readonly nativeLogging?: Parameters<typeof makeAcpAdapterV2>[0]["nativeLogging"];
   readonly continuationRequests?: Parameters<typeof makeAcpAdapterV2>[0]["continuationRequests"];
   /** Replaces the `hermes acp` spawn; tests point it at the mock agent. */
@@ -273,7 +273,7 @@ export function makeHermesAdapterV2(options: HermesAdapterV2Options) {
     crypto: options.crypto,
     fileSystem: options.fileSystem,
     idAllocator: options.idAllocator,
-    serverConfig: options.serverConfig,
+    host: options.host,
     selfInvocation: options.selfInvocation,
     ...(options.nativeLogging === undefined ? {} : { nativeLogging: options.nativeLogging }),
     ...(options.continuationRequests === undefined
@@ -289,7 +289,7 @@ export type HermesAdapterV2DriverEnv =
   | IdAllocator.IdAllocatorV2
   | Path.Path
   | ProviderEventLoggers.ProviderEventLoggers
-  | ServerConfig.ServerConfig;
+  | ProviderHost.ProviderHost;
 
 export const HermesAdapterV2Driver: ProviderAdapterDriver<
   HermesSettings,
@@ -313,7 +313,7 @@ export const HermesAdapterV2Driver: ProviderAdapterDriver<
         fileSystem: yield* FileSystem.FileSystem,
         path: yield* Path.Path,
         idAllocator: yield* IdAllocator.IdAllocatorV2,
-        serverConfig: yield* ServerConfig.ServerConfig,
+        host: yield* ProviderHost.ProviderHost,
         continuationRequests: yield* ProviderContinuationRequests.ProviderContinuationRequests,
         nativeLogging: (threadId) =>
           makeNativeLogger({

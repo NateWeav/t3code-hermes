@@ -37,7 +37,7 @@ import {
   makeHermesAcpRuntime,
   resolveHermesAcpBaseModelId,
 } from "./acp/HermesAcpSupport.ts";
-import { dedupeSlashCommands } from "./slashCommands.ts";
+import { dedupeSlashCommands } from "@t3tools/provider-core/server/slashCommands";
 import {
   buildHermesModelCapabilities,
   readHermesReasoningContext,

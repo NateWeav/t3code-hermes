@@ -29,18 +29,19 @@ import { ChildProcessSpawner } from "effect/process";
 
 import type * as EffectAcpSchema from "effect-acp/compat";
 
-import { layerTestProviderHost } from "@t3tools/provider-testing/host";
+import * as TestProviderHost from "@t3tools/provider-testing/TestProviderHost";
 import { parseSessionUpdateEvent } from "@t3tools/provider-acp/server/runtimeModel";
 import type * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 import { makeHermesAcpRuntime } from "../../provider/acp/HermesAcpSupport.ts";
 import delegationFixture from "../../provider/acp/fixtures/hermes-delegation.json" with { type: "json" };
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import {
   ProviderAdapterV2RuntimePolicy,
   type ProviderAdapterV2Event,
   type ProviderAdapterV2TurnInput,
 } from "@t3tools/provider-core/server/ProviderAdapter";
-import type { ProviderContinuationRequest } from "@t3tools/provider-core/server/continuationRequests";
+import type { ProviderContinuationRequest } from "@t3tools/provider-core/server/ProviderContinuationRequests";
 import {
   HermesProviderCapabilitiesV2,
   hermesSpawnEnvironment,
@@ -52,7 +53,8 @@ import {
 const testLayer = Layer.mergeAll(
   NodeServices.layer,
   IdAllocator.layer,
-  layerTestProviderHost().pipe(Layer.provide(NodeServices.layer)),
+  McpProviderSessions.layer,
+  TestProviderHost.layer().pipe(Layer.provide(NodeServices.layer)),
 );
 const windowsHost = HostProcessPlatform.defaultValue() === "win32";
 const decodeHermesSettings = Schema.decodeSync(HermesSettings);

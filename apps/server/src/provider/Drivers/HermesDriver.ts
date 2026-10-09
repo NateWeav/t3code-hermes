@@ -15,14 +15,15 @@ import {
   HermesAdapterV2Driver,
   type HermesAdapterV2DriverEnv,
 } from "../../orchestration-v2/Adapters/HermesAdapterV2.ts";
-import { ProviderHost } from "@t3tools/provider-core/server/ProviderHost";
+import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
+import * as ProviderLatestVersions from "@t3tools/provider-core/server/ProviderLatestVersions";
 import { ProviderDriverError } from "../Errors.ts";
 import {
   buildInitialHermesProviderSnapshot,
   checkHermesProviderStatus,
   enrichHermesSnapshot,
 } from "../HermesProvider.ts";
-import * as ProviderEventLoggers from "../ProviderEventLoggers.ts";
+import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 import { makeManagedServerProvider } from "@t3tools/provider-core/server/managedProvider";
 import {
   defaultProviderContinuationIdentity,
@@ -91,7 +92,8 @@ export type HermesDriverEnv =
   | HttpClient.HttpClient
   | Path.Path
   | ProviderEventLoggers.ProviderEventLoggers
-  | ProviderHost
+  | ProviderHost.ProviderHost
+  | ProviderLatestVersions.ProviderLatestVersions
   | ServerConfig.ServerConfig;
 
 const withInstanceIdentity =
@@ -125,7 +127,7 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const httpClient = yield* HttpClient.HttpClient;
-      const host = yield* ProviderHost;
+      const latestVersions = yield* ProviderLatestVersions.ProviderLatestVersions;
       const processEnv = mergeProviderInstanceEnvironment(environment);
       const continuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
@@ -175,7 +177,7 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
       );
 
-      const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, host.settings);
+      const snapshotSettings = yield* makeProviderSnapshotSettingsSource(effectiveConfig);
       const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<HermesSettings>>({
         resolveMaintenance,
         getSettings: snapshotSettings.getSettings,
@@ -193,6 +195,7 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
                 enableProviderUpdateChecks: settings.enableProviderUpdateChecks,
                 publishSnapshot,
                 httpClient,
+                latestVersions,
               }),
             ),
           ),

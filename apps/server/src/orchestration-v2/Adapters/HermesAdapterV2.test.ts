@@ -17,7 +17,6 @@ import {
 } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { resolveSelfInvocation } from "@t3tools/shared/nodeRuntime";
-import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -30,7 +29,6 @@ import { ChildProcessSpawner } from "effect/process";
 
 import type * as EffectAcpSchema from "effect-acp/compat";
 
-import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
 import { layerTestProviderHost } from "@t3tools/provider-testing/host";
 import { parseSessionUpdateEvent } from "@t3tools/provider-acp/server/runtimeModel";
 import type * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
@@ -178,7 +176,7 @@ const runMockTurn = (input: {
     const promptUpdates = input.promptUpdates;
     type Runtime = AcpSessionRuntime.AcpSessionRuntime["Service"];
     let deliver: Parameters<Runtime["handleSessionUpdate"]>[0] | undefined;
-    const adapter = makeHermesAdapterV2({
+    const adapter = yield* makeHermesAdapterV2({
       instanceId,
       settings,
       environment,
@@ -208,12 +206,7 @@ const runMockTurn = (input: {
               ),
           }),
       childProcessSpawner,
-      crypto: yield* Crypto.Crypto,
       selfInvocation: yield* resolveSelfInvocation(),
-      fileSystem,
-      path,
-      idAllocator: yield* IdAllocator.IdAllocatorV2,
-      host: yield* ProviderHost.ProviderHost,
       ...(input.continuationRequests === undefined
         ? {}
         : { continuationRequests: input.continuationRequests }),
@@ -281,7 +274,7 @@ const runMockTurn = (input: {
 describe("HermesAdapterV2 flavor", () => {
   const flavor = makeHermesAcpAdapterFlavor({
     environment: {},
-  } as unknown as HermesAdapterV2Options);
+  } as unknown as Parameters<typeof makeHermesAcpAdapterFlavor>[0]);
 
   it("compacts with Hermes's own command and sends images whatever the handshake says", () => {
     assert.equal(flavor.compactionCommand, "/compress");

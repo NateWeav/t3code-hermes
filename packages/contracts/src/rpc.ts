@@ -256,6 +256,7 @@ import {
   PreviewListResult,
   PreviewClearProfileError,
   PreviewClearProfileInput,
+  PreviewReportProfilesInput,
   PreviewNavigateInput,
   PreviewOpenInput,
   PreviewRefreshInput,
@@ -500,6 +501,7 @@ export const WS_METHODS = {
   previewClose: "preview.close",
   previewList: "preview.list",
   previewClearProfile: "preview.clearProfile",
+  previewReportProfiles: "preview.reportProfiles",
   previewReportStatus: "preview.reportStatus",
 
   // Device methods
@@ -1710,6 +1712,11 @@ const WsPreviewClearProfileRpc = Rpc.make(WS_METHODS.previewClearProfile, {
   error: Schema.Union([PreviewClearProfileError, EnvironmentAuthorizationError]),
 });
 
+const WsPreviewReportProfilesRpc = Rpc.make(WS_METHODS.previewReportProfiles, {
+  payload: PreviewReportProfilesInput,
+  error: EnvironmentAuthorizationError,
+});
+
 const WsPreviewReportStatusRpc = Rpc.make(WS_METHODS.previewReportStatus, {
   payload: PreviewReportStatusInput,
   error: Schema.Union([PreviewError, EnvironmentAuthorizationError]),
@@ -2053,7 +2060,43 @@ export class RpcScopeAuthorization extends RpcMiddleware.Service<RpcScopeAuthori
   { error: EnvironmentAuthorizationError },
 ) {}
 
-export const WsRpcGroup = RpcGroup.make(
+/**
+ * Fork: the Hermes, Hindsight, and run-throughput RPCs. They are a group of their own so
+ * the server implements them in a separate handler layer: one handler map for every RPC
+ * exceeds TypeScript's instantiation limit (TS2589) and widens the server's types to `any`.
+ */
+export const HermesWsRpcGroup = RpcGroup.make(
+  WsHermesSkillsListRpc,
+  WsHermesSkillsGetRpc,
+  WsSubscribeHermesSkillsRpc,
+  WsHermesMemoryReadRpc,
+  WsHermesMemoryMutateRpc,
+  WsSubscribeHermesMemoryRpc,
+  WsHermesCronListRpc,
+  WsHermesCronGetRunOutputRpc,
+  WsHermesCronSetEnabledRpc,
+  WsHermesCronSetMutedRpc,
+  WsHermesRunSourcesListRpc,
+  WsHermesRunSourceSetRpc,
+  WsHermesPatchListRpc,
+  WsHermesPatchApplyRpc,
+  WsHermesPatchRevertRpc,
+  WsHermesPatchUpdateHermesRpc,
+  WsHermesGatewayRestartRpc,
+  WsHindsightListBanksRpc,
+  WsHindsightBrowseRpc,
+  WsHindsightRecallRpc,
+  WsHindsightStatsRpc,
+  WsHindsightRetainRpc,
+  WsHindsightReflectRpc,
+  WsHindsightSubscribeAgentMemoryRpc,
+  WsHindsightApplyAgentMemoryRpc,
+  WsSubscribeHermesCronRpc,
+  WsOrchestrationV2SubscribeRunThroughputRpc,
+).middleware(RpcScopeAuthorization);
+
+/** Every RPC upstream T3 Code serves; the fork's own are in `HermesWsRpcGroup`. */
+export const CoreWsRpcGroup = RpcGroup.make(
   WsServerProbeRpc,
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,
@@ -2099,31 +2142,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetResourceTelemetryHistoryRpc,
   WsServerRetryResourceTelemetryRpc,
   WsServerGetUsageSummaryRpc,
-  WsHermesSkillsListRpc,
-  WsHermesSkillsGetRpc,
-  WsSubscribeHermesSkillsRpc,
-  WsHermesMemoryReadRpc,
-  WsHermesMemoryMutateRpc,
-  WsSubscribeHermesMemoryRpc,
-  WsHermesCronListRpc,
-  WsHermesCronGetRunOutputRpc,
-  WsHermesCronSetEnabledRpc,
-  WsHermesCronSetMutedRpc,
-  WsHermesRunSourcesListRpc,
-  WsHermesRunSourceSetRpc,
-  WsHermesPatchListRpc,
-  WsHermesPatchApplyRpc,
-  WsHermesPatchRevertRpc,
-  WsHermesPatchUpdateHermesRpc,
-  WsHermesGatewayRestartRpc,
-  WsHindsightListBanksRpc,
-  WsHindsightBrowseRpc,
-  WsHindsightRecallRpc,
-  WsHindsightStatsRpc,
-  WsHindsightRetainRpc,
-  WsHindsightReflectRpc,
-  WsHindsightSubscribeAgentMemoryRpc,
-  WsHindsightApplyAgentMemoryRpc,
   WsServerRefreshUsageRatesRpc,
   WsServerSignalProcessRpc,
   WsScheduledTasksListRpc,
@@ -2232,6 +2250,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsPreviewCloseRpc,
   WsPreviewListRpc,
   WsPreviewClearProfileRpc,
+  WsPreviewReportProfilesRpc,
   WsPreviewReportStatusRpc,
   WsSubscribePreviewEventsRpc,
   WsSubscribeDiscoveredLocalServersRpc,
@@ -2249,7 +2268,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeAuthAccessRpc,
   WsSubscribeBackgroundPolicyRpc,
   WsSubscribeResourceTelemetryRpc,
-  WsSubscribeHermesCronRpc,
   WsOrchestrationV2DispatchCommandRpc,
   WsOrchestrationV2GetWorkflowScriptRpc,
   WsOrchestrationV2GetTurnItemRpc,
@@ -2264,5 +2282,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationV2SubscribeArchivedShellRpc,
   WsOrchestrationV2SubscribeShellRpc,
   WsOrchestrationV2SubscribeThreadRpc,
-  WsOrchestrationV2SubscribeRunThroughputRpc,
 ).middleware(RpcScopeAuthorization);
+
+export const WsRpcGroup = CoreWsRpcGroup.merge(HermesWsRpcGroup);

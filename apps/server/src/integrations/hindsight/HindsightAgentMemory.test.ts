@@ -219,10 +219,14 @@ function setup(options: Options) {
 
   const settings = ServerSettings.layerTest({
     integrations: { hindsight: { agentMemory: options.agentMemory } },
-    ...(options.secondHermesHome === undefined
-      ? {}
-      : {
-          providerInstances: {
+    providerInstances: {
+      [ProviderInstanceId.make("hermes")]: {
+        driver: ProviderDriverKind.make("hermes"),
+        enabled: true,
+      },
+      ...(options.secondHermesHome === undefined
+        ? {}
+        : {
             [ProviderInstanceId.make("hermes_work")]: {
               driver: ProviderDriverKind.make("hermes"),
               enabled: true,
@@ -230,21 +234,26 @@ function setup(options: Options) {
                 { name: "HERMES_HOME", value: options.secondHermesHome, sensitive: false },
               ],
             },
-          },
-        }),
-    providers: {
-      hermes: { enabled: true },
+          }),
       ...(options.claudeHomePath === undefined
         ? {}
-        : { claudeAgent: { homePath: options.claudeHomePath } }),
+        : {
+            [ProviderInstanceId.make("claudeAgent")]: {
+              driver: ProviderDriverKind.make("claudeAgent"),
+              config: { homePath: options.claudeHomePath },
+            },
+          }),
       ...(options.codexShadowHooks === undefined && options.codexManaged !== true
         ? {}
         : {
-            codex: {
-              ...(options.codexShadowHooks === undefined
-                ? {}
-                : { shadowHomePath: codexShadowHome }),
-              ...(options.codexManaged === true ? { setupMode: "managed" as const } : {}),
+            [ProviderInstanceId.make("codex")]: {
+              driver: ProviderDriverKind.make("codex"),
+              config: {
+                ...(options.codexShadowHooks === undefined
+                  ? {}
+                  : { shadowHomePath: codexShadowHome }),
+                ...(options.codexManaged === true ? { setupMode: "managed" as const } : {}),
+              },
             },
           }),
     },

@@ -11,12 +11,13 @@ import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import { ServerConfig } from "../../config.ts";
-import * as IdAllocator from "../../orchestration-v2/IdAllocator.ts";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { NoOpProviderEventLoggers, ProviderEventLoggers } from "../ProviderEventLoggers.ts";
+import * as ProviderHostLive from "../ProviderHostLive.ts";
 import { HermesDriver } from "./HermesDriver.ts";
 
-const testLayer = ServerConfig.layerTest(process.cwd(), {
+const testDeps = ServerConfig.layerTest(process.cwd(), {
   prefix: "t3-hermes-driver-update-",
 }).pipe(
   Layer.provideMerge(NodeServices.layer),
@@ -35,6 +36,7 @@ const testLayer = ServerConfig.layerTest(process.cwd(), {
     ),
   ),
 );
+const testLayer = ProviderHostLive.layer.pipe(Layer.provideMerge(testDeps));
 
 const noSpawner = ChildProcessSpawner.make(() =>
   Effect.die("Disabled Hermes must not spawn a process"),

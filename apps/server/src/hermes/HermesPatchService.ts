@@ -37,8 +37,8 @@ import { HttpClient } from "effect/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import { providerUpdateLock } from "../provider/providerMaintenanceCommandCoordinator.ts";
-import { mergeProviderInstanceEnvironment } from "../provider/ProviderInstanceEnvironment.ts";
-import { spawnAndCollect } from "../provider/providerSnapshot.ts";
+import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
+import { spawnAndCollect } from "@t3tools/provider-core/server/snapshotProbe";
 import * as ServerSettings from "../serverSettings.ts";
 import { resolveEnabledHermesInstance, resolveHermesHome } from "./hermesCronState.ts";
 import {

@@ -52,14 +52,14 @@ import {
 } from "../../provider/acp/HermesBackground.ts";
 import { makeHermesSubagentExtractor } from "../../provider/acp/HermesDelegation.ts";
 import * as ProviderEventLoggers from "../../provider/ProviderEventLoggers.ts";
-import { mergeProviderInstanceEnvironment } from "../../provider/ProviderInstanceEnvironment.ts";
-import * as IdAllocator from "../IdAllocator.ts";
-import * as ProviderContinuationRequests from "../ProviderContinuationRequests.ts";
+import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import * as ProviderContinuationRequests from "@t3tools/provider-core/server/continuationRequests";
 import {
   ProviderAdapterDriverCreateError,
   type ProviderAdapterDriver,
   type ProviderAdapterDriverCreateInput,
-} from "../ProviderAdapterDriver.ts";
+} from "@t3tools/provider-core/server/adapterDriver";
 import {
   AcpProviderCapabilitiesV2,
   makeAcpAdapterV2,

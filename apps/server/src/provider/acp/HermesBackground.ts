@@ -6,7 +6,10 @@
  */
 import * as Schema from "effect/Schema";
 
-import type { BackgroundWork, BackgroundWorkReport } from "../../orchestration-v2/Notification.ts";
+import type {
+  BackgroundWork,
+  BackgroundWorkReport,
+} from "@t3tools/provider-core/server/notification";
 
 export const HERMES_PROCESS_METHOD = "_hermes/process";
 

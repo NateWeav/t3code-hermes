@@ -103,19 +103,23 @@ describe("resolveEnabledHermesInstance", () => {
         config: { binaryPath: "/opt/hermes" },
       },
     });
-    expect(settings.providers.hermes.enabled).toBe(false);
     expect(resolveEnabledHermesInstance(settings)?.settings.binaryPath).toBe("/opt/hermes");
   });
 
-  it("falls back to the legacy providers blob", () => {
-    const settings: ServerSettings = {
-      ...DEFAULT_SERVER_SETTINGS,
-      providers: {
-        ...DEFAULT_SERVER_SETTINGS.providers,
-        hermes: { ...DEFAULT_SERVER_SETTINGS.providers.hermes, enabled: true },
+  it("prefers the default slot over an enabled custom instance", () => {
+    const settings = withInstances({
+      [ProviderInstanceId.make("hermes-box")]: {
+        driver: hermes,
+        enabled: true,
+        config: { binaryPath: "/srv/hermes" },
       },
-    };
-    expect(resolveEnabledHermesInstance(settings)).not.toBeNull();
+      [ProviderInstanceId.make("hermes")]: {
+        driver: hermes,
+        enabled: true,
+        config: { binaryPath: "/opt/hermes" },
+      },
+    });
+    expect(resolveEnabledHermesInstance(settings)?.instanceId).toBe("hermes");
   });
 
   it("uses an enabled custom instance when the default slot is off", () => {
@@ -138,16 +142,14 @@ describe("resolveEnabledHermesInstance", () => {
     expect(instance?.environment).toEqual(environment);
   });
 
-  it("respects an explicit disable over the legacy blob", () => {
-    const settings: ServerSettings = {
-      ...withInstances({
-        [ProviderInstanceId.make("hermes")]: { driver: hermes, enabled: false },
-      }),
-      providers: {
-        ...DEFAULT_SERVER_SETTINGS.providers,
-        hermes: { ...DEFAULT_SERVER_SETTINGS.providers.hermes, enabled: true },
+  it("respects an explicit disable of the default slot", () => {
+    const settings = withInstances({
+      [ProviderInstanceId.make("hermes")]: {
+        driver: hermes,
+        enabled: false,
+        config: { enabled: true },
       },
-    };
+    });
     expect(resolveEnabledHermesInstance(settings)).toBeNull();
   });
 });

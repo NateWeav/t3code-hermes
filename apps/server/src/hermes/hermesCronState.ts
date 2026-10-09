@@ -101,11 +101,10 @@ export interface EnabledHermesInstance {
 /**
  * The enabled Hermes instance, or `null` when none is enabled.
  *
- * Resolved like the provider registry does: an explicit `providerInstances`
- * entry wins over the legacy `providers.hermes` blob. The Settings switch
- * writes that explicit entry and leaves `providers.hermes.enabled` at its
- * default `false`, so the legacy blob alone reports a switched-on Hermes as
- * disabled. The default slot is preferred over custom instances.
+ * Resolved like the provider registry does: the default `hermes` slot runs
+ * with the driver's default (disabled) config until the Settings switch
+ * writes an explicit `providerInstances` entry for it. The default slot is
+ * preferred over custom instances.
  *
  * The instance `environment` matters: it can point `HERMES_HOME` at a
  * different store, and cron reads and CLI calls must follow it.
@@ -117,10 +116,7 @@ export function resolveEnabledHermesInstance(
   const candidates: Array<readonly [ProviderInstanceId, ProviderInstanceConfig]> = [
     [
       defaultId,
-      settings.providerInstances[defaultId] ?? {
-        driver: HERMES_DRIVER_KIND,
-        config: settings.providers.hermes,
-      },
+      settings.providerInstances[defaultId] ?? { driver: HERMES_DRIVER_KIND, config: {} },
     ],
   ];
   for (const [instanceId, instance] of Object.entries(settings.providerInstances)) {

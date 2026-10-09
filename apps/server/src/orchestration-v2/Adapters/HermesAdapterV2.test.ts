@@ -35,13 +35,13 @@ import { parseSessionUpdateEvent } from "../../provider/acp/AcpRuntimeModel.ts";
 import type * as AcpSessionRuntime from "../../provider/acp/AcpSessionRuntime.ts";
 import { makeHermesAcpRuntime } from "../../provider/acp/HermesAcpSupport.ts";
 import delegationFixture from "../../provider/acp/fixtures/hermes-delegation.json" with { type: "json" };
-import * as IdAllocator from "../IdAllocator.ts";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import {
   ProviderAdapterV2RuntimePolicy,
   type ProviderAdapterV2Event,
   type ProviderAdapterV2TurnInput,
-} from "../ProviderAdapter.ts";
-import type { ProviderContinuationRequest } from "../ProviderContinuationRequests.ts";
+} from "@t3tools/provider-core/server/ProviderAdapter";
+import type { ProviderContinuationRequest } from "@t3tools/provider-core/server/continuationRequests";
 import {
   HermesProviderCapabilitiesV2,
   hermesSpawnEnvironment,

@@ -9,13 +9,13 @@ import { ChildProcessSpawner } from "effect/process";
 
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import * as ServerConfig from "../../config.ts";
-import * as ServerSettings from "../../serverSettings.ts";
 import { HERMES_UPDATE_LOCK_KEY, resolveHermesGitCheckout } from "../../hermes/hermesPatches.ts";
 import { makeHermesTextGeneration } from "../../textGeneration/HermesTextGeneration.ts";
 import {
   HermesAdapterV2Driver,
   type HermesAdapterV2DriverEnv,
 } from "../../orchestration-v2/Adapters/HermesAdapterV2.ts";
+import { ProviderHost } from "@t3tools/provider-core/server/ProviderHost";
 import { ProviderDriverError } from "../Errors.ts";
 import {
   buildInitialHermesProviderSnapshot,
@@ -23,26 +23,26 @@ import {
   enrichHermesSnapshot,
 } from "../HermesProvider.ts";
 import * as ProviderEventLoggers from "../ProviderEventLoggers.ts";
-import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
+import { makeManagedServerProvider } from "@t3tools/provider-core/server/managedProvider";
 import {
   defaultProviderContinuationIdentity,
   type ProviderDriver,
   type ProviderInstance,
-} from "../ProviderDriver.ts";
-import type { ServerProviderDraft } from "../providerSnapshot.ts";
-import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
+} from "@t3tools/provider-core/server/driver";
+import type { ServerProviderDraft } from "@t3tools/provider-core/server/snapshotProbe";
+import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import {
   makeCachedProviderMaintenanceResolution,
   makeManualOnlyProviderMaintenanceCapabilities,
   makeProviderMaintenanceCapabilities,
   type ProviderMaintenanceCapabilitiesResolver,
   resolveProviderMaintenanceCapabilitiesEffect,
-} from "../providerMaintenance.ts";
+} from "@t3tools/provider-core/server/maintenanceResolver";
 import {
   haveProviderSnapshotSettingsChanged,
   makeProviderSnapshotSettingsSource,
   type ProviderSnapshotSettings,
-} from "../providerUpdateSettings.ts";
+} from "@t3tools/provider-core/server/snapshotSettings";
 const decodeHermesSettings = Schema.decodeSync(HermesSettings);
 
 const DRIVER_KIND = ProviderDriverKind.make("hermes");
@@ -91,8 +91,8 @@ export type HermesDriverEnv =
   | HttpClient.HttpClient
   | Path.Path
   | ProviderEventLoggers.ProviderEventLoggers
-  | ServerConfig.ServerConfig
-  | ServerSettings.ServerSettingsService;
+  | ProviderHost
+  | ServerConfig.ServerConfig;
 
 const withInstanceIdentity =
   (input: {
@@ -125,7 +125,7 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const httpClient = yield* HttpClient.HttpClient;
-      const serverSettings = yield* ServerSettings.ServerSettingsService;
+      const host = yield* ProviderHost;
       const processEnv = mergeProviderInstanceEnvironment(environment);
       const continuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
@@ -175,7 +175,7 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
       );
 
-      const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings);
+      const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, host.settings);
       const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<HermesSettings>>({
         resolveMaintenance,
         getSettings: snapshotSettings.getSettings,

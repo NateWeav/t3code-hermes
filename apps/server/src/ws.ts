@@ -101,6 +101,8 @@ import {
   type PullRequestRef,
   WS_METHODS,
   WsRpcGroup,
+  CoreWsRpcGroup,
+  HermesWsRpcGroup,
 } from "@t3tools/contracts";
 import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
 import {
@@ -121,7 +123,7 @@ import * as McpAppRequests from "./mcpApps/McpAppRequests.ts";
 import * as ProviderSessionManager from "./orchestration-v2/ProviderSessionManager.ts";
 import * as ThreadLaunchService from "./orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadMessageIntake from "./orchestration-v2/ThreadMessageIntake.ts";
-import * as IdAllocator from "./orchestration-v2/IdAllocator.ts";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ScheduledTasks from "./scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "./secrets/SecretRequests.ts";
 import {
@@ -168,7 +170,7 @@ import * as ProviderInstanceRegistry from "./provider/ProviderInstanceRegistry.t
 import * as AcpRegistrySupport from "./provider/acp/AcpRegistrySupport.ts";
 import * as AcpRegistryRuntimeCoordinator from "./provider/acp/AcpRegistryRuntimeCoordinator.ts";
 import * as ModelManifest from "./provider/ModelManifest.ts";
-import * as ProviderMaintenance from "./provider/providerMaintenance.ts";
+import * as ProviderMaintenance from "@t3tools/provider-core/server/maintenanceResolver";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import * as ProviderAuthService from "./provider/ProviderAuthService.ts";
 import { makeProviderInstallation } from "./provider/providerInstallation.ts";
@@ -557,6 +559,14 @@ const PROVIDER_STATUS_DEBOUNCE_MS = 200;
 const ServerWsRpcGroup: typeof WsRpcGroup = WsRpcGroup.middleware(
   RpcInstrumentation,
 ) as unknown as typeof WsRpcGroup;
+// Fork: the Hermes RPCs get their own handler layer (see `HermesWsRpcGroup`). Both halves
+// carry the same middleware as `ServerWsRpcGroup`, which `RpcServer.make` serves whole.
+const CoreServerWsRpcGroup: typeof CoreWsRpcGroup = CoreWsRpcGroup.middleware(
+  RpcInstrumentation,
+) as unknown as typeof CoreWsRpcGroup;
+const HermesServerWsRpcGroup: typeof HermesWsRpcGroup = HermesWsRpcGroup.middleware(
+  RpcInstrumentation,
+) as unknown as typeof HermesWsRpcGroup;
 // When a resuming client's cursor is more than this many events behind the
 // current head, skip the per-event catch-up replay and send a fresh shell
 // snapshot instead. Replaying each intervening event costs a shell refetch;
@@ -1204,7 +1214,7 @@ const layerWsRpc = (
   previewAutomationBroker: PreviewAutomationBroker.PreviewAutomationBroker["Service"],
   serverBrowser: ServerBrowser.ServerBrowser["Service"],
 ) =>
-  ServerWsRpcGroup.toLayer(
+  CoreServerWsRpcGroup.toLayer(
     Effect.gen(function* () {
       const currentSessionId = currentSession.sessionId;
       const sql = yield* SqlClient.SqlClient;
@@ -1265,7 +1275,6 @@ const layerWsRpc = (
       const usageLimitSources = yield* UsageLimitSources.UsageLimitSources;
       const projectSetupScriptRunner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
       const worktreeSetupTracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
-      const runThroughputMeter = yield* RunThroughputMeter;
       const projectCloneTracker = yield* ProjectCloneTracker.ProjectCloneTracker;
       const repositoryIdentityResolver =
         yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
@@ -1339,13 +1348,6 @@ const layerWsRpc = (
       const hostResources = yield* HostResources.HostResources;
       const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor;
       const resourceTelemetry = yield* ResourceTelemetry.ResourceTelemetry;
-      const hermesCron = yield* HermesCronService.HermesCronService;
-      const hermesSkills = yield* HermesSkillsService.HermesSkillsService;
-      const hermesMemory = yield* HermesMemoryService.HermesMemoryService;
-      const hermesRuns = yield* HermesRunService.HermesRunService;
-      const hermesPatches = yield* HermesPatchService.HermesPatchService;
-      const hindsight = yield* HindsightService.HindsightService;
-      const hindsightAgentMemory = yield* HindsightAgentMemory.HindsightAgentMemory;
       const relayClient = yield* RelayClient.RelayClient;
       // A webhook URL starts agent runs, so only sessions that may operate
       // see it; read-only sessions still see the task itself.
@@ -1836,7 +1838,7 @@ const layerWsRpc = (
         return result;
       });
 
-      const handlers = ServerWsRpcGroup.of({
+      const handlers = CoreServerWsRpcGroup.of({
         [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
           Effect.annotateCurrentSpan({
             "orchestration_v2.command_id": command.commandId,
@@ -2060,12 +2062,6 @@ const layerWsRpc = (
           Stream.unwrap(
             Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
               Effect.andThen(subscribeOrchestrationV2Thread(input)),
-            ),
-          ),
-        [ORCHESTRATION_V2_WS_METHODS.subscribeRunThroughput]: (input) =>
-          Stream.unwrap(
-            Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
-              Effect.as(runThroughputMeter.stream(input.threadId)),
             ),
           ),
         [WS_METHODS.scheduledTasksList]: (_input) =>
@@ -2442,29 +2438,6 @@ const layerWsRpc = (
         [WS_METHODS.serverGetResourceTelemetryHistory]: (input) =>
           resourceTelemetry.readHistory(input),
         [WS_METHODS.serverGetUsageSummary]: (input) => usage.readSummary(input),
-        [WS_METHODS.hermesSkillsList]: (input) => hermesSkills.list(input),
-        [WS_METHODS.hermesSkillsGet]: (input) => hermesSkills.get(input),
-        [WS_METHODS.hermesMemoryRead]: () => hermesMemory.read,
-        [WS_METHODS.hermesMemoryMutate]: (input) => hermesMemory.mutate(input),
-        [WS_METHODS.hermesCronGetRunOutput]: (input) => hermesCron.getRunOutput(input),
-        [WS_METHODS.hermesCronList]: (input) => hermesCron.list(input),
-        [WS_METHODS.hermesCronSetEnabled]: (input) => hermesCron.setEnabled(input),
-        [WS_METHODS.hermesCronSetMuted]: (input) => hermesCron.setMuted(input),
-        [WS_METHODS.hermesRunSourcesList]: (_input) => hermesRuns.listSources,
-        [WS_METHODS.hermesRunSourceSet]: (input) => hermesRuns.setSource(input),
-        [WS_METHODS.hermesPatchList]: () => hermesPatches.list,
-        [WS_METHODS.hermesPatchApply]: (input) => hermesPatches.apply(input),
-        [WS_METHODS.hermesPatchRevert]: (input) => hermesPatches.revert(input),
-        [WS_METHODS.hermesPatchUpdateHermes]: () => hermesPatches.updateHermes,
-        [WS_METHODS.hermesGatewayRestart]: () => hermesPatches.restartGateway,
-        [WS_METHODS.hindsightListBanks]: (input) => hindsight.listBanks(input),
-        [WS_METHODS.hindsightBrowse]: (input) => hindsight.browse(input),
-        [WS_METHODS.hindsightRecall]: (input) => hindsight.recall(input),
-        [WS_METHODS.hindsightStats]: (input) => hindsight.stats(input),
-        [WS_METHODS.hindsightRetain]: (input) => hindsight.retain(input),
-        [WS_METHODS.hindsightReflect]: (input) => hindsight.reflect(input),
-        [WS_METHODS.hindsightSubscribeAgentMemory]: (_input) => hindsightAgentMemory.changes,
-        [WS_METHODS.hindsightApplyAgentMemory]: (_input) => hindsightAgentMemory.apply,
         [WS_METHODS.serverRefreshUsageRates]: (_input) => usage.refreshRates,
         [WS_METHODS.serverRetryResourceTelemetry]: (_input) => resourceTelemetry.retry,
         [WS_METHODS.serverSignalProcess]: (input) => processDiagnostics.signal(input),
@@ -2950,6 +2923,7 @@ const layerWsRpc = (
         [WS_METHODS.previewClose]: (input) => previewManager.close(input),
         [WS_METHODS.previewList]: (input) => previewManager.list(input),
         [WS_METHODS.previewClearProfile]: (input) => serverBrowser.clearProfile(input.profileId),
+        [WS_METHODS.previewReportProfiles]: (input) => serverBrowser.reportProfiles(input),
         [WS_METHODS.previewReportStatus]: (input) => previewManager.reportStatus(input),
         [WS_METHODS.subscribePreviewEvents]: (_input) => previewManager.events,
         [WS_METHODS.deviceConfigure]: (input) => deviceService.configure(input),
@@ -3163,13 +3137,58 @@ const layerWsRpc = (
               Stream.concat(Stream.make(latest), changes),
             ),
           ),
-        [WS_METHODS.subscribeHermesSkills]: (_input) => Stream.unwrap(hermesSkills.subscribe),
-        [WS_METHODS.subscribeHermesMemory]: () => Stream.unwrap(hermesMemory.subscribe),
-        [WS_METHODS.subscribeHermesCron]: (_input) => Stream.unwrap(hermesCron.subscribe),
       });
       return handlers;
     }),
   );
+
+/** Fork: handlers for `HermesWsRpcGroup`, provided beside `layerWsRpc`. */
+const layerHermesWsRpc = HermesServerWsRpcGroup.toLayer(
+  Effect.gen(function* () {
+    const runThroughputMeter = yield* RunThroughputMeter;
+    const hermesCron = yield* HermesCronService.HermesCronService;
+    const hermesSkills = yield* HermesSkillsService.HermesSkillsService;
+    const hermesMemory = yield* HermesMemoryService.HermesMemoryService;
+    const hermesRuns = yield* HermesRunService.HermesRunService;
+    const hermesPatches = yield* HermesPatchService.HermesPatchService;
+    const hindsight = yield* HindsightService.HindsightService;
+    const hindsightAgentMemory = yield* HindsightAgentMemory.HindsightAgentMemory;
+    return HermesServerWsRpcGroup.of({
+      [ORCHESTRATION_V2_WS_METHODS.subscribeRunThroughput]: (input) =>
+        Stream.unwrap(
+          Effect.annotateCurrentSpan({ "orchestration_v2.thread_id": input.threadId }).pipe(
+            Effect.as(runThroughputMeter.stream(input.threadId)),
+          ),
+        ),
+      [WS_METHODS.hermesSkillsList]: (input) => hermesSkills.list(input),
+      [WS_METHODS.hermesSkillsGet]: (input) => hermesSkills.get(input),
+      [WS_METHODS.hermesMemoryRead]: () => hermesMemory.read,
+      [WS_METHODS.hermesMemoryMutate]: (input) => hermesMemory.mutate(input),
+      [WS_METHODS.hermesCronGetRunOutput]: (input) => hermesCron.getRunOutput(input),
+      [WS_METHODS.hermesCronList]: (input) => hermesCron.list(input),
+      [WS_METHODS.hermesCronSetEnabled]: (input) => hermesCron.setEnabled(input),
+      [WS_METHODS.hermesCronSetMuted]: (input) => hermesCron.setMuted(input),
+      [WS_METHODS.hermesRunSourcesList]: (_input) => hermesRuns.listSources,
+      [WS_METHODS.hermesRunSourceSet]: (input) => hermesRuns.setSource(input),
+      [WS_METHODS.hermesPatchList]: () => hermesPatches.list,
+      [WS_METHODS.hermesPatchApply]: (input) => hermesPatches.apply(input),
+      [WS_METHODS.hermesPatchRevert]: (input) => hermesPatches.revert(input),
+      [WS_METHODS.hermesPatchUpdateHermes]: () => hermesPatches.updateHermes,
+      [WS_METHODS.hermesGatewayRestart]: () => hermesPatches.restartGateway,
+      [WS_METHODS.hindsightListBanks]: (input) => hindsight.listBanks(input),
+      [WS_METHODS.hindsightBrowse]: (input) => hindsight.browse(input),
+      [WS_METHODS.hindsightRecall]: (input) => hindsight.recall(input),
+      [WS_METHODS.hindsightStats]: (input) => hindsight.stats(input),
+      [WS_METHODS.hindsightRetain]: (input) => hindsight.retain(input),
+      [WS_METHODS.hindsightReflect]: (input) => hindsight.reflect(input),
+      [WS_METHODS.hindsightSubscribeAgentMemory]: (_input) => hindsightAgentMemory.changes,
+      [WS_METHODS.hindsightApplyAgentMemory]: (_input) => hindsightAgentMemory.apply,
+      [WS_METHODS.subscribeHermesSkills]: (_input) => Stream.unwrap(hermesSkills.subscribe),
+      [WS_METHODS.subscribeHermesMemory]: () => Stream.unwrap(hermesMemory.subscribe),
+      [WS_METHODS.subscribeHermesCron]: (_input) => Stream.unwrap(hermesCron.subscribe),
+    });
+  }),
+);
 
 // A defect in a handler's effect fails only its own request. RpcServer's default
 // sends a socket-level Defect frame instead, and the client ends every pending
@@ -3242,6 +3261,7 @@ export const layer = Layer.unwrap(
               previewAutomationBroker,
               serverBrowser,
             ).pipe(
+              Layer.merge(layerHermesWsRpc),
               Layer.provideMerge(RpcSerialization.layerJson),
               // Request fibers run in the handlers' context, so this reporter sees
               // their defects, not the rest of the server's.

@@ -64,7 +64,7 @@ import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientRequest } from "effect/http";
 
 import { resolveEnabledHermesInstance } from "../../hermes/hermesCronState.ts";
-import { mergeProviderInstanceEnvironment } from "../../provider/ProviderInstanceEnvironment.ts";
+import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import * as ServerSettings from "../../serverSettings.ts";
 import {
   type HermesHindsightConfig,

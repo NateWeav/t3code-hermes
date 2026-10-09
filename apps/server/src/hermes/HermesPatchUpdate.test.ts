@@ -6,7 +6,7 @@ import * as NodePath from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
-import { HermesPatchId } from "@t3tools/contracts";
+import { HermesPatchId, ProviderDriverKind, ProviderInstanceId } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
 import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -173,7 +173,15 @@ const withService = (
   Effect.provide(
     Layer.effect(HermesPatchService, makeWith({ patches, ...options })).pipe(
       Layer.provide(
-        ServerSettings.layerTest({ providers: { hermes: { enabled: true, binaryPath } } }),
+        ServerSettings.layerTest({
+          providerInstances: {
+            [ProviderInstanceId.make("hermes")]: {
+              driver: ProviderDriverKind.make("hermes"),
+              enabled: true,
+              config: { binaryPath },
+            },
+          },
+        }),
       ),
       Layer.provideMerge(Layer.merge(NodeServices.layer, FetchHttpClient.layer)),
     ),

@@ -15,7 +15,7 @@ import type { ModelSelection } from "@t3tools/contracts";
 import type * as EffectAcpSchema from "effect-acp/compat";
 import { getModelSelectionBooleanOptionValue } from "@t3tools/shared/model";
 
-import { buildBooleanOptionDescriptor } from "../provider/providerSnapshot.ts";
+import { buildBooleanOptionDescriptor } from "@t3tools/provider-core/server/snapshotProbe";
 
 /** Descriptor id, shared with Claude and Codex so clients render one Fast toggle. */
 export const HERMES_FAST_MODE_OPTION_ID = "fastMode";

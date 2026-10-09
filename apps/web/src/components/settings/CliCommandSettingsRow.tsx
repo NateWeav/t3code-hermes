@@ -52,11 +52,13 @@ export function CliCommandSettingsRow() {
 
   if (!bridge || !state?.supported) return null;
   const installed = state.installedPath !== null;
-  const description = !installed
-    ? "Run T3 Hermes's CLI as `t3-hermes` from any terminal."
-    : state.onPath
-      ? `Installed at ${state.installedPath}. Open a new terminal to use it.`
-      : `Installed at ${state.installedPath}, which is not on your PATH yet. Add its folder to your PATH to run \`t3-hermes\`.`;
+  const description = state.shadowedBy
+    ? `Another t3-hermes at ${state.shadowedBy} runs first in a new terminal. Remove it to use T3 Hermes's.`
+    : !installed
+      ? "Run T3 Hermes's CLI as `t3-hermes` from any terminal."
+      : state.onPath
+        ? `Installed at ${state.installedPath}. Open a new terminal to use it.`
+        : `Installed at ${state.installedPath}, which is not on your PATH yet. Add its folder to your PATH to run \`t3-hermes\`.`;
 
   return (
     <SettingsRow

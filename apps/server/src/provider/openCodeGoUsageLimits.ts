@@ -9,7 +9,10 @@ import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/http";
 
 import { readOpenCodeGoApiKey, readOpenCodeGoLocalQuota } from "./openCodeGoLocal.ts";
 import { parseOpenCodeGoDocument, parseOpenCodeGoUsage } from "./openCodeGoReaders.ts";
-import { makeUnavailableUsageLimits, makeUsageLimits } from "./providerUsageLimits.ts";
+import {
+  makeUnavailableUsageLimits,
+  makeUsageLimits,
+} from "@t3tools/provider-core/server/usageLimits";
 
 /** Reads Go limits during the instance probe; upstream snapshots own refresh and stale values. */
 export const readOpenCodeGoUsageLimits = Effect.fn("readOpenCodeGoUsageLimits")(function* (input: {

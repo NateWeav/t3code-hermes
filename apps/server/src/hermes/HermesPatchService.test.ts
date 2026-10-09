@@ -5,7 +5,7 @@ import * as NodePath from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
-import { HermesPatchId } from "@t3tools/contracts";
+import { HermesPatchId, ProviderDriverKind, ProviderInstanceId } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -15,7 +15,7 @@ import { FetchHttpClient } from "effect/http";
 
 import { providerUpdateLock } from "../provider/providerMaintenanceCommandCoordinator.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import { writeFakeCli } from "../testUtils/fakeCli.ts";
+import { writeFakeCli } from "@t3tools/provider-testing/fakeCli";
 import { startFakeGateway } from "./hermesGatewayFixtures.ts";
 import { HERMES_PATCHES, HERMES_UPDATE_LOCK_KEY } from "./hermesPatches.ts";
 import { HermesPatchService, make } from "./HermesPatchService.ts";
@@ -26,7 +26,17 @@ const git = (cwd: string, ...args: string[]) =>
 const withService = (hermes: { readonly enabled: boolean; readonly binaryPath?: string }) =>
   Effect.provide(
     Layer.effect(HermesPatchService, make).pipe(
-      Layer.provide(ServerSettings.layerTest({ providers: { hermes } })),
+      Layer.provide(
+        ServerSettings.layerTest({
+          providerInstances: {
+            [ProviderInstanceId.make("hermes")]: {
+              driver: ProviderDriverKind.make("hermes"),
+              enabled: hermes.enabled,
+              config: hermes,
+            },
+          },
+        }),
+      ),
       Layer.provideMerge(Layer.merge(NodeServices.layer, FetchHttpClient.layer)),
     ),
   );

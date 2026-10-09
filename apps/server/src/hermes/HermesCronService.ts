@@ -58,8 +58,8 @@ import * as SynchronizedRef from "effect/SynchronizedRef";
 
 import { writeFileStringAtomically } from "../atomicWrite.ts";
 import { ServerConfig } from "../config.ts";
-import { mergeProviderInstanceEnvironment } from "../provider/ProviderInstanceEnvironment.ts";
-import { spawnAndCollect } from "../provider/providerSnapshot.ts";
+import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
+import { spawnAndCollect } from "@t3tools/provider-core/server/snapshotProbe";
 import * as ServerSettings from "../serverSettings.ts";
 import { subscribeBeforeSnapshot } from "../utils/subscribeBeforeSnapshot.ts";
 import { createHermesCronDeliveryReader } from "./hermesCronDeliveries.ts";

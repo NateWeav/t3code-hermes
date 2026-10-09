@@ -15,6 +15,7 @@ import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { NoOpProviderEventLoggers, ProviderEventLoggers } from "../ProviderEventLoggers.ts";
 import * as ProviderHostLive from "../ProviderHostLive.ts";
+import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 import { HermesDriver } from "./HermesDriver.ts";
 
 const testDeps = ServerConfig.layerTest(process.cwd(), {
@@ -36,7 +37,10 @@ const testDeps = ServerConfig.layerTest(process.cwd(), {
     ),
   ),
 );
-const testLayer = ProviderHostLive.layer.pipe(Layer.provideMerge(testDeps));
+const testLayer = ProviderHostLive.layer.pipe(
+  Layer.provideMerge(ServerSecretStore.layer),
+  Layer.provideMerge(testDeps),
+);
 
 const noSpawner = ChildProcessSpawner.make(() =>
   Effect.die("Disabled Hermes must not spawn a process"),

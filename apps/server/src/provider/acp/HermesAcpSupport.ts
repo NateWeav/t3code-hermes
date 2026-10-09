@@ -23,8 +23,11 @@ import type * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/compat";
 import { normalizeModelSlug } from "@t3tools/shared/model";
 
-import type { AcpSessionModeState, AcpToolCallState } from "./AcpRuntimeModel.ts";
-import * as AcpSessionRuntime from "./AcpSessionRuntime.ts";
+import type {
+  AcpSessionModeState,
+  AcpToolCallState,
+} from "@t3tools/provider-acp/server/runtimeModel";
+import * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 
 const HERMES_DRIVER_KIND = ProviderDriverKind.make("hermes");
 /** Hermes authenticates from `~/.hermes/.env`; the method id is a formality. */

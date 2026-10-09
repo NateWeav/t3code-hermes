@@ -30,9 +30,10 @@ import { ChildProcessSpawner } from "effect/process";
 
 import type * as EffectAcpSchema from "effect-acp/compat";
 
-import * as ServerConfig from "../../config.ts";
-import { parseSessionUpdateEvent } from "../../provider/acp/AcpRuntimeModel.ts";
-import type * as AcpSessionRuntime from "../../provider/acp/AcpSessionRuntime.ts";
+import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
+import { layerTestProviderHost } from "@t3tools/provider-testing/host";
+import { parseSessionUpdateEvent } from "@t3tools/provider-acp/server/runtimeModel";
+import type * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 import { makeHermesAcpRuntime } from "../../provider/acp/HermesAcpSupport.ts";
 import delegationFixture from "../../provider/acp/fixtures/hermes-delegation.json" with { type: "json" };
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
@@ -53,9 +54,7 @@ import {
 const testLayer = Layer.mergeAll(
   NodeServices.layer,
   IdAllocator.layer,
-  ServerConfig.layerTest(process.cwd(), { prefix: "t3-hermes-v2-adapter-" }).pipe(
-    Layer.provide(NodeServices.layer),
-  ),
+  layerTestProviderHost().pipe(Layer.provide(NodeServices.layer)),
 );
 const windowsHost = HostProcessPlatform.defaultValue() === "win32";
 const decodeHermesSettings = Schema.decodeSync(HermesSettings);
@@ -214,7 +213,7 @@ const runMockTurn = (input: {
       fileSystem,
       path,
       idAllocator: yield* IdAllocator.IdAllocatorV2,
-      serverConfig: yield* ServerConfig.ServerConfig,
+      host: yield* ProviderHost.ProviderHost,
       ...(input.continuationRequests === undefined
         ? {}
         : { continuationRequests: input.continuationRequests }),

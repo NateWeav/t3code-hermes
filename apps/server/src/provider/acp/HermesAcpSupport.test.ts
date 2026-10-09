@@ -11,7 +11,7 @@ import {
   preserveHermesAgentActivityTitle,
   resolveHermesSessionModeId,
 } from "./HermesAcpSupport.ts";
-import { parseSessionUpdateEvent } from "./AcpRuntimeModel.ts";
+import { parseSessionUpdateEvent } from "@t3tools/provider-acp/server/runtimeModel";
 
 describe("resolveHermesAcpBaseModelId", () => {
   it("falls back to the placeholder model for empty ids", () => {

@@ -11,6 +11,7 @@ import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import * as ServerConfig from "../../config.ts";
 import { HERMES_UPDATE_LOCK_KEY, resolveHermesGitCheckout } from "../../hermes/hermesPatches.ts";
 import { makeHermesTextGeneration } from "../../textGeneration/HermesTextGeneration.ts";
+import { hermesUsageReader, type HermesUsageReaderEnv } from "../../usage/usageHermes.ts";
 import {
   HermesAdapterV2Driver,
   type HermesAdapterV2DriverEnv,
@@ -112,7 +113,7 @@ const withInstanceIdentity =
     continuation: { groupKey: input.continuationGroupKey },
   });
 
-export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
+export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv, HermesUsageReaderEnv> = {
   driverKind: DRIVER_KIND,
   metadata: {
     displayName: "Hermes",
@@ -120,6 +121,7 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv> = {
   },
   configSchema: HermesSettings,
   defaultConfig: (): HermesSettings => decodeHermesSettings({}),
+  usage: hermesUsageReader,
   create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
     Effect.gen(function* () {
       const crypto = yield* Crypto.Crypto;

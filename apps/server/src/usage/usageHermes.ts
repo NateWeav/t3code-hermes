@@ -1,8 +1,21 @@
 // @effect-diagnostics nodeBuiltinImport:off
 /** Reads canonical Hermes Agent usage totals from `state.db`. */
+import * as NodeOS from "node:os";
 import * as NodeSqlite from "node:sqlite";
 
-import type { UsageRecord } from "./usageTranscripts.ts";
+import type { HermesSettings } from "@t3tools/contracts";
+import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
+import type {
+  ProviderUsageReader,
+  ProviderUsageScan,
+  UsageRecord,
+} from "@t3tools/provider-core/server/usage";
+import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
+
+import { readDirectoryVolumeId } from "./usageTranscriptReader.ts";
 
 interface HermesSessionRow {
   readonly id: unknown;
@@ -129,3 +142,61 @@ export function readHermesUsageRecords(
     database.close();
   }
 }
+
+export type HermesUsageReaderEnv = FileSystem.FileSystem | Path.Path;
+
+/**
+ * Hermes session counters are canonical and cumulative, so each database is
+ * one source rather than per-message transcript records. Every profile under
+ * `<home>/profiles/<name>` keeps its own state.db and sessions.
+ */
+export const hermesUsageReader: ProviderUsageReader<HermesSettings, HermesUsageReaderEnv> = {
+  kind: "scan",
+  provider: "hermes",
+  scan: Effect.fn("hermesUsageReader.scan")(function* ({ windowStartMs }) {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const hostEnvironment = yield* HostProcessEnvironment;
+    const hermesHome = path.resolve(
+      expandHomePath(
+        hostEnvironment["HERMES_HOME"]?.trim() || path.join(NodeOS.homedir(), ".hermes"),
+      ),
+    );
+    const hermesProfilesDir = path.join(hermesHome, "profiles");
+    const hermesProfiles = yield* fileSystem
+      .readDirectory(hermesProfilesDir)
+      .pipe(Effect.orElseSucceed((): string[] => []));
+    const hermesHomes = [
+      hermesHome,
+      ...hermesProfiles
+        .filter((name) => !name.startsWith("."))
+        .toSorted()
+        .map((name) => path.join(hermesProfilesDir, name)),
+    ];
+    const scanned: ProviderUsageScan[] = [];
+    for (const profileHome of hermesHomes) {
+      const hermesDb = path.join(profileHome, "state.db");
+      const hermesExists = yield* fileSystem
+        .exists(hermesDb)
+        .pipe(Effect.catchCause(() => Effect.succeed(false)));
+      // A profile that never ran has no database and is not a source.
+      if (!hermesExists && profileHome !== hermesHome) continue;
+      const hermesRecords = hermesExists
+        ? yield* Effect.sync(() => readHermesUsageRecords(hermesDb, windowStartMs))
+        : [];
+      scanned.push({
+        dir: hermesDb,
+        // The profile home, not the database file, identifies the source.
+        volumeId: yield* Effect.promise(() => readDirectoryVolumeId(profileHome)),
+        files: hermesExists ? [{ path: hermesDb, records: hermesRecords ?? [] }] : null,
+        status: hermesRecords === null ? "failed" : "ok",
+        ...(hermesExists
+          ? hermesRecords === null
+            ? { message: "Hermes state database could not be read." }
+            : {}
+          : { message: "No Hermes state database on this environment." }),
+      });
+    }
+    return scanned;
+  }),
+};

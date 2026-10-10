@@ -258,17 +258,15 @@ export const make = Effect.gen(function* () {
     );
 
   /** The enabled instance, with its env overrides already merged over `process.env`. */
-  const hermesInstance = Effect.map(
-    settingsService.getSettings.pipe(Effect.orElseSucceed(() => null)),
-    (settings) => {
-      const instance = settings === null ? null : resolveEnabledHermesInstance(settings);
-      if (instance === null) return null;
-      return {
-        settings: instance.settings,
-        env: mergeProviderInstanceEnvironment(instance.environment),
-      };
-    },
-  );
+  const hermesInstance = Effect.gen(function* () {
+    const settings = yield* settingsService.getSettings.pipe(Effect.orElseSucceed(() => null));
+    const instance = settings === null ? null : resolveEnabledHermesInstance(settings);
+    if (instance === null) return null;
+    return {
+      settings: instance.settings,
+      env: yield* mergeProviderInstanceEnvironment(instance.environment),
+    };
+  });
 
   /** Reads Hermes state. Never fails — availability is part of the snapshot. */
   const readSnapshot = Effect.gen(function* () {

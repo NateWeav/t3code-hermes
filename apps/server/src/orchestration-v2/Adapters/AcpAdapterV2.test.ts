@@ -28,7 +28,7 @@ import {
   type OrchestrationV2Subagent,
 } from "@t3tools/contracts";
 import { GrokSettings } from "@t3tools/provider-grok/settings";
-import { HostProcessIsExecutable, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { resolveSelfInvocation } from "@t3tools/shared/nodeRuntime";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -706,7 +706,7 @@ describe("AcpAdapterV2", () => {
       const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const path = yield* Path.Path;
       const selfInvocation = yield* resolveSelfInvocation().pipe(
-        Effect.provideService(HostProcessIsExecutable, true),
+        Effect.provideService(HostProcess.IsExecutable, true),
       );
       const mockAgentPath = yield* path.fromFileUrl(
         new URL("../../../scripts/acp-mock-agent.ts", import.meta.url),
@@ -1948,7 +1948,7 @@ describe("AcpAdapterV2", () => {
 
   it.live("cleans detached fixtures when an assertion aborts the test scope", () =>
     Effect.gen(function* () {
-      if ((yield* HostProcessPlatform) !== "linux") return;
+      if ((yield* HostProcess.Platform) !== "linux") return;
       const fileSystem = yield* FileSystem.FileSystem;
       let published: ReadonlyArray<number> = [];
       const failed = yield* Effect.scoped(
@@ -2062,7 +2062,7 @@ describe("AcpAdapterV2", () => {
 
   it.live("reaps detached native work when the provider exits before explicit teardown", () =>
     Effect.gen(function* () {
-      if ((yield* HostProcessPlatform) !== "linux") return;
+      if ((yield* HostProcess.Platform) !== "linux") return;
       const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
@@ -2141,7 +2141,7 @@ describe("AcpAdapterV2", () => {
 
   it.live("surfaces reduced guarantee when delegated cgroup containment is unavailable", () =>
     Effect.gen(function* () {
-      if ((yield* HostProcessPlatform) !== "linux") return;
+      if ((yield* HostProcess.Platform) !== "linux") return;
       const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const path = yield* Path.Path;
       const selfInvocation = yield* resolveSelfInvocation();
@@ -3215,7 +3215,7 @@ describe("AcpAdapterV2", () => {
           instanceId,
           settings: DEFAULT_GROK_SETTINGS,
           environment: {},
-          hostPlatform: yield* HostProcessPlatform,
+          hostPlatform: yield* HostProcess.Platform,
           selfInvocation: yield* resolveSelfInvocation(),
           // Production Grok runtimes are wrapped by the x.ai prompt runtime.
           makeRuntime: (input) =>
@@ -3262,7 +3262,7 @@ describe("AcpAdapterV2", () => {
         instanceId,
         settings: DEFAULT_GROK_SETTINGS,
         environment: {},
-        hostPlatform: yield* HostProcessPlatform,
+        hostPlatform: yield* HostProcess.Platform,
         selfInvocation: yield* resolveSelfInvocation(),
         // Production Grok runtimes are wrapped by the x.ai prompt runtime.
         makeRuntime: (input) =>
@@ -13281,7 +13281,7 @@ describe("AcpAdapterV2", () => {
 
   it.live("direct Stop skips uninterruptible ACP cancel and recovers after native teardown", () =>
     Effect.gen(function* () {
-      if ((yield* HostProcessPlatform) !== "linux") return;
+      if ((yield* HostProcess.Platform) !== "linux") return;
       const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const fileSystem = yield* FileSystem.FileSystem;
       const idAllocator = yield* IdAllocator.IdAllocatorV2;
@@ -13701,7 +13701,7 @@ describe("AcpAdapterV2", () => {
 
   it.live("restart_active terminates native work and reloads a clean runtime", () =>
     Effect.gen(function* () {
-      if ((yield* HostProcessPlatform) !== "linux") return;
+      if ((yield* HostProcess.Platform) !== "linux") return;
       const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const fileSystem = yield* FileSystem.FileSystem;
       const idAllocator = yield* IdAllocator.IdAllocatorV2;

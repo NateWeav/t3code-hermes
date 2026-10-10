@@ -245,7 +245,7 @@ const make = Effect.gen(function* () {
     const settings = yield* settingsService.getSettings.pipe(Effect.orElseSucceed(() => null));
     const instance = settings === null ? null : resolveEnabledHermesInstance(settings);
     if (instance === null) return null;
-    const root = resolveHermesHome(mergeProviderInstanceEnvironment(instance.environment));
+    const root = resolveHermesHome(yield* mergeProviderInstanceEnvironment(instance.environment));
     const profiles: HermesProfileHome[] = [{ profile: DEFAULT_HERMES_PROFILE, home: root }];
     const profilesDir = path.join(root, "profiles");
     const names = yield* fs

@@ -38,7 +38,7 @@ import {
   type ServerSettings,
   resolveProviderInstanceEnabled,
 } from "@t3tools/contracts";
-import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { CommandAvailability } from "@t3tools/shared/shell";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -374,7 +374,7 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const config = yield* ServerConfig.ServerConfig;
-  const hostEnvironment = yield* HostProcessEnvironment;
+  const hostEnvironment = yield* HostProcess.Environment;
   const commandAvailable = yield* CommandAvailability;
   const homeDir = options.homeDir ?? NodeOS.homedir();
   const ledgerPath = path.join(config.stateDir, LEDGER_FILE);
@@ -501,7 +501,10 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
           if (instance.driver !== agent.driver || !resolveProviderInstanceEnabled(instance))
             continue;
           const instanceConfig = asRecord(instance.config) ?? {};
-          const env = mergeProviderInstanceEnvironment(instance.environment, hostEnvironment);
+          const env = yield* mergeProviderInstanceEnvironment(
+            instance.environment,
+            hostEnvironment,
+          );
           // Managed Codex runs a copy T3 Code installs itself, usually off PATH.
           const managed = agent.target === "codex" && instanceConfig["setupMode"] === "managed";
           const binary = nonEmptyString(instanceConfig["binaryPath"]) ?? agent.binary;
@@ -550,20 +553,23 @@ export const make = Effect.fn("HindsightAgentMemory.make")(function* (
       // enabled one with a home of its own is named, not wired.
       const hermes = resolveEnabledHermesInstance(settings);
       if (hermes !== null) {
-        const env = mergeProviderInstanceEnvironment(hermes.environment, hostEnvironment);
+        const env = yield* mergeProviderInstanceEnvironment(hermes.environment, hostEnvironment);
         const binary = nonEmptyString(hermes.settings.binaryPath) ?? "hermes";
         if (yield* isAvailable(binary, env)) {
           const hermesHome = hermesHomeOf(env);
-          const otherHomes = instances.flatMap(([instanceId, instance]) =>
-            instanceId !== hermes.instanceId &&
-            instance.driver === "hermes" &&
-            resolveProviderInstanceEnabled(instance) &&
-            hermesHomeOf(
-              mergeProviderInstanceEnvironment(instance.environment, hostEnvironment),
-            ) !== hermesHome
-              ? [instanceId]
-              : [],
-          );
+          const otherHomes: Array<string> = [];
+          for (const [instanceId, instance] of instances) {
+            if (
+              instanceId !== hermes.instanceId &&
+              instance.driver === "hermes" &&
+              resolveProviderInstanceEnabled(instance) &&
+              hermesHomeOf(
+                yield* mergeProviderInstanceEnvironment(instance.environment, hostEnvironment),
+              ) !== hermesHome
+            ) {
+              otherHomes.push(instanceId);
+            }
+          }
           present.push({ target: "hermes", customHomeInstances: otherHomes, hermesHome });
         }
       }

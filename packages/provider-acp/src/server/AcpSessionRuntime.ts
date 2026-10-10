@@ -28,7 +28,8 @@ import type * as EffectAcpSchema from "effect-acp/compat";
 import type * as EffectAcpProtocol from "effect-acp/protocol";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import type { ServerProviderSlashCommand } from "@t3tools/contracts";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { AgentScope, AgentScopeThreadId, RAISE_OOM_SCORE_LINE } from "@t3tools/shared/AgentScope";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 
 import { signalProcessGroup } from "@t3tools/provider-core/server/processGroup";
 import { appendAcpStderrTail, sanitizeAcpStderrExcerpt } from "./stderr.ts";
@@ -277,6 +278,7 @@ export function wrapCommandForLinuxCgroup(
       "-c",
       [
         "lease_path=$1; expected=$2; shift 2",
+        RAISE_OOM_SCORE_LINE,
         'printf "%s\\n" "$$" > "$lease_path/cgroup.procs" || exit 125',
         "actual=",
         "while IFS= read -r line; do",
@@ -1418,6 +1420,7 @@ export const make = (
     const stoppingRef = yield* Ref.make(false);
     const stderrFailure = yield* Deferred.make<never, EffectAcpErrors.AcpError>();
     const stderrTailRef = yield* Ref.make("");
+    const homeDirectory = yield* HostProcess.HomeDirectory;
     const stderrDrained = yield* Deferred.make<void>();
     const runtimeClosed = yield* Deferred.make<void>();
     const promptSerializationSemaphore = yield* Semaphore.make(1);
@@ -1450,7 +1453,7 @@ export const make = (
             Effect.ignore,
             Effect.andThen(Ref.get(stderrTailRef)),
             Effect.map((tail) => {
-              const stderr = sanitizeAcpStderrExcerpt(tail);
+              const stderr = sanitizeAcpStderrExcerpt(tail, homeDirectory);
               return stderr.length === 0
                 ? error
                 : new EffectAcpErrors.AcpProcessExitedError({
@@ -1561,9 +1564,24 @@ export const make = (
               cause: new Error("Contained ACP command was not found on PATH"),
             });
           });
+    // A cgroup lease is already its own leaf cgroup, so it only needs the
+    // raised OOM score (in its wrapper). Other agents get their own scope.
+    const scopedSpawnCommand =
+      linuxCgroupLease !== undefined || spawnCommand.shell
+        ? spawnCommand
+        : {
+            ...(yield* (yield* AgentScope).wrap({
+              command: spawnCommand.command,
+              args: spawnCommand.args,
+              name: "acp",
+              threadId: yield* AgentScopeThreadId,
+              env: { ...process.env, ...options.spawn.env },
+            })),
+            shell: false,
+          };
     const containedSpawnCommand =
       linuxCgroupLease === undefined
-        ? spawnCommand
+        ? scopedSpawnCommand
         : {
             ...wrapCommandForLinuxCgroup(
               linuxCgroupLease,
@@ -1738,7 +1756,7 @@ export const make = (
       Effect.uninterruptible(terminateOwnedProcessGroupImpl),
     );
     if (options.ownDetachedProcessGroup === true) {
-      const hostPlatform = yield* HostProcessPlatform;
+      const hostPlatform = yield* HostProcess.Platform;
       const forceTerminateOwnedProcessGroup =
         hostPlatform === "win32"
           ? terminateWindowsProcessTreeWithTaskkill(Number(child.pid)).pipe(

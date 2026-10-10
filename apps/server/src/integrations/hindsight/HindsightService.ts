@@ -369,7 +369,9 @@ export const make = Effect.gen(function* () {
     // A Hermes instance can point `HERMES_HOME` elsewhere; follow it when one is on.
     const instance = resolveEnabledHermesInstance(settings);
     const environment =
-      instance === null ? process.env : mergeProviderInstanceEnvironment(instance.environment);
+      instance === null
+        ? process.env
+        : yield* mergeProviderInstanceEnvironment(instance.environment);
     const hermes = yield* readHermesConfig(environment);
     const hindsight = settings.integrations.hindsight;
     return {

@@ -37,7 +37,7 @@ import {
   type CliArchivePlatformKey,
   NPM_PLATFORM_PACKAGE_NAMES,
 } from "@t3tools/shared/cliRelease";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { fromJsonStringPretty } from "@t3tools/shared/schemaJson";
 import { isCommandAvailable } from "@t3tools/shared/shell";
 import serverPackageJson from "../apps/server/package.json" with { type: "json" };
@@ -256,7 +256,7 @@ const runCommand = Effect.fn("runCommand")(function* (
 const extractArchive = Effect.fn("extractArchive")(function* (archive: string, into: string) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const platform = yield* HostProcessPlatform;
+  const platform = yield* HostProcess.Platform;
   if (!archive.endsWith(".zip")) {
     yield* runCommand(ChildProcess.make("tar", ["-xf", archive, "-C", into]), "tar -xf");
   } else if (platform === "win32") {
@@ -285,7 +285,7 @@ const extractArchive = Effect.fn("extractArchive")(function* (archive: string, i
 });
 
 /** Tar to build npm tarballs with; see build-cli-archive.ts for why Windows names bsdtar by path. */
-const hostTar = Effect.map(HostProcessPlatform, (platform) =>
+const hostTar = Effect.map(HostProcess.Platform, (platform) =>
   platform === "win32" ? windowsSystemTar() : "tar",
 );
 

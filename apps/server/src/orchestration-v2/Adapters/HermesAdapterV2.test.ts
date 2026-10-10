@@ -15,7 +15,7 @@ import {
   type ProviderOptionSelection,
   type RuntimeMode,
 } from "@t3tools/contracts";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { resolveSelfInvocation } from "@t3tools/shared/nodeRuntime";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -56,7 +56,7 @@ const testLayer = Layer.mergeAll(
   McpProviderSessions.layer,
   TestProviderHost.layer().pipe(Layer.provide(NodeServices.layer)),
 );
-const windowsHost = HostProcessPlatform.defaultValue() === "win32";
+const windowsHost = HostProcess.Platform.defaultValue() === "win32";
 const decodeHermesSettings = Schema.decodeSync(HermesSettings);
 const hermesSettings = (binaryPath: string) => decodeHermesSettings({ binaryPath });
 const decodeRequestLine = Schema.decodeSync(

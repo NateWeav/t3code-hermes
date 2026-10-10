@@ -4,7 +4,7 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as NodePath from "node:path";
 
 import {
@@ -131,7 +131,7 @@ export function resolveHermesMemoryPaths(environment: NodeJS.ProcessEnv) {
   // Path.home() in the child honors an instance HOME override on Unix. Never
   // fall back to the server user's store when that instance uses another home.
   const homedir =
-    HostProcessPlatform.defaultValue() === "win32"
+    HostProcess.Platform.defaultValue() === "win32"
       ? NodeOS.homedir()
       : environment["HOME"] || NodeOS.homedir();
   const { home, configFile } = resolveHermesReasoningPaths(environment, homedir);

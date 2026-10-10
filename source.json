@@ -1,0 +1,92 @@
+{
+  "name": "T3 Hermes",
+  "identifier": "com.nateweav.t3hermes.source",
+  "sourceURL": "https://raw.githubusercontent.com/NateWeav/t3code-hermes/ipa-source/source.json",
+  "iconURL": "https://raw.githubusercontent.com/NateWeav/t3code-hermes/HEAD/assets/hermes/ios-1024.png",
+  "apps": [
+    {
+      "name": "T3 Hermes",
+      "bundleIdentifier": "com.nateweav.t3hermes",
+      "developerName": "NateWeav",
+      "localizedDescription": "Nightly and stable builds from NateWeav/t3code-hermes releases.",
+      "iconURL": "https://raw.githubusercontent.com/NateWeav/t3code-hermes/HEAD/assets/hermes/ios-1024.png",
+      "versions": [
+        {
+          "version": "0.0.46-nightly.20261010.168",
+          "date": "2026-10-10T19:55:39Z",
+          "localizedDescription": "T3 Code Nightly 0.0.46-nightly.20261010.168 (1cc96f0a1800)",
+          "downloadURL": "https://github.com/NateWeav/t3code-hermes/releases/download/v0.0.46-nightly.20261010.168/T3Code-0.0.46-nightly.20261010.168.ipa",
+          "size": 43219101
+        },
+        {
+          "version": "0.0.46-nightly.20261010.167",
+          "date": "2026-10-10T13:34:11Z",
+          "localizedDescription": "T3 Code Nightly 0.0.46-nightly.20261010.167 (5684da071be4)",
+          "downloadURL": "https://github.com/NateWeav/t3code-hermes/releases/download/v0.0.46-nightly.20261010.167/T3Code-0.0.46-nightly.20261010.167.ipa",
+          "size": 43219431
+        },
+        {
+          "version": "0.0.46-nightly.20261009.164",
+          "date": "2026-10-10T00:01:47Z",
+          "localizedDescription": "T3 Code Nightly 0.0.46-nightly.20261009.164 (69354e9509e6)",
+          "downloadURL": "https://github.com/NateWeav/t3code-hermes/releases/download/v0.0.46-nightly.20261009.164/T3Code-0.0.46-nightly.20261009.164.ipa",
+          "size": 43212674
+        },
+        {
+          "version": "0.0.46-nightly.20261009.162",
+          "date": "2026-10-09T19:32:57Z",
+          "localizedDescription": "T3 Code Nightly 0.0.46-nightly.20261009.162 (089b9ee8a50f)",
+          "downloadURL": "https://github.com/NateWeav/t3code-hermes/releases/download/v0.0.46-nightly.20261009.162/T3Code-0.0.46-nightly.20261009.162.ipa",
+          "size": 43194132
+        },
+        {
+          "version": "0.0.46-nightly.20261009.160",
+          "date": "2026-10-09T12:09:37Z",
+          "localizedDescription": "T3 Code Nightly 0.0.46-nightly.20261009.160 (a561694bb19e)",
+          "downloadURL": "https://github.com/NateWeav/t3code-hermes/releases/download/v0.0.46-nightly.20261009.160/T3Code-0.0.46-nightly.20261009.160.ipa",
+          "size": 43191569
+        },
+        {
+          "version": "0.0.46-nightly.20261009.159",
+          "date": "2026-10-09T11:18:11Z",
+          "localizedDescription": "T3 Code Nightly 0.0.46-nightly.20261009.159 (9693611c0229)",
+          "downloadURL": "https://github.com/NateWeav/t3code-hermes/releases/download/v0.0.46-nightly.20261009.159/T3Code-0.0.46-nightly.20261009.159.ipa",
+          "size": 43190420
+        },
+        {
+          "version": "0.0.46-nightly.20261009.157",
+          "date": "2026-10-09T03:33:34Z",
+          "localizedDescription": "T3 Code Nightly 0.0.46-nightly.20261009.157 (3189289a99ad)",
+          "downloadURL": "https://github.com/NateWeav/t3code-hermes/releases/download/v0.0.46-nightly.20261009.157/T3Code-0.0.46-nightly.20261009.157.ipa",
+          "size": 43182617
+        },
+        {
+          "version": "0.0.46-nightly.20261009.156",
+          "date": "2026-10-09T01:59:05Z",
+          "localizedDescription": "T3 Code Nightly 0.0.46-nightly.20261009.156 (14c0da77205f)",
+          "downloadURL": "https://github.com/NateWeav/t3code-hermes/releases/download/v0.0.46-nightly.20261009.156/T3Code-0.0.46-nightly.20261009.156.ipa",
+          "size": 43177240
+        },
+        {
+          "version": "0.0.46-nightly.20261008.153",
+          "date": "2026-10-08T16:14:02Z",
+          "localizedDescription": "T3 Code Nightly 0.0.46-nightly.20261008.153 (f258e8a62d6d)",
+          "downloadURL": "https://github.com/NateWeav/t3code-hermes/releases/download/v0.0.46-nightly.20261008.153/T3Code-0.0.46-nightly.20261008.153.ipa",
+          "size": 43167538
+        },
+        {
+          "version": "0.0.46-nightly.20261007.147",
+          "date": "2026-10-07T21:15:26Z",
+          "localizedDescription": "T3 Code Nightly 0.0.46-nightly.20261007.147 (0d97da51902e)",
+          "downloadURL": "https://github.com/NateWeav/t3code-hermes/releases/download/v0.0.46-nightly.20261007.147/T3Code-0.0.46-nightly.20261007.147.ipa",
+          "size": 42889832
+        }
+      ],
+      "version": "0.0.46-nightly.20261010.168",
+      "versionDate": "2026-10-10T19:55:39Z",
+      "downloadURL": "https://github.com/NateWeav/t3code-hermes/releases/download/v0.0.46-nightly.20261010.168/T3Code-0.0.46-nightly.20261010.168.ipa",
+      "size": 43219101
+    }
+  ],
+  "news": []
+}

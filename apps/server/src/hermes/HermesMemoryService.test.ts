@@ -1,4 +1,4 @@
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   DEFAULT_SERVER_SETTINGS,
@@ -178,7 +178,7 @@ describe("HermesMemoryService", () => {
     ),
   );
 
-  it.live.skipIf(HostProcessPlatform.defaultValue() === "win32")(
+  it.live.skipIf(HostProcess.Platform.defaultValue() === "win32")(
     "watches readable stores even when their parent cannot be watched",
     () =>
       Effect.gen(function* () {

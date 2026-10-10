@@ -82,12 +82,14 @@ export const make = Effect.gen(function* () {
   }>({ count: 0, fiber: null });
 
   const skillsPath = settings.getSettings.pipe(
-    Effect.map((value) => {
-      const instance = resolveEnabledHermesInstance(value);
-      return instance === null
-        ? null
-        : resolveHermesSkillsPath(mergeProviderInstanceEnvironment(instance.environment));
-    }),
+    Effect.flatMap(
+      Effect.fnUntraced(function* (value) {
+        const instance = resolveEnabledHermesInstance(value);
+        return instance === null
+          ? null
+          : resolveHermesSkillsPath(yield* mergeProviderInstanceEnvironment(instance.environment));
+      }),
+    ),
     Effect.mapError(
       (cause) =>
         new HermesSkillsError({

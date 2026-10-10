@@ -5,7 +5,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import {
@@ -21,7 +21,7 @@ import {
 
 const fixture = NodeURL.fileURLToPath(new URL("./fixtures/hermes-memory/", import.meta.url));
 const mutateForTest = (input: Parameters<typeof mutateHermesMemory>[2]) =>
-  mutateHermesMemory(environment, "hermes", input, HostProcessPlatform.defaultValue());
+  mutateHermesMemory(environment, "hermes", input, HostProcess.Platform.defaultValue());
 let home: string;
 let environment: NodeJS.ProcessEnv;
 beforeEach(async () => {
@@ -57,7 +57,7 @@ describe("Hermes 0.21.0 memory format", () => {
     }
   });
 
-  it.skipIf(HostProcessPlatform.defaultValue() === "win32")(
+  it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
     "resolves an instance HOME without falling back to the server user's store",
     async () => {
       const selected = { ...environment, HERMES_HOME: "", HOME: home };
@@ -258,7 +258,7 @@ describe("locked atomic memory writes", () => {
       { ...environment, PYTHONIOENCODING: "cp1252" },
       "hermes",
       { target: "memory", revision: file.revision, action: "add", content: "🙂" },
-      HostProcessPlatform.defaultValue(),
+      HostProcess.Platform.defaultValue(),
     );
     expect(await NodeFSP.readFile(resolveHermesMemoryPaths(environment).memory, "utf8")).toBe(
       "Café\n§\n日本語\n§\n🙂",
@@ -302,7 +302,7 @@ describe("locked atomic memory writes", () => {
           action: "add",
           content: "Wrong store",
         },
-        HostProcessPlatform.defaultValue(),
+        HostProcess.Platform.defaultValue(),
       ),
     ).rejects.toMatchObject({ reason: "conflict" });
   });
@@ -310,7 +310,7 @@ describe("locked atomic memory writes", () => {
   it("respects Hermes's flock / msvcrt lock on the sibling .lock file", async () => {
     const file = await seed();
     const lockPath = `${resolveHermesMemoryPaths(environment).memory}.lock`;
-    const python = HostProcessPlatform.defaultValue() === "win32" ? "python" : "python3";
+    const python = HostProcess.Platform.defaultValue() === "win32" ? "python" : "python3";
     const child = NodeChildProcess.spawn(
       python,
       [
@@ -355,7 +355,7 @@ describe("locked atomic memory writes", () => {
     });
   });
 
-  it.skipIf(HostProcessPlatform.defaultValue() === "win32")(
+  it.skipIf(HostProcess.Platform.defaultValue() === "win32")(
     "refuses FIFOs, symlinks, and oversized stores without blocking or buffering them",
     async () => {
       await seed();

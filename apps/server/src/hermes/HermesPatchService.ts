@@ -201,7 +201,7 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
       const settings = yield* settingsService.getSettings.pipe(Effect.orElseSucceed(() => null));
       const instance = settings === null ? null : resolveEnabledHermesInstance(settings);
       if (instance === null) return { availability: "providerDisabled" } as const;
-      const env = mergeProviderInstanceEnvironment(instance.environment);
+      const env = yield* mergeProviderInstanceEnvironment(instance.environment);
       const commandPath = yield* resolveCommandPath(instance.settings.binaryPath || "hermes", {
         env,
       }).pipe(Effect.orElseSucceed(() => null));

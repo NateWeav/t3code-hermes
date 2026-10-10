@@ -13,7 +13,7 @@ import * as NodePath from "node:path";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import { ProviderDriverKind, ProviderInstanceId } from "@t3tools/contracts";
-import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { CommandAvailability } from "@t3tools/shared/shell";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -270,7 +270,7 @@ function setup(options: Options) {
     Layer.provide(
       Layer.succeed(CommandAvailability, (command) => Effect.succeed(!missing.has(command))),
     ),
-    Layer.provide(Layer.succeed(HostProcessEnvironment, options.hostEnv ?? {})),
+    Layer.provide(Layer.succeed(HostProcess.Environment, options.hostEnv ?? {})),
     Layer.provide(fileSystem),
     Layer.provideMerge(NodeServices.layer),
   );

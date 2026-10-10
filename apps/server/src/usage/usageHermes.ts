@@ -1,6 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off
 /** Reads canonical Hermes Agent usage totals from `state.db`. */
-import * as NodeOS from "node:os";
 import * as NodeSqlite from "node:sqlite";
 
 import type { HermesSettings } from "@t3tools/contracts";
@@ -10,7 +9,7 @@ import type {
   ProviderUsageScan,
   UsageRecord,
 } from "@t3tools/provider-core/server/usage";
-import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -156,10 +155,12 @@ export const hermesUsageReader: ProviderUsageReader<HermesSettings, HermesUsageR
   scan: Effect.fn("hermesUsageReader.scan")(function* ({ windowStartMs }) {
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const hostEnvironment = yield* HostProcessEnvironment;
+    const hostEnvironment = yield* HostProcess.Environment;
+    const homeDirectory = yield* HostProcess.HomeDirectory;
     const hermesHome = path.resolve(
       expandHomePath(
-        hostEnvironment["HERMES_HOME"]?.trim() || path.join(NodeOS.homedir(), ".hermes"),
+        hostEnvironment["HERMES_HOME"]?.trim() || path.join(homeDirectory, ".hermes"),
+        homeDirectory,
       ),
     );
     const hermesProfilesDir = path.join(hermesHome, "profiles");

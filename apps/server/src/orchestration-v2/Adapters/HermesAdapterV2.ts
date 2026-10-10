@@ -14,7 +14,7 @@ import {
   type OrchestrationV2ProviderCapabilities,
   type RuntimeMode,
 } from "@t3tools/contracts";
-import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { resolveSelfInvocation, type SelfInvocation } from "@t3tools/shared/nodeRuntime";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -307,13 +307,13 @@ export const HermesAdapterV2Driver: ProviderAdapterDriver<
   defaultConfig: (): HermesSettings => DEFAULT_HERMES_SETTINGS,
   create: Effect.fn("HermesAdapterV2Driver.create")(
     function* (input: ProviderAdapterDriverCreateInput<HermesSettings>) {
-      const hostEnvironment = yield* HostProcessEnvironment;
+      const hostEnvironment = yield* HostProcess.Environment;
       const providerEventLoggers = yield* ProviderEventLoggers.ProviderEventLoggers;
       const makeNativeLogger = yield* makeAcpNativeLoggerFactory();
       return yield* makeHermesAdapterV2({
         instanceId: input.instanceId,
         settings: { ...input.config, enabled: input.enabled },
-        environment: mergeProviderInstanceEnvironment(input.environment, hostEnvironment),
+        environment: yield* mergeProviderInstanceEnvironment(input.environment, hostEnvironment),
         childProcessSpawner: yield* ChildProcessSpawner.ChildProcessSpawner,
         selfInvocation: yield* resolveSelfInvocation(),
         continuationRequests: yield* ProviderContinuationRequests.ProviderContinuationRequests,

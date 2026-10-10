@@ -53,7 +53,7 @@ function MemoryUsage({ file }: { file: HermesMemoryFile }) {
               aria-valuenow={Math.max(0, Math.min(file.charsUsed, file.charLimit))}
               aria-valuetext={summary}
               tabIndex={0}
-              className="flex h-6 items-center rounded outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="flex h-6 items-center rounded outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
             />
           }
         >

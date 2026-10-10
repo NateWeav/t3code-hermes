@@ -3,7 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodeUtil from "node:util";
 import * as NodePath from "node:path";
 
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import {
   HermesMemoryError,
   type HermesMemoryMutateInput,
@@ -104,7 +104,7 @@ function watchDirectories(home: string, directory: string, notify: () => void): 
  * No timers, no subprocess on reads, and no frames for unchanged snapshots.
  * @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
-  const platform = yield* HostProcessPlatform;
+  const platform = yield* HostProcess.Platform;
   const settings = yield* ServerSettings.ServerSettingsService;
   const changes = yield* Effect.acquireRelease(
     PubSub.unbounded<{ seq: number; snapshot: HermesMemorySnapshot }>(),
@@ -118,15 +118,17 @@ export const make = Effect.gen(function* () {
   const serviceScope = yield* Effect.scope;
 
   const instance = settings.getSettings.pipe(
-    Effect.map((settings) => {
-      const enabled = resolveEnabledHermesInstance(settings);
-      return enabled === null
-        ? null
-        : {
-            env: mergeProviderInstanceEnvironment(enabled.environment),
-            binary: enabled.settings.binaryPath || "hermes",
-          };
-    }),
+    Effect.flatMap(
+      Effect.fnUntraced(function* (settings) {
+        const enabled = resolveEnabledHermesInstance(settings);
+        return enabled === null
+          ? null
+          : {
+              env: yield* mergeProviderInstanceEnvironment(enabled.environment),
+              binary: enabled.settings.binaryPath || "hermes",
+            };
+      }),
+    ),
     Effect.mapError(
       (cause) =>
         new HermesMemoryError({

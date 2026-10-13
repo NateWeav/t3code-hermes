@@ -53,6 +53,23 @@ export function fileBreadcrumbChildren(
     });
 }
 
+/** Join a child name onto an absolute host folder, keeping the folder's separator style. */
+export function hostFolderChildPath(folderPath: string, name: string): string {
+  const separator = isWindowsAbsolutePath(folderPath) ? "\\" : "/";
+  return `${folderPath.replace(/[\\/]+$/, "")}${separator}${name}`;
+}
+
+/** Parent of an absolute host folder, or null at a filesystem root. */
+export function hostFolderParent(folderPath: string): string | null {
+  const trimmed = folderPath.replace(/[\\/]+$/, "");
+  const separatorIndex = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  if (separatorIndex < 0) return null;
+  if (separatorIndex === 0) return trimmed.length > 1 ? "/" : null;
+  const parent = trimmed.slice(0, separatorIndex);
+  // `C:` alone is drive-relative; the drive root keeps its separator.
+  return /^[A-Za-z]:$/.test(parent) ? `${parent}\\` : parent;
+}
+
 export function fileBreadcrumbParent(directoryPath: string): string | null {
   if (!directoryPath) return null;
   const separatorIndex = directoryPath.lastIndexOf("/");

@@ -1,6 +1,34 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { fileBreadcrumbChildren, fileBreadcrumbParent, fileBreadcrumbs } from "./filePath";
+import {
+  fileBreadcrumbChildren,
+  fileBreadcrumbParent,
+  fileBreadcrumbs,
+  hostFolderChildPath,
+  hostFolderParent,
+} from "./filePath";
+
+describe("host folder paths", () => {
+  it.each([
+    ["/home/me/previews", "a.png", "/home/me/previews/a.png"],
+    ["/home/me/previews/", "a.png", "/home/me/previews/a.png"],
+    ["/", "etc", "/etc"],
+    ["C:\\Users\\me", "a.png", "C:\\Users\\me\\a.png"],
+  ])("joins %j and %j", (folder, name, expected) => {
+    expect(hostFolderChildPath(folder, name)).toBe(expected);
+  });
+
+  it.each([
+    ["/home/me/previews", "/home/me"],
+    ["/home/me/previews/", "/home/me"],
+    ["/home", "/"],
+    ["/", null],
+    ["C:\\Users\\me", "C:\\Users"],
+    ["C:\\Users", "C:\\"],
+  ])("returns the parent of %j", (folder, expected) => {
+    expect(hostFolderParent(folder)).toBe(expected);
+  });
+});
 
 describe("fileBreadcrumbs", () => {
   it("builds project, directory, and file crumbs", () => {

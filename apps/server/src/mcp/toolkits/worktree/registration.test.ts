@@ -58,7 +58,7 @@ const layerStubServices = Layer.mergeAll(
   Layer.mock(SourceControlRepositoryService.SourceControlRepositoryService)({}),
   Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
   Layer.mock(ThreadSearch.ThreadSearch)({}),
-  Layer.mock(PaperclipService.PaperclipService)({}),
+  PaperclipService.layerTest,
 );
 
 const ToolsListPayload = Schema.fromJsonString(

@@ -171,8 +171,8 @@ export function paperclipWebRoot(baseUrl: string): string | null {
 const company = (id: string) => `/companies/${encodeURIComponent(id)}`;
 
 /** Activity and runs are capped by the side panel, not by what Paperclip would send. */
-export const PAPERCLIP_ACTIVITY_LIMIT = 30;
-export const PAPERCLIP_RUN_LIMIT = 20;
+const PAPERCLIP_ACTIVITY_LIMIT = 30;
+const PAPERCLIP_RUN_LIMIT = 20;
 /** Paperclip's own issue list default is 500; a side panel never needs that many. */
 export const PAPERCLIP_ISSUE_LIMIT = 50;
 

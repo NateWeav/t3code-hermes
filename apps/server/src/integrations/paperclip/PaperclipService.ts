@@ -84,9 +84,7 @@ function trimmedOrNull(value: string | undefined): string | null {
 }
 
 /** Effective connection, or null when switched off or missing a URL or key. */
-export function resolvePaperclipConnection(
-  settings: PaperclipSettings,
-): PaperclipConnection | null {
+function resolvePaperclipConnection(settings: PaperclipSettings): PaperclipConnection | null {
   if (!settings.enabled) return null;
   const baseUrl = trimmedOrNull(settings.baseUrl);
   const apiKey = trimmedOrNull(settings.apiKey);

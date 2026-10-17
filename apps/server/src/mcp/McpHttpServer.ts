@@ -799,10 +799,9 @@ export const layerEnvironmentToolkit = toolkitRegistration(
   EnvironmentHandlers.layer,
 ).pipe(Layer.provide(ThreadCommandExecutor.layer));
 
-export const layerPaperclipToolkit = toolkitRegistration(
-  PaperclipToolkit,
-  PaperclipHandlers.layer,
-).pipe(Layer.provide(ThreadCommandExecutor.layer));
+const layerPaperclipToolkit = toolkitRegistration(PaperclipToolkit, PaperclipHandlers.layer).pipe(
+  Layer.provide(ThreadCommandExecutor.layer),
+);
 
 const layerProjectRegistration = toolkitRegistration(ProjectToolkit, ProjectHandlers.layer);
 

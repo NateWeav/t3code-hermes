@@ -12,6 +12,7 @@ import {
   DEFAULT_RUNTIME_MODE,
   type EnvironmentId,
   type HermesHubSettings,
+  type ProjectId,
   type ThreadId,
 } from "@t3tools/contracts";
 import { useState } from "react";
@@ -79,7 +80,15 @@ function HermesHubsControls({ environmentId }: { readonly environmentId: Environ
   const createThread = useOrchestrationCommand(threadEnvironment.create, { reportFailure: false });
   const { pinThread } = useThreadActions();
   const providers = useEnvironmentProviders().get(environmentId) ?? [];
-  const hubProject = useProjects().find((project) => project.environmentId === environmentId);
+  const projects = useProjects().filter((project) => project.environmentId === environmentId);
+  // Hub threads land in a project the user picks; guessing one put them in unrelated projects.
+  const [projectByHub, setProjectByHub] = useState<Record<string, ProjectId>>({});
+  const projectFor = (hub: HermesHubSettings) => {
+    const picked = projectByHub[hub.id];
+    if (picked !== undefined) return projects.find((project) => project.id === picked);
+    const hubName = hub.name.trim().toLowerCase();
+    return projects.find((project) => project.title.trim().toLowerCase() === hubName);
+  };
   const pinnedThreads = useThreadShells().filter(
     (thread) =>
       thread.environmentId === environmentId &&
@@ -110,8 +119,9 @@ function HermesHubsControls({ environmentId }: { readonly environmentId: Environ
     void save(hubs.map((hub) => (hub.id === id ? { ...hub, ...patch } : hub)));
 
   const createPinnedThread = async (hub: HermesHubSettings) => {
+    const hubProject = projectFor(hub);
     if (hubProject === undefined) {
-      reportFailure("Could not create hub thread", "This environment has no project yet.");
+      reportFailure("Could not create hub thread", "Pick a project for the hub thread first.");
       return;
     }
     setSaving(true);
@@ -122,7 +132,8 @@ function HermesHubsControls({ environmentId }: { readonly environmentId: Environ
         threadId,
         projectId: hubProject.id,
         title: hub.name,
-        modelSelection: resolveAppModelSelectionState(settings, providers),
+        modelSelection:
+          hubProject.defaultModelSelection ?? resolveAppModelSelectionState(settings, providers),
         runtimeMode: DEFAULT_RUNTIME_MODE,
         interactionMode: "default",
         branch: null,
@@ -240,14 +251,42 @@ function HermesHubsControls({ environmentId }: { readonly environmentId: Environ
                     </SelectPopup>
                   </Select>
                   {needsThread ? (
-                    <Button
-                      size="compact"
-                      variant="outline"
-                      disabled={saving}
-                      onClick={() => void createPinnedThread(hub)}
-                    >
-                      Create pinned thread
-                    </Button>
+                    <>
+                      <Select
+                        value={projectFor(hub)?.id ?? ""}
+                        onValueChange={(value) => {
+                          if (value)
+                            setProjectByHub((current) => ({
+                              ...current,
+                              [hub.id]: value as ProjectId,
+                            }));
+                        }}
+                      >
+                        <SelectTrigger
+                          size="compact"
+                          className="w-40"
+                          aria-label={`${hub.name} project`}
+                          disabled={saving || projects.length === 0}
+                        >
+                          <SelectValue>{projectFor(hub)?.title ?? "Pick a project"}</SelectValue>
+                        </SelectTrigger>
+                        <SelectPopup align="end" alignItemWithTrigger={false}>
+                          {projects.map((project) => (
+                            <SelectItem key={project.id} value={project.id}>
+                              {project.title}
+                            </SelectItem>
+                          ))}
+                        </SelectPopup>
+                      </Select>
+                      <Button
+                        size="compact"
+                        variant="outline"
+                        disabled={saving || projectFor(hub) === undefined}
+                        onClick={() => void createPinnedThread(hub)}
+                      >
+                        Create pinned thread
+                      </Button>
+                    </>
                   ) : null}
                 </div>
               }

@@ -1266,6 +1266,20 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.hermesChatTranscript,
       staleTimeMs: 2_000,
     }),
+    /** Which threads each conversation's card lives in; re-read after a link change. */
+    hermesChatLinks: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:hermes-chat-links",
+      tag: WS_METHODS.hermesChatLinks,
+      staleTimeMs: 5_000,
+    }),
+    hermesChatLink: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:hermes-chat-link",
+      tag: WS_METHODS.hermesChatLink,
+    }),
+    hermesChatUnlink: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:hermes-chat-unlink",
+      tag: WS_METHODS.hermesChatUnlink,
+    }),
     paperclipOverview: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:server:paperclip-overview",
       tag: WS_METHODS.paperclipOverview,

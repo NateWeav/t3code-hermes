@@ -8,13 +8,13 @@ const MOTION_CLASS: Record<ThreadStatusRingModel["motion"], string> = {
   none: "",
 };
 
-// No viewBox on purpose: SVG user units are then CSS pixels, so the stroke
-// width and corner radius stay exact instead of being scaled by the row's
-// aspect ratio. The box is inset by half the stroke so the line lands on the
-// row's own edge instead of being clipped by its overflow-hidden corners.
-const STROKE_WIDTH = 1.5;
-// rounded-md (6px) less the inset, so the outline follows the row's corners.
-const CORNER_RADIUS = 5.25;
+// No viewBox, so user units are CSS pixels. The SVG is 1px smaller than the
+// row and the half-pixel rect overflows it, so the 1px stroke covers whole
+// pixels on every edge without the row's rounded clip thinning the corners.
+const STROKE_WIDTH = 1;
+// The row's rounded-md (--radius less 2px, so 8px) less half the stroke; any
+// tighter and the row's corner clip swallows the arc.
+const CORNER_RADIUS = 7.5;
 const TRAVEL_DASH_ARRAY = "6 6";
 
 /** The status outline around a sidebar card row: the same state the row's
@@ -26,13 +26,13 @@ export function ThreadStatusRing(props: { readonly ring: ThreadStatusRingModel |
   return (
     <span
       aria-hidden
-      className={cn("pointer-events-none absolute inset-[0.75px]", props.ring.colorClass)}
+      className={cn("pointer-events-none absolute inset-0", props.ring.colorClass)}
       data-testid={`thread-status-ring-${props.ring.kind}`}
     >
-      <svg className="h-full w-full" fill="none">
+      <svg className="h-[calc(100%-1px)] w-[calc(100%-1px)] overflow-visible" fill="none">
         <rect
-          x="0"
-          y="0"
+          x="0.5"
+          y="0.5"
           width="100%"
           height="100%"
           rx={CORNER_RADIUS}

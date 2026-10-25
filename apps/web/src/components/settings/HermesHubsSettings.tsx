@@ -243,11 +243,27 @@ function HermesHubsControls({ environmentId }: { readonly environmentId: Environ
                       <SelectValue>{thread?.title ?? "Needs a thread"}</SelectValue>
                     </SelectTrigger>
                     <SelectPopup align="end" alignItemWithTrigger={false}>
-                      {pinnedThreads.map((candidate) => (
-                        <SelectItem key={candidate.id} value={candidate.id}>
-                          {candidate.title}
-                        </SelectItem>
-                      ))}
+                      {pinnedThreads.map((candidate) => {
+                        // Pinned threads from every project are valid hubs, so
+                        // the project and any hub already using one tell
+                        // same-named threads apart.
+                        const project = projects.find((entry) => entry.id === candidate.projectId);
+                        const usedBy = hubs.find(
+                          (other) => other.id !== hub.id && other.threadId === candidate.id,
+                        );
+                        return (
+                          <SelectItem key={candidate.id} value={candidate.id}>
+                            <span className="flex min-w-0 flex-col">
+                              <span className="truncate">{candidate.title}</span>
+                              <span className="truncate text-muted-foreground text-xs">
+                                {[project?.title, usedBy ? `Hub: ${usedBy.name}` : null]
+                                  .filter(Boolean)
+                                  .join(" · ") || "No project"}
+                              </span>
+                            </span>
+                          </SelectItem>
+                        );
+                      })}
                     </SelectPopup>
                   </Select>
                   {needsThread ? (

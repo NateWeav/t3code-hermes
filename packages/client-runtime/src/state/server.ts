@@ -934,6 +934,20 @@ export function createServerEnvironmentAtoms<R, E>(
       ]);
     }).pipe(Atom.withLabel(`environment-data:server:usage-scan-settings:${environmentId}`)),
   );
+  /**
+   * The hub a thread posts Hermes conversation cards for, by name, or null.
+   * Keyed per thread and a primitive value, so a settings change re-renders
+   * only the rows whose answer changed.
+   */
+  const hermesHubNameAtom = Atom.family((key: string) => {
+    const [environmentId, threadId] = key.split("\u0000") as [EnvironmentId, string];
+    return Atom.make(
+      (get) =>
+        get(settingsValueAtom(environmentId))?.integrations.hermesHubs.find(
+          (hub) => hub.threadId === threadId,
+        )?.name ?? null,
+    ).pipe(Atom.withLabel(`environment-data:server:hermes-hub-name:${key}`));
+  });
   const providersValueAtom = Atom.family((environmentId: EnvironmentId) =>
     Atom.make((get) => get(configValueAtom(environmentId))?.providers ?? null).pipe(
       Atom.withLabel(`environment-data:server:providers:${environmentId}`),
@@ -1011,6 +1025,8 @@ export function createServerEnvironmentAtoms<R, E>(
     }),
     updateStateAtom,
     settingsValueAtom,
+    hermesHubNameAtom: (environmentId: EnvironmentId, threadId: string) =>
+      hermesHubNameAtom(`${environmentId}\u0000${threadId}`),
     providersValueAtom,
     providerAuthState: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:provider:auth-state",

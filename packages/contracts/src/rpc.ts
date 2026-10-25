@@ -371,6 +371,13 @@ import {
   HermesChatUnlinkInput,
 } from "./hermesChat.ts";
 import {
+  HermesKanbanBoard,
+  HermesKanbanGetBoardInput,
+  HermesKanbanGetTaskInput,
+  HermesKanbanListBoardsResult,
+  HermesKanbanTaskResult,
+} from "./hermesKanban.ts";
+import {
   HermesGatewayRestartInput,
   HermesPatchChangeInput,
   HermesPatchError,
@@ -595,6 +602,9 @@ export const WS_METHODS = {
   hermesChatLinks: "hermes.chatLinks",
   hermesChatLink: "hermes.chatLink",
   hermesChatUnlink: "hermes.chatUnlink",
+  hermesKanbanListBoards: "hermesKanban.listBoards",
+  hermesKanbanGetBoard: "hermesKanban.getBoard",
+  hermesKanbanGetTask: "hermesKanban.getTask",
   hermesPatchList: "hermes.patchList",
   hermesPatchApply: "hermes.patchApply",
   hermesPatchRevert: "hermes.patchRevert",
@@ -1107,6 +1117,27 @@ const WsHermesChatLinkRpc = Rpc.make(WS_METHODS.hermesChatLink, {
 const WsHermesChatUnlinkRpc = Rpc.make(WS_METHODS.hermesChatUnlink, {
   payload: HermesChatUnlinkInput,
   success: HermesChatLinksResult,
+  error: EnvironmentAuthorizationError,
+});
+
+/** Every Hermes Kanban board at a glance. Never fails for a missing or locked board. */
+const WsHermesKanbanListBoardsRpc = Rpc.make(WS_METHODS.hermesKanbanListBoards, {
+  payload: Schema.Struct({}),
+  success: HermesKanbanListBoardsResult,
+  error: EnvironmentAuthorizationError,
+});
+
+/** One board's cards, links, and milestone structure, read on demand. */
+const WsHermesKanbanGetBoardRpc = Rpc.make(WS_METHODS.hermesKanbanGetBoard, {
+  payload: HermesKanbanGetBoardInput,
+  success: HermesKanbanBoard,
+  error: EnvironmentAuthorizationError,
+});
+
+/** One card with its body and comments. */
+const WsHermesKanbanGetTaskRpc = Rpc.make(WS_METHODS.hermesKanbanGetTask, {
+  payload: HermesKanbanGetTaskInput,
+  success: HermesKanbanTaskResult,
   error: EnvironmentAuthorizationError,
 });
 
@@ -2235,6 +2266,9 @@ export const HermesWsRpcGroup = RpcGroup.make(
   WsHermesChatLinksRpc,
   WsHermesChatLinkRpc,
   WsHermesChatUnlinkRpc,
+  WsHermesKanbanListBoardsRpc,
+  WsHermesKanbanGetBoardRpc,
+  WsHermesKanbanGetTaskRpc,
   WsHermesPatchListRpc,
   WsHermesPatchApplyRpc,
   WsHermesPatchRevertRpc,

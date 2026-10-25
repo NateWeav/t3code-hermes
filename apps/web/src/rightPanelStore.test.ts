@@ -76,6 +76,40 @@ describe("rightPanelStore", () => {
     );
   });
 
+  it("opens one Board tab, keeps it across a reload, and reopens it after a close", async () => {
+    const store = useRightPanelStore.getState();
+    store.open(refA, "hermes-kanban");
+    store.open(refA, "diff");
+    store.open(refA, "hermes-kanban");
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA),
+    ).toMatchObject({
+      activeSurfaceId: "hermes-kanban",
+      surfaces: [{ id: "hermes-kanban", kind: "hermes-kanban" }, { id: "diff" }],
+    });
+
+    await reloadRightPanelStore();
+    expect(selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      id: "hermes-kanban",
+      kind: "hermes-kanban",
+    });
+
+    useRightPanelStore.getState().closeSurface(refA, "hermes-kanban");
+    const [closed] = useClosedViewStore.getState().entries;
+    expect(closed?.kind === "panel-tab" && closed.surface).toEqual({
+      id: "hermes-kanban",
+      kind: "hermes-kanban",
+    });
+    await reopenClosedView(closed!, {
+      openPreview: (() => undefined) as never,
+      workspaceAvailable: false,
+    });
+    expect(selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      id: "hermes-kanban",
+      kind: "hermes-kanban",
+    });
+  });
+
   it("drops a persisted Hermes conversation tab whose key is malformed", () => {
     const migrated = migratePersistedRightPanelState({
       byThreadKey: {

@@ -1907,6 +1907,7 @@ export default function ChatView(props: ChatViewProps) {
     isServerThread && supportsThreadPullRequests && visiblePullRequestCount > 0;
   const paperclipSurfaceAvailable = isServerThread && settings.integrations.paperclip.enabled;
   const hermesChatSurfaceAvailable = useHermesEnvironmentEnabled(environmentId) && isServerThread;
+  const hermesKanbanSurfaceAvailable = hermesChatSurfaceAvailable;
   const { state: deviceState, loaded: deviceStateLoaded } = useDeviceState(
     activeThreadRef?.environmentId ?? null,
   );
@@ -2396,6 +2397,7 @@ export default function ChatView(props: ChatViewProps) {
     addPullRequestsSurfaceStable,
     addPaperclipSurfaceStable,
     addHermesChatSurfaceStable,
+    addHermesKanbanSurfaceStable,
     closePreviewPanelStable,
     copyRightPanelFilePathStable,
     createBrowserSurface,
@@ -2429,6 +2431,7 @@ export default function ChatView(props: ChatViewProps) {
     pullRequestsSurfaceAvailable,
     paperclipSurfaceAvailable,
     hermesChatSurfaceAvailable,
+    hermesKanbanSurfaceAvailable,
     gitCwd,
     activeProjectCwd,
     explicitDiffOpenRef,
@@ -3942,6 +3945,7 @@ export default function ChatView(props: ChatViewProps) {
           onAddPullRequests={addPullRequestsSurfaceStable}
           onAddPaperclip={addPaperclipSurfaceStable}
           onAddHermesChat={addHermesChatSurfaceStable}
+          onAddHermesKanban={addHermesKanbanSurfaceStable}
           onAddDevice={addDeviceSurfaceStable}
           browserAvailable={canOperatePreview && browserAvailable}
           terminalAvailable={activeProject !== null && canOperateTerminal}
@@ -3951,6 +3955,7 @@ export default function ChatView(props: ChatViewProps) {
           pullRequestsAvailable={pullRequestsSurfaceAvailable}
           paperclipAvailable={paperclipSurfaceAvailable}
           hermesChatAvailable={hermesChatSurfaceAvailable}
+          hermesKanbanAvailable={hermesKanbanSurfaceAvailable}
           deviceAvailable={activeThreadRef !== null}
         >
           {rightPanelContent}

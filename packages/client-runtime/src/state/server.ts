@@ -1342,6 +1342,25 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:hermes-chat-unlink",
       tag: WS_METHODS.hermesChatUnlink,
     }),
+    /**
+     * Hermes Kanban boards, read on demand: their databases have no change feed
+     * this server listens to, so the surface asks when it opens and on refresh.
+     */
+    hermesKanbanListBoards: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:hermes-kanban-list-boards",
+      tag: WS_METHODS.hermesKanbanListBoards,
+      staleTimeMs: 5_000,
+    }),
+    hermesKanbanGetBoard: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:hermes-kanban-get-board",
+      tag: WS_METHODS.hermesKanbanGetBoard,
+      staleTimeMs: 5_000,
+    }),
+    hermesKanbanGetTask: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:hermes-kanban-get-task",
+      tag: WS_METHODS.hermesKanbanGetTask,
+      staleTimeMs: 5_000,
+    }),
     paperclipOverview: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:server:paperclip-overview",
       tag: WS_METHODS.paperclipOverview,

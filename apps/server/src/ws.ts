@@ -242,6 +242,7 @@ import * as HermesMemoryService from "./hermes/HermesMemoryService.ts";
 import * as HermesRunService from "./hermes/HermesRunService.ts";
 import * as HermesChatService from "./hermes/HermesChatService.ts";
 import * as HermesChatHubService from "./hermes/HermesChatHubService.ts";
+import * as HermesKanbanService from "./hermes/HermesKanbanService.ts";
 import * as HermesPatchService from "./hermes/HermesPatchService.ts";
 import * as HindsightAgentMemory from "./integrations/hindsight/HindsightAgentMemory.ts";
 import * as HindsightService from "./integrations/hindsight/HindsightService.ts";
@@ -3290,6 +3291,7 @@ const layerHermesWsRpc = HermesServerWsRpcGroup.toLayer(
     const hermesRuns = yield* HermesRunService.HermesRunService;
     const hermesChat = yield* HermesChatService.HermesChatService;
     const hermesChatHubs = yield* HermesChatHubService.HermesChatHubService;
+    const hermesKanban = yield* HermesKanbanService.HermesKanbanService;
     const hermesPatches = yield* HermesPatchService.HermesPatchService;
     const hindsight = yield* HindsightService.HindsightService;
     const hindsightAgentMemory = yield* HindsightAgentMemory.HindsightAgentMemory;
@@ -3316,6 +3318,9 @@ const layerHermesWsRpc = HermesServerWsRpcGroup.toLayer(
       [WS_METHODS.hermesChatLinks]: () => hermesChatHubs.links,
       [WS_METHODS.hermesChatLink]: (input) => hermesChatHubs.link(input),
       [WS_METHODS.hermesChatUnlink]: (input) => hermesChatHubs.unlink(input),
+      [WS_METHODS.hermesKanbanListBoards]: () => hermesKanban.listBoards,
+      [WS_METHODS.hermesKanbanGetBoard]: (input) => hermesKanban.getBoard(input),
+      [WS_METHODS.hermesKanbanGetTask]: (input) => hermesKanban.getTask(input),
       [WS_METHODS.hermesPatchList]: () => hermesPatches.list,
       [WS_METHODS.hermesPatchApply]: (input) => hermesPatches.apply(input),
       [WS_METHODS.hermesPatchRevert]: (input) => hermesPatches.revert(input),

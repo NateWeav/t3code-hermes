@@ -107,6 +107,16 @@ it("keeps Hermes gateway conversations read-only", () => {
   }
 });
 
+it("keeps Hermes Kanban boards read-only", () => {
+  for (const method of [
+    WS_METHODS.hermesKanbanListBoards,
+    WS_METHODS.hermesKanbanGetBoard,
+    WS_METHODS.hermesKanbanGetTask,
+  ]) {
+    expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationReadScope);
+  }
+});
+
 it("requires operate permission to change a conversation's links", () => {
   for (const method of [WS_METHODS.hermesChatLink, WS_METHODS.hermesChatUnlink]) {
     expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);

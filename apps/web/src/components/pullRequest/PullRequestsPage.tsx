@@ -1474,6 +1474,7 @@ export function PullRequestsPage() {
             onAddPullRequests={() => undefined}
             onAddPaperclip={() => undefined}
             onAddHermesChat={() => undefined}
+            onAddHermesKanban={() => undefined}
             onAddDevice={() => undefined}
             browserAvailable={false}
             terminalAvailable={false}
@@ -1483,6 +1484,7 @@ export function PullRequestsPage() {
             pullRequestsAvailable={false}
             paperclipAvailable={false}
             hermesChatAvailable={false}
+            hermesKanbanAvailable={false}
             deviceAvailable={false}
             pullRequestStatusSeeds={listedPullRequestTabStatuses}
           >

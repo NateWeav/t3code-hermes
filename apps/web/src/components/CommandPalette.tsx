@@ -64,6 +64,7 @@ import {
   RotateCcwIcon,
   SettingsIcon,
   PaperclipIcon,
+  SquareKanbanIcon,
   SquarePenIcon,
   TextSearchIcon,
   UserPlusIcon,
@@ -1430,6 +1431,16 @@ function OpenCommandPaletteDialog(props: {
       icon: <MessagesSquareIcon className={ITEM_ICON_CLASS} />,
       run: async () => {
         useRightPanelStore.getState().openHermesChat(threadRef, null);
+      },
+    });
+    actionItems.push({
+      kind: "action",
+      value: "action:open-hermes-kanban",
+      searchTerms: ["hermes", "kanban", "board", "projects", "milestones", "tracker", "cards"],
+      title: "Open Board",
+      icon: <SquareKanbanIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        useRightPanelStore.getState().open(threadRef, "hermes-kanban");
       },
     });
   }

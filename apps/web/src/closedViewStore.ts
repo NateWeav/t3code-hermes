@@ -64,6 +64,7 @@ const isClosedViewEntry = (entry: unknown): entry is ClosedViewEntry => {
     case "files":
     case "pull-requests":
     case "paperclip":
+    case "hermes-kanban":
       return surface.id === surface.kind;
     case "hermes-chat":
       return (

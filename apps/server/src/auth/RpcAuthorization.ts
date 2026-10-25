@@ -122,6 +122,9 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.hermesChatList]: AuthOrchestrationReadScope,
   [WS_METHODS.hermesChatTranscript]: AuthOrchestrationReadScope,
   [WS_METHODS.hermesChatLinks]: AuthOrchestrationReadScope,
+  [WS_METHODS.hermesKanbanListBoards]: AuthOrchestrationReadScope,
+  [WS_METHODS.hermesKanbanGetBoard]: AuthOrchestrationReadScope,
+  [WS_METHODS.hermesKanbanGetTask]: AuthOrchestrationReadScope,
   // Linking a conversation changes a thread's timeline, which is part of
   // operating threads.
   [WS_METHODS.hermesChatLink]: AuthOrchestrationOperateScope,

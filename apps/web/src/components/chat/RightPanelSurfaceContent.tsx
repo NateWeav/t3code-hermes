@@ -24,6 +24,7 @@ import { PullRequestsUnavailableState } from "../pullRequest/PullRequestsUnavail
 import { ThreadPullRequestsPanel } from "../pullRequest/ThreadPullRequestsPanel";
 import { PaperclipPanel } from "../paperclip/PaperclipPanel";
 import { HermesChatPanel } from "../hermes/HermesChatPanel";
+import { HermesKanbanPanel } from "../hermes/HermesKanbanPanel";
 
 const PreviewPanel = lazy(() =>
   import("../preview/PreviewPanel").then((module) => ({ default: module.PreviewPanel })),
@@ -169,6 +170,8 @@ export function RightPanelSurfaceContent(props: {
       return <ThreadPullRequestsPanel threadRef={threadRef} />;
     case "paperclip":
       return <PaperclipPanel environmentId={props.environmentId} />;
+    case "hermes-kanban":
+      return <HermesKanbanPanel environmentId={props.environmentId} />;
     case "hermes-chat":
       return (
         <HermesChatPanel

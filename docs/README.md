@@ -22,6 +22,7 @@
 - [See your Paperclip company](./user/paperclip.md)
 - [Browse Hermes skills](./user/hermes-skills.md)
 - [Read Hermes conversations](./user/hermes-conversations.md)
+- [See your Hermes Kanban boards](./user/hermes-board.md)
 - [Configure Hermes reasoning](./user/hermes-reasoning.md)
 - [Use fast mode with Hermes](./user/hermes-fast-mode.md)
 - [Keep Hermes patches in place](./user/hermes-patches.md)

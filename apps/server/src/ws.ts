@@ -133,11 +133,12 @@ import {
   coalesceStoredThreadEvents,
   composeShellStreamWithEnrichment,
   dedupeShellEnrichment,
-  activeShellRowsForSubscriber,
+  loadOlderSettledThreadsPage,
   loadShellSnapshotParts,
   shellStreamItemFromEnrichmentRefresh,
   shellStreamItemFromThreadShell,
   shellStreamItemsFromInitialSnapshot,
+  shellSnapshotForSubscriber,
   shellStreamItemsFromResumeSnapshot,
   shouldPublishShellApplicationEvent,
   skipUnchangedThreadShells,
@@ -1014,6 +1015,7 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
     readonly afterSequence?: number;
     readonly requestCompletionMarker?: boolean;
     readonly omitIdleSubagents?: boolean;
+    readonly omitOlderSettled?: boolean;
   }) {
     const sql = yield* SqlClient.SqlClient;
     const threadManagement = yield* ThreadManagementService.ThreadManagementService;
@@ -1050,13 +1052,16 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
           latestSequence: applicationEvents.latestApplicationSequence,
         }),
       );
-      const rows = activeShellRowsForSubscriber(base.threads, input.omitIdleSubagents === true);
-      subagentThreadIds = rows.subagentThreadIds;
+      const forSubscriber = shellSnapshotForSubscriber(base, {
+        omitIdleSubagents: input.omitIdleSubagents === true,
+        omitOlderSettled: input.omitOlderSettled === true,
+        now: yield* DateTime.now,
+      });
+      subagentThreadIds = forSubscriber.subagentThreadIds;
       const enriched = yield* enrichProjectShells(base.projects);
       return {
         snapshot: {
-          ...base,
-          threads: rows.threads,
+          ...forSubscriber.snapshot,
           projects: enriched.projects,
         } as OrchestrationV2ShellSnapshot,
         resolvedRepositoryIdentityRoots: enriched.resolvedRepositoryIdentityRoots,
@@ -1803,6 +1808,7 @@ export const layerWsRpc = (
           settings,
           shellResumeCompletionMarker: true,
           shellThreadFamilies: true,
+          shellOlderSettled: true,
           threadResumeCompletionMarker: true,
           threadSnapshotPagination: true,
           threadFind: true,
@@ -1852,7 +1858,7 @@ export const layerWsRpc = (
       // Rows the shell can omit, read with the same snapshot sequence the shell uses.
       const readOmittableShellRows = Effect.fn("ws.orchestrationV2.readOmittableShellRows")(
         function* (
-          options: { readonly subagentFamilyOf: ThreadId } | { readonly worktreePath: string },
+          options: { readonly familyOf: ThreadId } | { readonly worktreePath: string },
           message: string,
         ) {
           const { threads, snapshotSequence } = yield* loadShellSnapshotParts({
@@ -2006,7 +2012,15 @@ export const layerWsRpc = (
             .searchThreadStream(input)
             .pipe(Stream.mapError((cause) => new OrchestrationV2SearchThreadError({ cause }))),
         [ORCHESTRATION_V2_WS_METHODS.searchThreads]: (input) =>
-          threadSearch.search(input).pipe(
+          ThreadSearch.searchThreadsWithOlderSettledRows({
+            request: input,
+            search: threadSearch.search,
+            searchOlderSettled: threadSearch.searchOlderSettled,
+            sql,
+            readThreads: (threadIds) =>
+              threadManagement.readShellSnapshot({ location: "active", threadIds }),
+            latestSequence: applicationEvents.latestApplicationSequence,
+          }).pipe(
             Effect.mapError(
               (cause) =>
                 new OrchestrationSearchThreadsError({
@@ -2018,9 +2032,22 @@ export const layerWsRpc = (
         [ORCHESTRATION_V2_WS_METHODS.getArchivedShellSnapshot]: (_input) =>
           getOrchestrationV2ArchivedShellSnapshot,
         [ORCHESTRATION_V2_WS_METHODS.getThreadFamily]: (input) =>
-          readOmittableShellRows(
-            { subagentFamilyOf: input.threadId },
-            "Failed to load the thread family",
+          readOmittableShellRows({ familyOf: input.threadId }, "Failed to load the thread family"),
+        [ORCHESTRATION_V2_WS_METHODS.getOlderSettledThreads]: (input) =>
+          loadOlderSettledThreadsPage({
+            sql,
+            listThreads: threadManagement.listOlderSettledThreads(input),
+            readThreads: (threadIds) =>
+              threadManagement.readShellSnapshot({ location: "active", threadIds }),
+            latestSequence: applicationEvents.latestApplicationSequence,
+          }).pipe(
+            Effect.mapError(
+              (cause) =>
+                new OrchestrationV2GetShellSnapshotError({
+                  message: "Failed to load older settled threads",
+                  cause,
+                }),
+            ),
           ),
         [ORCHESTRATION_V2_WS_METHODS.getWorktreeThreadIds]: (input) =>
           readOmittableShellRows(

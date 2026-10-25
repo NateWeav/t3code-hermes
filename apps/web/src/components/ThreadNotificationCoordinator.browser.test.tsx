@@ -1,9 +1,10 @@
+import { WORKING_EXIT_GRACE_MS } from "@t3tools/client-runtime/state/thread-inbox";
 import type { ClientSettings } from "@t3tools/contracts/settings";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { render, stubGlobal, type Screen } from "../../test/render";
+import { fakeTimers, render, stubGlobal, type Screen } from "../../test/render";
 
 const state = vi.hoisted(() => ({
   mode: "off" as ClientSettings["notificationMode"],
@@ -243,7 +244,9 @@ describe("thread notifications", () => {
       state.hermesRun = { profile, sourceKey, sessionId: "cron_1" };
       state.latestRunId = latestRunId;
       await app.render();
+      using _timers = fakeTimers();
       await app.complete();
+      await vi.advanceTimersByTimeAsync(WORKING_EXIT_GRACE_MS);
       expect(state.add).toHaveBeenCalledTimes(alerts);
     },
   );
@@ -252,7 +255,9 @@ describe("thread notifications", () => {
     await using app = setup();
     state.watchingPullRequest = true;
     await app.render();
+    using _timers = fakeTimers();
     await app.complete();
+    await vi.advanceTimersByTimeAsync(WORKING_EXIT_GRACE_MS);
     expect(state.add).toHaveBeenCalledTimes(1);
     expect(state.add).toHaveBeenLastCalledWith(
       expect.objectContaining({ title: "Thread completed" }),

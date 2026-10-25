@@ -218,6 +218,7 @@ export function HermesSkillsTab({ environmentId }: { readonly environmentId: Env
           ))}
         </View>
       </View>
+      {/* oxlint-disable-next-line t3code/require-registered-list-scroll -- Hermes pins its tabs above this list under a solid header (SettingsHermes), so there is no header scroll edge to register with. */}
       <LegendList
         className="flex-1"
         data={skills.emptyState === null ? rows : []}

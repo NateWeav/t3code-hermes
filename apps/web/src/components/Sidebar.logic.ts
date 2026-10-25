@@ -952,7 +952,8 @@ export function resolveThreadStatusRing(input: {
     case "working":
       return {
         kind: "working",
-        colorClass: "text-sky-500 dark:text-sky-400",
+        // The row's Working label token, so the two stay one hue.
+        colorClass: "text-info",
         dashed: true,
         motion: "travel",
       };

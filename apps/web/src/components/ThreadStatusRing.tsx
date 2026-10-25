@@ -8,12 +8,12 @@ const MOTION_CLASS: Record<ThreadStatusRingModel["motion"], string> = {
   none: "",
 };
 
-// No viewBox, so user units are CSS pixels. The rect sits on the row's edge
-// and the SVG clips the stroke's outer half, leaving a 1px line inside; a
-// fractional inset snaps the origin but not the far edges, blurring them.
-const STROKE_WIDTH = 2;
-// rounded-md, so the stroke's centre line follows the row's clipped corners.
-const CORNER_RADIUS = 6;
+// No viewBox, so user units are CSS pixels. The SVG is 1px smaller than the
+// row and the half-pixel rect overflows it, so the 1px stroke covers whole
+// pixels on every edge without the row's rounded clip thinning the corners.
+const STROKE_WIDTH = 1;
+// rounded-md less half the stroke, so the outer edge meets the row's corners.
+const CORNER_RADIUS = 5.5;
 const TRAVEL_DASH_ARRAY = "6 6";
 
 /** The status outline around a sidebar card row: the same state the row's
@@ -28,10 +28,10 @@ export function ThreadStatusRing(props: { readonly ring: ThreadStatusRingModel |
       className={cn("pointer-events-none absolute inset-0", props.ring.colorClass)}
       data-testid={`thread-status-ring-${props.ring.kind}`}
     >
-      <svg className="h-full w-full" fill="none">
+      <svg className="h-[calc(100%-1px)] w-[calc(100%-1px)] overflow-visible" fill="none">
         <rect
-          x="0"
-          y="0"
+          x="0.5"
+          y="0.5"
           width="100%"
           height="100%"
           rx={CORNER_RADIUS}

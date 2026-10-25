@@ -191,6 +191,10 @@
       "types": "./src/state/hermesChat.ts",
       "default": "./src/state/hermesChat.ts"
     },
+    "./state/hermesKanban": {
+      "types": "./src/state/hermesKanban.ts",
+      "default": "./src/state/hermesKanban.ts"
+    },
     "./state/paperclip": {
       "types": "./src/state/paperclip.ts",
       "default": "./src/state/paperclip.ts"

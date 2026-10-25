@@ -14,7 +14,13 @@ import {
   hermesKanbanStatusTone,
   sortHermesKanbanBoards,
 } from "@t3tools/client-runtime/state/hermesKanban";
-import type { EnvironmentId, HermesKanbanBoardSummary, HermesKanbanTask } from "@t3tools/contracts";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import type {
+  EnvironmentId,
+  HermesKanbanBoardSummary,
+  HermesKanbanTask,
+  ThreadId,
+} from "@t3tools/contracts";
 import {
   ArrowLeftIcon,
   CircleAlertIcon,
@@ -22,11 +28,13 @@ import {
   CircleDotIcon,
   CircleIcon,
   GitBranchIcon,
+  MessagesSquareIcon,
   SquareKanban,
 } from "lucide-react";
 import { type ReactNode, useState } from "react";
 
 import { readLocalApi } from "~/localApi";
+import { useThreadShell } from "~/state/entities";
 import { useHermesEnvironmentEnabled } from "~/state/hermesCron";
 import { useEnvironmentQuery } from "~/state/query";
 import { serverEnvironment } from "~/state/server";
@@ -382,16 +390,47 @@ function TaskChips({ task }: { readonly task: HermesKanbanTask }) {
   );
 }
 
-function TaskRow(props: { readonly task: HermesKanbanTask; readonly onOpen: () => void }) {
+function TaskThreadLabel(props: {
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+}) {
+  const shell = useThreadShell(scopeThreadRef(props.environmentId, props.threadId));
+  return (
+    <span className="flex min-w-0 items-center gap-1">
+      <MessagesSquareIcon aria-hidden className="size-3 shrink-0" />
+      <span className="truncate">{shell?.title.trim() || "Linked thread"}</span>
+    </span>
+  );
+}
+
+function TaskRow(props: {
+  readonly environmentId: EnvironmentId;
+  readonly task: HermesKanbanTask;
+  readonly onOpen: () => void;
+}) {
+  const { task } = props;
   return (
     <button
       type="button"
       onClick={props.onOpen}
-      className={`${ROW_BUTTON_CLASS} flex items-center gap-2 px-1.5 py-1 text-sm`}
+      className={`${ROW_BUTTON_CLASS} flex items-start gap-2 px-1.5 py-1.5 text-sm`}
     >
-      <StatusGlyph status={props.task.status} />
-      <span className="min-w-0 flex-1 truncate">{props.task.title}</span>
-      <TaskChips task={props.task} />
+      <span className="flex h-5 items-center">
+        <StatusGlyph status={task.status} />
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate">{task.title}</span>
+        <span className="flex min-w-0 items-center gap-1.5 text-2xs text-muted-foreground">
+          <span className="shrink-0">{hermesKanbanStatusLabel(task.status)}</span>
+          {task.threadId === null ? null : (
+            <>
+              <span aria-hidden>·</span>
+              <TaskThreadLabel environmentId={props.environmentId} threadId={task.threadId} />
+            </>
+          )}
+        </span>
+      </span>
+      <TaskChips task={task} />
     </button>
   );
 }
@@ -479,7 +518,12 @@ function HermesKanbanBoardView(props: {
       )}
       {props.mode === "milestones" ? (
         <ScrollArea className="min-h-0 flex-1">
-          <MilestonesList board={result} color={board.color} onOpenTask={props.onOpenTask} />
+          <MilestonesList
+            environmentId={props.environmentId}
+            board={result}
+            color={board.color}
+            onOpenTask={props.onOpenTask}
+          />
         </ScrollArea>
       ) : (
         <ColumnsView tasks={result.tasks} onOpenTask={props.onOpenTask} />
@@ -489,6 +533,7 @@ function HermesKanbanBoardView(props: {
 }
 
 function MilestonesList(props: {
+  readonly environmentId: EnvironmentId;
   readonly board: Parameters<typeof hermesKanbanMilestoneView>[0];
   readonly color: string | null;
   readonly onOpenTask: (taskId: string) => void;
@@ -522,8 +567,12 @@ function MilestonesList(props: {
           </button>
           <ul className="flex flex-col">
             {feature.milestones.map((milestone) => (
-              <li key={milestone.id}>
-                <TaskRow task={milestone} onOpen={() => props.onOpenTask(milestone.id)} />
+              <li key={milestone.id} className="rounded-md even:bg-muted/40">
+                <TaskRow
+                  environmentId={props.environmentId}
+                  task={milestone}
+                  onOpen={() => props.onOpenTask(milestone.id)}
+                />
               </li>
             ))}
           </ul>
@@ -533,8 +582,12 @@ function MilestonesList(props: {
         <Section title="Cards" count={String(view.standalone.length)}>
           <ul className="flex flex-col">
             {view.standalone.map((task) => (
-              <li key={task.id}>
-                <TaskRow task={task} onOpen={() => props.onOpenTask(task.id)} />
+              <li key={task.id} className="rounded-md even:bg-muted/40">
+                <TaskRow
+                  environmentId={props.environmentId}
+                  task={task}
+                  onOpen={() => props.onOpenTask(task.id)}
+                />
               </li>
             ))}
           </ul>

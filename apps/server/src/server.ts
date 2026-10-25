@@ -181,6 +181,7 @@ import * as HermesMemoryService from "./hermes/HermesMemoryService.ts";
 import * as HermesRunService from "./hermes/HermesRunService.ts";
 import * as HermesChatService from "./hermes/HermesChatService.ts";
 import * as HermesChatHubService from "./hermes/HermesChatHubService.ts";
+import * as HermesKanbanService from "./hermes/HermesKanbanService.ts";
 import * as HermesPatchService from "./hermes/HermesPatchService.ts";
 import * as HindsightAgentMemory from "./integrations/hindsight/HindsightAgentMemory.ts";
 import * as HindsightService from "./integrations/hindsight/HindsightService.ts";
@@ -298,6 +299,7 @@ const layerHermesMemory = HermesMemoryService.layer.pipe(Layer.provide(layerServ
 const layerHermesCron = HermesCronService.layer.pipe(Layer.provide(layerServerSettings));
 const layerHermesPatch = HermesPatchService.layer.pipe(Layer.provide(layerServerSettings));
 const layerHermesChat = HermesChatService.layer.pipe(Layer.provide(layerServerSettings));
+const layerHermesKanban = HermesKanbanService.layer.pipe(Layer.provide(layerServerSettings));
 // HttpClient comes from the outermost FetchHttpClient layer, the same way the
 // provider maintenance checks get theirs.
 const layerHindsight = HindsightService.layer.pipe(Layer.provide(layerServerSettings));
@@ -785,6 +787,7 @@ const layerRuntimeDependencies = layerRuntimeCoreDependencies.pipe(
   Layer.provideMerge(layerHermesMemory),
   Layer.provideMerge(layerHermesPatch),
   Layer.provideMerge(layerHermesChat),
+  Layer.provideMerge(layerHermesKanban),
   Layer.provideMerge(layerHindsight),
   Layer.provideMerge(layerHindsightAgentMemory),
   Layer.provideMerge(layerPaperclip),

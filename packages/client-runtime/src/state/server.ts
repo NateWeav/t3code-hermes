@@ -1468,6 +1468,15 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.hermesKanbanGetTask,
       staleTimeMs: 5_000,
     }),
+    /** T3 Code's own board preferences; callers refresh the list and board queries after. */
+    hermesKanbanSetBoardProject: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:hermes-kanban-set-board-project",
+      tag: WS_METHODS.hermesKanbanSetBoardProject,
+    }),
+    hermesKanbanSetBoardIcon: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:hermes-kanban-set-board-icon",
+      tag: WS_METHODS.hermesKanbanSetBoardIcon,
+    }),
     paperclipOverview: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:server:paperclip-overview",
       tag: WS_METHODS.paperclipOverview,

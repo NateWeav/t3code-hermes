@@ -125,6 +125,9 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.hermesKanbanListBoards]: AuthOrchestrationReadScope,
   [WS_METHODS.hermesKanbanGetBoard]: AuthOrchestrationReadScope,
   [WS_METHODS.hermesKanbanGetTask]: AuthOrchestrationReadScope,
+  // Board preferences (linked project, icon) are T3 Code's own state, shared by every client.
+  [WS_METHODS.hermesKanbanSetBoardProject]: AuthOrchestrationOperateScope,
+  [WS_METHODS.hermesKanbanSetBoardIcon]: AuthOrchestrationOperateScope,
   // Linking a conversation changes a thread's timeline, which is part of
   // operating threads.
   [WS_METHODS.hermesChatLink]: AuthOrchestrationOperateScope,

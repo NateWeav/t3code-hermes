@@ -40,6 +40,7 @@ import { useEnvironmentQuery } from "~/state/query";
 import { serverEnvironment } from "~/state/server";
 
 import ChatMarkdown from "../ChatMarkdown";
+import { HermesKanbanBoardIconView, HermesKanbanBoardSettings } from "./HermesKanbanBoardSettings";
 import { MarkdownThreadLink } from "../chat/MarkdownThreadLink";
 import { PullRequestGlyph } from "../pullRequest/pullRequestIcons";
 import { Badge } from "../ui/badge";
@@ -298,7 +299,11 @@ function HermesKanbanOverview(props: {
           <ul className="grid gap-2 p-3">
             {boards.map((board) => (
               <li key={board.slug}>
-                <BoardCard board={board} onOpen={() => props.onOpenBoard(board.slug)} />
+                <BoardCard
+                  environmentId={props.environmentId}
+                  board={board}
+                  onOpen={() => props.onOpenBoard(board.slug)}
+                />
               </li>
             ))}
           </ul>
@@ -309,6 +314,7 @@ function HermesKanbanOverview(props: {
 }
 
 function BoardCard(props: {
+  readonly environmentId: EnvironmentId;
   readonly board: HermesKanbanBoardSummary;
   readonly onOpen: () => void;
 }) {
@@ -321,7 +327,7 @@ function BoardCard(props: {
       style={board.color ? { borderLeftColor: board.color } : undefined}
     >
       <div className="flex items-center gap-2">
-        {board.icon ? <span aria-hidden>{board.icon}</span> : null}
+        <HermesKanbanBoardIconView environmentId={props.environmentId} board={board} />
         <span className="min-w-0 flex-1 truncate text-sm font-semibold">{board.name}</span>
         <span className="text-2xs text-muted-foreground tabular-nums">
           {formatHermesKanbanAge(board.lastActivityAt)}
@@ -459,6 +465,9 @@ function HermesKanbanBoardView(props: {
       onRefresh={query.refresh}
     >
       {result?.board ? (
+        <HermesKanbanBoardSettings environmentId={props.environmentId} board={result.board} />
+      ) : null}
+      {result?.board ? (
         <div className="flex rounded-md border border-border/60 p-0.5" role="group">
           {(["milestones", "columns"] as const).map((mode) => (
             <Button
@@ -511,7 +520,7 @@ function HermesKanbanBoardView(props: {
     <div className="flex h-full min-h-0 flex-col">
       {header(
         <span className="flex items-center gap-1.5">
-          {board.icon ? <span aria-hidden>{board.icon}</span> : null}
+          <HermesKanbanBoardIconView environmentId={props.environmentId} board={board} />
           {board.name}
         </span>,
         `${board.doneCount}/${board.taskCount} done · ${formatHermesKanbanAge(board.lastActivityAt)}`,

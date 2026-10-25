@@ -6,9 +6,32 @@
 import type {
   HermesKanbanAvailability,
   HermesKanbanBoard,
+  HermesKanbanBoardIcon,
   HermesKanbanBoardSummary,
   HermesKanbanTask,
 } from "@t3tools/contracts";
+
+/**
+ * Which icon a board shows: an uploaded one, else the linked T3 project's icon while that project
+ * still exists, else the Hermes emoji, else none. Render an uploaded icon only as `<img src>`.
+ */
+export type HermesKanbanBoardIconSource =
+  | { readonly kind: "upload"; readonly icon: HermesKanbanBoardIcon }
+  | { readonly kind: "project"; readonly projectId: string }
+  | { readonly kind: "emoji"; readonly emoji: string }
+  | { readonly kind: "none" };
+
+export function hermesKanbanBoardIconSource(
+  board: Pick<HermesKanbanBoardSummary, "customIcon" | "projectId" | "icon">,
+  projectExists: (projectId: string) => boolean,
+): HermesKanbanBoardIconSource {
+  if (board.customIcon !== null) return { kind: "upload", icon: board.customIcon };
+  if (board.projectId !== null && projectExists(board.projectId)) {
+    return { kind: "project", projectId: board.projectId };
+  }
+  const emoji = board.icon?.trim();
+  return emoji ? { kind: "emoji", emoji } : { kind: "none" };
+}
 
 /** One board column: the Hermes statuses it gathers, in display order. */
 export interface HermesKanbanColumn {

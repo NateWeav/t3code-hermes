@@ -34,7 +34,9 @@ seconds. Transcripts are read from Hermes when you look at them and are not save
 ## Link a conversation to a thread
 
 A linked conversation shows up as a card in a thread's timeline, updated as the chat moves. Select
-the card to open the conversation; **Detach** removes the link. To link the conversation you are
+the card to open the conversation; **Detach** takes the card down. A detached conversation stays out
+of an auto-linking hub until you link it again, and the hub fills the slot with its next newest
+conversation. To link the conversation you are
 reading to the thread the panel belongs to, use **Link to this thread** in its header, and
 **Unlink** to undo it. Opening a conversation never links it.
 
@@ -58,7 +60,7 @@ Hermes can also ask for a link by appending a line to `t3-hub-links.jsonl` in th
 `hub` is the hub's id or name. `action` is `link` (the default) or `unlink`; `reason` and `at` are
 optional. A line is ignored unless the conversation is in one of that hub's channels.
 
-Known limits: unlinking leaves the cards already in the timeline; they just stop updating. A
+Known limit: a
 brand-new hub thread is not marked unread until it has had at least one run.
 
 ## Agent tools

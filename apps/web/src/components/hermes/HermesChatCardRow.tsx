@@ -16,7 +16,6 @@ import { useRightPanelStore } from "~/rightPanelStore";
 import { serverEnvironment } from "~/state/server";
 import { useAtomCommand } from "~/state/use-atom-command";
 
-import { WorkLogRow } from "../chat/WorkLog";
 import { Button } from "../ui/button";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 
@@ -55,7 +54,9 @@ export function HermesChatCardRow(props: {
     }
   };
   return (
-    <WorkLogRow
+    // A feature-owned card, not a work-log row: conversations in a hub are
+    // the thread's content, so they read as cards rather than log lines.
+    <div
       role="button"
       tabIndex={0}
       aria-label={`Open Hermes conversation ${props.summary}`}
@@ -67,10 +68,14 @@ export function HermesChatCardRow(props: {
           open();
         }
       }}
-      icon={<MessagesSquare className="size-3.5 shrink-0 text-muted-foreground" />}
-      label={props.summary}
-      trailing={
-        <>
+      className="group/hermes-card my-1 flex w-full min-w-0 cursor-pointer flex-col gap-1 rounded-xl border border-border/60 bg-card px-3.5 py-3 text-left transition-colors hover:border-border hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset focus-visible:outline-none"
+    >
+      <div className="flex min-w-0 items-center gap-2">
+        <MessagesSquare className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+        <p className="min-w-0 flex-1 truncate text-base font-semibold text-foreground">
+          {props.summary}
+        </p>
+        <div className="flex shrink-0 items-center gap-1.5">
           {canOperate ? (
             <Button
               size="micro"
@@ -85,12 +90,11 @@ export function HermesChatCardRow(props: {
             </Button>
           ) : null}
           {props.timestamp}
-        </>
-      }
-    >
+        </div>
+      </div>
       {props.detail ? (
-        <p className="truncate pl-5 text-xs text-muted-foreground">{props.detail}</p>
+        <p className="line-clamp-2 pl-6 text-sm text-muted-foreground">{props.detail}</p>
       ) : null}
-    </WorkLogRow>
+    </div>
   );
 }

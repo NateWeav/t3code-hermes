@@ -177,6 +177,13 @@ function makeLayer(
     written,
     itemEvents: () =>
       written.flatMap((event) => (event.type === "turn-item.updated" ? [event.payload] : [])),
+    /** Written hub cards, narrowed to the notification items they always are. */
+    cardEvents: () =>
+      written.flatMap((event) =>
+        event.type === "turn-item.updated" && event.payload.type === "notification"
+          ? [event.payload]
+          : [],
+      ),
     layer: HermesChatHubService.layer.pipe(
       Layer.provide(dependencies),
       Layer.provide(NodeServices.layer),
@@ -206,7 +213,8 @@ describe("HermesChatHubService", () => {
         type: "notification",
         source: { kind: "hermes_chat", sessionKey: KEY },
         outcome: "updated",
-        summary: "Fix my lag",
+        // A Discord thread's card takes the thread's own name, as the panel does.
+        summary: "help",
       });
       // A conversation with no messages carries no detail, and no detail key.
       expect(card).not.toHaveProperty("detail");
@@ -227,7 +235,7 @@ describe("HermesChatHubService", () => {
         `${HUB_THREAD}:hermes-chat:${KEY}`,
         `${HUB_THREAD}:hermes-chat:${KEY}`,
       ]);
-      expect(itemEvents()[1]).toMatchObject({ summary: "Fix my lag" });
+      expect(itemEvents()[1]).toMatchObject({ summary: "help" });
       expect(dispatched).toMatchObject([{ type: "thread.mark-unread", threadId: HUB_THREAD }]);
     }).pipe(
       Effect.provide(layer),
@@ -342,7 +350,7 @@ describe("HermesChatHubService", () => {
   it.live("links and unlinks manually, detaching every thread at once", () => {
     const hermes = makeHermesHome();
     const KEY = "agent:main:discord:group:111:a";
-    const { layer, itemEvents } = makeLayer(hermes.home, {
+    const { layer, itemEvents, cardEvents } = makeLayer(hermes.home, {
       hubs: [hubSettings({ autoLink: false })],
     });
     return Effect.gen(function* () {
@@ -359,7 +367,7 @@ describe("HermesChatHubService", () => {
       expect(itemEvents().map((item) => item.threadId)).toEqual([OTHER_THREAD]);
 
       // A links-file link adds the hub thread's own manual link; an unlink
-      // line removes exactly that link. Cards stay behind either way.
+      // line removes exactly that link and takes its card down.
       hermes.appendLink({ sessionKey: KEY, hub: "gaming" });
       yield* service.sync;
       expect(itemEvents()).toHaveLength(2);
@@ -374,11 +382,82 @@ describe("HermesChatHubService", () => {
           activityAt: expect.any(Number),
         },
       ]);
-      expect(itemEvents()).toHaveLength(2);
+      expect(cardEvents().map((item) => [item.threadId, item.outcome])).toEqual([
+        [OTHER_THREAD, "updated"],
+        [HUB_THREAD, "updated"],
+        [HUB_THREAD, "cancelled"],
+      ]);
 
       // Unlinking without a thread detaches every thread at once.
       const detached = yield* service.unlink({ sessionKey: KEY });
       expect(detached.links).toEqual([]);
+    }).pipe(Effect.provide(layer), Effect.ensuring(Effect.sync(() => hermes.cleanup())));
+  });
+
+  it.live("detaching a hub card takes it down, keeps it out, and a re-link brings it back", () => {
+    const hermes = makeHermesHome();
+    const KEY = "agent:main:discord:thread:111:a";
+    const { layer, itemEvents, cardEvents } = makeLayer(hermes.home, {
+      hubs: [hubSettings({ autoLinkCap: 1 })],
+    });
+    return Effect.gen(function* () {
+      const service = yield* HermesChatHubService.HermesChatHubService;
+      const startedAt = (yield* nowSeconds) - 600;
+      hermes.conversation(KEY, { channelIds: ["111"], startedAt, lastActivityAt: startedAt });
+      hermes.conversation("older", { channelIds: ["111"], startedAt: startedAt - 60 });
+      yield* service.sync;
+      expect(cardEvents().map((item) => [item.id, item.outcome])).toEqual([
+        [`${HUB_THREAD}:hermes-chat:${KEY}`, "updated"],
+      ]);
+
+      // Detach: the card is rewritten as cancelled, and the cap's next
+      // newest conversation fills the slot instead.
+      const detached = yield* service.unlink({ sessionKey: KEY, threadId: HUB_THREAD });
+      expect(detached.links.map((link) => link.sessionKey)).toEqual(["older"]);
+      yield* service.sync;
+      expect(
+        cardEvents()
+          .slice(1)
+          .map((item) => [item.id, item.outcome]),
+      ).toEqual([
+        [`${HUB_THREAD}:hermes-chat:older`, "updated"],
+        [`${HUB_THREAD}:hermes-chat:${KEY}`, "cancelled"],
+      ]);
+
+      // New activity does not bring a detached conversation back.
+      hermes.touch(KEY, startedAt + 30);
+      yield* service.sync;
+      expect(itemEvents()).toHaveLength(3);
+
+      // Linking it again does, as a live card.
+      yield* service.link({ sessionKey: KEY, threadId: HUB_THREAD });
+      yield* service.sync;
+      expect(cardEvents().at(-1)).toMatchObject({
+        id: `${HUB_THREAD}:hermes-chat:${KEY}`,
+        outcome: "updated",
+      });
+    }).pipe(Effect.provide(layer), Effect.ensuring(Effect.sync(() => hermes.cleanup())));
+  });
+
+  it.live("names a card by its Discord thread rather than Hermes's placeholder title", () => {
+    const hermes = makeHermesHome();
+    const KEY = "agent:main:discord:thread:111:b";
+    const { layer, itemEvents, cardEvents } = makeLayer(hermes.home);
+    return Effect.gen(function* () {
+      const service = yield* HermesChatHubService.HermesChatHubService;
+      const startedAt = (yield* nowSeconds) - 60;
+      hermes.conversation(KEY, {
+        channelIds: ["111"],
+        startedAt,
+        title: "[Triggering message id: `1`] hey",
+      });
+      hermes.withDb((db) =>
+        db
+          .prepare("UPDATE sessions SET display_name = ?, chat_type = ? WHERE session_key = ?")
+          .run("Guild / #general / get nick a girlfriend", "thread", KEY),
+      );
+      yield* service.sync;
+      expect(cardEvents()[0]?.summary).toBe("get nick a girlfriend");
     }).pipe(Effect.provide(layer), Effect.ensuring(Effect.sync(() => hermes.cleanup())));
   });
 });

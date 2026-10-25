@@ -69,6 +69,20 @@ describe("effectiveLinkedConversations", () => {
     ]);
   });
 
+  it("skips detached conversations before the cap, so the next newest fills in", () => {
+    const links = effectiveLinkedConversations({
+      hubs: [hub({ autoLinkCap: 2 })],
+      manualLinks: [],
+      conversations: [
+        conversation("old", ["111"], 100),
+        conversation("mid", ["111"], 300),
+        conversation("new", ["222"], 400),
+      ],
+      detached: [{ threadId: HUB_THREAD, sessionKey: "new" }],
+    });
+    expect(links.map((link) => link.sessionKey)).toEqual(["mid", "old"]);
+  });
+
   it("prefers a manual link over the same hub derivation and skips hubs without threads or autoLink", () => {
     const links = effectiveLinkedConversations({
       hubs: [

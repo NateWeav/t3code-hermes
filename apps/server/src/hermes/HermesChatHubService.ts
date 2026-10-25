@@ -95,9 +95,14 @@ const PersistedLink = Schema.Struct({
   sessionKey: Schema.String,
   linkedAt: Schema.String,
 });
+const PersistedDetached = Schema.Struct({
+  threadId: Schema.String,
+  sessionKey: Schema.String,
+});
 const PersistedState = Schema.Struct({
   version: Schema.Literal(1),
   links: Schema.Array(PersistedLink),
+  detached: Schema.optional(Schema.Array(PersistedDetached)),
 });
 const PersistedStateJson = Schema.fromJsonString(PersistedState);
 const decodePersistedState = Schema.decodeUnknownEffect(PersistedStateJson);
@@ -136,10 +141,45 @@ function resolveHub<T extends { id: string; name: string }>(
   );
 }
 
+// Hermes titles a fresh conversation from its trigger until it names it.
+const PLACEHOLDER_TITLE = /^\[Triggering message id:/;
+
+/**
+ * A card's title, as the conversation panel names the same conversation
+ * (client-runtime hermesChatConversationTitle): a Discord thread by its own
+ * name, otherwise Hermes's title, otherwise the channel and who it is with.
+ */
+function cardTitle(conversation: {
+  readonly title: string | null;
+  readonly displayName: string | null;
+  readonly userName: string | null;
+  readonly chatType: string | null;
+}): string | null {
+  const title =
+    conversation.title !== null && !PLACEHOLDER_TITLE.test(conversation.title)
+      ? conversation.title
+      : null;
+  const place = conversation.displayName?.split(" / ").at(-1)?.trim() || null;
+  if (conversation.chatType === "dm") return conversation.userName ?? title;
+  if (conversation.chatType === "thread" && place) return place;
+  if (title) return title;
+  if (place && conversation.userName) return `${place} · ${conversation.userName}`;
+  return place ?? conversation.userName;
+}
+
 /** Activity key of a card the thread already holds, from its updatedAt. */
 function activityKeyFromUpdatedAt(updatedAt: DateTime.DateTime): string {
   return (DateTime.toEpochMillis(updatedAt) / 1000).toFixed(3);
 }
+
+/**
+ * Written-state marker for a card that was taken down. Turn items cannot be
+ * deleted, so a detached card is rewritten with outcome `cancelled` and clients
+ * leave it out of the timeline.
+ */
+const DETACHED_CARD = "detached";
+/** Written-state marker for a card whose text predates the current title rule. */
+const STALE_CARD = "stale";
 
 export class HermesChatHubService extends Context.Service<
   HermesChatHubService,
@@ -177,6 +217,19 @@ const make = Effect.gen(function* () {
 
   /** Manual links, keyed `${threadId}\u0000${sessionKey}`. Hub links are never stored. */
   const manualLinks = new Map<string, ManualLink>();
+  /**
+   * Hub derivations the user detached, same keys. Without this an auto-linking
+   * hub would derive the conversation straight back on the next pass.
+   */
+  const detachedLinks = new Map<
+    string,
+    { readonly threadId: ThreadId; readonly sessionKey: string }
+  >();
+  /** Manual links removed since the last pass, whose cards still need taking down. */
+  const unlinkedCards = new Map<
+    string,
+    { readonly threadId: ThreadId; readonly sessionKey: string }
+  >();
   /** Cards each thread already holds: item id → activity key. Seeded from the projection. */
   const writtenCards = new Map<ThreadId, Map<string, string>>();
   let unreadCounter = 0;
@@ -194,6 +247,13 @@ const make = Effect.gen(function* () {
       const link = { threadId: ThreadId.make(threadId), sessionKey, linkedAt: entry.linkedAt };
       manualLinks.set(linkKey(link.threadId, link.sessionKey), link);
     }
+    for (const entry of decoded.value.detached ?? []) {
+      const threadId = entry.threadId.trim();
+      const sessionKey = entry.sessionKey.trim();
+      if (!threadId || !sessionKey) continue;
+      const detached = { threadId: ThreadId.make(threadId), sessionKey };
+      detachedLinks.set(linkKey(detached.threadId, sessionKey), detached);
+    }
   });
 
   const saveState = stateMutex.withPermits(1)(
@@ -203,7 +263,11 @@ const make = Effect.gen(function* () {
         sessionKey: link.sessionKey,
         linkedAt: link.linkedAt,
       }));
-      const contents = yield* encodePersistedState({ version: 1, links });
+      const detached = [...detachedLinks.values()].map((link) => ({
+        threadId: link.threadId as string,
+        sessionKey: link.sessionKey,
+      }));
+      const contents = yield* encodePersistedState({ version: 1, links, detached });
       yield* writeFileStringAtomically({ filePath: statePath, contents: `${contents}\n` }).pipe(
         Effect.provideService(FileSystem.FileSystem, fs),
         Effect.provideService(Path.Path, path),
@@ -230,16 +294,17 @@ const make = Effect.gen(function* () {
     return { settings, home: resolveHermesHome(environment) as string | null };
   });
 
-  const channelsWindow = (home: string): Effect.Effect<readonly HermesChatChannelsRow[]> =>
-    Effect.gen(function* () {
-      const nowSeconds = (yield* Clock.currentTimeMillis) / 1000;
-      const rows = yield* Effect.sync(() =>
-        readHermesChatChannels(path.join(home, "state.db"), {
-          sinceSeconds: nowSeconds - HUB_WINDOW_SECONDS,
-        }),
-      );
-      return rows ?? [];
-    });
+  const channelsWindow = Effect.fn("HermesChatHubService.channelsWindow")(function* (
+    home: string,
+  ): Effect.fn.Return<readonly HermesChatChannelsRow[]> {
+    const nowSeconds = (yield* Clock.currentTimeMillis) / 1000;
+    const rows = yield* Effect.sync(() =>
+      readHermesChatChannels(path.join(home, "state.db"), {
+        sinceSeconds: nowSeconds - HUB_WINDOW_SECONDS,
+      }),
+    );
+    return rows ?? [];
+  });
 
   /** Manual links only, for when Hermes is off and nothing can be derived. */
   const manualLinksAsEffective = (): ReadonlyArray<EffectiveHermesChatLink> =>
@@ -258,6 +323,7 @@ const make = Effect.gen(function* () {
       return effectiveLinkedConversations({
         hubs: context.settings.integrations.hermesHubs,
         manualLinks: [...manualLinks.values()],
+        detached: [...detachedLinks.values()],
         conversations: rows,
       });
     });
@@ -295,6 +361,7 @@ const make = Effect.gen(function* () {
     const links = effectiveLinkedConversations({
       hubs: hubSettings,
       manualLinks: [...manualLinks.values()],
+      detached: [...detachedLinks.values()],
       conversations: rows,
     });
     return {
@@ -309,6 +376,7 @@ const make = Effect.gen(function* () {
   const link: HermesChatHubService["Service"]["link"] = Effect.fn("HermesChatHubService.link")(
     function* (input) {
       const linkedAt = DateTime.formatIso(yield* DateTime.now);
+      detachedLinks.delete(linkKey(input.threadId, input.sessionKey));
       manualLinks.set(linkKey(input.threadId, input.sessionKey), {
         threadId: input.threadId,
         sessionKey: input.sessionKey,
@@ -324,13 +392,28 @@ const make = Effect.gen(function* () {
   const unlink: HermesChatHubService["Service"]["unlink"] = Effect.fn(
     "HermesChatHubService.unlink",
   )(function* (input) {
+    // Hub-derived links are recomputed every pass, so detaching one has to be
+    // remembered, or the hub would link the conversation straight back.
+    const current = yield* effectiveLinks;
+    for (const link of current) {
+      if (link.sessionKey !== input.sessionKey) continue;
+      if (input.threadId !== undefined && link.threadId !== input.threadId) continue;
+      if (link.source === "hub") {
+        detachedLinks.set(linkKey(link.threadId, link.sessionKey), {
+          threadId: link.threadId,
+          sessionKey: link.sessionKey,
+        });
+      }
+    }
     for (const [key, link] of manualLinks) {
       if (link.sessionKey !== input.sessionKey) continue;
       if (input.threadId !== undefined && link.threadId !== input.threadId) continue;
       manualLinks.delete(key);
+      unlinkedCards.set(key, { threadId: link.threadId, sessionKey: link.sessionKey });
     }
-    // Cards already written stay; removal is a later milestone, not this one.
     yield* saveState;
+    // The card comes down on the next pass; wake it now rather than waiting.
+    yield* Queue.offer(wake, undefined);
     return yield* linksResult;
   });
 
@@ -360,6 +443,35 @@ const make = Effect.gen(function* () {
     }
     return tailerState.tailer;
   };
+
+  /**
+   * Cards a thread already holds: item id → activity key, or DETACHED_CARD.
+   * Seeded from the projection on first use, so a restart never rewrites a
+   * card the thread already has.
+   */
+  const writtenFor = Effect.fn("HermesChatHubService.writtenFor")(function* (threadId: ThreadId) {
+    const known = writtenCards.get(threadId);
+    if (known !== undefined) return known;
+    const records = yield* projections.getThreadRecords(threadId, ["turnItems"], {
+      turnItemRunIds: [null],
+    });
+    const seeded = new Map(
+      records.turnItems
+        .filter((item) => item.id.startsWith(`${threadId}${CARD_ID_PREFIX}`))
+        .map((item) => [
+          item.id as string,
+          item.type === "notification" && item.outcome === "cancelled"
+            ? DETACHED_CARD
+            : // Cards written before titles skipped Hermes's placeholder
+              // get one rewrite to pick up the conversation's real name.
+              item.type === "notification" && PLACEHOLDER_TITLE.test(item.summary)
+              ? STALE_CARD
+              : activityKeyFromUpdatedAt(item.updatedAt),
+        ]),
+    );
+    writtenCards.set(threadId, seeded);
+    return seeded;
+  });
 
   /** One pass. Returns whether anything changed, which shortens the next tick. */
   const pass = Effect.gen(function* () {
@@ -398,7 +510,9 @@ const make = Effect.gen(function* () {
         continue;
       }
       if (line.action === "unlink") {
-        if (manualLinks.delete(linkKey(hub.threadId, line.sessionKey))) {
+        const key = linkKey(hub.threadId, line.sessionKey);
+        if (manualLinks.delete(key)) {
+          unlinkedCards.set(key, { threadId: hub.threadId, sessionKey: line.sessionKey });
           stateDirty = true;
           changed = true;
         }
@@ -414,6 +528,7 @@ const make = Effect.gen(function* () {
         continue;
       }
       const linkedAt = line.at?.trim() || DateTime.formatIso(yield* DateTime.now);
+      detachedLinks.delete(linkKey(hub.threadId, line.sessionKey));
       manualLinks.set(linkKey(hub.threadId, line.sessionKey), {
         threadId: hub.threadId,
         sessionKey: line.sessionKey,
@@ -429,10 +544,12 @@ const make = Effect.gen(function* () {
     const links = effectiveLinkedConversations({
       hubs: hubSettings,
       manualLinks: [...manualLinks.values()],
+      detached: [...detachedLinks.values()],
       conversations: rows,
     });
     const dbPath = path.join(home, "state.db");
     const events: OrchestrationV2DomainEvent[] = [];
+    const nowMillis = yield* Clock.currentTimeMillis;
     const pending: Array<{ readonly item: OrchestrationV2TurnItem; readonly activityKey: string }> =
       [];
     const unreadThreads = new Set<ThreadId>();
@@ -441,34 +558,15 @@ const make = Effect.gen(function* () {
       if (row === undefined) continue;
       const activityKey = row.lastActivityAt.toFixed(3);
       const itemId = TurnItemId.make(`${link.threadId}${CARD_ID_PREFIX}${link.sessionKey}`);
-      let written = writtenCards.get(link.threadId);
-      if (written === undefined) {
-        // First pass after boot: a card the thread already holds must not be
-        // rewritten, so seed from the projection before deciding anything.
-        const records = yield* projections.getThreadRecords(link.threadId, ["turnItems"], {
-          turnItemRunIds: [null],
-        });
-        written = new Map(
-          records.turnItems
-            .filter((item) => item.id.startsWith(`${link.threadId}${CARD_ID_PREFIX}`))
-            .map((item) => [item.id, activityKeyFromUpdatedAt(item.updatedAt)]),
-        );
-        writtenCards.set(link.threadId, written);
-      }
-      if (written.get(itemId) === activityKey) continue;
+      const written = yield* writtenFor(link.threadId);
+      const previous = written.get(itemId);
+      if (previous === activityKey) continue;
 
       // The conversation's detail is only worth a read once it moved.
       const detail = yield* Effect.sync(() => readHermesChatTranscript(dbPath, link.sessionKey, 0));
       const conversation = detail?.conversation ?? null;
       if (conversation === null) continue;
-      const summary = clip(
-        oneLine(
-          conversation.title ??
-            conversation.displayName ??
-            conversation.userName ??
-            link.sessionKey,
-        ),
-      );
+      const summary = clip(oneLine(cardTitle(conversation) ?? link.sessionKey));
       const preview = conversation.latestMessagePreview;
       const at = DateTime.makeUnsafe(Math.round(row.lastActivityAt * 1000));
       const item: OrchestrationV2TurnItem = {
@@ -495,7 +593,13 @@ const make = Effect.gen(function* () {
       };
       const placed = yield* positions.normalize(item);
       events.push({
-        id: EventId.make(`${itemId}:${activityKey}:${fnv1a(`${summary}|${preview ?? ""}`)}`),
+        // A re-link can land on the activity a card had before it was
+        // detached, so its event id needs more than the content to be new.
+        id: EventId.make(
+          `${itemId}:${activityKey}:${fnv1a(`${summary}|${preview ?? ""}`)}${
+            previous === DETACHED_CARD ? `:relinked:${nowMillis}` : ""
+          }`,
+        ),
         type: "turn-item.updated",
         threadId: link.threadId,
         occurredAt: placed.updatedAt,
@@ -504,6 +608,38 @@ const make = Effect.gen(function* () {
       pending.push({ item: placed, activityKey });
       unreadThreads.add(link.threadId);
     }
+    // Detached and unlinked conversations: take their cards down. Turn items
+    // cannot be deleted, so the card is rewritten as `cancelled`, which
+    // clients leave out of the timeline.
+    const holding = new Set(links.map((link) => linkKey(link.threadId, link.sessionKey)));
+    const takedowns = new Map([...detachedLinks, ...unlinkedCards]);
+    unlinkedCards.clear();
+    for (const [key, target] of takedowns) {
+      if (holding.has(key)) continue;
+      const itemId = TurnItemId.make(`${target.threadId}${CARD_ID_PREFIX}${target.sessionKey}`);
+      const written = yield* writtenFor(target.threadId);
+      const previous = written.get(itemId);
+      if (previous === undefined || previous === DETACHED_CARD) continue;
+      const records = yield* projections.getThreadRecords(target.threadId, ["turnItems"], {
+        turnItemRunIds: [null],
+      });
+      const card = records.turnItems.find((item) => item.id === itemId);
+      if (card === undefined || card.type !== "notification") {
+        written.delete(itemId);
+        continue;
+      }
+      const at = DateTime.makeUnsafe(nowMillis);
+      const placed = yield* positions.normalize({ ...card, outcome: "cancelled", updatedAt: at });
+      events.push({
+        id: EventId.make(`${itemId}:detached:${nowMillis}`),
+        type: "turn-item.updated",
+        threadId: target.threadId,
+        occurredAt: at,
+        payload: placed,
+      });
+      pending.push({ item: placed, activityKey: DETACHED_CARD });
+    }
+
     if (events.length > 0) {
       // Only mark the cards written once the write took: a failed write must
       // be retried next pass exactly as it was.

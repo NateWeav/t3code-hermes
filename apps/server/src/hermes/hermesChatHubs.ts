@@ -81,12 +81,15 @@ export interface EffectiveHermesChatLink {
  * The links that currently hold: every manual link, plus each auto-linking
  * hub's newest conversations in its channels up to its cap. A manual link to
  * the same thread as a hub's derivation wins, and cards never duplicate.
- * Newest conversation activity first.
+ * Detached conversations are skipped before the cap, so the hub keeps its
+ * newest conversations the user has not detached. Newest activity first.
  */
 export function effectiveLinkedConversations(input: {
   readonly hubs: ReadonlyArray<HermesHubChannels>;
   readonly manualLinks: ReadonlyArray<ManualHermesChatLink>;
   readonly conversations: ReadonlyArray<HermesHubConversation>;
+  /** Hub derivations the user detached; they stay out until linked again. */
+  readonly detached?: ReadonlyArray<ManualHermesChatLink>;
 }): ReadonlyArray<EffectiveHermesChatLink> {
   const activity = new Map(
     input.conversations.map((conversation) => [
@@ -96,6 +99,9 @@ export function effectiveLinkedConversations(input: {
   );
   const byKey = new Map<string, EffectiveHermesChatLink>();
   const key = (threadId: ThreadId, sessionKey: string) => `${threadId}\u0000${sessionKey}`;
+  const detached = new Set(
+    (input.detached ?? []).map((link) => key(link.threadId, link.sessionKey)),
+  );
   for (const link of input.manualLinks) {
     byKey.set(key(link.threadId, link.sessionKey), {
       threadId: link.threadId,
@@ -105,15 +111,20 @@ export function effectiveLinkedConversations(input: {
     });
   }
   for (const hub of input.hubs) {
-    if (hub.threadId === null || !hub.autoLink) continue;
+    const threadId = hub.threadId;
+    if (threadId === null || !hub.autoLink) continue;
     const matched = input.conversations
-      .filter((conversation) => conversationInHub(conversation, hub))
+      .filter(
+        (conversation) =>
+          conversationInHub(conversation, hub) &&
+          !detached.has(key(threadId, conversation.sessionKey)),
+      )
       .toSorted((a, b) => b.lastActivityAt - a.lastActivityAt);
     for (const conversation of matched.slice(0, hub.autoLinkCap)) {
-      const linkKey = key(hub.threadId, conversation.sessionKey);
+      const linkKey = key(threadId, conversation.sessionKey);
       if (byKey.has(linkKey)) continue;
       byKey.set(linkKey, {
-        threadId: hub.threadId,
+        threadId,
         sessionKey: conversation.sessionKey,
         source: "hub",
         activityAt: conversation.lastActivityAt,

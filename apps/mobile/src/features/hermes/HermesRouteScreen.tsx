@@ -276,6 +276,7 @@ function HermesTasksScreen({ environmentId }: { readonly environmentId: Environm
     ) : null;
 
   return (
+    // oxlint-disable-next-line t3code/require-registered-list-scroll -- Hermes pins its tabs above this list under a solid header (SettingsHermes), so there is no header scroll edge to register with.
     <LegendList
       className="flex-1"
       contentInsetAdjustmentBehavior="automatic"
@@ -648,6 +649,7 @@ function HindsightMemoryScreen({
 
   const emptyState = describeHindsightEmptyList(memory.submittedQuery);
   return (
+    // oxlint-disable-next-line t3code/require-registered-list-scroll -- Hermes pins its tabs above this list under a solid header (SettingsHermes), so there is no header scroll edge to register with.
     <LegendList
       className="flex-1"
       contentInsetAdjustmentBehavior="automatic"

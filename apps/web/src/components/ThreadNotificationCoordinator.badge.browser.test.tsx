@@ -1,11 +1,12 @@
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
+import { WORKING_EXIT_GRACE_MS } from "@t3tools/client-runtime/state/thread-inbox";
 import { EnvironmentId, HermesCronJobId, type HermesCronRunCompleted } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import { Atom, AtomRegistry } from "effect/reactivity";
 import { expect, it, vi } from "vite-plus/test";
 
-import { render, stubGlobal, type Screen } from "../../test/render";
+import { fakeTimers, render, stubGlobal, type Screen } from "../../test/render";
 
 const state = vi.hoisted(() => ({
   mode: "notifications",
@@ -252,8 +253,10 @@ it.each(["off", "sound", "denied"])(
     if (condition === "off" || condition === "sound") state.mode = condition;
     if (condition === "denied") TestNotification.permission = "denied";
     await app.render();
+    using _timers = fakeTimers();
     complete();
     await app.render();
+    await vi.advanceTimersByTimeAsync(WORKING_EXIT_GRACE_MS);
     expect(TestNotification.sent).toHaveLength(0);
     expect(state.badge).toHaveBeenLastCalledWith(1);
     window.dispatchEvent(new Event("focus"));
@@ -266,7 +269,10 @@ it("with status dots on, colors the badge by the most severe alert and blinks on
   state.mode = "off";
   state.dots = true;
   await app.render();
+  using _timers = fakeTimers();
   complete("one");
+  await app.render();
+  await vi.advanceTimersByTimeAsync(WORKING_EXIT_GRACE_MS);
   state.shells.set("two", shell({ hasPendingApprovals: true }));
   await app.render();
   expect(state.badge).toHaveBeenLastCalledWith(2, { kind: "input", blink: true });
@@ -275,6 +281,7 @@ it("with status dots on, colors the badge by the most severe alert and blinks on
   expect(state.badge).toHaveBeenLastCalledWith(2, { kind: "failed", blink: true });
   complete("one", "2026-09-13T08:01:00Z");
   await app.render();
+  await vi.advanceTimersByTimeAsync(WORKING_EXIT_GRACE_MS);
   expect(state.badge).toHaveBeenLastCalledWith(2, { kind: "failed", blink: false });
 });
 
@@ -355,8 +362,10 @@ it("shares Hermes and thread badge counts and opens the exact remote run", async
   await using app = setup();
   state.hermes.set("two", null);
   await app.render();
+  using _timers = fakeTimers();
   complete("one");
   await app.render();
+  await vi.advanceTimersByTimeAsync(WORKING_EXIT_GRACE_MS);
   completeHermes();
   await app.render();
   expect(lastBadge()).toBe(2);
@@ -493,6 +502,31 @@ it.each([
       latestTurn: { turnId: "turn", state: status, completedAt: "2026-09-13T07:01:00.000Z" },
     }),
   );
+  using _timers = fakeTimers();
   await screen.rerender(app.ui());
+  await vi.advanceTimersByTimeAsync(WORKING_EXIT_GRACE_MS);
   expect(TestNotification.sent.map((notification) => notification.title)).toEqual(titles);
+});
+
+it("holds a completion through a continuation gap and notifies once it settles", async () => {
+  await using app = setup();
+  await app.render();
+  using _timers = fakeTimers();
+  const finished = (turnId: string, completedAt: string) => ({
+    latestTurn: { turnId, state: "completed", completedAt },
+  });
+  state.shells.set("one", shell(finished("turn-1", "2026-09-13T07:00:01.000Z")));
+  await app.render();
+  state.shells.set(
+    "one",
+    shell({ latestTurn: { turnId: "turn-2", state: "running", completedAt: null } }),
+  );
+  await app.render();
+  state.shells.set("one", shell(finished("turn-2", "2026-09-13T07:00:02.000Z")));
+  await app.render();
+  expect(TestNotification.sent).toEqual([]);
+  await vi.advanceTimersByTimeAsync(WORKING_EXIT_GRACE_MS - 1);
+  expect(TestNotification.sent).toEqual([]);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(TestNotification.sent.map((sent) => sent.title)).toEqual(["Thread completed"]);
 });

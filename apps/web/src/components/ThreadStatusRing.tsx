@@ -12,8 +12,9 @@ const MOTION_CLASS: Record<ThreadStatusRingModel["motion"], string> = {
 // row and the half-pixel rect overflows it, so the 1px stroke covers whole
 // pixels on every edge without the row's rounded clip thinning the corners.
 const STROKE_WIDTH = 1;
-// rounded-md less half the stroke, so the outer edge meets the row's corners.
-const CORNER_RADIUS = 5.5;
+// The row's rounded-md (--radius less 2px, so 8px) less half the stroke; any
+// tighter and the row's corner clip swallows the arc.
+const CORNER_RADIUS = 7.5;
 const TRAVEL_DASH_ARRAY = "6 6";
 
 /** The status outline around a sidebar card row: the same state the row's

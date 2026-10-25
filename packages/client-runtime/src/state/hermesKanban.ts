@@ -58,7 +58,7 @@ function activityMillis(iso: string | null): number {
 export function sortHermesKanbanBoards(
   boards: readonly HermesKanbanBoardSummary[],
 ): HermesKanbanBoardSummary[] {
-  return boards.toSorted(
+  return [...boards].sort(
     (a, b) =>
       Number(b.blockedCount > 0) - Number(a.blockedCount > 0) ||
       activityMillis(b.lastActivityAt) - activityMillis(a.lastActivityAt) ||

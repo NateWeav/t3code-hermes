@@ -23,6 +23,7 @@ const RIGHT_PANEL_KINDS = [
   "pull-requests",
   "paperclip",
   "hermes-chat",
+  "hermes-kanban",
 ] as const;
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
 
@@ -78,6 +79,8 @@ export type RightPanelSurface =
     }
   | { id: "pull-requests"; kind: "pull-requests" }
   | { id: "paperclip"; kind: "paperclip" }
+  /** Hermes Kanban boards: the overview, a board, and its cards, all in one tab. */
+  | { id: "hermes-kanban"; kind: "hermes-kanban" }
   /**
    * A Hermes gateway conversation, or the conversation picker while `sessionKey`
    * is null. One tab per conversation, so several can sit side by side.
@@ -232,6 +235,8 @@ const singletonSurface = (
       return { id: "pull-requests", kind };
     case "paperclip":
       return { id: "paperclip", kind };
+    case "hermes-kanban":
+      return { id: "hermes-kanban", kind };
     case "hermes-chat":
       return hermesChatSurface(null);
     case "device":

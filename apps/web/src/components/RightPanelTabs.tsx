@@ -27,6 +27,7 @@ import { horizontalListSortingStrategy, SortableContext, useSortable } from "@dn
 import { CSS } from "@dnd-kit/utilities";
 import {
   Smartphone,
+  SquareKanban,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -132,6 +133,7 @@ export interface RightPanelTabsProps {
   onAddPullRequests: () => void;
   onAddPaperclip: () => void;
   onAddHermesChat: () => void;
+  onAddHermesKanban: () => void;
   onAddDevice: () => void;
   browserAvailable: boolean;
   terminalAvailable: boolean;
@@ -141,6 +143,7 @@ export interface RightPanelTabsProps {
   pullRequestsAvailable: boolean;
   paperclipAvailable: boolean;
   hermesChatAvailable: boolean;
+  hermesKanbanAvailable: boolean;
   deviceAvailable: boolean;
   pullRequestStatusSeeds?: Readonly<Record<string, PullRequestTabStatusSeed>>;
   children: ReactNode;
@@ -169,6 +172,7 @@ const SURFACE_DISABLED_REASONS = {
   pullRequests: "No linked pull requests are available for this thread.",
   paperclip: "Turn on Paperclip in Settings → Integrations.",
   hermesChat: "Turn on the Hermes provider in Settings to see its conversations.",
+  hermesKanban: "Turn on the Hermes provider in Settings to see its Kanban boards.",
   device: "Devices are only available from a thread.",
 } as const;
 
@@ -195,6 +199,7 @@ const SURFACE_UNAVAILABLE_HINTS = {
   pullRequests: "No linked pull requests available.",
   paperclip: "Turn on Paperclip in Settings.",
   hermesChat: "Turn on Hermes in Settings.",
+  hermesKanban: "Turn on Hermes in Settings.",
   device: "Available from a thread.",
 } as const;
 
@@ -314,6 +319,7 @@ function RightPanelEmptyState(props: {
   onAddPullRequests: () => void;
   onAddPaperclip: () => void;
   onAddHermesChat: () => void;
+  onAddHermesKanban: () => void;
   onAddDevice: () => void;
   browserAvailable: boolean;
   terminalAvailable: boolean;
@@ -323,6 +329,7 @@ function RightPanelEmptyState(props: {
   pullRequestsAvailable: boolean;
   paperclipAvailable: boolean;
   hermesChatAvailable: boolean;
+  hermesKanbanAvailable: boolean;
   deviceAvailable: boolean;
 }) {
   const [highlight, setHighlight] = useState(-1);
@@ -393,6 +400,15 @@ function RightPanelEmptyState(props: {
       available: props.hermesChatAvailable,
       disabledReason: SURFACE_UNAVAILABLE_HINTS.hermesChat,
       onClick: props.onAddHermesChat,
+    },
+    {
+      label: "Board",
+      description: "Projects and milestones on your Hermes Kanban boards.",
+      icon: SquareKanban,
+      shortcut: "K",
+      available: props.hermesKanbanAvailable,
+      disabledReason: SURFACE_UNAVAILABLE_HINTS.hermesKanban,
+      onClick: props.onAddHermesKanban,
     },
     {
       label: "Device",
@@ -587,6 +603,8 @@ function surfaceTitle(
       return "Pull requests";
     case "paperclip":
       return "Paperclip";
+    case "hermes-kanban":
+      return "Board";
     case "hermes-chat":
       return surface.sessionKey === null
         ? "Hermes conversations"
@@ -683,6 +701,8 @@ function SurfaceIcon({
       return <PullRequestGlyph.link className="size-3 shrink-0" />;
     case "paperclip":
       return <Paperclip className="size-3 shrink-0" />;
+    case "hermes-kanban":
+      return <SquareKanban className="size-3 shrink-0" />;
     case "hermes-chat":
       return <MessagesSquare className="size-3 shrink-0" />;
     case "device":
@@ -1119,6 +1139,14 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       onClick: props.onAddHermesChat,
     },
     {
+      label: "Board",
+      icon: SquareKanban,
+      shortcut: "K",
+      available: props.hermesKanbanAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.hermesKanban,
+      onClick: props.onAddHermesKanban,
+    },
+    {
       label: "Device",
       icon: Smartphone,
       shortcut: "M",
@@ -1498,6 +1526,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddPullRequests={props.onAddPullRequests}
             onAddPaperclip={props.onAddPaperclip}
             onAddHermesChat={props.onAddHermesChat}
+            onAddHermesKanban={props.onAddHermesKanban}
             onAddDevice={props.onAddDevice}
             browserAvailable={props.browserAvailable}
             terminalAvailable={props.terminalAvailable}
@@ -1507,6 +1536,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             pullRequestsAvailable={props.pullRequestsAvailable}
             paperclipAvailable={props.paperclipAvailable}
             hermesChatAvailable={props.hermesChatAvailable}
+            hermesKanbanAvailable={props.hermesKanbanAvailable}
             deviceAvailable={props.deviceAvailable}
           />
         ) : (

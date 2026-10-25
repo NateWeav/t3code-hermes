@@ -52,6 +52,7 @@ interface RightPanelActionsInput {
   readonly pullRequestsSurfaceAvailable: boolean;
   readonly paperclipSurfaceAvailable: boolean;
   readonly hermesChatSurfaceAvailable: boolean;
+  readonly hermesKanbanSurfaceAvailable: boolean;
   readonly gitCwd: string | null;
   readonly activeProjectCwd: string | null;
   readonly explicitDiffOpenRef: { current: ScopedThreadRef | null };
@@ -87,6 +88,7 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
     pullRequestsSurfaceAvailable,
     paperclipSurfaceAvailable,
     hermesChatSurfaceAvailable,
+    hermesKanbanSurfaceAvailable,
     gitCwd,
     activeProjectCwd,
     explicitDiffOpenRef,
@@ -159,6 +161,11 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
     useRightPanelStore.getState().openHermesChat(activeThreadRef, null);
   };
   const addHermesChatSurfaceStable = useStableCallback(addHermesChatSurface);
+  const addHermesKanbanSurface = () => {
+    if (!activeThreadRef || !hermesKanbanSurfaceAvailable) return;
+    useRightPanelStore.getState().open(activeThreadRef, "hermes-kanban");
+  };
+  const addHermesKanbanSurfaceStable = useStableCallback(addHermesKanbanSurface);
   const addDeviceSurface = () => {
     if (!activeThreadRef) return;
     if (!deviceState.onboardingCompleted || deviceState.hostStatus === "disabled") {
@@ -330,6 +337,7 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
     addPullRequestsSurfaceStable,
     addPaperclipSurfaceStable,
     addHermesChatSurfaceStable,
+    addHermesKanbanSurfaceStable,
     closePreviewPanelStable,
     copyRightPanelFilePathStable,
     createBrowserSurface,

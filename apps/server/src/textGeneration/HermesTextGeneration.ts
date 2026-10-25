@@ -6,24 +6,8 @@ import * as Schema from "effect/Schema";
 import { ChildProcessSpawner } from "effect/process";
 import type * as EffectAcpErrors from "effect-acp/errors";
 
-import { type HermesSettings, type ModelSelection } from "@t3tools/contracts";
-import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@t3tools/shared/git";
-import { extractJsonObject } from "@t3tools/shared/schemaJson";
-
-import { TextGenerationError } from "@t3tools/contracts";
-import * as TextGeneration from "./TextGeneration.ts";
-import {
-  buildBranchNamePrompt,
-  buildCommitMessagePrompt,
-  buildPrContentPrompt,
-  buildThreadTitlePrompt,
-} from "@t3tools/provider-core/server/textGenerationPrompts";
-import {
-  sanitizeCommitSubject,
-  sanitizePrTitle,
-  sanitizeThreadTitle,
-} from "@t3tools/provider-core/server/textGenerationUtils";
-import { investigationUnsupported } from "@t3tools/provider-core/server/textGenerationOperations";
+import { type HermesSettings, TextGenerationError } from "@t3tools/contracts";
+import * as TextGenerationOperations from "@t3tools/provider-core/server/textGenerationOperations";
 import {
   applyHermesAcpModelSelection,
   currentHermesModelIdFromSessionSetup,
@@ -42,25 +26,11 @@ export const makeHermesTextGeneration = Effect.fn("makeHermesTextGeneration")(fu
   const crypto = yield* Crypto.Crypto;
   const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
 
-  const runHermesJson = Effect.fn("HermesTextGeneration.runHermesJson")(
-    function* <S extends Schema.Top>({
-      operation,
-      cwd,
-      prompt,
-      outputSchemaJson,
-      modelSelection,
-    }: {
-      operation:
-        | "generateCommitMessage"
-        | "generatePrContent"
-        | "generateBranchName"
-        | "generateThreadTitle";
-      cwd: string;
-      prompt: string;
-      outputSchemaJson: S;
-      modelSelection: ModelSelection;
-    }) {
-      const resolvedModel = resolveHermesAcpBaseModelId(modelSelection.model);
+  const runHermesJson: TextGenerationOperations.Runner = Effect.fn(
+    "HermesTextGeneration.runHermesJson",
+  )(
+    function* (request) {
+      const { operation, cwd, prompt, modelSelection } = request;
       const outputRef = yield* Ref.make("");
       const runtime = yield* makeHermesAcpRuntime({
         hermesSettings,
@@ -87,7 +57,7 @@ export const makeHermesTextGeneration = Effect.fn("makeHermesTextGeneration")(fu
         yield* applyHermesAcpModelSelection({
           runtime,
           currentModelId: currentHermesModelIdFromSessionSetup(started.sessionSetupResult),
-          requestedModelId: resolvedModel,
+          requestedModelId: resolveHermesAcpBaseModelId(modelSelection.model),
           mapError: (cause) =>
             new TextGenerationError({
               operation,
@@ -132,19 +102,7 @@ export const makeHermesTextGeneration = Effect.fn("makeHermesTextGeneration")(fu
         });
       }
 
-      const decodeOutput = Schema.decodeEffect(Schema.fromJsonString(outputSchemaJson));
-      return yield* decodeOutput(extractJsonObject(trimmed)).pipe(
-        Effect.catchTags({
-          SchemaError: (cause) =>
-            Effect.fail(
-              new TextGenerationError({
-                operation,
-                detail: "Hermes Agent returned invalid structured output.",
-                cause,
-              }),
-            ),
-        }),
-      );
+      return yield* TextGenerationOperations.decodeJsonReply(request, "Hermes Agent", trimmed);
     },
     (effect, { operation }) =>
       effect.pipe(
@@ -161,111 +119,10 @@ export const makeHermesTextGeneration = Effect.fn("makeHermesTextGeneration")(fu
       ),
   );
 
-  const generateCommitMessage: TextGeneration.TextGeneration["Service"]["generateCommitMessage"] =
-    Effect.fn("HermesTextGeneration.generateCommitMessage")(function* (input) {
-      const { prompt, outputSchema } = buildCommitMessagePrompt({
-        branch: input.branch,
-        stagedSummary: input.stagedSummary,
-        stagedPatch: input.stagedPatch,
-        includeBranch: input.includeBranch === true,
-        policy: input.policy,
-      });
-
-      const generated = yield* runHermesJson({
-        operation: "generateCommitMessage",
-        cwd: input.cwd,
-        prompt,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
-      });
-
-      return {
-        subject: sanitizeCommitSubject(generated.subject),
-        body: generated.body.trim(),
-        ...("branch" in generated && typeof generated.branch === "string"
-          ? { branch: sanitizeFeatureBranchName(generated.branch) }
-          : {}),
-      };
-    });
-
-  const generatePrContent: TextGeneration.TextGeneration["Service"]["generatePrContent"] =
-    Effect.fn("HermesTextGeneration.generatePrContent")(function* (input) {
-      const { prompt, outputSchema } = buildPrContentPrompt({
-        baseBranch: input.baseBranch,
-        headBranch: input.headBranch,
-        commitSummary: input.commitSummary,
-        diffSummary: input.diffSummary,
-        diffPatch: input.diffPatch,
-        policy: input.policy,
-        changeRequestTemplate: input.changeRequestTemplate,
-      });
-
-      const generated = yield* runHermesJson({
-        operation: "generatePrContent",
-        cwd: input.cwd,
-        prompt,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
-      });
-
-      return {
-        title: sanitizePrTitle(generated.title),
-        body: generated.body.trim(),
-      };
-    });
-
-  const generateBranchName: TextGeneration.TextGeneration["Service"]["generateBranchName"] =
-    Effect.fn("HermesTextGeneration.generateBranchName")(function* (input) {
-      const { prompt, outputSchema } = buildBranchNamePrompt({
-        message: input.message,
-        attachments: input.attachments,
-      });
-
-      const generated = yield* runHermesJson({
-        operation: "generateBranchName",
-        cwd: input.cwd,
-        prompt,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
-      });
-
-      return {
-        branch: sanitizeBranchFragment(generated.branch),
-      };
-    });
-
-  const generateThreadTitle: TextGeneration.TextGeneration["Service"]["generateThreadTitle"] =
-    Effect.fn("HermesTextGeneration.generateThreadTitle")(function* (input) {
-      const { prompt, outputSchema } = buildThreadTitlePrompt({
-        message: input.message,
-        previousTitle: input.previousTitle,
-        attachments: input.attachments,
-        instructions: input.instructions,
-      });
-
-      const generated = yield* runHermesJson({
-        operation: "generateThreadTitle",
-        cwd: input.cwd,
-        prompt,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
-      });
-
-      return {
-        title: sanitizeThreadTitle(generated.title),
-      } satisfies TextGeneration.ThreadTitleGenerationResult;
-    });
-
   // Hermes ACP sessions have no read-only tool mode, so an investigation could change the
   // checkout; refuse instead of answering blind, as Cursor and Grok do.
-  const generateReviewGuide: TextGeneration.TextGeneration["Service"]["generateReviewGuide"] = () =>
-    Effect.fail(investigationUnsupported("generateReviewGuide", "Hermes"));
-
-  return {
-    generateCommitMessage,
-    generatePrContent,
-    generateBranchName,
-    generateThreadTitle,
-    generateReviewGuide,
-  } satisfies TextGeneration.TextGeneration["Service"];
+  return TextGenerationOperations.fromRunner(
+    "HermesTextGeneration",
+    TextGenerationOperations.withoutInvestigation("Hermes", runHermesJson),
+  );
 });

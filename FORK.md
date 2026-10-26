@@ -282,13 +282,13 @@ that commit's first 12 characters.
    - `extractSubagentUpdate`: Hermes sets the plural `extractSubagentUpdates`, because one delegate
      call starts several children.
    - `assertComplete`: only replay tests set it.
-   - `promptFailure`: Hermes ACP catches agent errors, shows them as reply text, and ends the
-     prompt with `end_turn`, so there is no prompt error code to classify.
 2. New optional inputs. In `git diff R -- packages/provider-core/src/server packages/provider-acp/src/server`,
    find optional fields added to input types and options. Where Hermes builds that input itself,
    check that it passes the field on as its siblings do.
-3. Grok templates. Hermes's driver, provider status, and ACP support follow the same structure as
-   Grok's. Port fixes from `git log R -- packages/provider-grok/src/server/{driver,status,acpSupport}.ts`
+3. Grok templates. Hermes's driver, provider status, ACP support, and text generation
+   (`apps/server/src/textGeneration/HermesTextGeneration.ts`) follow the same structure as Grok's,
+   including building text generation on provider-core's `TextGenerationOperations.fromRunner`. Port
+   fixes from `git log R -- packages/provider-grok/src/server/{driver,status,acpSupport,textGeneration}.ts`
    that are not specific to Grok.
 
 Fix each gap in its own commit on the resolution PR, with a test that fails without the fix. A gap

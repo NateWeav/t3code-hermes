@@ -961,8 +961,8 @@ const withToolResultRecords =
     if (Option.isNone(sessions)) return yield* registration;
     const recordingServer = McpServer.McpServer.of({
       ...server,
-      addTool: (options) =>
-        server.addTool({
+      addTool: Effect.fn("McpServer.addTool")(function (options) {
+        return server.addTool({
           ...options,
           handle: (payload) =>
             options.handle(payload).pipe(
@@ -984,7 +984,8 @@ const withToolResultRecords =
                 }),
               ),
             ),
-        }),
+        });
+      }),
     });
     return yield* registration.pipe(Effect.provideService(McpServer.McpServer, recordingServer));
   });

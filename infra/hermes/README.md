@@ -221,3 +221,20 @@ The patch removes the ACP exception. Verified against hermes-agent `749cb638ff` 
 2026-10-26), alone and after the other patches. Restart the Hermes gateway after applying it. Run
 the patch's `tests/gateway/test_local_viewer_reasoning.py` in a scratch checkout, as for
 `acp-delegation-progress`.
+
+## `acp-lost-turn-refusal`
+
+**Needed by:** recovering a Hermes session after a gateway restart loses a turn. Hermes fences the
+lost turn as `unknown` and refuses each later ACP prompt until someone sends
+`/discard <admission>`. T3 sends that discard itself when the user's next message is refused
+unsubmitted, then resends the message. Stock `hermes acp` only re-reads the fence when the prompt
+reconnects, after its own fence check. So the first prompt after a restart is queued behind the lost
+turn while ACP reports it failed. The discard then runs it without the prompt open.
+
+The patch refuses a prompt whose reconnect just adopted a lost turn, and withdraws its own input if
+it is queued behind a lost turn before refusing. Either way the refusal says nothing was submitted.
+Without it, T3 discards the lost turn so the queued input runs once, and shows its reply as a
+continuation instead of resending it. Verified against hermes-agent `edfa1c2a13` (`main`,
+2026-10-26), alone and after the other patches. New `hermes acp` processes pick it up; restarting the gateway is not required. Run the
+patch's `tests/acp_adapter/test_gateway_queued_unknown.py` in a scratch checkout, as for
+`acp-delegation-progress`.

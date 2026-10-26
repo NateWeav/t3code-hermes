@@ -121,6 +121,18 @@
           "file": "acp-reasoning-once/749cb638ff43.patch"
         }
       ]
+    },
+    {
+      "id": "acp-lost-turn-refusal",
+      "title": "Lost-turn refusals",
+      "neededFor": "Recovering a Hermes session after a gateway restart loses a turn. Without it, a prompt sent from T3 can be queued behind the lost turn while T3 shows it as failed, then run unseen once the lost turn is discarded.",
+      "versions": [
+        {
+          "hermesCommit": "edfa1c2a135532a8b64f7825c0ac0af6cfe73d4d",
+          "hermesCommitDate": "2026-10-26T15:58:39Z",
+          "file": "acp-lost-turn-refusal/edfa1c2a1355.patch"
+        }
+      ]
     }
   ]
 }

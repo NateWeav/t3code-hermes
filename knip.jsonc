@@ -25,6 +25,8 @@
       "entry": [
         // These fixture scripts are injected into a browser page by path.
         "fixtures/*/*.js",
+        // Fork: check-changed-remote.ts runs it by path for --local.
+        "check-changed.ts",
         "knip-schemas.ts",
         "mobile-native-client.ts",
         "setup-worktree.ts",

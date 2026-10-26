@@ -102,6 +102,7 @@ describe("hermes patches", () => {
         id: string;
         title: string;
         neededFor: string;
+        retired?: true;
         versions: ReadonlyArray<{ hermesCommit: string; hermesCommitDate: string; file: string }>;
       }>;
     };
@@ -708,6 +709,51 @@ describe("hermes patches", () => {
 
       const [status] = yield* readHermesPatches(root, [patch]).pipe(Effect.ensuring(restore));
       assert.strictEqual(status?.state, "notApplied");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("removes a patch built on another, then the one beneath it", () =>
+    Effect.gen(function* () {
+      // Like acp-durable-completion-receipts, which edits a file acp-background-reports creates:
+      // the top patch applies only on top of the other, never to HEAD alone.
+      const { root, patch: beneath } = yield* makeCheckout;
+      const file = NodePath.join(root, "session.py");
+      NodeFS.writeFileSync(file, "remote_cwd = configured()\n");
+      git(root, "add", "session.py");
+      const top: HermesPatchDefinition = {
+        id: HermesPatchId.make("top-patch"),
+        title: "Top",
+        neededFor: "Tests.",
+        versions: [
+          diffAt(
+            root,
+            "session.py",
+            "remote_cwd = configured(strict)\n",
+            beneath.versions[0]!.hermesCommit,
+          ),
+        ],
+      };
+      git(root, "reset", "--quiet", "--hard");
+      const patches = [beneath, top];
+      assert.isTrue((yield* changeHermesPatch(root, beneath, "forward", patches)).ok);
+      assert.isTrue((yield* changeHermesPatch(root, top, "forward", patches)).ok);
+
+      assert.isTrue((yield* changeHermesPatch(root, top, "reverse", patches)).ok);
+      assert.strictEqual(NodeFS.readFileSync(file, "utf8"), "remote_cwd = configured()\n");
+      assert.isTrue((yield* changeHermesPatch(root, beneath, "reverse", patches)).ok);
+      assert.strictEqual(git(root, "status", "--porcelain"), "");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("lists a retired patch only while the checkout still has it", () =>
+    Effect.gen(function* () {
+      const { root, patch } = yield* makeCheckout;
+      const retired = { ...patch, retired: true };
+      assert.deepStrictEqual(yield* readHermesPatches(root, [retired]), []);
+      assert.isTrue((yield* changeHermesPatch(root, patch, "forward", [patch])).ok);
+      const [status] = yield* readHermesPatches(root, [retired]);
+      assert.strictEqual(status?.state, "applied");
+      assert.isTrue(status?.retired);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 

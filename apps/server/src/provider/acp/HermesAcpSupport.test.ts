@@ -3,15 +3,20 @@ import * as Effect from "effect/Effect";
 import * as EffectAcpErrors from "effect-acp/errors";
 
 import {
+  hermesApprovalOptions,
   applyHermesAcpModelSelection,
   buildHermesAcpSpawnInput,
   HERMES_BUILT_IN_SLASH_COMMANDS,
   resolveHermesAcpBaseModelId,
+  normalizeHermesT3McpToolCall,
   normalizeHermesTerminalResult,
   preserveHermesAgentActivityTitle,
   resolveHermesSessionModeId,
 } from "./HermesAcpSupport.ts";
-import { parseSessionUpdateEvent } from "@t3tools/provider-acp/server/runtimeModel";
+import {
+  extractMcpToolCallIdentity,
+  parseSessionUpdateEvent,
+} from "@t3tools/provider-acp/server/runtimeModel";
 
 describe("resolveHermesAcpBaseModelId", () => {
   it("falls back to the placeholder model for empty ids", () => {
@@ -401,5 +406,89 @@ describe("preserveHermesAgentActivityTitle", () => {
   it("leaves other tools on their shared summary", () => {
     const toolCall = parsed("read_file: src/app.ts", "read");
     expect(preserveHermesAgentActivityTitle(toolCall)).toBe(toolCall);
+  });
+});
+
+describe("hermesApprovalOptions", () => {
+  const request = (kinds: ReadonlyArray<[string, string]>) =>
+    ({
+      sessionId: "s",
+      toolCall: { toolCallId: "perm-check-1" },
+      options: kinds.map(([optionId, kind]) => ({ optionId, kind, name: optionId })),
+    }) as unknown as Parameters<typeof hermesApprovalOptions>[0];
+
+  it("offers no session scope when Hermes only allows once", () => {
+    expect(
+      hermesApprovalOptions(
+        request([
+          ["allow_once", "allow_once"],
+          ["deny", "reject_once"],
+        ]),
+      ).map((option) => option.decision),
+    ).toEqual(["cancel", "decline", "accept"]);
+  });
+
+  it("offers the session scope when Hermes does", () => {
+    expect(
+      hermesApprovalOptions(
+        request([
+          ["allow_once", "allow_once"],
+          ["allow_session", "allow_always"],
+          ["allow_always", "allow_always"],
+          ["deny", "reject_once"],
+        ]),
+      ).map((option) => option.decision),
+    ).toEqual(["cancel", "decline", "acceptForSession", "accept"]);
+  });
+
+  it("never offers a permanent grant as the session scope", () => {
+    expect(
+      hermesApprovalOptions(
+        request([
+          ["allow_once", "allow_once"],
+          ["allow_always", "allow_always"],
+          ["deny", "reject_once"],
+        ]),
+      ).map((option) => option.decision),
+    ).toEqual(["cancel", "decline", "accept"]);
+  });
+});
+
+describe("normalizeHermesT3McpToolCall", () => {
+  // Hermes's gateway starts a tool call with no status and a `<name>: <preview>` title.
+  const started = (title: string) => {
+    const event = parseSessionUpdateEvent({
+      sessionId: "s",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "tc-1",
+        title,
+        kind: "other",
+        rawInput: { threadId: "thread-1" },
+      },
+    }).events[0];
+    if (event?._tag !== "ToolCallUpdated") throw new Error("expected a tool call");
+    return normalizeHermesT3McpToolCall(event.toolCall);
+  };
+
+  it("recognizes T3 tools under the gateway's per-session server names", () => {
+    for (const title of [
+      "mcp__editor_t3_code_1a2b3c4d__t3_thread_wait: thread-1",
+      "mcp__editor_0123456789abcdef0123_0__t3_thread_wait",
+    ]) {
+      const toolCall = started(title);
+      expect(extractMcpToolCallIdentity(toolCall)).toMatchObject({
+        server: "t3-code",
+        tool: "t3_thread_wait",
+      });
+      expect(toolCall.status).toBe("inProgress");
+    }
+  });
+
+  it("leaves other editor servers and Hermes tools alone", () => {
+    const github = started("mcp__editor_github_1a2b3c4d__list_issues");
+    expect(extractMcpToolCallIdentity(github)).toMatchObject({ server: "editor_github_1a2b3c4d" });
+    expect(github.status).toBe("pending");
+    expect(started("read_file: src/app.ts").status).toBe("pending");
   });
 });

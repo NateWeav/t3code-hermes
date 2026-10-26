@@ -1,0 +1,197 @@
+diff --git a/acp_adapter/gateway_server.py b/acp_adapter/gateway_server.py
+index d37224bc64..13689ec804 100644
+--- a/acp_adapter/gateway_server.py
++++ b/acp_adapter/gateway_server.py
+@@ -215,6 +215,17 @@ class GatewayACPAgent(GatewayReplyMixin, acp.Agent):
+             self._changed.notify_all()
+         await self._project_mode(session_id, self._editor_id(session_id), snapshot.get("info") or {})
+ 
++    async def _pin_launch_yolo(self, client, session_id):
++        """Apply this launch's ``--yolo`` (``HERMES_YOLO_MODE``) to a session it reopens or forks.
++
++        ``session.create`` freezes the flag into a new session's policy, but a reopened session keeps the
++        policy it was created with, so an editor that relaunches ``hermes acp`` to change its approval
++        mode would otherwise keep the old one. Set either way: a launch without the flag revokes a bypass
++        the session was created with. A refusal fails the attach rather than run under the wrong mode."""
++        from hermes_cli.gateway_chat import env_launch_flags
++        value = "1" if env_launch_flags().get("yolo") else "0"
++        await client.rpc("config.set", session_id=session_id, key="yolo", value=value)
++
+     async def _request_live_reasoning(self, client, session_id):
+         """Ask the owner to stream this session's reasoning (``show_reasoning``), as the CLI does.
+ 
+@@ -374,6 +385,7 @@ class GatewayACPAgent(GatewayReplyMixin, acp.Agent):
+             await self._rebind_editor_mcp(client, session_id, resume_params['editor'])
+             snapshot = await client.rpc("session.resume", session_id=session_id, **resume_params)
+         await self._adopt(session_id, snapshot)
++        await self._pin_launch_yolo(client, session_id)
+         if 'editor' in resume_params:
+             self._editor_mcp[session_id] = resume_params['editor']
+         from acp_adapter.server import _history_replay_updates
+@@ -465,6 +477,7 @@ class GatewayACPAgent(GatewayReplyMixin, acp.Agent):
+         if self._moved(info, cwd):
+             await self._move_workspace(client, child, cwd)
+         await self._adopt(child, await client.rpc('session.resume', session_id=child))
++        await self._pin_launch_yolo(client, child)
+         if payload or session_id in self._editor_mcp:
+             self._editor_mcp[child] = payload or self._editor_mcp[session_id]
+         self._mutations.acknowledge(session_id, 'branch', payload)
+diff --git a/tests/acp_adapter/test_gateway_compressed_reopen.py b/tests/acp_adapter/test_gateway_compressed_reopen.py
+index 247f49588a..89776b9a59 100644
+--- a/tests/acp_adapter/test_gateway_compressed_reopen.py
++++ b/tests/acp_adapter/test_gateway_compressed_reopen.py
+@@ -36,7 +36,7 @@ class _Editor:
+ async def test_compressed_acp_chat_lists_and_reopens_under_its_logical_id(tmp_path, monkeypatch):
+     from gateway import run
+     from gateway.config import GatewayConfig
+-    from gateway.session import SessionStore
++    from gateway.session import AsyncSessionStore, SessionStore
+     from gateway.session_authority import initialize_session_authority
+     from gateway.session_controls import AuthorityConnection
+     from gateway.session_local import create_local_session
+@@ -47,6 +47,7 @@ async def test_compressed_acp_chat_lists_and_reopens_under_its_logical_id(tmp_pa
+     store = SessionStore(tmp_path / 'sessions', GatewayConfig())
+     runner = SimpleNamespace(session_store=store, _session_db=store._db, adapters={}, _draining=False,
+                              _cached_agent_for=lambda route: None)
++    runner.async_session_store = AsyncSessionStore(store)
+     runner._adapter_for_source = lambda source: runner.adapters.get(source.platform)
+     authority = await initialize_session_authority(runner, profile_id='fixture', instance_id='owner')
+     db = authority.db
+diff --git a/tests/acp_adapter/test_gateway_launch_yolo_resume.py b/tests/acp_adapter/test_gateway_launch_yolo_resume.py
+new file mode 100644
+index 0000000000..879cecab52
+--- /dev/null
++++ b/tests/acp_adapter/test_gateway_launch_yolo_resume.py
+@@ -0,0 +1,85 @@
++"""A reopened or forked editor session takes the approval bypass of the ``hermes acp`` launch reopening it.
++
++``session.create`` freezes ``--yolo`` (``HERMES_YOLO_MODE``) into a new session's policy, but an editor
++that relaunches ``hermes acp`` to change approval mode reopens the session it already has. Real
++authority + SQLite + dispatch; only the socket is replaced.
++"""
++import asyncio
++from types import SimpleNamespace
++
++import pytest
++
++
++class _Bridge:
++    """``GatewayClient.rpc`` over a real ``AuthorityConnection.dispatch`` (no socket)."""
++
++    def __init__(self, connection):
++        self.connection, self.events = connection, asyncio.Queue()
++
++    async def rpc(self, method, _timeout=None, **params):
++        from hermes_cli.gateway_client import GatewayClientError
++        reply = await self.connection.dispatch({'id': 1, 'method': method, 'params': params})
++        if 'error' in reply:
++            raise GatewayClientError(reply['error']['message'])
++        return reply['result']
++
++
++class _Editor:
++    async def session_update(self, session_id, update, **kwargs):
++        pass
++
++
++@pytest.mark.asyncio
++async def test_reopen_and_fork_follow_the_launch_yolo(tmp_path, monkeypatch):
++    from gateway import run
++    from gateway.config import GatewayConfig
++    from gateway.session import AsyncSessionStore, SessionStore
++    from gateway.session_authority import initialize_session_authority
++    from gateway.session_controls import AuthorityConnection
++    from gateway.session_local import create_local_session
++    from acp_adapter.gateway_server import GatewayACPAgent
++    from tools.approval import is_session_yolo_enabled
++
++    monkeypatch.setenv('HERMES_HOME', str(tmp_path))
++    monkeypatch.delenv('HERMES_YOLO_MODE', raising=False)
++    monkeypatch.setattr(run, '_load_gateway_config', lambda: {'platform_toolsets': {'acp': []}})
++    store = SessionStore(tmp_path / 'sessions', GatewayConfig())
++    runner = SimpleNamespace(session_store=store, _session_db=store._db, adapters={}, _draining=False,
++                             _cached_agent_for=lambda route: None)
++    runner.async_session_store = AsyncSessionStore(store)
++    runner._adapter_for_source = lambda source: runner.adapters.get(source.platform)
++    authority = await initialize_session_authority(runner, profile_id='fixture', instance_id='owner')
++    try:
++        connection = AuthorityConnection(authority, object(), {'user_id': 'human', 'profile_id': 'fixture'})
++        bridge = _Bridge(connection)
++        ref = create_local_session(authority, connection.actor, {
++            'request_id': 'editor', 'source': 'acp', 'cwd': str(tmp_path), 'model': 'frozen', 'toolsets': []})
++
++        def editor():
++            agent = GatewayACPAgent()
++            agent._home = tmp_path
++            agent._gateway, agent._conn = bridge, _Editor()
++            return agent
++
++        async def yolo(session_id):
++            value = (await bridge.rpc('config.get', session_id=session_id, key='yolo'))['value']
++            assert (value == '1') == is_session_yolo_enabled(authority.sessions[session_id].route)
++            return value
++
++        assert await yolo(ref.session_id) == '0'
++
++        # A Full-access relaunch reopens the session it created without the flag.
++        monkeypatch.setenv('HERMES_YOLO_MODE', '1')
++        await editor().load_session(cwd=str(tmp_path), session_id=ref.session_id, mcp_servers=[])
++        assert await yolo(ref.session_id) == '1'
++
++        # Back to an approval mode: the bypass is revoked, not left on from the last launch.
++        monkeypatch.delenv('HERMES_YOLO_MODE')
++        await editor().resume_session(cwd=str(tmp_path), session_id=ref.session_id, mcp_servers=[])
++        assert await yolo(ref.session_id) == '0'
++
++        monkeypatch.setenv('HERMES_YOLO_MODE', '1')
++        forked = await editor().fork_session(cwd=str(tmp_path), session_id=ref.session_id, mcp_servers=[])
++        assert await yolo(forked.session_id) == '1'
++    finally:
++        store.close_all_db_handles()
+diff --git a/tests/acp_adapter/test_gateway_queued_unknown.py b/tests/acp_adapter/test_gateway_queued_unknown.py
+index 097951fb88..830c20b797 100644
+--- a/tests/acp_adapter/test_gateway_queued_unknown.py
++++ b/tests/acp_adapter/test_gateway_queued_unknown.py
+@@ -235,7 +235,7 @@ async def test_resumed_unknown_turn_names_the_existing_discard_recovery():
+     assert 'nothing was submitted' in str(refused.value)
+     # The prompt refreshed the owner's pending rows; no prompt was submitted.
+     asked = [call.args[0] for call in agent._gateway.rpc.await_args_list]
+-    assert asked == ['session.info', 'session.resume', 'config.set', 'session.resume']
++    assert asked == ['session.info', 'session.resume', 'config.set', 'config.set', 'session.resume']
+ 
+ 
+ @pytest.mark.asyncio
+diff --git a/tests/acp_adapter/test_gateway_reasoning.py b/tests/acp_adapter/test_gateway_reasoning.py
+index a7bedeec9f..3402269f1d 100644
+--- a/tests/acp_adapter/test_gateway_reasoning.py
++++ b/tests/acp_adapter/test_gateway_reasoning.py
+@@ -87,7 +87,7 @@ async def test_an_attach_asks_for_live_reasoning_before_it_replies_and_never_fai
+ 
+     async def rpc(method, **params):
+         asked.append((method, params))
+-        if method == "config.set":
++        if method == "config.set" and params.get("key") == "show_reasoning":
+             try:
+                 for _ in range(3):  # the owner's round trip: a card offered before it is answered meanwhile
+                     await asyncio.sleep(0)
+diff --git a/tests/acp_adapter/test_retained_identity_retirement.py b/tests/acp_adapter/test_retained_identity_retirement.py
+index cebd1bf41f..2ec587864a 100644
+--- a/tests/acp_adapter/test_retained_identity_retirement.py
++++ b/tests/acp_adapter/test_retained_identity_retirement.py
+@@ -50,7 +50,7 @@ async def owner(tmp_path, monkeypatch):
+     monkeypatch.setenv('HERMES_HOME', str(tmp_path))
+     from gateway import run
+     from gateway.config import GatewayConfig
+-    from gateway.session import SessionStore
++    from gateway.session import AsyncSessionStore, SessionStore
+     from gateway.session_authority import initialize_session_authority
+     from gateway.session_controls import AuthorityConnection
+     from gateway.session_local import create_local_session
+@@ -72,6 +72,7 @@ async def owner(tmp_path, monkeypatch):
+                              _handle_message=answer,
+                              _cached_agent_for=lambda route: None, _evict_cached_agent=lambda route: None,
+                              _resolve_session_agent_runtime=lambda **kwargs: ('frozen', {}))
++    runner.async_session_store = AsyncSessionStore(store)
+     runner._adapter_for_source = lambda source: runner.adapters.get(source.platform)
+     authority = await initialize_session_authority(runner, profile_id='p', instance_id='owner')
+     wire = Wire(asyncio.get_running_loop())

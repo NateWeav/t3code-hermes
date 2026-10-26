@@ -5,7 +5,9 @@ const {
   decide,
   fileResult,
   formatReport,
+  inProcessOnly,
   newFailures,
+  newestVersions,
   ownersOfTestFile,
   parsePytestFailures,
   patchTestFiles,
@@ -39,6 +41,49 @@ test("patch test files come from the b/ side of test diffs only", () => {
     "tests/acp_adapter/test_tools.py",
     "tests/gateway/test_x.py",
   ]);
+});
+
+test("an acp_adapter patch must test the agent hermes acp builds, never the in-process one", () => {
+  const diff = (file, ...added) =>
+    [`diff --git a/${file} b/${file}`, `--- a/${file}`, `+++ b/${file}`, ...added].join("\n");
+  const adapter = diff("acp_adapter/gateway_server.py", "+    pass");
+  const viewer = diff("tests/acp_adapter/test_x.py", "+    agent = HermesACPAgent()");
+  const gateway = diff(
+    "tests/acp_adapter/test_y.py",
+    "+from acp_adapter.gateway_server import GatewayACPAgent",
+  );
+  const forced = diff(
+    "tests/acp_adapter/test_z.py",
+    "+    server = HermesACPAgent.__new__(HermesACPAgent, Mock())",
+  );
+  const manager = diff(
+    "tests/acp_adapter/test_w.py",
+    "+    HermesACPAgent(session_manager=manager)",
+  );
+
+  assert.equal(inProcessOnly([adapter, viewer].join("\n")), false);
+  assert.equal(inProcessOnly([adapter, gateway].join("\n")), false);
+  assert.equal(inProcessOnly(adapter), true);
+  assert.equal(inProcessOnly([adapter, viewer, forced].join("\n")), true);
+  assert.equal(inProcessOnly([adapter, gateway, manager].join("\n")), true);
+  // Only added test lines count: context, removals, and non-adapter patches are left alone.
+  assert.equal(inProcessOnly([adapter, diff("tests/t.py", " HermesACPAgent()")].join("\n")), true);
+  assert.equal(inProcessOnly([diff("tools/x.py", "+x"), forced].join("\n")), false);
+});
+
+test("retired patches are neither checked nor stacked", () => {
+  const version = (name) => ({ hermesCommit: SHA, file: `${name}/5a8dea85fbb6.patch` });
+  const manifest = {
+    patches: [
+      { id: "live", versions: [version("live")] },
+      { id: "gone", retired: true, versions: [version("gone")] },
+    ],
+  };
+  assert.deepEqual(
+    newestVersions(manifest, "/m").map((patch) => patch.id),
+    ["live"],
+  );
+  assert.throws(() => newestVersions({ patches: [manifest.patches[1]] }, "/m"), /no live patches/);
 });
 
 test("pytest -rfE summary lines yield failed and errored node ids", () => {
@@ -101,7 +146,7 @@ test("failing test files are charged to the patches that own them", () => {
   assert.deepEqual(ownersOfTestFile("tests/cli/test_other.py", patches), ["ssh", "bg", "hook"]);
 });
 
-test("statuses: obsolete beats doesNotApply beats stackConflict beats testsFailed", () => {
+test("statuses: obsolete, doesNotApply, stackConflict, inProcessOnly, then testsFailed", () => {
   const results = decide({
     hermesSha: SHA,
     testFiles: [],
@@ -109,13 +154,14 @@ test("statuses: obsolete beats doesNotApply beats stackConflict beats testsFaile
     patches: [
       patch("gone", { apply: false, reverse: true, stack: null }),
       patch("broken", { apply: false, stack: false }),
-      patch("clash", { stack: false }),
+      patch("clash", { stack: false, inProcessOnly: true }),
+      patch("dead", { inProcessOnly: true }),
       patch("fine"),
     ],
   });
   assert.deepEqual(
     results.map((result) => result.status),
-    ["obsolete", "doesNotApply", "stackConflict", "ok"],
+    ["obsolete", "doesNotApply", "stackConflict", "inProcessOnly", "ok"],
   );
 });
 

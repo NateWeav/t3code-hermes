@@ -1,10 +1,12 @@
 import { WORKING_EXIT_GRACE_MS } from "@t3tools/client-runtime/state/thread-inbox";
+import type { AnyRouter } from "@tanstack/react-router";
 import type { ClientSettings } from "@t3tools/contracts/settings";
 import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
+import { Atom, AtomRegistry } from "effect/reactivity";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { fakeTimers, render, stubGlobal, type Screen } from "../../test/render";
+import { fakeTimers, stubGlobal } from "../../test/render";
 
 const state = vi.hoisted(() => ({
   mode: "off" as ClientSettings["notificationMode"],
@@ -137,35 +139,37 @@ function mockThreads() {
   return [stableParent, child];
 }
 
-vi.mock(import("@effect/atom-react"), async (original) => ({
-  ...(await original()),
-  useAtomValue: (() => ({
-    status: state.live ? "live" : "disconnected",
-    snapshot: Option.some({ threads: mockThreads() }),
-  })) as never,
-}));
-vi.mock(import("@tanstack/react-router"), async (original) => ({
-  ...(await original()),
-  useNavigate: (() => state.navigate) as never,
-  useParams: (() => state.active) as never,
-}));
+vi.mock(import("../state/shell"), async (original) => {
+  const actual = await original();
+  return {
+    ...actual,
+    environmentShell: {
+      ...actual.environmentShell,
+      stateValueAtom: (() => shellAtom) as never,
+    },
+  };
+});
+vi.mock(import("../state/presentation"), async (original) => {
+  const actual = await original();
+  return {
+    ...actual,
+    environmentSummaries: {
+      ...actual.environmentSummaries,
+      // Read lazily: the factory runs before this module's own bindings exist.
+      get environmentIdsAtom() {
+        return environmentIdsAtom as never;
+      },
+    },
+  };
+});
 vi.mock(import("../hooks/useSettings"), async (original) => ({
   ...(await original()),
-  useClientSettings: ((
-    select: (
-      settings: Pick<ClientSettings, "notificationMode" | "inAppNotificationsEnabled">,
-    ) => unknown,
-  ) => select({ notificationMode: state.mode, inAppNotificationsEnabled: state.inApp })) as never,
-  getClientSettings: (() => ({ notificationMode: state.mode })) as never,
-}));
-vi.mock(import("../state/environments"), async (original) => ({
-  ...(await original()),
-  useEnvironmentIds: (() => ["env-1"]) as never,
-}));
-// Hermes task alerts share this coordinator; they are covered by the badge suite.
-vi.mock(import("../state/hermesCron"), async (original) => ({
-  ...(await original()),
-  useHermesEnvironmentEnabled: (() => false) as never,
+  subscribeClientSettings: (() => () => undefined) as never,
+  getClientSettings: (() => ({
+    notificationMode: state.mode,
+    inAppNotificationsEnabled: state.inApp,
+    tabStatusDots: false,
+  })) as never,
 }));
 vi.mock(import("../threadNotifications"), async (original) => ({
   ...(await original()),
@@ -180,10 +184,13 @@ vi.mock(import("./ui/toast"), async (original) => {
   };
 });
 
-import { ThreadNotificationCoordinator } from "./ThreadNotificationCoordinator";
+import { startThreadNotifications } from "./ThreadNotificationCoordinator";
 
-// The mocked modules read `state`, so every test starts by resetting all of it. The first
-// render is left to the test because some tests change state before the coordinator mounts.
+const shellAtom = Atom.make<unknown>(null);
+const environmentIdsAtom = Atom.make<ReadonlyArray<string>>(["env-1"]);
+
+// The mocked modules read `state`, so every test starts by resetting all of it. Starting the
+// service is left to the test because some tests change state first.
 function setup() {
   vi.clearAllMocks();
   Object.assign(state, {
@@ -218,16 +225,33 @@ function setup() {
   stack.use(
     stubGlobal("Notification", Object.assign(state.notification, { permission: "granted" })),
   );
-  let screen: Screen | undefined;
+  const registry = AtomRegistry.make();
+  stack.defer(() => registry.dispose());
+  const router = {
+    get state() {
+      return { matches: [{ params: state.active }] };
+    },
+    navigate: state.navigate,
+  } as unknown as AnyRouter;
+  let started = false;
+  // Publishes a fresh shell snapshot, as the live subscription would.
+  const publish = () =>
+    registry.set(shellAtom, {
+      status: state.live ? "live" : "disconnected",
+      snapshot: Option.some({ threads: mockThreads() }),
+    });
   const renderCoordinator = async () => {
-    if (screen) await screen.rerender(<ThreadNotificationCoordinator />);
-    else screen = stack.use(await render(<ThreadNotificationCoordinator />));
+    publish();
+    if (!started) {
+      started = true;
+      stack.defer(startThreadNotifications(registry, router));
+    }
   };
   return {
     render: renderCoordinator,
     complete: async () => {
       state.completedAt = "2026-09-13T10:00:00.000Z";
-      await renderCoordinator();
+      publish();
     },
     [Symbol.asyncDispose]: () => stack.disposeAsync(),
   };

@@ -1,0 +1,423 @@
+diff --git a/gateway/run.py b/gateway/run.py
+index c063e4f414..a93a84156a 100644
+--- a/gateway/run.py
++++ b/gateway/run.py
+@@ -2006,6 +2006,7 @@ def _bridge_terminal_config_to_env(_terminal_cfg: dict) -> None:
+         "ssh_user": "TERMINAL_SSH_USER",
+         "ssh_port": "TERMINAL_SSH_PORT",
+         "ssh_key": "TERMINAL_SSH_KEY",
++        "ssh_sync_files": "TERMINAL_SSH_SYNC_FILES",
+         "container_cpu": "TERMINAL_CONTAINER_CPU",
+         "container_memory": "TERMINAL_CONTAINER_MEMORY",
+         "container_disk": "TERMINAL_CONTAINER_DISK",
+diff --git a/gateway/session_mutation_policy.py b/gateway/session_mutation_policy.py
+index 626c92aa4f..fe3ac9cba4 100644
+--- a/gateway/session_mutation_policy.py
++++ b/gateway/session_mutation_policy.py
+@@ -35,9 +35,10 @@ async def prepare_reasoning(authority, live, payload, prepared):
+ 
+ 
+ async def prepare_workspace(authority, live, payload, prepared):
+-    """Move to project: execution cwd and TERMINAL_CWD move together (restore_policy's invariant)."""
++    """Move to project: execution cwd and TERMINAL_CWD move together (restore_policy's invariant), except
++    an ACP session on ssh, whose tools keep the configured remote directory (``keeps_remote_cwd``)."""
+     import os
+-    from gateway.session_policy import restore_policy
++    from gateway.session_policy import keeps_remote_cwd, restore_policy
+     from hermes_constants import translate_cwd_for_wsl_backend
+     from tui_gateway import git_probe
+     old = restore_policy(prepared['snapshot']['receipt']['policy'])
+@@ -50,7 +51,8 @@ async def prepare_workspace(authority, live, payload, prepared):
+         return cwd, git_probe.branch(cwd), git_probe.common_repo_root(cwd)
+     cwd, branch, root = await asyncio.to_thread(probe)
+     terminal = json.loads(old.terminal_json)
+-    terminal['TERMINAL_CWD'] = cwd
++    if not keeps_remote_cwd(old.source, terminal):
++        terminal['TERMINAL_CWD'] = cwd
+     policy = replace(old, cwd=cwd, terminal_json=json.dumps(terminal))
+     return _rebind(authority, prepared, old, policy, git={'branch': branch, 'root': root})
+ 
+diff --git a/gateway/session_policy.py b/gateway/session_policy.py
+index 8fdc4a087f..97d59ad60e 100644
+--- a/gateway/session_policy.py
++++ b/gateway/session_policy.py
+@@ -490,6 +490,13 @@ def build_policy(params, config, *, private_secrets=None, profile_terminal=True,
+                               client_env_rules_json=rules)
+ 
+ 
++def keeps_remote_cwd(source, terminal):
++    """An ACP editor's folder is a path on this host, which an ssh backend with a configured ``terminal.cwd``
++    does not have: its tools stay rooted in that remote directory when the editor moves the session."""
++    return (source == 'acp' and str(terminal.get('TERMINAL_ENV') or '').strip().lower() == 'ssh'
++            and bool(str(terminal.get('TERMINAL_CWD') or '').strip()))
++
++
+ def terminal_uses_host_cwd(terminal):
+     """Whether the terminal works in the session's host cwd: the local backend, or docker mounting it at
+     ``/workspace``. ssh, modal and the other sandboxes resolve their own cwd."""
+diff --git a/gateway/session_policy_refresh.py b/gateway/session_policy_refresh.py
+index d42244615c..10ea6bc3a6 100644
+--- a/gateway/session_policy_refresh.py
++++ b/gateway/session_policy_refresh.py
+@@ -80,11 +80,12 @@ def _settings(policy, config, live, picked):
+ 
+ 
+ def _terminal(policy, terminal, picked):
+-    from gateway.session_policy import terminal_uses_host_cwd
++    from gateway.session_policy import keeps_remote_cwd, terminal_uses_host_cwd
+     terminal, request = dict(terminal), json.loads(policy.request_json)
+     # The session's own folder, where it now is, under build_policy's rule; a committed Move to project is
+     # the user's pick on every backend (it rewrote the policy, never the launch request).
+-    if request.get('cwd_explicit') is True or 'workspace' in picked or terminal_uses_host_cwd(terminal):
++    if not keeps_remote_cwd(policy.source, terminal) and (
++            request.get('cwd_explicit') is True or 'workspace' in picked or terminal_uses_host_cwd(terminal)):
+         terminal['TERMINAL_CWD'] = policy.cwd
+     return terminal
+ 
+diff --git a/hermes_cli/cli_config_load.py b/hermes_cli/cli_config_load.py
+index 281dd848b8..c258c449b2 100644
+--- a/hermes_cli/cli_config_load.py
++++ b/hermes_cli/cli_config_load.py
+@@ -86,7 +86,7 @@ _TERMINAL_ENV_MAPPINGS = {
+     for key in (
+         "degraded_mode", "cwd", "timeout", "home_mode", "lifetime_seconds", "docker_image",
+         "docker_forward_env", "modal_image", "daytona_image", "vercel_runtime", "vercel_image",
+-        "ssh_host", "ssh_user", "ssh_port", "ssh_key", "container_cpu", "container_memory",
++        "ssh_host", "ssh_user", "ssh_port", "ssh_key", "ssh_sync_files", "container_cpu", "container_memory",
+         "container_disk", "container_persistent", "docker_volumes", "docker_env", "docker_extra_args",
+         "docker_shm_size", "docker_mount_cwd_to_workspace", "docker_network", "docker_run_as_host_user",
+         "docker_snap_compat",
+diff --git a/hermes_cli/config.py b/hermes_cli/config.py
+index d47899f732..3a784eda7e 100644
+--- a/hermes_cli/config.py
++++ b/hermes_cli/config.py
+@@ -2050,7 +2050,7 @@ TERMINAL_CONFIG_ENV_MAP = {
+             "modal_mode", "degraded_mode", "cwd", "temp_dir", "timeout", "lifetime_seconds",
+             "docker_image", "docker_forward_env", "modal_image",
+             "daytona_image", "vercel_runtime", "vercel_image", "ssh_host", "ssh_user", "ssh_port", "ssh_key",
+-            "container_cpu", "container_memory", "container_disk", "container_persistent",
++            "ssh_sync_files", "container_cpu", "container_memory", "container_disk", "container_persistent",
+             "docker_volumes", "docker_env", "docker_mount_cwd_to_workspace", "docker_network",
+             "docker_extra_args", "docker_shm_size", "docker_run_as_host_user", "docker_snap_compat",
+             "docker_persist_across_processes", "docker_shared_container_key",
+diff --git a/hermes_cli/config_defaults.py b/hermes_cli/config_defaults.py
+index 5fd79bdf2e..d184e173ce 100644
+--- a/hermes_cli/config_defaults.py
++++ b/hermes_cli/config_defaults.py
+@@ -378,6 +378,9 @@ DEFAULT_CONFIG = {
+         # default for images whose entrypoints must start as root (e.g. the bundled Hermes image,
+         # which drops to `hermes` via s6-setuidgid). When on, SETUID/SETGID caps are omitted.
+         "docker_run_as_host_user": False,
++        # SSH mirrors Hermes credentials, skills, and cache into the target's ~/.hermes. Turn off for
++        # shell-only targets that must not receive local Hermes state (execution stays central).
++        "ssh_sync_files": True,
+         # Snap-packaged Docker under AppArmor (Ubuntu cloud images; LP#1908448) refuses to exec
+         # anything under `--init` or `--security-opt no-new-privileges` ("operation not
+         # permitted"). True drops those two flags; every other hardening stays. See #9730.
+diff --git a/tests/acp_adapter/test_gateway_ssh_workspace.py b/tests/acp_adapter/test_gateway_ssh_workspace.py
+new file mode 100644
+index 0000000000..78c04fa603
+--- /dev/null
++++ b/tests/acp_adapter/test_gateway_ssh_workspace.py
+@@ -0,0 +1,39 @@
++"""An editor's folder never retargets an ssh backend's configured remote cwd (real ACP stdio, real gateway).
++
++The editor names a folder on the gateway's host; tools on an ssh backend run on the target, where that
++path need not exist. ``session/load`` from another folder moves the session's own cwd, not the backend's.
++"""
++import json
++import sqlite3
++
++import pytest
++
++from hermes_state_local import POLICY_PREFIX
++from tests.acp_adapter.test_gateway_sessions import editor
++
++_SSH = {'terminal': {'backend': 'ssh', 'ssh_host': 'box.invalid', 'ssh_user': 'me', 'cwd': '/srv/app'}}
++
++
++def _frozen(home, sid):
++    """``(cwd, TERMINAL_CWD)`` of the session's committed policy."""
++    with sqlite3.connect(f'file:{home / "state.db"}?mode=ro', uri=True) as conn:
++        (value,) = conn.execute('SELECT value FROM state_meta WHERE key=?', (POLICY_PREFIX + sid,)).fetchone()
++    policy = json.loads(value)['policy']
++    return policy['cwd'], json.loads(policy['terminal_json']).get('TERMINAL_CWD')
++
++
++@pytest.mark.platforms('linux')
++@pytest.mark.parametrize('daemon', [_SSH], indirect=True)
++@pytest.mark.asyncio
++async def test_loading_a_session_from_another_folder_keeps_the_ssh_remote_cwd(daemon, tmp_path, model_peer):
++    first, second = tmp_path / 'first', tmp_path / 'second'
++    first.mkdir()
++    second.mkdir()
++    async with editor(daemon, tmp_path) as acp:
++        await acp.rpc('initialize', protocolVersion=1, clientCapabilities={})
++        created = await acp.rpc('session/new', cwd=str(first), mcpServers=[])
++        sid = created['result']['sessionId']
++        assert _frozen(daemon[0], sid) == (str(first), '/srv/app')
++        loaded = await acp.rpc('session/load', cwd=str(second), sessionId=sid, mcpServers=[])
++        assert 'result' in loaded, loaded
++        assert _frozen(daemon[0], sid) == (str(second), '/srv/app')
+diff --git a/tests/gateway/test_session_resume_config_refresh.py b/tests/gateway/test_session_resume_config_refresh.py
+index 4ac51dd55a..40ed534136 100644
+--- a/tests/gateway/test_session_resume_config_refresh.py
++++ b/tests/gateway/test_session_resume_config_refresh.py
+@@ -276,6 +276,44 @@ async def test_resume_keeps_a_moved_workspace_on_a_backend_with_its_own_cwd(tmp_
+         store.close_all_db_handles()
+ 
+ 
++@pytest.mark.asyncio
++@pytest.mark.parametrize('source, remote_cwd, expected', [
++    ('acp', '/srv/app', '/srv/app'),
++    ('acp', None, 'moved'),
++    ('cli', '/srv/app', 'moved'),
++])
++async def test_an_editor_move_keeps_an_ssh_backends_configured_remote_cwd(
++        tmp_path, monkeypatch, source, remote_cwd, expected):
++    """An ACP editor names a folder on the gateway host. An ssh backend configured with its own ``terminal.cwd``
++    keeps that remote directory through the move and the resume refresh that follows; the policy cwd still moves."""
++    home = _home(monkeypatch)
++    remote = 'terminal: {backend: ssh, ssh_host: box.invalid, ssh_user: me%s}\n' % (
++        f', cwd: {remote_cwd}' if remote_cwd else '')
++    (home / 'config.yaml').write_text(BEFORE.replace('terminal: {backend: local}\n', remote))
++    moved = tmp_path / 'project'
++    moved.mkdir()
++    store, authority = await _owner_authority(home)
++    owner = _connect(authority)
++    later = _connect(authority)
++    try:
++        sid = (await _call(owner, 'session.create', request_id='w', source=source, cwd=str(tmp_path)))['session_id']
++        await _mutate(owner, store, sid, 'move', 'workspace', {'cwd': str(moved)})
++        policy = _policy(authority, sid)
++        assert (policy.cwd, json.loads(policy.terminal_json).get('TERMINAL_CWD')) == (
++            str(moved), str(moved) if expected == 'moved' else expected)
++        (home / 'config.yaml').write_text(AFTER.replace('terminal: {backend: docker}\n', remote))
++        await _call(later, 'session.resume', session_id=sid)
++        policy = _policy(authority, sid)
++        assert policy.max_turns == 7  # the refresh ran
++        terminal = json.loads(policy.terminal_json)
++        assert (terminal['TERMINAL_ENV'], policy.cwd, terminal.get('TERMINAL_CWD')) == (
++            'ssh', str(moved), str(moved) if expected == 'moved' else expected)
++    finally:
++        for connection in (owner, later):
++            await connection.close()
++        store.close_all_db_handles()
++
++
+ @pytest.mark.asyncio
+ async def test_a_refresh_by_one_viewer_reaches_every_attached_viewer(tmp_path, monkeypatch):
+     """Viewer B's attach commits generation G+1; viewer A, attached at G, learns it from the fanout and its
+diff --git a/tests/hermes_cli/test_env_loader.py b/tests/hermes_cli/test_env_loader.py
+index 1a6e618f2f..52d6f74a32 100644
+--- a/tests/hermes_cli/test_env_loader.py
++++ b/tests/hermes_cli/test_env_loader.py
+@@ -563,6 +563,24 @@ def test_config_yaml_terminal_omitted_key_does_not_clear_env(tmp_path, monkeypat
+     assert os.getenv("TERMINAL_TIMEOUT") == "600"
+ 
+ 
++def test_config_yaml_ssh_sync_files_overrides_stale_env(tmp_path, monkeypatch):
++    home = _seed_terminal_home(
++        tmp_path, monkeypatch,
++        config_yaml=(
++            "terminal:\n"
++            "  backend: ssh\n"
++            "  ssh_sync_files: false\n"
++        ),
++        env_text="TERMINAL_SSH_SYNC_FILES=true\n",
++    )
++
++    monkeypatch.delenv("TERMINAL_SSH_SYNC_FILES", raising=False)
++
++    load_hermes_dotenv(hermes_home=home)
++
++    assert os.getenv("TERMINAL_SSH_SYNC_FILES") == "False"
++
++
+ def test_other_profile_home_does_not_bridge_process_config(tmp_path, monkeypatch):
+     """Loading a DIFFERENT profile's .env must not re-bridge this process's
+     config.yaml — the shared bridge reads the process-global config, so
+diff --git a/tests/tools/test_ssh_environment.py b/tests/tools/test_ssh_environment.py
+index b68ebf9173..401c16dd64 100644
+--- a/tests/tools/test_ssh_environment.py
++++ b/tests/tools/test_ssh_environment.py
+@@ -226,6 +226,17 @@ class TestTerminalToolConfig:
+         finally:
+             env.cleanup()
+ 
++    def test_ssh_file_sync_defaults_enabled(self, monkeypatch):
++        monkeypatch.delenv("TERMINAL_SSH_SYNC_FILES", raising=False)
++        from tools.terminal_tool import _get_env_config
++        assert _get_env_config()["ssh_sync_files"] is True
++
++    def test_ssh_file_sync_can_be_disabled(self, monkeypatch):
++        monkeypatch.setenv("TERMINAL_SSH_SYNC_FILES", "false")
++        from tools.terminal_tool import _get_env_config
++        from tools.terminal_tool_backends import _ssh_config_from_config
++        assert _ssh_config_from_config(_get_env_config())["sync_files"] is False
++
+ 
+ class TestSSHPreflight:
+     def test_ensure_ssh_available_raises_clear_error_when_missing(self, monkeypatch):
+@@ -280,6 +291,22 @@ class TestSSHPreflight:
+         assert env._sync_manager is None
+         env._before_execute()
+ 
++    def test_sync_disabled_does_not_require_scp(self, monkeypatch):
++        requested = []
++
++        def fake_which(name):
++            requested.append(name)
++            return "/usr/bin/ssh" if name == "ssh" else None
++
++        monkeypatch.setattr(ssh_env.shutil, "which", fake_which)
++        monkeypatch.setattr(ssh_env.SSHEnvironment, "_establish_connection", lambda self: None)
++        monkeypatch.setattr(ssh_env.SSHEnvironment, "_detect_remote_home", lambda self: "/home/alice")
++        monkeypatch.setattr(ssh_env.SSHEnvironment, "init_session", lambda self: None)
++
++        ssh_env.SSHEnvironment(host="example.com", user="alice", sync_files=False)
++
++        assert requested == ["ssh"]
++
+ 
+ @pytest.fixture
+ def _mock_ssh_runtime(monkeypatch, tmp_path):
+diff --git a/tests/tools/test_terminal_config_env_sync.py b/tests/tools/test_terminal_config_env_sync.py
+index eec78ae003..d3ba0cabea 100644
+--- a/tests/tools/test_terminal_config_env_sync.py
++++ b/tests/tools/test_terminal_config_env_sync.py
+@@ -105,6 +105,12 @@ _CLI_ONLY_OK = frozenset({
+ })
+ 
+ 
++def test_ssh_sync_files_is_bridged_everywhere():
++    assert _cli_env_map()["ssh_sync_files"] == "TERMINAL_SSH_SYNC_FILES"
++    assert _gateway_env_map()["ssh_sync_files"] == "TERMINAL_SSH_SYNC_FILES"
++    assert "ssh_sync_files" in _save_config_env_sync_keys()
++
++
+ def test_cli_and_gateway_env_maps_agree():
+     """cli.py and gateway/run.py must bridge each terminal key to the same env var.
+ 
+diff --git a/tests/tools/test_terminal_env_bridge.py b/tests/tools/test_terminal_env_bridge.py
+index 2d50d0e888..48f39b110f 100644
+--- a/tests/tools/test_terminal_env_bridge.py
++++ b/tests/tools/test_terminal_env_bridge.py
+@@ -23,6 +23,7 @@ def _reset_bridge_state(monkeypatch):
+         "TERMINAL_CWD",
+         "TERMINAL_DOCKER_IMAGE",
+         "TERMINAL_SSH_HOST",
++        "TERMINAL_SSH_SYNC_FILES",
+     ):
+         monkeypatch.delenv(name, raising=False)
+     yield
+@@ -97,6 +98,19 @@ def test_ssh_config_preserves_remote_tilde_cwd(monkeypatch):
+     assert config["cwd"] == "~"
+ 
+ 
++def test_ssh_config_can_disable_remote_hermes_file_sync(monkeypatch):
++    _write_config(
++        "terminal:\n"
++        "  backend: ssh\n"
++        "  ssh_sync_files: false\n"
++    )
++
++    config = terminal_tool._get_env_config()
++
++    assert os.environ["TERMINAL_SSH_SYNC_FILES"] == "False"
++    assert config["ssh_sync_files"] is False
++
++
+ def test_env_is_preserved_when_config_has_no_terminal_section(monkeypatch):
+     _write_config("agent:\n  max_turns: 100\n")
+     monkeypatch.setenv("TERMINAL_ENV", "ssh")
+diff --git a/tests/tools/test_terminal_scope_multiplex.py b/tests/tools/test_terminal_scope_multiplex.py
+index 495f251c15..79cdc7b6ce 100644
+--- a/tests/tools/test_terminal_scope_multiplex.py
++++ b/tests/tools/test_terminal_scope_multiplex.py
+@@ -146,6 +146,23 @@ def test_profile_omitting_keys_gets_defaults_not_launch_values(tmp_path):
+     assert json.loads(os.environ["TERMINAL_DOCKER_VOLUMES"])  # A unchanged
+ 
+ 
++def test_profile_ssh_file_sync_comes_from_its_own_terminal_scope(tmp_path, monkeypatch):
++    """The gateway builds each session's ssh environment from its profile's scope: ``ssh_sync_files: false``
++    reaches it, and an unset key stays on (a launch process that bridged ``true`` decides neither)."""
++    import tools.terminal_tool as tt
++    from tools.terminal_tool_backends import _ssh_config_from_config
++
++    monkeypatch.setenv("TERMINAL_SSH_SYNC_FILES", "true")
++    off = _profile(tmp_path, "off", "terminal:\n  backend: ssh\n  ssh_sync_files: false\n")
++    unset = _profile(tmp_path, "unset", "terminal:\n  backend: ssh\n")
++    for home, expected in ((off, False), (unset, True)):
++        token = install_profile_terminal_scope(home)
++        try:
++            assert _ssh_config_from_config(tt._get_env_config())["sync_files"] is expected
++        finally:
++            reset_terminal_scope(token)
++
++
+ def test_persistent_docker_routed_profile_keeps_one_container(tmp_path):
+     """Persistent Docker is profile-scoped: a routed profile's session-less (cron) work must key the
+     SAME container as its session-bound work, and never another profile's."""
+diff --git a/tools/environments/ssh.py b/tools/environments/ssh.py
+index ce9ee7579a..8fc9570c2a 100644
+--- a/tools/environments/ssh.py
++++ b/tools/environments/ssh.py
+@@ -29,9 +29,9 @@ _SSH_MULTIPLEX = os.name != "nt"
+ _load_hermes_env_vars = load_hermes_env_vars
+ 
+ 
+-def _ensure_ssh_available() -> None:
+-    """Fail fast with a clear error when the SSH client is unavailable."""
+-    for tool in ("ssh", "scp"):
++def _ensure_ssh_available(*, require_scp: bool = True) -> None:
++    """Fail fast with a clear error when the SSH client is unavailable (scp is only used by file sync)."""
++    for tool in ("ssh", "scp") if require_scp else ("ssh",):
+         if not shutil.which(tool):
+             raise RuntimeError(f"{tool.upper()} is not installed or not in PATH. "
+                                "Install OpenSSH client: apt install openssh-client")
+@@ -72,7 +72,7 @@ class SSHEnvironment(BaseEnvironment):
+             socket_key = f"{socket_key}:probe:{self._session_id}"
+         _socket_id = hashlib.sha256(socket_key.encode()).hexdigest()[:16]
+         self.control_socket = self.control_dir / f"{_socket_id}.sock"
+-        _ensure_ssh_available()
++        _ensure_ssh_available(require_scp=sync_files)
+         self._establish_connection()
+         if probe_only:
+             self._sync_manager = None
+diff --git a/tools/terminal_tool.py b/tools/terminal_tool.py
+index b3cd0ada3b..9709df76d2 100644
+--- a/tools/terminal_tool.py
++++ b/tools/terminal_tool.py
+@@ -828,6 +828,7 @@ def _get_env_config() -> dict[str, Any]:
+         "ssh_user": _tenv("TERMINAL_SSH_USER", ""),
+         "ssh_port": _parse_env_var("TERMINAL_SSH_PORT", "22"),
+         "ssh_key": _tenv("TERMINAL_SSH_KEY", ""),
++        "ssh_sync_files": _tenv_bool("TERMINAL_SSH_SYNC_FILES", "true"),
+         # Exported env carries across commands (cwd always does). SSH follows
+         # terminal.persistent_shell; local has its own knob. Both default on.
+         "ssh_persistent": _tenv_bool(
+diff --git a/tools/terminal_tool_backends.py b/tools/terminal_tool_backends.py
+index 5c752c5b14..88a96864d1 100644
+--- a/tools/terminal_tool_backends.py
++++ b/tools/terminal_tool_backends.py
+@@ -54,7 +54,8 @@ _BUILTIN_BACKENDS = "local, docker, modal, daytona, vercel_sandbox, ssh"
+ # Config -> kwargs shapers, driven by (out_key, config_key, default) tables. The container table's
+ # (key, default) literal is intentionally greppable; tools/terminal_tool.py keeps its own for the AST test.
+ _SSH_KEYS = (("host", "ssh_host", ""), ("user", "ssh_user", ""), ("port", "ssh_port", 22),
+-             ("key", "ssh_key", ""), ("persistent", "ssh_persistent", True))
++             ("key", "ssh_key", ""), ("persistent", "ssh_persistent", True),
++             ("sync_files", "ssh_sync_files", True))
+ _RESOURCE_KEYS = (("cpu", "container_cpu", 1), ("memory", "container_memory", 5120),
+                   ("disk", "container_disk", 51200), ("persistent_filesystem", "container_persistent", True))
+ _CONTAINER_KEYS = (
+@@ -207,7 +208,8 @@ def _build_ssh_env(*, cwd, timeout, ssh_config, probe_only=False, **_):
+         raise ValueError("SSH environment requires ssh_host and ssh_user to be configured")
+     return _SSHEnvironment(host=ssh_config["host"], user=ssh_config["user"], port=ssh_config.get("port", 22),
+                            key_path=ssh_config.get("key", ""), cwd=cwd, timeout=timeout, probe_only=probe_only,
+-                           persistent=ssh_config.get("persistent", True))
++                           persistent=ssh_config.get("persistent", True),
++                           sync_files=ssh_config.get("sync_files", True))
+ 
+ 
+ def _stamp_sandbox_home(env_obj, provider, cwd) -> None:

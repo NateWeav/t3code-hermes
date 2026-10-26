@@ -6,7 +6,11 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 
-import { mcpToolSession, runAcpMcpStdioBridge } from "./AcpMcpStdioBridge.ts";
+import {
+  MCP_CALL_LIMIT_HEADER,
+  mcpToolSession,
+  runAcpMcpStdioBridge,
+} from "./AcpMcpStdioBridge.ts";
 
 function makeHarness(responder: (request: Request) => Promise<Response> | Response) {
   const input = new NodeStream.PassThrough();
@@ -66,6 +70,7 @@ describe("AcpMcpStdioBridge", () => {
       expect(JSON.parse(written[0]!)).toMatchObject({ id: 1 });
       expect(JSON.parse(written[1]!)).toMatchObject({ id: 2, result: { ok: true } });
       expect(requests[0]?.headers.get("authorization")).toBe("Bearer bridge-test");
+      expect(requests[0]?.headers.get(MCP_CALL_LIMIT_HEADER)).toBe("300000");
       expect(requests[1]?.headers.get("mcp-session-id")).toBe("session-42");
       expect(requests[1]?.headers.get("mcp-protocol-version")).toBe("2025-06-18");
     }),

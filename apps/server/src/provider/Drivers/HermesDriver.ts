@@ -10,6 +10,7 @@ import { ChildProcessSpawner } from "effect/process";
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import * as ServerConfig from "../../config.ts";
 import { HERMES_UPDATE_LOCK_KEY, resolveHermesGitCheckout } from "../../hermes/hermesPatches.ts";
+import { applyHermesT3SubagentsOnly } from "../../hermes/hermesSubagentsConfig.ts";
 import { makeHermesTextGeneration } from "../../textGeneration/HermesTextGeneration.ts";
 import { hermesUsageReader, type HermesUsageReaderEnv } from "../../usage/usageHermes.ts";
 import {
@@ -144,6 +145,11 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv, Herme
       continuationGroupKey: continuationIdentity.continuationKey,
     });
     const effectiveConfig = { ...config, enabled } satisfies HermesSettings;
+    // Instances rebuild on every settings change, so this is where the toggle lands.
+    yield* applyHermesT3SubagentsOnly({
+      environment: processEnv,
+      enabled: config.t3SubagentsOnly,
+    });
     const resolveMaintenance = yield* makeCachedProviderMaintenanceResolution(
       resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
         binaryPath: effectiveConfig.binaryPath,

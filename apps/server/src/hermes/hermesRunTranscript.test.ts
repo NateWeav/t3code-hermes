@@ -202,6 +202,80 @@ describe("hermesRunItemsFor", () => {
     expect(batch.pullRequestUrls).toEqual(["https://github.com/NateWeav/t3code-hermes/pull/98"]);
   });
 
+  it("links a pull request the run edited, from a shell or a script", () => {
+    const pending = new Map<string, HermesToolCall>([
+      ["call-shell", { name: "terminal", args: { command: "gh pr edit 370 --body-file body.md" } }],
+      [
+        "call-script",
+        {
+          name: "execute_code",
+          args: { code: 'subprocess.run(["gh", "pr", "edit", "371", "--body-file", f])' },
+        },
+      ],
+      ["call-checks", { name: "terminal", args: { command: "gh pr checks 372 --watch" } }],
+    ]);
+    const outputs = {
+      "call-shell": "https://github.com/NateWeav/t3code-hermes/pull/370\n",
+      "call-script": "https://github.com/NateWeav/t3code-hermes/pull/371\n",
+      "call-checks": "https://github.com/NateWeav/t3code-hermes/pull/372\n",
+    };
+    const batch = hermesRunItemsFor(
+      ids,
+      Object.entries(outputs).map(([toolCallId, output], index) =>
+        row({
+          id: 30 + index,
+          role: "tool",
+          toolCallId,
+          content: JSON.stringify({ output, exit_code: 0 }),
+        }),
+      ),
+      pending,
+    );
+    expect(batch.pullRequestUrls).toEqual([
+      "https://github.com/NateWeav/t3code-hermes/pull/370",
+      "https://github.com/NateWeav/t3code-hermes/pull/371",
+    ]);
+  });
+
+  it("links the pull request `gh pr merge` or `ready` targets, which print no URL", () => {
+    const commands = {
+      "call-merge":
+        "gh pr merge 370 --repo NateWeav/t3code-hermes --merge --match-head-commit abc 2>&1 | tail -3",
+      "call-ready": "gh pr ready https://github.com/NateWeav/t3code-hermes/pull/371",
+      "call-no-repo": "gh pr merge 372 --merge",
+      "call-flag-first":
+        "gh pr merge --body https://github.com/NateWeav/t3code-hermes/pull/99 373 -R NateWeav/t3code-hermes",
+      "call-numeric-subject": "gh pr merge 374 --subject 123 --repo NateWeav/t3code-hermes",
+      "call-quoted-repo": "gh pr merge 375 --repo='NateWeav/t3code-hermes' --merge",
+      "call-short-equals": "gh pr merge 376 -R=NateWeav/t3code-hermes",
+    };
+    const pending = new Map<string, HermesToolCall>(
+      Object.entries(commands).map(([id, command]) => [
+        id,
+        { name: "terminal", args: { command } },
+      ]),
+    );
+    const batch = hermesRunItemsFor(
+      ids,
+      Object.keys(commands).map((toolCallId, index) =>
+        row({
+          id: 40 + index,
+          role: "tool",
+          toolCallId,
+          content: JSON.stringify({ output: "✓ Merged pull request", exit_code: 0 }),
+        }),
+      ),
+      pending,
+    );
+    expect(batch.pullRequestUrls).toEqual([
+      "https://github.com/NateWeav/t3code-hermes/pull/370",
+      "https://github.com/NateWeav/t3code-hermes/pull/371",
+      "https://github.com/NateWeav/t3code-hermes/pull/374",
+      "https://github.com/NateWeav/t3code-hermes/pull/375",
+      "https://github.com/NateWeav/t3code-hermes/pull/376",
+    ]);
+  });
+
   it("derives the same items on replay, so re-reading rows writes nothing new", () => {
     const rows = [row({ id: 7, role: "assistant", content: "hello" })];
     const first = hermesRunItemsFor(ids, rows, new Map());

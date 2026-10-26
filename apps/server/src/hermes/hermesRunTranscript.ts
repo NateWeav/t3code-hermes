@@ -396,17 +396,55 @@ export function isSilentReport(text: string | null): boolean {
 const PULL_REQUEST_URL =
   /https?:\/\/[^\s"'<>()[\]`]+(?:\/pulls?\/\d+|\/-\/merge_requests\/\d+|\/pull-requests\/\d+|\/pullrequest\/\d+)/g;
 
+/** `gh pr create|edit|ready`, in a shell command or a script's argument list. */
+const PULL_REQUEST_WRITE = /\bgh\b["'\s,]+pr["'\s,]+(?:create|edit|ready)\b/;
+
 /**
- * Pull request URLs a run worked on: in the agent's own words or the output of `gh pr create`.
- * Read-only commands (`list`, `view`, `status`, ...) print pull requests the run merely looked
- * at, and linking those lets an unrelated merge settle the run's thread. `gh pr merge` prints
- * no URL, and a pull request the run opened was already linked by its `create`.
+ * Pull request URLs a run worked on: in the agent's own words or the output of a `gh pr` command
+ * that changes a pull request (a run that reuses a branch's PR only edits it). Read-only commands
+ * (`list`, `view`, `status`, ...) print pull requests the run merely looked at, and linking those
+ * lets an unrelated merge settle the run's thread.
  */
 function pullRequestUrlsIn(row: HermesMessageRow, call: HermesToolCall | undefined): string[] {
-  const fromTool =
-    row.role === "tool" &&
-    call?.name === "terminal" &&
-    /\bgh\s+pr\s+create\b/.test(arg(call.args, "command"));
-  if (row.role !== "assistant" && !fromTool) return [];
-  return [...new Set(row.content.match(PULL_REQUEST_URL) ?? [])];
+  const script =
+    call?.name === "terminal"
+      ? arg(call.args, "command")
+      : call?.name === "execute_code"
+        ? arg(call.args, "code")
+        : "";
+  const fromTool = row.role === "tool" && PULL_REQUEST_WRITE.test(script);
+  const printed =
+    row.role === "assistant" || fromTool ? (row.content.match(PULL_REQUEST_URL) ?? []) : [];
+  const targeted =
+    row.role === "tool" && call?.name === "terminal" ? pullRequestsTargetedBy(script) : [];
+  return [...new Set([...printed, ...targeted])];
+}
+
+const GH_PR_SILENT_WRITE = /\bgh\s+pr\s+(?:merge|ready)\b([^;&|\n]*)/g;
+
+/**
+ * `gh pr merge|ready` print no URL, so it comes from their `<number|url>` and `--repo` arguments.
+ * Only a target written straight after the subcommand counts: a flag value such as `--subject 123`
+ * or a `--body` URL must never link a pull request the command did not touch.
+ */
+function pullRequestsTargetedBy(command: string): string[] {
+  return [...command.matchAll(GH_PR_SILENT_WRITE)].flatMap(([, rest = ""]) => {
+    const tokens = rest
+      .trim()
+      .split(/\s+/)
+      .map((token) => token.replace(/^["']|["']$/g, ""));
+    const target = tokens[0] ?? "";
+    if ((target.match(PULL_REQUEST_URL) ?? [])[0] === target) return [target];
+    if (!/^\d+$/.test(target)) return [];
+    const repoAt = tokens.findIndex((token) => token === "--repo" || token === "-R");
+    const repo = (
+      repoAt === -1
+        ? tokens.find((token) => /^(?:--repo|-R)=/.test(token))?.replace(/^(?:--repo|-R)=/, "")
+        : tokens[repoAt + 1]
+    )?.replace(/["']/g, "");
+    const parts = repo?.split("/") ?? [];
+    if (parts.length !== 2 && parts.length !== 3) return [];
+    const [host, owner, name] = parts.length === 3 ? parts : ["github.com", ...parts];
+    return [`https://${host}/${owner}/${name}/pull/${target}`];
+  });
 }

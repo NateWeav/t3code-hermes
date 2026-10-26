@@ -773,13 +773,28 @@ export const layer = Layer.effect(HindsightService, make);
 export const layerTest = Layer.succeed(
   HindsightService,
   HindsightService.of({
-    listBanks: () =>
-      Effect.succeed({ status: statusOf(NOT_CONFIGURED), banks: [], defaultBank: null }),
-    browse: () => Effect.succeed(emptyMemoryResult(NOT_CONFIGURED)),
-    recall: () => Effect.succeed(emptyMemoryResult(NOT_CONFIGURED)),
-    stats: () => Effect.succeed({ status: statusOf(NOT_CONFIGURED), stats: null }),
-    retain: () => Effect.fail(probeFailure(NOT_CONFIGURED)),
-    reflect: () => Effect.fail(probeFailure(NOT_CONFIGURED)),
+    listBanks: Effect.fn("HindsightService.listBanks")(function* () {
+      return yield* Effect.succeed({
+        status: statusOf(NOT_CONFIGURED),
+        banks: [],
+        defaultBank: null,
+      });
+    }),
+    browse: Effect.fn("HindsightService.browse")(function* () {
+      return yield* Effect.succeed(emptyMemoryResult(NOT_CONFIGURED));
+    }),
+    recall: Effect.fn("HindsightService.recall")(function* () {
+      return yield* Effect.succeed(emptyMemoryResult(NOT_CONFIGURED));
+    }),
+    stats: Effect.fn("HindsightService.stats")(function* () {
+      return yield* Effect.succeed({ status: statusOf(NOT_CONFIGURED), stats: null });
+    }),
+    retain: Effect.fn("HindsightService.retain")(function* () {
+      return yield* probeFailure(NOT_CONFIGURED);
+    }),
+    reflect: Effect.fn("HindsightService.reflect")(function* () {
+      return yield* probeFailure(NOT_CONFIGURED);
+    }),
     resolveConnection: Effect.succeed({ connection: null, hermes: null, enabled: false }),
   }),
 );

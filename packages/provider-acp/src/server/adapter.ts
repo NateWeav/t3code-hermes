@@ -1115,6 +1115,8 @@ interface ActiveAcpTurn {
   promptSettledStatus: "completed" | "interrupted" | "failed" | "cancelled" | null;
   workAccepted: boolean;
   readonly promptWireSettled: Deferred.Deferred<void, never>;
+  /** A drained continuation has no prompt response or idle state, so only a quiet window ends it. */
+  readonly finalizesOnQuiet: boolean;
   backgroundFinalizeGeneration: number;
 }
 
@@ -3395,7 +3397,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
         const rearmDeferredFinalize =
           /* Provider events include streaming deltas; avoid a span for each update. */
           Effect.fnUntraced(function* (context: ActiveAcpTurn) {
-            if (!flavor.deferFinalizeForBackgroundWork) return;
+            if (!context.finalizesOnQuiet) return;
             if (!context.promptSettled || context.finalized) return;
             if (hasDeferredBackgroundWork(context)) return;
             yield* scheduleDeferredFinalize(context);
@@ -7161,7 +7163,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
 
         scheduleDeferredFinalize = (context) =>
           Effect.gen(function* () {
-            if (!flavor.deferFinalizeForBackgroundWork) return;
+            if (!context.finalizesOnQuiet) return;
             if (!context.promptSettled || context.finalized || context.interrupted) return;
             if (hasDeferredBackgroundWork(context)) return;
             context.backgroundFinalizeGeneration += 1;
@@ -7462,6 +7464,9 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               promptSettledStatus: null,
               workAccepted: false,
               promptWireSettled,
+              finalizesOnQuiet:
+                flavor.deferFinalizeForBackgroundWork === true ||
+                (isContinuationTurn && !followsAgentWorkState),
               backgroundFinalizeGeneration: 0,
             };
             const carryover = yield* Ref.getAndSet(carryoverSubagents, null);

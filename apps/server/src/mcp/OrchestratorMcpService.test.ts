@@ -401,6 +401,82 @@ describe("OrchestratorMcpService", () => {
     }),
   );
 
+  it.effect("ends a wait before the caller's transport gives up on the call", () =>
+    Effect.gen(function* () {
+      const parentThreadId = ThreadId.make("thread:mcp-call-limit-parent");
+      const childThreadId = ThreadId.make("thread:mcp-call-limit-child");
+      const requested: Array<number> = [];
+      const childProjection = {
+        thread: { id: childThreadId, title: "Child task" },
+        runs: [],
+        contextTransfers: [],
+        messages: [],
+        subagents: [],
+        providerThreads: [],
+        runtimeRequests: [],
+        nodes: [],
+        turnItems: [],
+      } as unknown as OrchestrationV2ThreadProjection;
+      const layerDependencies = Layer.mergeAll(
+        NodeServices.layer,
+        Layer.mock(ThreadManagementService.ThreadManagementService)({
+          getThreadRecords: (threadId) =>
+            Effect.succeed(
+              threadId === parentThreadId
+                ? ({
+                    thread: { id: parentThreadId },
+                    runs: [],
+                    contextTransfers: [],
+                    subagents: [],
+                  } as unknown as OrchestrationV2ThreadProjection)
+                : childProjection,
+            ),
+          getThreadShell: (threadId) => Effect.succeed(liveThreadShell(threadId)),
+          getProjectThreadRecords: () => Effect.succeed(childProjection),
+          waitForThread: (input) =>
+            Effect.sync(() => {
+              requested.push(input.timeoutMs);
+              return { threadId: childThreadId, run: null, timedOut: true };
+            }),
+        }),
+        ServerSettings.layerTest(),
+        Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed([]) }),
+        Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({
+          list: () => Effect.succeed([]),
+        }),
+        Layer.mock(ProjectService.ProjectService)({}),
+        Layer.mock(SecretRequests.SecretRequests)({}),
+        Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+      );
+      const scope: McpInvocationScope = {
+        environmentId: EnvironmentId.make("environment:mcp-call-limit"),
+        requestNamespace: "provider-session:mcp-call-limit",
+        thread: {
+          threadId: parentThreadId,
+          providerSessionId: "provider-session:mcp-call-limit",
+          providerInstanceId: ProviderInstanceId.make("hermes"),
+        },
+        client: undefined,
+        capabilities: new Set(["orchestration"]),
+        issuedAt: 1,
+      };
+
+      yield* Effect.gen(function* () {
+        const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+        yield* service.waitForThread(scope, { threadId: childThreadId });
+        yield* service.waitForThread(
+          { ...scope, callLimitMs: 300_000 },
+          { threadId: childThreadId, timeoutMs: 20 * 60 * 1_000 },
+        );
+        yield* service.waitForThread(
+          { ...scope, callLimitMs: 300_000 },
+          { threadId: childThreadId, timeoutMs: 60_000 },
+        );
+        assert.deepEqual(requested, [10 * 60 * 1_000, 270_000, 60_000]);
+      }).pipe(Effect.provide(layerOrchestratorService.pipe(Layer.provide(layerDependencies))));
+    }),
+  );
+
   it.effect("does not dispose delivery when a nonterminal task has no active child run", () =>
     Effect.gen(function* () {
       const parentThreadId = ThreadId.make("thread:mcp-cancel-parent");

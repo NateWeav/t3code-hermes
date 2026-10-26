@@ -345,6 +345,67 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 
+  it.effect("shows Hermes's compaction status lines as a compaction row, not reply text", () =>
+    Effect.gen(function* () {
+      const { events } = yield* runMockTurn({
+        name: "compaction-status",
+        mockEnvironment: {
+          T3_ACP_HERMES_STATUS_LINES: [
+            "📦 Pre-API compression: ~200,292 tokens near the context/output limit. Compacting before the next model call.",
+            "🗜️ Compacting context — summarizing earlier conversation so I can continue...",
+            "⚠️  Session compressed 2 times — accuracy may degrade. Consider /new to start fresh.",
+            "✓ Context compaction complete — continuing turn...",
+            "🗜️ Compacting context — summarizing earlier conversation so I can continue...",
+            "✓ Context compaction complete — continuing turn...",
+          ].join("\n"),
+        },
+      });
+      const compactions = new Map<string, { status: string; summary: string | undefined }>();
+      const replies: Array<string> = [];
+      for (const event of events) {
+        if (event.type !== "turn_item.updated") continue;
+        const item = event.turnItem;
+        if (item.type === "compaction") {
+          compactions.set(item.id, { status: item.status, summary: item.summary });
+        }
+        if (item.type === "assistant_message") replies.push(item.text);
+      }
+      assert.deepEqual(
+        [...compactions.values()],
+        [
+          {
+            status: "completed",
+            summary:
+              "Session compressed 2 times — accuracy may degrade. Consider /new to start fresh.",
+          },
+          { status: "completed", summary: undefined },
+        ],
+      );
+      assert.equal(replies.at(-1), "hello from mock");
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+
+  it.effect("keeps a reply that only talks about compaction", () =>
+    Effect.gen(function* () {
+      const text = "Compacting context — I'd raise threshold_tokens instead.";
+      const { events } = yield* runMockTurn({
+        name: "compaction-talk",
+        mockEnvironment: { T3_ACP_HERMES_STATUS_LINES: text },
+      });
+      assert.isFalse(
+        events.some(
+          (event) => event.type === "turn_item.updated" && event.turnItem.type === "compaction",
+        ),
+      );
+      const replies = events.flatMap((event) =>
+        event.type === "turn_item.updated" && event.turnItem.type === "assistant_message"
+          ? [event.turnItem.text]
+          : [],
+      );
+      assert.include(replies.join("\n"), text);
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+
   it.effect("sends the fast-mode choice as Hermes's session option once", () =>
     Effect.gen(function* () {
       const { events, requests } = yield* runMockTurn({

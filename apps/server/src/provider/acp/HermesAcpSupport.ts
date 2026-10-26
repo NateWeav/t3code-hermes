@@ -23,6 +23,8 @@ import type {
 } from "@t3tools/provider-acp/server/runtimeModel";
 import * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 
+import { makeHermesCompactionTransform } from "./HermesCompaction.ts";
+
 const HERMES_DRIVER_KIND = ProviderDriverKind.make("hermes");
 /** Hermes authenticates from `~/.hermes/.env`; the method id is a formality. */
 const HERMES_AUTH_METHOD_ID = "hermes";
@@ -196,11 +198,14 @@ export const makeHermesAcpRuntime = Effect.fn("HermesAcpSupport.makeHermesAcpRun
   EffectAcpErrors.AcpError,
   Crypto.Crypto | Scope.Scope
 > {
+  const crypto = yield* Crypto.Crypto;
+  const compactionIdPrefix = yield* crypto.randomUUIDv4().pipe(Effect.orDie);
   const acpContext = yield* Layer.build(
     AcpSessionRuntime.layer({
       ...input,
       spawn: buildHermesAcpSpawnInput(input.hermesSettings, input.cwd, input.environment),
       authMethodId: HERMES_AUTH_METHOD_ID,
+      transformSessionUpdate: makeHermesCompactionTransform(compactionIdPrefix),
     }).pipe(
       Layer.provide(
         Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, input.childProcessSpawner),

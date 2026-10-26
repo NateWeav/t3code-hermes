@@ -82,6 +82,8 @@ const promptUsage = process.env.T3_ACP_EMIT_PROMPT_USAGE;
 const thoughtText = process.env.T3_ACP_EMIT_THOUGHT_TEXT;
 /** Emits a Hermes-shaped compaction `session_info_update` before finishing the prompt. */
 const emitCompactionInfo = process.env.T3_ACP_EMIT_COMPACTION_INFO === "1";
+/** Newline-separated lines sent before the reply as Hermes sends status: one chunk each, no message id. */
+const hermesStatusLines = process.env.T3_ACP_HERMES_STATUS_LINES;
 const emitInterleavedAssistantToolCalls =
   process.env.T3_ACP_EMIT_INTERLEAVED_ASSISTANT_TOOL_CALLS === "1";
 const emitV2Fidelity = process.env.T3_ACP_EMIT_V2_FIDELITY === "1";
@@ -2949,6 +2951,16 @@ const program = Effect.gen(function* () {
           update: {
             sessionUpdate: "agent_thought_chunk",
             content: { type: "text", text: thoughtText },
+          },
+        });
+      }
+
+      for (const line of hermesStatusLines?.split("\n") ?? []) {
+        yield* agent.client.sessionUpdate({
+          sessionId: requestedSessionId,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: `${line}\n` },
           },
         });
       }

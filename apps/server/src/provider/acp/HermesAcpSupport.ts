@@ -312,8 +312,8 @@ export function resolveHermesSessionModeId(input: {
 
 /**
  * The choices a Hermes permission request offers. Hermes drops "Allow for session" when the gate
- * re-asks every time (Smart-DENY overrides, protected writes), and T3 answers `acceptForSession`
- * with the request's first `allow_always` option, which is Hermes's `allow_session`.
+ * re-asks every time (Smart-DENY overrides, protected writes). T3 answers `acceptForSession` with
+ * the first `allow_always` option, so it is offered only when that one is Hermes's `allow_session`.
  */
 export function hermesApprovalOptions(
   request: EffectAcpSchema.RequestPermissionRequest,
@@ -323,7 +323,8 @@ export function hermesApprovalOptions(
   return [
     { decision: "cancel", label: "Cancel" },
     ...(has("reject_once") ? [{ decision: "decline", label: "Deny" } as const] : []),
-    ...(has("allow_always")
+    ...(request.options.find((option) => option.kind === "allow_always")?.optionId ===
+    "allow_session"
       ? [{ decision: "acceptForSession", label: "Allow for this session" } as const]
       : []),
     ...(has("allow_once") ? [{ decision: "accept", label: "Allow once" } as const] : []),

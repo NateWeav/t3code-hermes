@@ -436,4 +436,16 @@ describe("hermesApprovalOptions", () => {
       ).map((option) => option.decision),
     ).toEqual(["cancel", "decline", "acceptForSession", "accept"]);
   });
+
+  it("never offers a permanent grant as the session scope", () => {
+    expect(
+      hermesApprovalOptions(
+        request([
+          ["allow_once", "allow_once"],
+          ["allow_always", "allow_always"],
+          ["deny", "reject_once"],
+        ]),
+      ).map((option) => option.decision),
+    ).toEqual(["cancel", "decline", "accept"]);
+  });
 });

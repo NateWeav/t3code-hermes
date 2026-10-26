@@ -442,7 +442,7 @@ describe("HermesChatHubService", () => {
   it.live("names a card by its Discord thread rather than Hermes's placeholder title", () => {
     const hermes = makeHermesHome();
     const KEY = "agent:main:discord:thread:111:b";
-    const { layer, itemEvents, cardEvents } = makeLayer(hermes.home);
+    const { layer, cardEvents } = makeLayer(hermes.home);
     return Effect.gen(function* () {
       const service = yield* HermesChatHubService.HermesChatHubService;
       const startedAt = (yield* nowSeconds) - 60;

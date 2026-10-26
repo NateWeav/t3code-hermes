@@ -62,10 +62,7 @@ export class HermesMemoryError extends Schema.TaggedError<HermesMemoryError>()(
 /** Match Python text-file newlines and str.strip so client capacity previews
  * count exactly the content the built-in memory store will persist. */
 export function normalizeHermesMemoryEntry(text: string): string {
-  return (
-    text
-      .replace(/\r\n?/g, "\n")
-      // eslint-disable-next-line no-control-regex -- Python str.strip also strips these four control separators.
-      .replace(/^[\p{White_Space}\u001c-\u001f]+|[\p{White_Space}\u001c-\u001f]+$/gu, "")
-  );
+  return text
+    .replace(/\r\n?/g, "\n")
+    .replace(/^[\p{White_Space}\u001c-\u001f]+|[\p{White_Space}\u001c-\u001f]+$/gu, "");
 }

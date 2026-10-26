@@ -133,6 +133,7 @@ function HermesHubsControls({ environmentId }: { readonly environmentId: Environ
         interactionMode: "default",
         branch: null,
         worktreePath: null,
+        // oxlint-disable-next-line react/purity -- runs in an event handler (oxc#27309)
         createdAt: new Date().toISOString(),
       },
     });

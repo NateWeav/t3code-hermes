@@ -1418,8 +1418,12 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
   return ProviderAdapter.ProviderAdapterV2.of({
     instanceId: options.instanceId,
     driver,
-    getCapabilities: () => Effect.succeed(flavor.capabilities),
-    planSelectionTransition: (input) => Effect.succeed(acpSelectionTransition(input)),
+    getCapabilities: Effect.fn("AcpAdapter.getCapabilities")(function () {
+      return Effect.succeed(flavor.capabilities);
+    }),
+    planSelectionTransition: Effect.fn("AcpAdapter.planSelectionTransition")(function (input) {
+      return Effect.succeed(acpSelectionTransition(input));
+    }),
     openSession: Effect.fn("AcpAdapterV2.openSession")(
       function* (input: ProviderAdapter.ProviderAdapterV2OpenSessionInput) {
         const sessionScope = yield* Effect.scope;
@@ -5410,12 +5414,10 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                   Effect.ensuring(
                     runRuntimeCallbackAtGeneration(
                       generation,
-                      Effect.gen(function* () {
-                        yield* Ref.update(pendingRuntimeRequests, (current) => {
-                          const updated = new Map(current);
-                          updated.delete(String(requestId));
-                          return updated;
-                        });
+                      Ref.update(pendingRuntimeRequests, (current) => {
+                        const updated = new Map(current);
+                        updated.delete(String(requestId));
+                        return updated;
                       }),
                     ).pipe(Effect.asVoid),
                   ),
@@ -6109,12 +6111,10 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                 Effect.ensuring(
                   runRuntimeCallbackAtGeneration(
                     handlerGeneration,
-                    Effect.gen(function* () {
-                      yield* Ref.update(pendingRuntimeRequests, (current) => {
-                        const updated = new Map(current);
-                        updated.delete(String(requestId));
-                        return updated;
-                      });
+                    Ref.update(pendingRuntimeRequests, (current) => {
+                      const updated = new Map(current);
+                      updated.delete(String(requestId));
+                      return updated;
                     }),
                   ).pipe(Effect.asVoid),
                 ),
@@ -7161,31 +7161,30 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           yield* Deferred.succeed(context.completed, undefined).pipe(Effect.ignore);
         });
 
-        scheduleDeferredFinalize = (context) =>
-          Effect.gen(function* () {
-            if (!context.finalizesOnQuiet) return;
-            if (!context.promptSettled || context.finalized || context.interrupted) return;
+        scheduleDeferredFinalize = Effect.fn("scheduleDeferredFinalize")(function* (context) {
+          if (!context.finalizesOnQuiet) return;
+          if (!context.promptSettled || context.finalized || context.interrupted) return;
+          if (hasDeferredBackgroundWork(context)) return;
+          context.backgroundFinalizeGeneration += 1;
+          const generation = context.backgroundFinalizeGeneration;
+          yield* Effect.gen(function* () {
+            yield* Effect.sleep(ACP_DEFERRED_FINALIZE_DEBOUNCE);
+            if (
+              context.finalized ||
+              context.interrupted ||
+              context.backgroundFinalizeGeneration !== generation
+            ) {
+              return;
+            }
             if (hasDeferredBackgroundWork(context)) return;
-            context.backgroundFinalizeGeneration += 1;
-            const generation = context.backgroundFinalizeGeneration;
-            yield* Effect.gen(function* () {
-              yield* Effect.sleep(ACP_DEFERRED_FINALIZE_DEBOUNCE);
-              if (
-                context.finalized ||
-                context.interrupted ||
-                context.backgroundFinalizeGeneration !== generation
-              ) {
-                return;
-              }
-              if (hasDeferredBackgroundWork(context)) return;
-              const status = context.promptSettledStatus ?? "completed";
-              yield* finalizeTurn(context, status);
-            }).pipe(Effect.forkIn(sessionScope), Effect.asVoid);
-            yield* (
-              options.testHooks?.onDeferredFinalizeScheduled?.(ACP_DEFERRED_FINALIZE_DEBOUNCE) ??
-                Effect.void
-            );
-          });
+            const status = context.promptSettledStatus ?? "completed";
+            yield* finalizeTurn(context, status);
+          }).pipe(Effect.forkIn(sessionScope), Effect.asVoid);
+          yield* (
+            options.testHooks?.onDeferredFinalizeScheduled?.(ACP_DEFERRED_FINALIZE_DEBOUNCE) ??
+              Effect.void
+          );
+        });
 
         const resolvePromptParts = Effect.fnUntraced(function* (
           turnInput: ProviderAdapter.ProviderAdapterV2TurnInput,
@@ -7209,10 +7208,11 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                       childProcessSpawner,
                     ),
                   );
-          const messageText = providerMessageTextWithAttachmentPaths({
+          const messageText = yield* providerMessageTextWithAttachmentPaths({
             text: userText,
             attachments: turnInput.message.attachments,
             resolveAttachmentPath: host.resolveAttachmentPath,
+            resolveExtractedTextPath: host.resolveExtractedTextPath,
           });
           const isNativeSlashCommand = userText.trimStart().startsWith("/");
           const text = t3AcpPromptWithInstructions({

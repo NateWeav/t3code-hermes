@@ -250,15 +250,7 @@ function HermesTasksScreen({ environmentId }: { readonly environmentId: Environm
         }
       />
     ),
-    [
-      cron.pendingJobIds,
-      cron.setEnabled,
-      cron.setMuted,
-      environmentId,
-      expandedJobIds,
-      runMutation,
-      toggleExpanded,
-    ],
+    [cron, environmentId, expandedJobIds, runMutation, toggleExpanded],
   );
 
   const empty =

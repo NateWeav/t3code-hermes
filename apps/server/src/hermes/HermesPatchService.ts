@@ -670,8 +670,12 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
 
   return HermesPatchService.of({
     list,
-    apply: (input) => change(input, "forward"),
-    revert: (input) => change(input, "reverse"),
+    apply: Effect.fn("HermesPatchService.apply")(function* (input) {
+      return yield* change(input, "forward");
+    }),
+    revert: Effect.fn("HermesPatchService.revert")(function* (input) {
+      return yield* change(input, "reverse");
+    }),
     updateHermes,
     changes: Stream.fromPubSub(changesPubSub),
     restartGateway,

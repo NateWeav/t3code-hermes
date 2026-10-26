@@ -299,6 +299,12 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
         detail: "There is no Hermes git checkout to patch.",
       });
     }
+    if (direction === "forward" && patch.retired === true) {
+      return yield* new HermesPatchError({
+        reason: "wrongState",
+        detail: "T3 Code no longer applies this patch: current Hermes does not run its code.",
+      });
+    }
     const before = yield* readSnapshot(checkout);
     const expected = direction === "forward" ? "notApplied" : "applied";
     if (before.patches.find((candidate) => candidate.id === patch.id)?.state !== expected) {
@@ -468,11 +474,9 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
     const inHead = yield* provide(readHermesPatchesInHead(checkoutRoot, shippedPatches)).pipe(
       Effect.mapError(gitFailed("Could not read the Hermes checkout with git.")),
     );
-    const applied = shippedPatches.filter(
-      (patch) =>
-        !inHead.has(patch.id) &&
-        before.patches.some((status) => status.id === patch.id && status.state === "applied"),
-    );
+    // Last in stack order first, each read as it comes off: a patch another
+    // builds on reads as applied only once that one is gone.
+    const removable = shippedPatches.filter((patch) => !inHead.has(patch.id)).toReversed();
     const refuseLocalChanges = (paths: ReadonlyArray<string>) =>
       new HermesPatchError({
         reason: "wrongState",
@@ -486,16 +490,19 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
     if (userEdits.size > 0) return yield* refuseLocalChanges([...userEdits].sort());
 
     const removed: HermesPatchDefinition[] = [];
+    // Back on in stack order. Retired patches stay off once Hermes updated.
+    const restore = () => removed.toReversed();
     // A dropped connection interrupts this request mid-update. Whatever was
     // lifted off by then goes back on; reapplying is a no-op for a patch that
     // already went back, so the normal path running it first is harmless.
     return yield* Effect.gen(function* () {
-      for (const patch of applied) {
+      for (const patch of removable) {
         const result = yield* provide(
           changeHermesPatch(checkoutRoot, patch, "reverse", shippedPatches),
-        ).pipe(Effect.orElseSucceed(() => ({ ok: false }) as const));
+        ).pipe(Effect.orElseSucceed(() => ({ ok: false, state: "applied" }) as const));
+        if (result.state !== "applied") continue;
         if (!result.ok) {
-          yield* reapply(checkout, removed);
+          yield* reapply(checkout, restore());
           return yield* new HermesPatchError({
             reason: "commandFailed",
             detail: `git refused to remove ${patch.title} before updating. Hermes was not updated.`,
@@ -509,7 +516,7 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
         Effect.orElseSucceed(() => new Set<string>()),
       );
       if (leftover.size > 0) {
-        yield* reapply(checkout, removed);
+        yield* reapply(checkout, restore());
         return yield* refuseLocalChanges([...leftover].sort());
       }
 
@@ -519,7 +526,10 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
           Effect.annotateLogs({ output: outputTail(update.output) }),
         );
       }
-      const restored = yield* reapply(checkout, removed);
+      const restored = yield* reapply(
+        checkout,
+        restore().filter((patch) => patch.retired !== true),
+      );
       // Hermes and its patches changed, so provider snapshots re-probe. The
       // fast mode config opt-in stays: the patch went back on, or comes back
       // once a T3 Code update brings a version that fits.
@@ -532,7 +542,7 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
       } satisfies HermesPatchUpdateHermesResult;
     }).pipe(
       Effect.onInterrupt(() =>
-        reapply(checkout, removed).pipe(
+        reapply(checkout, restore()).pipe(
           Effect.ignore,
           // The update may already have moved HEAD, so provider snapshots
           // re-probe here too.

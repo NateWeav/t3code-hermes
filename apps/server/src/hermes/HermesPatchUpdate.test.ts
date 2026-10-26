@@ -381,6 +381,70 @@ describe("HermesPatchService.updateHermes", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("takes a retired patch off for good, and never applies it", () =>
+    Effect.gen(function* () {
+      const hermes = yield* makeHermes;
+      const patch = { ...hermes.patch([hermes.newerVersion, hermes.olderVersion]), retired: true };
+      yield* Effect.gen(function* () {
+        const service = yield* HermesPatchService;
+        assert.deepStrictEqual((yield* service.list).patches, []);
+        const refused = yield* service.apply({ patchId: patch.id }).pipe(Effect.flip);
+        assert.strictEqual(refused.reason, "wrongState");
+
+        // Applied before T3 Code retired it.
+        NodeFS.writeFileSync(
+          NodePath.join(hermes.base, "older.patch"),
+          hermes.olderVersion.content,
+        );
+        git(hermes.root, "apply", NodePath.join(hermes.base, "older.patch"));
+        assert.isTrue((yield* stateOf(service))?.retired);
+
+        const result = yield* service.updateHermes;
+        assert.isFalse(result.updateFailed);
+        assert.deepStrictEqual(result.reapplied, []);
+        assert.strictEqual(hermes.head(), hermes.newer);
+        assert.strictEqual(hermes.read(), "backend = resolve()\nremote_cwd = None\n");
+        assert.deepStrictEqual(result.snapshot.patches, []);
+      }).pipe(withService(hermes.binaryPath, [patch]));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("lifts a patch built on another off first, and puts both back in stack order", () =>
+    Effect.gen(function* () {
+      const hermes = yield* makeHermes;
+      const beneath = hermes.patch([hermes.olderVersion]);
+      const file = NodePath.join(hermes.root, "session.py");
+      NodeFS.writeFileSync(file, "backend = local\nremote_cwd = configured()\n");
+      git(hermes.root, "add", "session.py");
+      const top: HermesPatchDefinition = {
+        id: HermesPatchId.make("strict-cwd"),
+        title: "Strict cwd",
+        neededFor: "Tests.",
+        versions: [
+          versionAt(
+            hermes.root,
+            "session.py",
+            "backend = local\nremote_cwd = configured(strict)\n",
+            hermes.older,
+            OLDER_DATE,
+          ),
+        ],
+      };
+      git(hermes.root, "reset", "--quiet", "--hard");
+      NodeFS.writeFileSync(NodePath.join(hermes.base, "fail"), "");
+      yield* Effect.gen(function* () {
+        const service = yield* HermesPatchService;
+        yield* service.apply({ patchId: beneath.id });
+        yield* service.apply({ patchId: top.id });
+
+        const result = yield* service.updateHermes;
+        assert.isTrue(result.updateFailed);
+        assert.deepStrictEqual(result.reapplied, [beneath.id, top.id]);
+        assert.strictEqual(hermes.read(), "backend = local\nremote_cwd = configured(strict)\n");
+      }).pipe(withService(hermes.binaryPath, [beneath, top]));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("keeps only the end of a long failed update's output", () =>
     Effect.gen(function* () {
       const hermes = yield* makeHermes;

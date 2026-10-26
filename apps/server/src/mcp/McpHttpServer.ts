@@ -19,6 +19,8 @@ import {
   type RunId,
   ThreadId,
 } from "@t3tools/contracts";
+import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
+import { compactDynamicToolOutput } from "@t3tools/shared/toolOutput";
 
 import packageJson from "../../package.json" with { type: "json" };
 import * as ServerConfig from "../config.ts";
@@ -35,6 +37,7 @@ import {
   MAX_REPORTED_DEPTH,
   toolOutcome,
 } from "../telemetry/ProviderDimensions.ts";
+import { MCP_CALL_LIMIT_HEADER } from "./AcpMcpStdioBridge.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import * as McpToolAccess from "./McpToolAccess.ts";
 import * as OrchestratorMcpService from "./OrchestratorMcpService.ts";
@@ -178,8 +181,15 @@ const makeMcpAuthMiddleware = Effect.gen(function* () {
         offerOAuth: Option.isSome(clients) && !looksLikeProviderToken(token),
       });
     }
+    // A client may only shorten its own waits, so the header needs no trust.
+    const callLimitMs = Number(request.headers[MCP_CALL_LIMIT_HEADER]);
     return yield* httpEffect.pipe(
-      Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
+      Effect.provideService(
+        McpInvocationContext.McpInvocationContext,
+        Number.isSafeInteger(callLimitMs) && callLimitMs > 0
+          ? { ...invocation, callLimitMs }
+          : invocation,
+      ),
       Effect.map(normalizeMcpHttpResponse),
     );
   }) satisfies McpAuthMiddleware;
@@ -939,6 +949,48 @@ const withToolAnalytics =
   });
 
 /**
+ * Hermes and Antigravity hand their model the result but report only a summary of it to T3, so
+ * clients would lose the task and thread ids they read from T3 tool results. ACP keeps the ids per
+ * call for the adapter to restore.
+ */
+const withToolResultRecords =
+  /* Request instrumentation already owns the span; keep this helper in that context. */
+  Effect.fnUntraced(function* <A, E, R>(registration: Effect.Effect<A, E, R>) {
+    const server = yield* McpServer.McpServer;
+    const sessions = yield* Effect.serviceOption(McpProviderSessions.McpProviderSessions);
+    if (Option.isNone(sessions)) return yield* registration;
+    const recordingServer = McpServer.McpServer.of({
+      ...server,
+      addTool: Effect.fn("McpServer.addTool")(function (options) {
+        return server.addTool({
+          ...options,
+          handle: (payload) =>
+            options.handle(payload).pipe(
+              Effect.tap((result) =>
+                Effect.gen(function* () {
+                  if (result instanceof McpSchema.InputRequired) return;
+                  const output = compactDynamicToolOutput(result);
+                  const thread = Option.getOrUndefined(
+                    yield* Effect.serviceOption(McpInvocationContext.McpInvocationContext),
+                  )?.thread;
+                  if (output === undefined || output.isError === true || thread === undefined) {
+                    return;
+                  }
+                  yield* sessions.value.recordToolResult(
+                    thread.threadId,
+                    { tool: options.tool.name, input: payload },
+                    output,
+                  );
+                }),
+              ),
+            ),
+        });
+      }),
+    });
+    return yield* registration.pipe(Effect.provideService(McpServer.McpServer, recordingServer));
+  });
+
+/**
  * `McpServer.toolkit` asks for every service its tools declare when it
  * registers them, but the auth middleware provides `McpInvocationContext` to
  * each request instead. Registration must not get one: the services it
@@ -949,7 +1001,9 @@ export const toolkitRegistration = <Tools extends Record<string, Tool.Any>, EX, 
   handlers: McpToolAccess.HandlersLayer<Tools, EX, RX>,
 ) => {
   const registration = Layer.effectDiscard(
-    withToolAnalytics(McpServer.registerToolkit(decodeAsAdvertised(toolkit))),
+    withToolAnalytics(
+      withToolResultRecords(McpServer.registerToolkit(decodeAsAdvertised(toolkit))),
+    ),
   ).pipe(Layer.provide(McpServer.McpServer.layer));
   // @effect-diagnostics-next-line unsafeEffectTypeAssertion:off - the auth middleware provides it per request.
   const registered = registration as Layer.Layer<
@@ -964,7 +1018,7 @@ const imageToolRegistration = <Tools extends Record<string, Tool.Any>, A, E, R, 
   register: Effect.Effect<A, E, R>,
   handlers: McpToolAccess.HandlersLayer<Tools, EX, RX>,
 ) =>
-  Layer.effectDiscard(withToolAnalytics(register)).pipe(
+  Layer.effectDiscard(withToolAnalytics(withToolResultRecords(register))).pipe(
     Layer.provide(McpToolAccess.HandlersLayer.layer(handlers)),
   );
 

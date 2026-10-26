@@ -101,6 +101,30 @@ export function preserveHermesAgentActivityTitle(toolCall: AcpToolCallState): Ac
     : toolCall;
 }
 
+/**
+ * Hermes's gateway renames an editor's MCP server to `editor_<name>_<8 hex>`, or
+ * `editor_<20 hex>_<index>` in sessions frozen before Hermes d28c07b3f2. T3 injects only its own
+ * server, so either form is T3's.
+ */
+const HERMES_EDITOR_T3_SERVER_PREFIX = /^mcp__editor_(?:t3_code_[0-9a-f]{8}|[0-9a-f]{20}_0)__/;
+
+/**
+ * Restores the `mcp__t3_code__` prefix T3 recognizes its tools by. Hermes reports a tool only
+ * once it runs and never sends `in_progress`, so a T3 call (a blocking wait included) is marked
+ * running rather than pending.
+ */
+export function normalizeHermesT3McpToolCall(toolCall: AcpToolCallState): AcpToolCallState {
+  const title = typeof toolCall.data.title === "string" ? toolCall.data.title : undefined;
+  if (title === undefined || !HERMES_EDITOR_T3_SERVER_PREFIX.test(title)) return toolCall;
+  const t3Title = title.replace(HERMES_EDITOR_T3_SERVER_PREFIX, "mcp__t3_code__");
+  return {
+    ...toolCall,
+    ...(toolCall.title === undefined ? {} : { title: t3Title }),
+    ...(toolCall.status === "pending" ? { status: "inProgress" as const } : {}),
+    data: { ...toolCall.data, title: t3Title },
+  };
+}
+
 const HERMES_TERMINAL_RESULT_HEADINGS = new Set(["terminal result", "✅ terminal completed"]);
 const HERMES_RESULT_FIELD = /^- \*\*[\w-]+:\*\*/;
 const HERMES_OUTPUT_FIELD = "- **output:**";

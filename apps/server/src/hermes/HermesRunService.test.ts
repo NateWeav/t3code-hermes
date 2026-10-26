@@ -120,6 +120,8 @@ function makeLayer(
     readonly existingItems?: ReadonlyArray<OrchestrationV2TurnItem>;
     /** Fails the first event sink write, as a transient failure would. */
     readonly failFirstWrite?: boolean;
+    /** Fails a write holding an event id already stored, as the event store's unique key does. */
+    readonly rejectDuplicateEvents?: boolean;
   } = {},
 ) {
   let failWrite = options.failFirstWrite ?? false;
@@ -179,6 +181,10 @@ function makeLayer(
           if (failWrite) {
             failWrite = false;
             return Effect.die(new Error("transient"));
+          }
+          if (options.rejectDuplicateEvents) {
+            const ids = [...written, ...events].map((event) => event.id);
+            if (new Set(ids).size !== ids.length) return Effect.die(new Error("UNIQUE event_id"));
           }
           for (const event of events) {
             written.push(event);
@@ -429,6 +435,108 @@ describe("HermesRunService", () => {
       expect(dispatched).toMatchObject([
         { type: "thread.hermes-run.set", threadId: thread.id, hermesRun: { live: false } },
       ]);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.live("writes a batch that repeats a tool call once, instead of failing it whole", () => {
+    const hermes = makeHermesHome();
+    const { layer, written } = makeLayer(hermes.root, { rejectDuplicateEvents: true });
+    return Effect.gen(function* () {
+      const service = yield* HermesRunService.HermesRunService;
+      yield* service.setSource({
+        profile: "upstream-sync",
+        sourceKey: "webhook:upstream-sync",
+        projectId: PROJECT_ID,
+      });
+      const startedAt = (yield* nowSeconds) + 1;
+      hermes.withDb((db) => {
+        insertHermesSession(db, {
+          id: "run-repeat",
+          source: "webhook",
+          route: "upstream-sync",
+          startedAt,
+          toolCallCount: 1,
+        });
+        // An older Hermes copies a call and its result forward without a message_uid.
+        for (const offset of [0, 10]) {
+          insertHermesMessage(db, {
+            sessionId: "run-repeat",
+            role: "assistant",
+            toolCalls: [{ id: "call-r", name: "terminal", args: { command: "git fetch" } }],
+            timestamp: startedAt + offset,
+          });
+          insertHermesMessage(db, {
+            sessionId: "run-repeat",
+            role: "tool",
+            toolCallId: "call-r",
+            content: JSON.stringify({ output: "ok", exit_code: 0 }),
+            timestamp: startedAt + offset + 1,
+          });
+        }
+      });
+      yield* service.sync;
+      expect(
+        written.flatMap((event) =>
+          event.type === "turn-item.updated" ? [`${event.payload.id}:${event.payload.status}`] : [],
+        ),
+      ).toEqual([
+        "hermes-run:upstream-sync:run-repeat:tool:call-r:running",
+        "hermes-run:upstream-sync:run-repeat:tool:call-r:completed",
+      ]);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.live("shows a live run as idle between turns and busy again when it resumes", () => {
+    const hermes = makeHermesHome();
+    const { layer, dispatched } = makeLayer(hermes.root);
+    return Effect.gen(function* () {
+      const service = yield* HermesRunService.HermesRunService;
+      yield* service.setSource({
+        profile: "upstream-sync",
+        sourceKey: "webhook:upstream-sync",
+        projectId: PROJECT_ID,
+      });
+      const startedAt = (yield* nowSeconds) + 1;
+      const setActivity = (at: number, description: string) =>
+        hermes.withDb((db) =>
+          db
+            .prepare(
+              "UPDATE sessions SET last_activity_at = ?, last_activity_description = ? WHERE id = 'run-ci'",
+            )
+            .run(at, description),
+        );
+      hermes.withDb((db) => {
+        insertHermesSession(db, {
+          id: "run-ci",
+          source: "webhook",
+          route: "upstream-sync",
+          startedAt,
+          toolCallCount: 1,
+        });
+        insertHermesMessage(db, {
+          sessionId: "run-ci",
+          role: "assistant",
+          toolCalls: [{ id: "call-ci", name: "terminal", args: { command: "gh pr checks 1" } }],
+          timestamp: startedAt,
+        });
+      });
+      setActivity(startedAt, "terminal command running");
+      yield* service.sync;
+      const idleStates = () =>
+        dispatched.flatMap((command) =>
+          command.type === "thread.hermes-run.set" ? [command.hermesRun.idle ?? false] : [],
+        );
+      expect(idleStates()).toEqual([false]);
+
+      setActivity(startedAt + 5, "");
+      yield* service.sync;
+      yield* service.sync;
+      expect(idleStates()).toEqual([false, true]);
+
+      setActivity(startedAt + 60, "receiving stream response");
+      yield* service.sync;
+      expect(idleStates()).toEqual([false, true, false]);
+      expect(new Set(dispatched.map((command) => command.commandId)).size).toBe(dispatched.length);
     }).pipe(Effect.provide(layer));
   });
 

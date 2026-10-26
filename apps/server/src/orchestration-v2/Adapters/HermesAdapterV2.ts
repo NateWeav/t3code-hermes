@@ -35,6 +35,7 @@ import {
   hermesPromptFailure,
   isHermesGatewayTurnLoss,
   makeHermesAcpRuntime,
+  normalizeHermesT3McpToolCall,
   normalizeHermesTerminalResult,
   preserveHermesAgentActivityTitle,
   resolveHermesAcpBaseModelId,
@@ -235,7 +236,9 @@ export function makeHermesAcpAdapterFlavor(
       return model;
     }),
     normalizeToolCall: (toolCall) =>
-      preserveHermesAgentActivityTitle(normalizeHermesTerminalResult(toolCall)),
+      preserveHermesAgentActivityTitle(
+        normalizeHermesTerminalResult(normalizeHermesT3McpToolCall(toolCall)),
+      ),
     extractSubagentUpdates: makeHermesSubagentExtractor(),
   };
 }

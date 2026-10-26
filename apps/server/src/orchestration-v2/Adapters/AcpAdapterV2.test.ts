@@ -904,6 +904,7 @@ describe("AcpAdapterV2", () => {
         endpoint: "http://127.0.0.1:43123/mcp",
         authorizationHeader: "Bearer instruction-transition-token",
         browserToolsAvailable: false,
+        capabilities: new Set(["orchestration", "device"]),
       });
       const adapter = yield* makeAcpAdapterV2({
         instanceId,
@@ -983,7 +984,9 @@ describe("AcpAdapterV2", () => {
       const firstDefault = yield* runTurn(2, defaultPolicy, "First default request.");
       assert.equal(firstDefault.textBlockCount, 2);
       assert.include(firstDefault.prompt, "T3 Code interaction mode: Default");
-      assert.include(firstDefault.prompt, "## T3 Code browser");
+      // The user withheld browser access, so preview_* guidance would only mislead the agent.
+      assert.notInclude(firstDefault.prompt, "## T3 Code browser");
+      assert.include(firstDefault.prompt, "## T3 Code devices");
       assert.include(firstDefault.prompt, "T3 Code orchestration");
       assert.notInclude(
         firstDefault.methods,

@@ -3762,6 +3762,29 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                 });
               }
             }
+            if (
+              (status === "completed" || status === "failed") &&
+              previous?.status !== "completed" &&
+              previous?.status !== "failed"
+            ) {
+              // Hermes and Antigravity report summaries; the server kept the ids clients read.
+              const recorded = yield* mcpSessions.takeToolResult(context.input.threadId, {
+                tool: mcpIdentity.tool,
+                input,
+              });
+              if (
+                recorded !== undefined &&
+                status === "completed" &&
+                !isHtmlRender &&
+                compactDynamicToolOutput(output) === undefined
+              ) {
+                output = recorded;
+                context.tools.set(toolCall.toolCallId, {
+                  ...toolCall,
+                  data: { ...toolCall.data, rawOutput: output },
+                });
+              }
+            }
             turnItem = {
               ...base,
               title: null,
@@ -7150,9 +7173,12 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           sessionId: string,
         ) {
           const prompt: Array<EffectAcpSchema.ContentBlock> = [];
+          const mcpSession = yield* mcpSessions.read(turnInput.threadId);
           const instructionState = {
             interactionMode: turnInput.runtimePolicy.interactionMode,
-            hasT3Mcp: (yield* readMcpContext(turnInput.threadId)).servers.length > 0,
+            hasT3Mcp: mcpSession !== undefined,
+            browserTools: mcpSession?.browserToolsAvailable ?? false,
+            deviceTools: mcpSession?.capabilities?.has("device") ?? false,
           } satisfies T3AcpInstructionState;
           const previousInstructionState = (yield* Ref.get(promptInstructionStates)).get(sessionId);
           const compactionMarker = (yield* Ref.get(compactionMarkers)).get(sessionId);

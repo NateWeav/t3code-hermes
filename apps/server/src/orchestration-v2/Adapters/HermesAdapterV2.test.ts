@@ -458,6 +458,62 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 
+  it.effect("shows Hermes's T3 tool calls as T3's, with the ids its summary dropped", () =>
+    Effect.gen(function* () {
+      // Hermes's gateway reports the call under a per-session server name, starts it with no
+      // status, and completes it with a truncated markdown summary instead of the result.
+      const args = { task: "Review the diff", mode: "wait" };
+      const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
+      yield* mcpSessions.recordToolResult(
+        ThreadId.make("hermes-v2-t3-tool"),
+        { tool: "delegate_task", input: { mode: "wait", task: "Review the diff" } },
+        { taskId: "node:t3-tool-task", threadId: "thread:t3-tool-child" },
+      );
+      const title = "mcp__editor_t3_code_1a2b3c4d__delegate_task";
+      const { events } = yield* runMockTurn({
+        name: "t3-tool",
+        mockEnvironment: {},
+        promptUpdates: [
+          {
+            sessionUpdate: "tool_call",
+            toolCallId: "tc-t3",
+            title: `${title}: Review the diff`,
+            kind: "other",
+            rawInput: args,
+          },
+          {
+            sessionUpdate: "tool_call_update",
+            toolCallId: "tc-t3",
+            kind: "other",
+            status: "completed",
+            content: [
+              {
+                type: "content",
+                content: { type: "text", text: `${title} result\n- **result:** {"taskId":"no` },
+              },
+            ],
+          },
+        ],
+      });
+      const rows = events.flatMap((event) =>
+        event.type === "turn_item.updated" && event.turnItem.type === "dynamic_tool"
+          ? [event.turnItem]
+          : [],
+      );
+      assert.deepEqual(
+        [rows.at(0), rows.at(-1)].map((row) => [row?.toolName, row?.status]),
+        [
+          ["t3-code.delegate_task", "running"],
+          ["t3-code.delegate_task", "completed"],
+        ],
+      );
+      assert.deepEqual(rows.at(-1)?.output, {
+        taskId: "node:t3-tool-task",
+        threadId: "thread:t3-tool-child",
+      });
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+
   it.effect("offers a wake run for a turn the Hermes gateway runs after the prompt settled", () =>
     Effect.gen(function* () {
       const offers = yield* Queue.unbounded<ProviderContinuationRequest>();

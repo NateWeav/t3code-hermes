@@ -30,6 +30,12 @@ interface JsonRpcEnvelope {
 
 const MCP_PROTOCOL_VERSION = "2025-06-18";
 
+/** Tells the server how long this transport lets one call run, so blocking waits return first. */
+export const MCP_CALL_LIMIT_HEADER = "t3-mcp-call-limit-ms";
+// T3 answers a call with one JSON body, and Node's fetch drops a response whose headers take
+// 300 s. Hermes, the main ACP client, also ends MCP calls at 300 s.
+const ACP_MCP_CALL_LIMIT_MS = 300_000;
+
 export interface AcpMcpStdioBridgeOptions {
   readonly endpoint: string;
   readonly authorization: string;
@@ -81,6 +87,7 @@ export const mcpToolSession = (
   const headers = () => ({
     accept: "application/json, text/event-stream",
     authorization: options.authorization,
+    [MCP_CALL_LIMIT_HEADER]: String(ACP_MCP_CALL_LIMIT_MS),
     ...(sessionId === null ? {} : { "mcp-session-id": sessionId }),
     ...(protocolVersion === null ? {} : { "mcp-protocol-version": protocolVersion }),
   });
@@ -217,6 +224,7 @@ export function runAcpMcpStdioBridge(options: AcpMcpStdioBridgeOptions): Effect.
                 "content-type": "application/json",
                 accept: "application/json, text/event-stream",
                 authorization: options.authorization,
+                [MCP_CALL_LIMIT_HEADER]: String(ACP_MCP_CALL_LIMIT_MS),
                 ...(sessionId === null ? {} : { "mcp-session-id": sessionId }),
                 ...(protocolVersion === null ? {} : { "mcp-protocol-version": protocolVersion }),
               },

@@ -114,6 +114,16 @@ cancel-and-restart. Its current driver also lacks `session/fork`, so app forks
 use portable context transfer. These are orchestrator policies, not
 provider-specific MCP tools.
 
+ACP agents reach T3 through the `acp-mcp-bridge` stdio process. T3 answers a
+call with one JSON body, and the bridge's `fetch` abandons a response whose
+headers take 300 seconds; Hermes also ends MCP calls at 300 seconds. The bridge
+therefore sends `t3-mcp-call-limit-ms`, and blocking waits (`delegate_task`
+wait, `t3_thread_wait`, `request_secret`) return their normal timed-out result
+30 seconds before that limit. Hermes and Antigravity report a summary in place
+of the MCP result, so the server keeps the ids clients read from each thread's
+T3 tool results in `McpProviderSessions`, and the ACP adapter restores them
+when the reported output carries none.
+
 ### ACP Registry V2
 
 The `acpRegistry` driver is the generic flavor of the same shared ACP adapter.

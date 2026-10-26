@@ -10,6 +10,7 @@ import {
   ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
+import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -21,6 +22,7 @@ import { HttpBody, HttpClient, HttpClientRequest, HttpRouter } from "effect/http
 import * as ProjectService from "../project/ProjectService.ts";
 import * as PullRequestReviewGuideService from "../pullRequest/PullRequestReviewGuideService.ts";
 import * as ServerConfig from "../config.ts";
+import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import * as McpHttpServer from "./McpHttpServer.ts";
 import * as McpToolAccess from "./McpToolAccess.ts";
 import * as McpToolAccessTestkit from "./McpToolAccess.testkit.ts";
@@ -813,6 +815,100 @@ it.effect("admits provider and OAuth client credentials and points only clients 
       const deadProvider = yield* call("deadProviderToken");
       expect(deadProvider.status).toBe(401);
       expect(deadProvider.headers["www-authenticate"]).toBe('Bearer error="invalid_token"');
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+it.effect("keeps a thread's tool result ids and the call limit its transport declares", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("thread-summarizing-provider");
+      const providerScope: McpInvocationContext.McpInvocationScope = {
+        environmentId,
+        requestNamespace: "provider-session",
+        thread: {
+          threadId,
+          providerSessionId: "provider-session",
+          providerInstanceId: ProviderInstanceId.make("hermes"),
+        },
+        client: undefined,
+        capabilities: new Set(["orchestration"]),
+        issuedAt: 1,
+      };
+      const callLimits: Array<number | undefined> = [];
+      const sessionsContext = yield* Layer.build(McpProviderSessions.layer);
+      const sessions = Context.get(sessionsContext, McpProviderSessions.McpProviderSessions);
+      const DelegateToolkit = Toolkit.make(
+        Tool.make("delegate_probe", {
+          description: "Starts a task.",
+          parameters: Schema.Struct({ task: Schema.String }),
+          success: Schema.Struct({ taskId: Schema.String, status: Schema.String }),
+          failure: OrchestratorMcpFailure,
+          failureMode: "return",
+          dependencies: [McpInvocationContext.McpInvocationContext],
+        }),
+      );
+      const serverLayer = McpHttpServer.toolkitRegistration(
+        DelegateToolkit,
+        McpToolAccess.toLayer(DelegateToolkit, {
+          delegate_probe: McpToolAccess.reads(() =>
+            McpInvocationContext.McpInvocationContext.pipe(
+              Effect.tap((scope) => Effect.sync(() => callLimits.push(scope.callLimitMs))),
+              Effect.as({ taskId: "node:probe-task", status: "running" }),
+            ),
+          ),
+        }),
+      ).pipe(
+        Layer.provideMerge(McpHttpServer.layerMcpTransport),
+        Layer.provide(Layer.succeedContext(sessionsContext)),
+        Layer.provide(
+          Layer.mock(McpSessionRegistry.McpSessionRegistry)({
+            resolve: () =>
+              Effect.succeed(providerScope as McpInvocationContext.McpThreadInvocationScope),
+          }),
+        ),
+      );
+      yield* HttpRouter.serve(serverLayer, { disableListenLog: true, disableLogger: true }).pipe(
+        Layer.build,
+      );
+      const httpClient = yield* HttpClient.HttpClient;
+      const call = (extraHeaders: Record<string, string>) =>
+        Effect.gen(function* () {
+          const headers = {
+            accept: "application/json, text/event-stream",
+            authorization: "Bearer provider",
+            ...extraHeaders,
+          };
+          const initialize = yield* httpClient.post("/mcp", {
+            headers,
+            body: HttpBody.text(
+              `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"probe","version":"1.0.0"}}}`,
+              "application/json",
+            ),
+          });
+          return yield* httpClient.post("/mcp", {
+            headers: {
+              ...headers,
+              "mcp-session-id": initialize.headers["mcp-session-id"]!,
+              "mcp-protocol-version": "2025-06-18",
+            },
+            body: HttpBody.text(
+              `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"delegate_probe","arguments":{"task":"Review"}}}`,
+              "application/json",
+            ),
+          });
+        });
+
+      expect((yield* call({ "t3-mcp-call-limit-ms": "300000" })).status).toBe(200);
+      expect((yield* call({})).status).toBe(200);
+      expect(callLimits).toEqual([300_000, undefined]);
+      const take = sessions.takeToolResult(threadId, {
+        tool: "delegate_probe",
+        input: { task: "Review" },
+      });
+      expect(yield* take).toEqual({ taskId: "node:probe-task" });
+      expect(yield* take).toEqual({ taskId: "node:probe-task" });
+      expect(yield* take).toBeUndefined();
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );

@@ -23,6 +23,7 @@ import * as Stream from "effect/Stream";
 import * as Semaphore from "effect/Semaphore";
 
 import * as ProviderLatestVersions from "@t3tools/provider-core/server/ProviderLatestVersions";
+import { dedupeSlashCommands } from "@t3tools/provider-core/server/slashCommands";
 import * as ModelManifest from "./ModelManifest.ts";
 import { applyProviderCompatibility } from "./providerCompatibility.ts";
 import * as ServerConfig from "../config.ts";
@@ -288,12 +289,10 @@ export const mergeProviderSnapshot = (
         : {}),
     ...(isIncompleteHermesProbe(nextProvider)
       ? {
-          slashCommands: [
+          slashCommands: dedupeSlashCommands([
             ...nextProvider.slashCommands,
-            ...previousProvider.slashCommands.filter(
-              (command) => !nextProvider.slashCommands.some((next) => next.name === command.name),
-            ),
-          ],
+            ...previousProvider.slashCommands,
+          ]),
         }
       : {}),
     ...(shouldRetainMissingOpenCodeMetadata(nextProvider)

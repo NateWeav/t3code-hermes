@@ -719,7 +719,7 @@ it.layer(
         status: "warning",
         auth: { status: "unknown" },
         models: [{ slug: "hermes-4", name: "Hermes 4", isCustom: false, capabilities: null }],
-        slashCommands: [{ name: "help" }],
+        slashCommands: [{ name: "Help" }],
         message: "Hermes ACP model discovery timed out.",
       } as const satisfies ServerProvider;
       for (const status of ["warning", "error"] as const) {
@@ -729,13 +729,16 @@ it.layer(
           ...incompleteProvider.models,
           previousProvider.models[0],
         ]);
-        assert.deepStrictEqual(merged.slashCommands, previousProvider.slashCommands);
+        assert.deepStrictEqual(merged.slashCommands, [
+          { name: "Help" },
+          { name: "discovered-command" },
+        ]);
         assert.deepStrictEqual(merged.auth, incomplete.auth);
         assert.strictEqual(merged.status, status);
         assert.strictEqual(merged.message, incomplete.message);
         assert.deepStrictEqual(
           ProviderRegistry.mergeProviderSnapshot(merged, incomplete).slashCommands,
-          previousProvider.slashCommands,
+          merged.slashCommands,
         );
       }
       for (const definitive of [

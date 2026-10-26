@@ -206,3 +206,18 @@ only on top of the patches before it, never to stock Hermes alone.
 Restart the T3 Code server after applying the patch. Run the patch's
 `tests/acp_adapter/test_background_reports.py` and `tests/tools/test_async_delegation.py` in a
 scratch checkout, as for `acp-delegation-progress`.
+
+## `acp-reasoning-once`
+
+**Needed by:** Hermes reasoning that appears only as reasoning. With `display.show_reasoning` on,
+the gateway adds the turn's last reasoning to the start of the final reply as a `💭 **Reasoning:**`
+code block for messaging platforms. Local viewers skip that block because they already stream
+`reasoning.delta`. ACP sessions were kept as an exception on the assumption that editors have no
+reasoning event, but the ACP gateway bridge streams `reasoning.delta` as thought chunks. A
+reasoning model's ACP reply therefore repeated its reasoning as reply text. Because that final text
+no longer began with what had streamed, the bridge also sent the whole reply a second time.
+
+The patch removes the ACP exception. Verified against hermes-agent `749cb638ff` (`main`,
+2026-10-26), alone and after the other patches. Restart the Hermes gateway after applying it. Run
+the patch's `tests/gateway/test_local_viewer_reasoning.py` in a scratch checkout, as for
+`acp-delegation-progress`.

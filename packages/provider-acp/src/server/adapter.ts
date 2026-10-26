@@ -238,6 +238,8 @@ export interface AcpAdapterV2Flavor {
     readonly promptCapabilities: EffectAcpSchema.AgentCapabilities["promptCapabilities"];
   }) => Effect.Effect<ReadonlyArray<EffectAcpSchema.ContentBlock>, EffectAcpErrors.AcpError>;
   readonly promptFailure?: (cause: unknown) => OrchestrationV2ProviderFailure;
+  /** A failed prompt that leaves the agent process unfit for the next turn; it is replaced first. */
+  readonly restartRuntimeAfterPromptFailure?: (cause: unknown) => boolean;
   /**
    * Runs before attachment paths, T3 instructions and native slash-command detection,
    * so a rewrite can turn the user's text into a native command.
@@ -7693,6 +7695,9 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                   promptGeneration,
                   Effect.gen(function* () {
                     if (context.finalized) return;
+                    if (flavor.restartRuntimeAfterPromptFailure?.(Cause.squash(cause)) === true) {
+                      yield* Ref.set(runtimeRestartRequired, true);
+                    }
                     const error = Cause.findError(cause);
                     // Native close rejects prompts cancelled before insertion with -32800.
                     const interrupted =

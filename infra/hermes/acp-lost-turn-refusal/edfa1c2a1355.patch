@@ -1,0 +1,156 @@
+diff --git a/acp_adapter/gateway_server.py b/acp_adapter/gateway_server.py
+index d37224bc64..8b261f04b9 100644
+--- a/acp_adapter/gateway_server.py
++++ b/acp_adapter/gateway_server.py
+@@ -64,6 +64,10 @@ def _tools_changed_notice(payload):
+     return f"Editor MCP tools changed (servers: {servers}); the new tool list applies from the next turn.\n"
+ 
+ 
++class _LostTurnRefusal(GatewayClientError):
++    """A prompt refused before ``prompt.submit``: nothing was sent, so no retry identity is kept."""
++
++
+ class GatewayACPAgent(GatewayReplyMixin, acp.Agent):
+     def __init__(self):
+         self._conn = None
+@@ -671,11 +675,14 @@ class GatewayACPAgent(GatewayReplyMixin, acp.Agent):
+         try:
+             # Inside the try: a failed reconnect is as ambiguous for a retained identity as a lost ack.
+             client = await self._client()
++            if self._has_unknown(session_id):
++                # That reconnect adopted a turn the restart lost: refuse, never queue behind it.
++                raise _LostTurnRefusal(self._unknown_recovery(session_id, submitted=False))
+             link, resumes = self._link, self._resumes.get(session_id, 0)
+             receipt = await client.rpc("prompt.submit", session_id=session_id, input_id=input_id, **submit)
+         except BaseException as exc:
+             from hermes_cli.gateway_client import GatewayRPCError
+-            if not isinstance(exc, GatewayRPCError):
++            if not isinstance(exc, (GatewayRPCError, _LostTurnRefusal)):
+                 # Transport loss, timeout or cancel before the ack: the owner may hold this admission.
+                 # Keep its identity for the editor's retry of the same prompt (latest 64 sessions).
+                 self._unacked[session_id] = (retry_key, input_id, staged)
+@@ -706,9 +713,22 @@ class GatewayACPAgent(GatewayReplyMixin, acp.Agent):
+                         raise self._lost_failure
+                     if self._failure:
+                         raise self._failure
+-                    raise self._lost.pop(admission_id, None) or GatewayClientError(
+-                        self._unknown_recovery(session_id, admission_id))
+-                terminal = self._terminals.pop(admission_id)
++                    lost = self._lost.pop(admission_id, None)
++                    if lost is not None or not self._queued_behind_unknown(session_id, admission_id):
++                        raise lost or GatewayClientError(self._unknown_recovery(session_id, admission_id))
++                terminal = self._terminals.pop(admission_id, None)
++            if terminal is None:
++                # The editor reads a refused prompt as never run, so its input must not wait in the
++                # FIFO to run unseen once the lost turn is discarded: withdraw it while still queued.
++                try:
++                    await (await self._client()).rpc(
++                        "prompt.cancel", session_id=session_id, admission_id=admission_id)
++                except GatewayClientError as exc:
++                    if str(exc) != "stale_generation":
++                        raise
++                    # Another viewer's discard already started it: the user's turn, never interrupted.
++                    raise GatewayClientError(self._unknown_recovery(session_id, admission_id)) from exc
++                raise GatewayClientError(self._unknown_recovery(session_id, submitted=False))
+         finally:
+             # Do not let one prompt tear down a newer mapping if the session has
+             # already advanced while this coroutine unwinds.
+@@ -922,6 +942,11 @@ class GatewayACPAgent(GatewayReplyMixin, acp.Agent):
+         return (fence is None or sequence is None or event.get("replay_epoch") != fence[0]
+                 or sequence > fence[1])
+ 
++    def _queued_behind_unknown(self, session_id, admission_id):
++        return self._has_unknown(session_id) and any(
++            row.get("admission_id") == admission_id and row.get("status") == "queued"
++            for row in self._snapshots[session_id].get("pending", []))
++
+     def _blocked_admission(self, session_id, admission_id):
+         return self._has_unknown(session_id) and any(
+             row.get("admission_id") == admission_id and row.get("status") in {"queued", "unknown"}
+diff --git a/tests/acp_adapter/test_gateway_queued_unknown.py b/tests/acp_adapter/test_gateway_queued_unknown.py
+index 097951fb88..43b5fe9b1b 100644
+--- a/tests/acp_adapter/test_gateway_queued_unknown.py
++++ b/tests/acp_adapter/test_gateway_queued_unknown.py
+@@ -13,15 +13,21 @@ from tests.waiting import async_wait_until
+ 
+ @pytest.mark.asyncio
+ @pytest.mark.parametrize('before_ack', [False, True])
+-async def test_editor_follower_reports_unknown_without_poisoning_other_sessions(before_ack):
++async def test_editor_follower_is_withdrawn_without_poisoning_other_sessions(before_ack):
++    # The editor reads the refusal as a prompt that never ran, so the follower must not stay queued
++    # to run unseen once the lost head is discarded.
+     agent = GatewayACPAgent()
+     agent._gateway = AsyncMock()
+     agent._snapshots['s'] = {}
+     agent._snapshots['other'] = {}
+     unknown = {'session_id': 's', 'type': 'session.info', 'payload': {'pending': [
+         {'admission_id': 'head', 'status': 'unknown'}, {'admission_id': 'ours', 'status': 'queued'}]}}
++    cancelled = []
+ 
+     async def submit(method, **params):
++        if method == 'prompt.cancel':
++            cancelled.append(params)
++            return {'admission_id': params['admission_id'], 'status': 'terminal', 'outcome': 'cancelled'}
+         assert method == 'prompt.submit'
+         if params['session_id'] == 'other':
+             await agent._project({'session_id': 'other', 'type': 'message.complete',
+@@ -36,13 +42,57 @@ async def test_editor_follower_reports_unknown_without_poisoning_other_sessions(
+     if not before_ack:
+         await asyncio.sleep(0)
+         await agent._project(unknown)
+-    with pytest.raises(GatewayClientError, match='unknown_execution: do not resend accepted input'):
++    with pytest.raises(GatewayClientError, match=r'unknown_execution: .*\(nothing was submitted\)'):
+         await asyncio.wait_for(submitted, 5)
+-    agent._gateway.rpc.assert_awaited_once()
++    assert cancelled == [{'session_id': 's', 'admission_id': 'ours'}]
+     assert agent._failure is None
+     assert (await agent.prompt([acp.text_block('independent')], 'other')).stop_reason == 'end_turn'
+ 
+ 
++@pytest.mark.asyncio
++async def test_follower_released_before_its_withdrawal_keeps_running():
++    # Another viewer's discard can start the follower between the refusal and the withdrawal: it is
++    # then the user's running turn, never interrupted, and the refusal says it was kept.
++    from hermes_cli.gateway_client import GatewayRPCError
++    agent = GatewayACPAgent()
++    agent._gateway = AsyncMock()
++    agent._snapshots['s'] = {}
++    calls = []
++
++    async def rpc(method, **params):
++        calls.append(method)
++        if method == 'prompt.cancel':
++            raise GatewayRPCError('stale_generation')
++        assert method == 'prompt.submit'
++        await agent._project({'session_id': 's', 'type': 'session.info', 'payload': {'pending': [
++            {'admission_id': 'head', 'status': 'unknown'}, {'admission_id': 'ours', 'status': 'queued'}]}})
++        return {'admission_id': 'ours'}
++
++    agent._gateway.rpc.side_effect = rpc
++    with pytest.raises(GatewayClientError, match=r'\(your input is accepted and kept\)'):
++        await asyncio.wait_for(agent.prompt([acp.text_block('queued')], 's'), 5)
++    assert calls == ['prompt.submit', 'prompt.cancel']
++
++
++@pytest.mark.asyncio
++async def test_reconnect_that_adopts_a_lost_turn_submits_nothing():
++    # A gateway restart leaves the cached snapshot stale until the submit path reconnects; the
++    # reconnect's re-attach is the first to see the lost turn, and the prompt must not queue behind it.
++    agent = GatewayACPAgent()
++    agent._snapshots['s'] = {}
++    gateway = AsyncMock()
++
++    async def reconnect():
++        agent._snapshots['s'] = {'pending': [{'admission_id': 'lost', 'status': 'unknown'}]}
++        return gateway
++
++    agent._client = reconnect
++    with pytest.raises(GatewayClientError, match=r'\(nothing was submitted\)'):
++        await asyncio.wait_for(agent.prompt([acp.text_block('continue')], 's'), 5)
++    gateway.rpc.assert_not_awaited()
++    assert 's' not in agent._unacked
++
++
+ @pytest.mark.asyncio
+ async def test_editor_refuses_new_prompt_until_lost_turn_is_resolved():
+     agent = GatewayACPAgent()

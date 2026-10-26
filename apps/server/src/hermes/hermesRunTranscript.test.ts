@@ -246,6 +246,8 @@ describe("hermesRunItemsFor", () => {
       "call-flag-first":
         "gh pr merge --body https://github.com/NateWeav/t3code-hermes/pull/99 373 -R NateWeav/t3code-hermes",
       "call-numeric-subject": "gh pr merge 374 --subject 123 --repo NateWeav/t3code-hermes",
+      "call-quoted-repo": "gh pr merge 375 --repo='NateWeav/t3code-hermes' --merge",
+      "call-short-equals": "gh pr merge 376 -R=NateWeav/t3code-hermes",
     };
     const pending = new Map<string, HermesToolCall>(
       Object.entries(commands).map(([id, command]) => [
@@ -269,6 +271,8 @@ describe("hermesRunItemsFor", () => {
       "https://github.com/NateWeav/t3code-hermes/pull/370",
       "https://github.com/NateWeav/t3code-hermes/pull/371",
       "https://github.com/NateWeav/t3code-hermes/pull/374",
+      "https://github.com/NateWeav/t3code-hermes/pull/375",
+      "https://github.com/NateWeav/t3code-hermes/pull/376",
     ]);
   });
 

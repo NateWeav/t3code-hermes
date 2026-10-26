@@ -437,10 +437,11 @@ function pullRequestsTargetedBy(command: string): string[] {
     if ((target.match(PULL_REQUEST_URL) ?? [])[0] === target) return [target];
     if (!/^\d+$/.test(target)) return [];
     const repoAt = tokens.findIndex((token) => token === "--repo" || token === "-R");
-    const repo =
+    const repo = (
       repoAt === -1
-        ? tokens.find((token) => token.startsWith("--repo="))?.slice("--repo=".length)
-        : tokens[repoAt + 1];
+        ? tokens.find((token) => /^(?:--repo|-R)=/.test(token))?.replace(/^(?:--repo|-R)=/, "")
+        : tokens[repoAt + 1]
+    )?.replace(/["']/g, "");
     const parts = repo?.split("/") ?? [];
     if (parts.length !== 2 && parts.length !== 3) return [];
     const [host, owner, name] = parts.length === 3 ? parts : ["github.com", ...parts];

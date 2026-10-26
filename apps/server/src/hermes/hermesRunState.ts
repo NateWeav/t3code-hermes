@@ -448,11 +448,10 @@ export function readHermesRunMessages(
   if (sessionIds.length === 0) return { rows: [], lastId: afterId, full: false };
   return withStateDb(dbPath, (db) => {
     const sessions = sessionIds.map(() => "?").join(", ");
-    const hasMessageUid = (
-      db.prepare("SELECT name FROM pragma_table_info('messages')").all() as ReadonlyArray<{
-        name: unknown;
-      }>
-    ).some((column) => column.name === "message_uid");
+    const hasMessageUid = db
+      .prepare("SELECT name FROM pragma_table_info('messages')")
+      .all()
+      .some((column) => column["name"] === "message_uid");
     // Compaction re-inserts rows it keeps under new ids with the same `message_uid`;
     // the first copy is the original.
     const original = hasMessageUid

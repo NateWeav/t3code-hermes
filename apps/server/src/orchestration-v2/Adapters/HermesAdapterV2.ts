@@ -1,7 +1,6 @@
 /**
  * Hermes Agent over ACP stdio (`hermes acp`) as a flavor of the shared ACP adapter. Differs by:
- * reasoning effort in `config.yaml`, delegations as one `delegate_task` call, and the
- * `acp-background-reports` patch reporting background processes.
+ * reasoning effort in `config.yaml` and delegations as one `delegate_task` call.
  */
 import {
   HermesSettings,
@@ -32,20 +31,15 @@ import {
   applyHermesAcpModelSelection,
   currentHermesModelIdFromSessionSetup,
   hermesApprovalOptions,
+  discardLostHermesTurnsOnPrompt,
+  hermesPromptFailure,
+  isHermesGatewayTurnLoss,
   makeHermesAcpRuntime,
   normalizeHermesTerminalResult,
   preserveHermesAgentActivityTitle,
   resolveHermesAcpBaseModelId,
   resolveHermesSessionModeId,
 } from "../../provider/acp/HermesAcpSupport.ts";
-import {
-  HERMES_NOTIFICATION_METHOD,
-  HERMES_PROCESS_METHOD,
-  HermesNotification,
-  HermesProcessReport,
-  hermesNotificationReport,
-  hermesProcessMutation,
-} from "../../provider/acp/HermesBackground.ts";
 import { makeHermesSubagentExtractor } from "../../provider/acp/HermesDelegation.ts";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
@@ -156,14 +150,17 @@ export function makeHermesAcpAdapterFlavor(
     supportsImagePrompts: true,
     supportsCompaction: true,
     compactionCommand: "/compress",
-    // The receipts patch keeps a background result pending until a prompt
-    // hands its notice's ids back; Hermes compares the capability with `== 1`.
-    clientCapabilitiesMeta: { "hermes.backgroundNotifications": true },
-    wakeReceiptPromptMetaKey: "hermes.notificationIds",
+    // The Hermes gateway runs a turn of its own when a background job finishes (`notify: true`) and
+    // projects it to ACP viewers as session updates, with no `session/prompt` open. Without this
+    // those frames were dropped, so the agent woke and worked while its thread showed nothing.
+    enablePostSettleContinuation: true,
     resolveModelId: (selection) => resolveHermesAcpBaseModelId(selection.model),
     approvalOptions: hermesApprovalOptions,
+    promptFailure: hermesPromptFailure,
+    restartRuntimeAfterPromptFailure: isHermesGatewayTurnLoss,
     makeRuntime: (input) =>
       (options.makeRuntime ?? spawnRuntime)(input).pipe(
+        Effect.map(discardLostHermesTurnsOnPrompt),
         Effect.tap((runtime) =>
           Effect.sync(() => runtimeModes.set(runtime, input.runtimePolicy.runtimeMode)),
         ),
@@ -240,28 +237,6 @@ export function makeHermesAcpAdapterFlavor(
     normalizeToolCall: (toolCall) =>
       preserveHermesAgentActivityTitle(normalizeHermesTerminalResult(toolCall)),
     extractSubagentUpdates: makeHermesSubagentExtractor(),
-    registerExtensions: ({ runtime, applyBackgroundTaskMutation, offerWakePrompt }) =>
-      runtime
-        .handleExtNotification(HERMES_PROCESS_METHOD, HermesProcessReport, (report) =>
-          applyBackgroundTaskMutation(hermesProcessMutation(report)),
-        )
-        .pipe(
-          Effect.andThen(
-            runtime.handleExtNotification(
-              HERMES_NOTIFICATION_METHOD,
-              HermesNotification,
-              (notice) =>
-                offerWakePrompt({
-                  sessionId: notice.sessionId,
-                  text: notice.text,
-                  report: hermesNotificationReport(notice),
-                  ...(notice.notificationIds === undefined
-                    ? {}
-                    : { receiptIds: notice.notificationIds }),
-                }),
-            ),
-          ),
-        ),
   };
 }
 

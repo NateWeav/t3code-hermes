@@ -7,6 +7,7 @@ import {
   describeHermesGateway,
   describeHermesPatchesUnavailable,
   describeHermesPatchHint,
+  describeHermesPatchNeed,
   HERMES_PATCH_STATE_LABELS,
   HERMES_UPDATE_DESCRIPTION,
   HERMES_UPDATE_LABEL,
@@ -67,7 +68,7 @@ function PatchRow({
           <p className="text-sm font-medium">{patch.title}</p>
           <Badge variant={STATE_BADGE[patch.state]}>{HERMES_PATCH_STATE_LABELS[patch.state]}</Badge>
         </div>
-        <p className="mt-1 text-sm text-muted-foreground">Needed for {patch.neededFor}</p>
+        <p className="mt-1 text-sm text-muted-foreground">{describeHermesPatchNeed(patch)}</p>
         <p className="mt-1 text-xs text-muted-foreground">{describeHermesPatchHint(patch)}</p>
       </div>
       {patch.state === "notApplied" ? (
@@ -440,7 +441,7 @@ function EverywherePatchRow({
             </Badge>
           )}
         </div>
-        <p className="mt-1 text-sm text-muted-foreground">Needed for {patch.neededFor}</p>
+        <p className="mt-1 text-sm text-muted-foreground">{describeHermesPatchNeed(patch)}</p>
         {shared === undefined ? null : (
           <p className="mt-1 text-xs text-muted-foreground">{describeHermesPatchHint(shared)}</p>
         )}

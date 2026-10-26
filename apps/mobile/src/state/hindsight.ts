@@ -53,7 +53,6 @@ export function useHindsightMemory(environmentId: EnvironmentId | null) {
     selectedBank !== null && banks.some((candidate) => candidate.id === selectedBank)
       ? selectedBank
       : (banksQuery.data?.defaultBank ?? banks[0]?.id ?? null);
-  selectedBankRef.current = bank;
   const isRecalling = submittedQuery.length > 0;
 
   const browseQuery = useEnvironmentQuery(
@@ -83,15 +82,22 @@ export function useHindsightMemory(environmentId: EnvironmentId | null) {
     reportFailure: false,
   });
 
+  // The query objects are rebuilt every render; only their refresh callbacks are stable.
+  const refreshBanks = banksQuery.refresh;
+  const refreshBrowse = browseQuery.refresh;
+  const refreshRecall = recallQuery.refresh;
+  const refreshStats = statsQuery.refresh;
   const retry = useCallback(() => {
-    banksQuery.refresh();
-    browseQuery.refresh();
-    recallQuery.refresh();
-    statsQuery.refresh();
-  }, [banksQuery.refresh, browseQuery.refresh, recallQuery.refresh, statsQuery.refresh]);
+    refreshBanks();
+    refreshBrowse();
+    refreshRecall();
+    refreshStats();
+  }, [refreshBanks, refreshBrowse, refreshRecall, refreshStats]);
   const submitQuery = useCallback((query: string) => setSubmittedQuery(query.trim()), []);
   const clearQuery = useCallback(() => setSubmittedQuery(""), []);
   const selectBank = useCallback((next: HindsightBankId) => {
+    // Lets an in-flight reflection notice the user moved to another bank.
+    selectedBankRef.current = next;
     setSelectedBank(next);
     setReflection(null);
   }, []);
@@ -110,6 +116,7 @@ export function useHindsightMemory(environmentId: EnvironmentId | null) {
         setIsRetaining(false);
       }
     },
+    // oxlint-disable-next-line react/memo-dependencies -- retry and the command change with the bank's queries, so a retain must not call a stale one.
     [bank, environmentId, retainCommand, retry],
   );
 
@@ -117,18 +124,20 @@ export function useHindsightMemory(environmentId: EnvironmentId | null) {
     if (environmentId === null || bank === null || isReflecting) return null;
     setIsReflecting(true);
     const reflectBank = bank;
+    selectedBankRef.current = bank;
     try {
       const query = submittedQuery.length > 0 ? submittedQuery : HINDSIGHT_DEFAULT_REFLECT_QUERY;
       const result = await reflectCommand({ environmentId, input: { bank, query } });
       if (result._tag !== "Success" || selectedBankRef.current !== reflectBank) return null;
       setReflection(result.value.text);
       // Reflecting writes mental models and can consolidate, so the counts move.
-      if (selectedBankRef.current === reflectBank) statsQuery.refresh();
+      refreshStats();
       return result.value.text;
     } finally {
       setIsReflecting(false);
     }
-  }, [bank, environmentId, isReflecting, reflectCommand, statsQuery.refresh, submittedQuery]);
+    // oxlint-disable-next-line react/memo-dependencies -- The reflection reads the current query and refreshes the current bank's stats.
+  }, [bank, environmentId, isReflecting, reflectCommand, refreshStats, submittedQuery]);
 
   const memories = activeQuery.data?.memories ?? [];
   return useMemo(

@@ -457,9 +457,7 @@ export const ClientSettingsSchema = Schema.Struct({
   showSkillActivityRows: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   /** Name memory reads and writes in the work log. Fork opt-in. */
   showMemoryActivityRows: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
-  sidebarWorkingShelfEnabled: Schema.Boolean.pipe(
-    Schema.withDecodingDefault(Effect.succeed(false)),
-  ),
+  sidebarWorkingShelfEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   sidebarProjectGroupingMode: SidebarProjectGroupingMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE)),
   ),
@@ -496,6 +494,8 @@ export const ClientSettingsSchema = Schema.Struct({
   // Opt-in TeX typesetting in rendered Markdown. Off keeps math parsing and
   // KaTeX out of the render path entirely.
   mathRenderingEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  // The quieter sidebar, composer and panel design. Off keeps the classic look.
+  redesignEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
 });
 export type ClientSettings = typeof ClientSettingsSchema.Type;
 
@@ -765,8 +765,17 @@ export const HermesSettings = makeProviderSettingsSchema(
       Schema.withDecodingDefault(Effect.succeed([])),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
+    t3SubagentsOnly: Schema.Boolean.pipe(
+      Schema.withDecodingDefault(Effect.succeed(false)),
+      Schema.annotateKey({
+        title: "Use T3 Code subagents only",
+        description:
+          "Hides Hermes's own subagent tool so agents delegate through T3 Code, which tracks each subagent and returns its result. Disables the delegation toolset in Hermes's config.yaml, so this also applies to the Hermes CLI and gateway.",
+        providerSettingsForm: { control: "switch" },
+      }),
+    ),
   },
-  { order: ["binaryPath"] },
+  { order: ["binaryPath", "t3SubagentsOnly"] },
 );
 export type HermesSettings = typeof HermesSettings.Type;
 
@@ -1831,5 +1840,6 @@ export const ClientSettingsPatch = Schema.Struct({
   snapShotAnimations: Schema.optionalKey(Schema.Boolean),
   wordWrap: Schema.optionalKey(Schema.Boolean),
   mathRenderingEnabled: Schema.optionalKey(Schema.Boolean),
+  redesignEnabled: Schema.optionalKey(Schema.Boolean),
 });
 export type ClientSettingsPatch = typeof ClientSettingsPatch.Type;

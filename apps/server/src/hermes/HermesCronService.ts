@@ -536,7 +536,9 @@ export const make = Effect.gen(function* () {
   });
 
   return HermesCronService.of({
-    list: (input) => (input.refresh === true ? poll : currentSnapshot),
+    list: Effect.fn("HermesCronService.list")(function* (input) {
+      return yield* input.refresh === true ? poll : currentSnapshot;
+    }),
     getRunOutput,
     setEnabled,
     setMuted,

@@ -12,6 +12,7 @@ import {
   describeHermesGateway,
   describeHermesPatchesUnavailable,
   describeHermesPatchHint,
+  describeHermesPatchNeed,
   HERMES_PATCH_STATE_LABELS,
   HERMES_UPDATE_DESCRIPTION,
   HERMES_UPDATE_LABEL,
@@ -250,15 +251,7 @@ function HermesTasksScreen({ environmentId }: { readonly environmentId: Environm
         }
       />
     ),
-    [
-      cron.pendingJobIds,
-      cron.setEnabled,
-      cron.setMuted,
-      environmentId,
-      expandedJobIds,
-      runMutation,
-      toggleExpanded,
-    ],
+    [cron, environmentId, expandedJobIds, runMutation, toggleExpanded],
   );
 
   const empty =
@@ -553,7 +546,9 @@ function HermesPatchesScreen({ environmentId }: { readonly environmentId: Enviro
                   label={HERMES_PATCH_STATE_LABELS[patch.state]}
                 />
               </View>
-              <Text className="text-sm text-foreground-muted">Needed for {patch.neededFor}</Text>
+              <Text className="text-sm text-foreground-muted">
+                {describeHermesPatchNeed(patch)}
+              </Text>
               <Text className="text-xs text-foreground-muted">
                 {describeHermesPatchHint(patch)}
               </Text>

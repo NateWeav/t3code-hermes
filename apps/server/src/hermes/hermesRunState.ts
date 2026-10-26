@@ -246,6 +246,8 @@ export interface HermesSessionRow {
   readonly endedAt: number | null;
   readonly endReason: string | null;
   readonly lastActivityAt: number | null;
+  /** What the session is doing now; Hermes clears it when a turn ends. */
+  readonly activityDescription: string | null;
   readonly toolCallCount: number;
   /**
    * The model the session ran on, as a Hermes ACP model id: `provider:model`
@@ -275,12 +277,13 @@ function sessionRowFrom(row: Record<string, unknown>): HermesSessionRow | null {
     endedAt: seconds(row["ended_at"]),
     endReason: text(row["end_reason"]).trim() || null,
     lastActivityAt: seconds(row["last_activity_at"]),
+    activityDescription: text(row["last_activity_description"]).trim() || null,
     toolCallCount: seconds(row["tool_call_count"]) ?? 0,
     model: sessionModelFrom(row),
   };
 }
 
-const SESSION_COLUMNS = `s.id, s.title, s.started_at, s.ended_at, s.end_reason, s.last_activity_at, s.tool_call_count, s.model, s.billing_provider`;
+const SESSION_COLUMNS = `s.id, s.title, s.started_at, s.ended_at, s.end_reason, s.last_activity_at, s.last_activity_description, s.tool_call_count, s.model, s.billing_provider`;
 
 function escapeLike(value: string): string {
   return value.replace(/[\\%_]/g, (character) => `\\${character}`);
@@ -402,6 +405,20 @@ export function isHermesRunOver(
   return nowSeconds - lastSeen > HERMES_RUN_STALE_AFTER_SECONDS;
 }
 
+/**
+ * Whether a run that is not over sits between turns, waiting on background work it started such
+ * as a CI watch. Hermes clears a session's activity label when a turn ends.
+ */
+export function isHermesRunIdle(chain: readonly HermesSessionRow[]): boolean {
+  const tip = chain.at(-1);
+  return (
+    tip !== undefined &&
+    tip.endedAt === null &&
+    tip.lastActivityAt !== null &&
+    tip.activityDescription === null
+  );
+}
+
 export interface HermesMessageRow {
   readonly id: number;
   readonly role: string;
@@ -430,15 +447,34 @@ export function readHermesRunMessages(
 ): HermesMessagePage | null {
   if (sessionIds.length === 0) return { rows: [], lastId: afterId, full: false };
   return withStateDb(dbPath, (db) => {
+    const sessions = sessionIds.map(() => "?").join(", ");
+    const hasMessageUid = (
+      db.prepare("SELECT name FROM pragma_table_info('messages')").all() as ReadonlyArray<{
+        name: unknown;
+      }>
+    ).some((column) => column.name === "message_uid");
+    // Compaction re-inserts rows it keeps under new ids with the same `message_uid`;
+    // the first copy is the original.
+    const original = hasMessageUid
+      ? `AND (m.message_uid IS NULL OR NOT EXISTS (
+           SELECT 1 FROM messages AS earlier
+           WHERE earlier.session_id IN (${sessions})
+             AND earlier.message_uid = m.message_uid AND earlier.id < m.id))`
+      : "";
     // `SELECT *` rather than a column list: optional columns such as
     // `_compressed_summary` come and go between Hermes versions.
     const rows = db
       .prepare(
-        `SELECT * FROM messages
-         WHERE session_id IN (${sessionIds.map(() => "?").join(", ")}) AND id > ?
-         ORDER BY id LIMIT ?`,
+        `SELECT m.* FROM messages AS m
+         WHERE m.session_id IN (${sessions}) AND m.id > ? ${original}
+         ORDER BY m.id LIMIT ?`,
       )
-      .all(...sessionIds, afterId, limit) as unknown as ReadonlyArray<Record<string, unknown>>;
+      .all(
+        ...sessionIds,
+        afterId,
+        ...(hasMessageUid ? sessionIds : []),
+        limit,
+      ) as unknown as ReadonlyArray<Record<string, unknown>>;
     const messages = rows.flatMap((row): HermesMessageRow[] => {
       const id = seconds(row["id"]);
       const timestamp = seconds(row["timestamp"]);

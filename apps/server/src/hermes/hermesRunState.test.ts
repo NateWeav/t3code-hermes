@@ -10,6 +10,7 @@ import { HERMES_STATE_DDL, insertHermesMessage, insertHermesSession } from "./he
 import {
   HERMES_COMPRESSION_HANDOFF_SECONDS,
   HERMES_RUN_STALE_AFTER_SECONDS,
+  isHermesRunIdle,
   isHermesRunOver,
   parseHermesCronJobSources,
   parseHermesWebhookRoutes,
@@ -264,6 +265,41 @@ describe("run reads", () => {
     });
   });
 
+  it("reads each message once when compaction copies it forward under a new id", () => {
+    withStateDb(
+      (db) => {
+        db.exec("ALTER TABLE messages ADD COLUMN message_uid TEXT");
+        insertHermesSession(db, {
+          id: "run",
+          source: "webhook",
+          route: "upstream-sync",
+          startedAt: 1,
+        });
+        const insert = db.prepare(
+          "INSERT INTO messages (session_id, role, content, timestamp, message_uid) VALUES ('run', ?, ?, ?, ?)",
+        );
+        insert.run("user", "go", 1, "uid-go");
+        insert.run("assistant", "working", 2, "uid-working");
+        // Hermes compacts: the summary, then the kept tail re-inserted with the same uids.
+        db.prepare(
+          "INSERT INTO messages (session_id, role, content, timestamp, _compressed_summary) VALUES ('run', 'user', 'summary', 3, 1)",
+        ).run();
+        insert.run("user", "go", 1, "uid-go");
+        insert.run("assistant", "working", 2, "uid-working");
+        insert.run("assistant", "done", 4, "uid-done");
+        insert.run("assistant", "legacy", 5, null);
+      },
+      (dbPath) => {
+        expect(readHermesRunMessages(dbPath, ["run"], 0)?.rows.map((row) => row.content)).toEqual([
+          "go",
+          "working",
+          "done",
+          "legacy",
+        ]);
+      },
+    );
+  });
+
   it("pages past skipped summary rows instead of stalling on them", () => {
     withStateDb(seed, (dbPath) => {
       // A one-row page holding only the summary still moves the cursor on.
@@ -333,6 +369,7 @@ describe("isHermesRunOver", () => {
     endedAt: null,
     endReason: null,
     lastActivityAt: null,
+    activityDescription: null,
     toolCallCount: 1,
     model: null,
   };
@@ -362,5 +399,16 @@ describe("isHermesRunOver", () => {
     expect(
       isHermesRunOver([session], 1_000 + HERMES_RUN_STALE_AFTER_SECONDS + 1, 1_000 + 3_600),
     ).toBe(false);
+  });
+
+  it("reads a run as idle once its turn ends and Hermes clears the activity label", () => {
+    const active = { ...session, lastActivityAt: 1_010 };
+    expect(isHermesRunIdle([{ ...active, activityDescription: "terminal command running" }])).toBe(
+      false,
+    );
+    expect(isHermesRunIdle([active])).toBe(true);
+    // A session that has not reported any activity yet is still starting.
+    expect(isHermesRunIdle([session])).toBe(false);
+    expect(isHermesRunIdle([{ ...active, endedAt: 1_100, endReason: "compression" }])).toBe(false);
   });
 });

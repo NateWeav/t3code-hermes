@@ -55,6 +55,7 @@ import { resolveEnabledHermesInstance, resolveHermesHome } from "./hermesCronSta
 import {
   DEFAULT_HERMES_PROFILE,
   cronSourceKey,
+  isHermesRunIdle,
   isHermesRunOver,
   parseHermesCronJobSources,
   parseHermesWebhookRoutes,
@@ -127,6 +128,8 @@ interface TrackedRun {
   cursor: number;
   lastMessageAt: number | null;
   latestSessionId: string;
+  /** Whether the thread shows the run as between turns. */
+  idle: boolean;
   finalReport: string | null;
   readonly toolCalls: Map<string, HermesToolCall>;
   readonly pullRequestUrls: Set<string>;
@@ -435,6 +438,7 @@ const make = Effect.gen(function* () {
     sessionId: run.rootSessionId,
     latestSessionId: run.latestSessionId,
     live,
+    ...(live && run.idle ? { idle: true } : {}),
   });
 
   const setHermesRun = (run: TrackedRun, live: boolean, suffix: string) =>
@@ -461,7 +465,13 @@ const make = Effect.gen(function* () {
       run.written = new Map(records.turnItems.map((item) => [item.id, item.status]));
     }
     const written = run.written;
+    // A write holding the same event twice fails whole, and an older Hermes can repeat a call it
+    // carries through compaction. Keep each item state once, in first-seen order.
+    const seen = new Set<string>();
     const fresh = entries.filter(({ item }) => {
+      const key = `${item.id}:${item.status}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
       const previous = written.get(item.id);
       return previous === undefined || (previous === "running" && item.status !== "running");
     });
@@ -640,7 +650,15 @@ const make = Effect.gen(function* () {
     if (batch.lastAssistantText !== null) run.finalReport = batch.lastAssistantText;
 
     if (!over) {
-      if (chain.length > 1) yield* setHermesRun(run, true, `live:${run.latestSessionId}`);
+      const idle = isHermesRunIdle(chain);
+      if (idle !== run.idle) {
+        // Command ids are idempotent, so each change needs its own.
+        const stamp = `${chain.at(-1)?.lastActivityAt ?? 0}:${cursor}`;
+        yield* setHermesRun({ ...run, idle }, true, `live:${idle ? "idle" : "busy"}:${stamp}`);
+        run.idle = idle;
+      } else if (chain.length > 1) {
+        yield* setHermesRun(run, true, `live:${run.latestSessionId}`);
+      }
       return false;
     }
 
@@ -726,6 +744,7 @@ const make = Effect.gen(function* () {
           cursor: 0,
           lastMessageAt: null,
           latestSessionId: root.id,
+          idle: existing?.hermesRun?.idle === true,
           finalReport: null,
           toolCalls: new Map(),
           pullRequestUrls: new Set(),
@@ -766,6 +785,7 @@ const make = Effect.gen(function* () {
         cursor: 0,
         lastMessageAt: null,
         latestSessionId: hermesRun.latestSessionId,
+        idle: hermesRun.idle === true,
         finalReport: null,
         toolCalls: new Map(),
         pullRequestUrls: new Set(),

@@ -34,6 +34,14 @@ The maintained source branches use `updates.parked_branch_strategy: update_in_pl
 
 A host is **not ready** if activation or any required live verification remains pending. Recovery/status diagnostics are not a substitute for autonomous-work ownership in T3.
 
+### ACP background-turn ownership
+
+The gateway persists ACP completion offers rather than starting a hidden automatic model turn. The existing installed T3 continuation bridge receives `_hermes/notification` with `notificationIds` and returns the receipt on its synthetic prompt as `_meta["hermes.notificationIds"]`.
+
+Socket delivery is not consumption. Receipt consumption and canonical automation admission must commit together; retries retain the same identity and producer provenance even if the retried prompt omits metadata. Stop is checked again at admission. Empty receipt lists remain ordinary user input. Unclaimed heartbeat offers fold into the latest tick, and completion withdraws obsolete ticks.
+
+Source regression tests cover these boundaries, including replacement-authority redelivery. They do not establish installed-client interoperability or live activation. Verify the actual installed T3 continuation path before marking any host ready.
+
 ## GCP automation ingress
 
 `upstream-sync` remains a separate, explicitly standalone gateway. It owns `127.0.0.1:8645`; the default gateway keeps its listener on 8644. Both existing smee services target `/p/upstream-sync/webhooks/<route>` on 8645. Signed irrelevant `ping` requests return `200` with `status: ignored`; unsigned requests return `401`. Do not send a real maintenance event just to test ingress.

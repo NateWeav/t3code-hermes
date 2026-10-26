@@ -134,10 +134,11 @@ describe("HermesPatchService", () => {
         assert.strictEqual(snapshot.availability, "ready");
         assert.strictEqual(snapshot.checkoutPath, NodeFS.realpathSync(root));
         assert.isFalse(snapshot.detachedHead);
-        // The shipped patches target Hermes source this fixture does not have.
+        // The shipped patches target Hermes source this fixture does not have. Retired ones are
+        // listed only where they are still applied.
         assert.deepStrictEqual(
           snapshot.patches.map((patch) => patch.state),
-          HERMES_PATCHES.map(() => "doesNotApply"),
+          HERMES_PATCHES.filter((patch) => patch.retired !== true).map(() => "doesNotApply"),
         );
 
         const unknown = yield* Effect.flip(

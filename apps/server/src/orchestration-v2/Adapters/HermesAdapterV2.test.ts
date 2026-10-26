@@ -25,14 +25,19 @@ import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import { ChildProcessSpawner } from "effect/process";
 
 import type * as EffectAcpSchema from "effect-acp/compat";
+import * as EffectAcpErrors from "effect-acp/errors";
 
 import * as TestProviderHost from "@t3tools/provider-testing/TestProviderHost";
 import { parseSessionUpdateEvent } from "@t3tools/provider-acp/server/runtimeModel";
 import type * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
-import { makeHermesAcpRuntime } from "../../provider/acp/HermesAcpSupport.ts";
+import {
+  discardLostHermesTurnsOnPrompt,
+  makeHermesAcpRuntime,
+} from "../../provider/acp/HermesAcpSupport.ts";
 import delegationFixture from "../../provider/acp/fixtures/hermes-delegation.json" with { type: "json" };
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
@@ -148,8 +153,13 @@ const runMockTurn = (input: {
    * Hermes's ACP v1 shapes (`tool_call`) the v2 mock cannot send.
    */
   readonly promptUpdates?: ReadonlyArray<EffectAcpSchema.SessionUpdate>;
-  /** Text of a wake turn run after the first, as the continuation worker would send it. */
-  readonly wakeTurnText?: Effect.Effect<string>;
+  /**
+   * Session updates delivered after the first turn ends, with no prompt open: what the Hermes
+   * gateway projects when it runs a turn of its own for a finished background job.
+   */
+  readonly idleUpdates?: ReadonlyArray<EffectAcpSchema.SessionUpdate>;
+  /** Runs the buffered continuation the idle updates offered, through its quiet window. */
+  readonly runContinuation?: boolean;
 }) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
@@ -176,13 +186,15 @@ const runMockTurn = (input: {
     };
     const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const promptUpdates = input.promptUpdates;
+    const idleUpdates = input.idleUpdates;
+    let sessionIdSeen: string | undefined;
     type Runtime = AcpSessionRuntime.AcpSessionRuntime["Service"];
     let deliver: Parameters<Runtime["handleSessionUpdate"]>[0] | undefined;
     const adapter = yield* makeHermesAdapterV2({
       instanceId,
       settings,
       environment,
-      ...(promptUpdates === undefined
+      ...(promptUpdates === undefined && idleUpdates === undefined
         ? {}
         : {
             makeRuntime: ({ runtimePolicy: _policy, ...runtimeInput }) =>
@@ -201,7 +213,9 @@ const runMockTurn = (input: {
                   prompt: () =>
                     Effect.gen(function* () {
                       const { sessionId } = yield* runtime.start();
-                      for (const update of promptUpdates) yield* deliver!({ sessionId, update });
+                      sessionIdSeen = sessionId;
+                      for (const update of promptUpdates ?? [])
+                        yield* deliver!({ sessionId, update });
                       return { stopReason: "end_turn" as const };
                     }),
                 })),
@@ -246,8 +260,11 @@ const runMockTurn = (input: {
       Stream.runCollect,
     );
     const events: Array<ProviderAdapterV2Event> = Array.from(yield* untilTerminal);
-    if (input.wakeTurnText !== undefined) {
-      const wake = turnInput({
+    for (const update of idleUpdates ?? []) {
+      yield* deliver!({ sessionId: sessionIdSeen!, update });
+    }
+    if (input.runContinuation === true) {
+      const continuation = turnInput({
         threadId,
         providerThread,
         runtimePolicy: policy,
@@ -256,14 +273,15 @@ const runMockTurn = (input: {
         ordinal: 2,
       });
       yield* session.startTurn({
-        ...wake,
+        ...continuation,
         message: {
-          ...wake.message,
+          ...continuation.message,
           createdBy: "agent",
-          creationSource: "server",
-          text: yield* input.wakeTurnText,
+          creationSource: "provider",
+          text: "Background activity updated",
         },
       });
+      yield* TestClock.adjust("3 seconds");
       events.push(...(yield* untilTerminal));
     }
     const requests = (yield* fileSystem.readFileString(requestLogPath))
@@ -440,54 +458,308 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 
-  it.effect("prompts Hermes with its notice once background work finishes", () =>
+  it.effect("offers a wake run for a turn the Hermes gateway runs after the prompt settled", () =>
     Effect.gen(function* () {
       const offers = yield* Queue.unbounded<ProviderContinuationRequest>();
-      yield* runMockTurn({
-        name: "wake",
-        mockEnvironment: {
-          T3_ACP_HERMES_BACKGROUND: "1",
-          T3_ACP_HERMES_BACKGROUND_FINISH: "after-turn",
-        },
+      const { events } = yield* runMockTurn({
+        name: "idle-gateway-turn",
+        mockEnvironment: {},
+        promptUpdates: [
+          { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Queued." } },
+        ],
+        idleUpdates: [
+          {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "The merge landed." },
+          },
+        ],
         continuationRequests: {
           offer: (request) => Queue.offer(offers, request).pipe(Effect.asVoid),
         },
+        runContinuation: true,
       });
-      const offer = yield* Queue.take(offers);
-      assert.equal(offer.delivery, "message_text");
-      assert.include(offer.detail ?? "", "Background process proc_ci000001 exited");
-      assert.equal(offer.notification?.source.kind, "background_task");
+      // A flavor without post-settle continuation drops these frames: the agent works, the thread stays blank.
+      assert.equal(yield* Queue.size(offers), 1);
+      const wakeEvents = events.slice(
+        events.findIndex((event) => event.type === "turn.terminal") + 1,
+      );
+      assert.isTrue(
+        wakeEvents.some(
+          (event) =>
+            event.type === "message.updated" &&
+            event.message.role === "assistant" &&
+            event.message.text.includes("The merge landed."),
+        ),
+      );
+      const wakeTerminal = wakeEvents.at(-1);
+      assert.equal(wakeTerminal?.type === "turn.terminal" && wakeTerminal.status, "completed");
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
+});
 
-  it.effect("hands a notice's receipt back on its wake prompt and ignores re-sends", () =>
+const hermesPromptError = (details: string) =>
+  new EffectAcpErrors.AcpRequestError({
+    code: -32603,
+    errorMessage: "Internal error",
+    data: { details },
+  });
+const GATEWAY_DISCONNECTED =
+  "Gateway disconnected; turn outcome is unknown. Resume the printed session ID to check whether it completed or was interrupted; do not resend the work.";
+const lostTurnRefusal = (state: string) =>
+  `unknown_execution: do not resend accepted input; a turn in this session was lost when the gateway restarted and its outcome is unknown (${state}). Send \`/discard lost-1\` here (or \`hermes sessions discard s\` in a terminal), then continue.`;
+const promptText = (payload: { readonly prompt: ReadonlyArray<EffectAcpSchema.ContentBlock> }) =>
+  payload.prompt.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("\n");
+
+describe("Hermes prompts blocked by a lost gateway turn", () => {
+  type Runtime = AcpSessionRuntime.AcpSessionRuntime["Service"];
+  const fakeRuntime = (prompt: Runtime["prompt"]) =>
+    discardLostHermesTurnsOnPrompt({
+      prompt: ((payload, options) =>
+        Effect.suspend(() => prompt(payload, options))) satisfies Runtime["prompt"],
+      handleSessionUpdate: () => Effect.void,
+    } as unknown as Runtime);
+
+  it.effect("discards the lost turn and resends a prompt Hermes did not submit", () =>
     Effect.gen(function* () {
-      const offers = yield* Queue.unbounded<ProviderContinuationRequest>();
-      const { requests } = yield* runMockTurn({
-        name: "wake-receipt",
-        mockEnvironment: {
-          T3_ACP_HERMES_BACKGROUND: "1",
-          T3_ACP_HERMES_BACKGROUND_FINISH: "after-turn",
-          T3_ACP_HERMES_NOTIFICATION_ID: "deleg-receipt-1",
-          T3_ACP_HERMES_REPEAT_NOTIFICATION: "1",
-        },
-        continuationRequests: {
-          offer: (request) => Queue.offer(offers, request).pipe(Effect.asVoid),
-        },
-        wakeTurnText: Queue.take(offers).pipe(Effect.map((offer) => offer.detail ?? "")),
+      const sent: Array<string> = [];
+      const runtime = fakeRuntime((payload) => {
+        const text = promptText(payload);
+        sent.push(text);
+        return sent.length === 1
+          ? Effect.fail(hermesPromptError(lostTurnRefusal("nothing was submitted")))
+          : Effect.succeed({ stopReason: "end_turn" as const });
       });
-      const initialize = requests.find((request) => request.method === "initialize");
-      assert.deepEqual(
-        (initialize?.params as { readonly clientCapabilities?: { readonly _meta?: unknown } })
-          ?.clientCapabilities?._meta,
-        { "hermes.backgroundNotifications": true },
+      const result = yield* runtime.prompt({ prompt: [{ type: "text", text: "continue" }] });
+      assert.equal(result.stopReason, "end_turn");
+      assert.deepEqual(sent, ["continue", "/discard lost-1", "continue"]);
+    }),
+  );
+
+  it.effect("releases input Hermes queued behind the lost turn instead of failing it", () =>
+    Effect.gen(function* () {
+      const sent: Array<string> = [];
+      const shown: Array<string> = [];
+      let deliver: Parameters<Runtime["handleSessionUpdate"]>[0] = () => Effect.void;
+      const runtime = discardLostHermesTurnsOnPrompt({
+        prompt: ((payload) =>
+          Effect.suspend(() => {
+            sent.push(promptText(payload));
+            if (sent.length > 1) return Effect.succeed({ stopReason: "end_turn" as const });
+            // A stale `hermes acp` reconnects inside the prompt and announces the lost turn.
+            const notice = lostTurnRefusal("nothing was submitted").replace(
+              "unknown_execution: ",
+              "",
+            );
+            return deliver({
+              sessionId: "s",
+              update: {
+                sessionUpdate: "agent_message_chunk",
+                content: { type: "text", text: notice },
+              },
+            }).pipe(
+              Effect.andThen(
+                Effect.fail(hermesPromptError(lostTurnRefusal("your input is accepted and kept"))),
+              ),
+            );
+          })) satisfies Runtime["prompt"],
+        handleSessionUpdate: (handler: Parameters<Runtime["handleSessionUpdate"]>[0]) =>
+          Effect.sync(() => {
+            deliver = handler;
+          }),
+      } as unknown as Runtime);
+      yield* runtime.handleSessionUpdate((notification) =>
+        Effect.sync(() => {
+          if (notification.update.sessionUpdate === "agent_message_chunk") shown.push("text");
+        }),
       );
-      const promptMeta = requests
-        .filter((request) => request.method === "session/prompt")
-        .map((request) => (request.params as { readonly _meta?: unknown })._meta);
-      assert.deepEqual(promptMeta, [undefined, { "hermes.notificationIds": ["deleg-receipt-1"] }]);
-      // The notice arrived three times before the wake turn finished; one woke it.
-      assert.equal(yield* Queue.size(offers), 0);
-    }).pipe(Effect.provide(testLayer), Effect.scoped),
+      const result = yield* runtime.prompt({ prompt: [{ type: "text", text: "continue" }] });
+      // Discarding the lost turn runs the queued input; resending it would run it twice.
+      assert.equal(result.stopReason, "end_turn");
+      assert.deepEqual(sent, ["continue", "/discard lost-1"]);
+      assert.deepEqual(shown, []);
+    }),
+  );
+
+  it.effect("fails a prompt whose own running turn was lost", () =>
+    Effect.gen(function* () {
+      const sent: Array<string> = [];
+      let deliver: Parameters<Runtime["handleSessionUpdate"]>[0] = () => Effect.void;
+      const runtime = discardLostHermesTurnsOnPrompt({
+        prompt: ((payload) =>
+          Effect.suspend(() => {
+            sent.push(promptText(payload));
+            return deliver({
+              sessionId: "s",
+              update: {
+                sessionUpdate: "agent_message_chunk",
+                content: { type: "text", text: "Working on it" },
+              },
+            }).pipe(
+              Effect.andThen(
+                Effect.fail(hermesPromptError(lostTurnRefusal("your input is accepted and kept"))),
+              ),
+            );
+          })) satisfies Runtime["prompt"],
+        handleSessionUpdate: (handler: Parameters<Runtime["handleSessionUpdate"]>[0]) =>
+          Effect.sync(() => {
+            deliver = handler;
+          }),
+      } as unknown as Runtime);
+      yield* runtime.handleSessionUpdate(() => Effect.void);
+      const exit = yield* Effect.exit(
+        runtime.prompt({ prompt: [{ type: "text", text: "continue" }] }),
+      );
+      assert.isTrue(exit._tag === "Failure");
+      assert.deepEqual(sent, ["continue"]);
+    }),
+  );
+
+  it("names Hermes's own reason when it rejects a prompt", () => {
+    const flavor = makeHermesAcpAdapterFlavor({
+      environment: {},
+    } as unknown as Parameters<typeof makeHermesAcpAdapterFlavor>[0]);
+    assert.equal(
+      flavor.promptFailure?.(hermesPromptError("admitted_turn_failed")).message,
+      "Hermes: admitted_turn_failed",
+    );
+  });
+});
+
+describe.skipIf(windowsHost)("HermesAdapterV2 across a Hermes gateway restart", () => {
+  it.effect(
+    "explains the lost turn, then starts a fresh agent that clears it for the next message",
+    () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const mockAgentPath = yield* path.fromFileUrl(
+          new URL("../../../scripts/acp-mock-agent.ts", import.meta.url),
+        );
+        const dir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-hermes-restart-" });
+        const binaryPath = path.join(dir, "hermes");
+        yield* fileSystem.writeFileString(
+          binaryPath,
+          `#!/bin/sh\nexec '${process.execPath}' '${mockAgentPath}' "$@"\n`,
+        );
+        yield* fileSystem.chmod(binaryPath, 0o755);
+        const settings = hermesSettings(binaryPath);
+        const environment = { ...process.env, HERMES_HOME: dir };
+        const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+        type Runtime = AcpSessionRuntime.AcpSessionRuntime["Service"];
+        // Every `hermes acp` process the adapter starts, and the prompts each was sent.
+        const spawned: Array<Array<string>> = [];
+        let sessionId: string | undefined;
+        const adapter = yield* makeHermesAdapterV2({
+          instanceId,
+          settings,
+          environment,
+          childProcessSpawner,
+          selfInvocation: yield* resolveSelfInvocation(),
+          makeRuntime: ({ runtimePolicy: _policy, ...runtimeInput }) =>
+            makeHermesAcpRuntime({
+              ...runtimeInput,
+              hermesSettings: settings,
+              environment,
+              childProcessSpawner,
+            }).pipe(
+              Effect.map((runtime): Runtime => {
+                const prompts: Array<string> = [];
+                const processIndex = spawned.push(prompts) - 1;
+                let deliver: Parameters<Runtime["handleSessionUpdate"]>[0] | undefined;
+                const say = (text: string) =>
+                  deliver!({
+                    sessionId: sessionId!,
+                    update: {
+                      sessionUpdate: "agent_message_chunk",
+                      content: { type: "text", text },
+                    },
+                  });
+                return {
+                  ...runtime,
+                  handleSessionUpdate: (handler) =>
+                    Effect.sync(() => {
+                      deliver = handler;
+                    }).pipe(Effect.andThen(runtime.handleSessionUpdate(handler))),
+                  prompt: (payload) =>
+                    Effect.gen(function* () {
+                      sessionId ??= (yield* runtime.start()).sessionId;
+                      const text = promptText(payload);
+                      prompts.push(text);
+                      // The first process was attached when the gateway restarted mid-turn.
+                      if (processIndex === 0) {
+                        return yield* hermesPromptError(GATEWAY_DISCONNECTED);
+                      }
+                      if (text === "/discard lost-1") {
+                        yield* say("Discarded the lost turn. Queued messages can continue.\n");
+                        return { stopReason: "end_turn" as const };
+                      }
+                      if (!prompts.includes("/discard lost-1")) {
+                        return yield* hermesPromptError(lostTurnRefusal("nothing was submitted"));
+                      }
+                      yield* say("Picking up where we left off.");
+                      return { stopReason: "end_turn" as const };
+                    }),
+                };
+              }),
+            ),
+        });
+        const threadId = ThreadId.make("hermes-v2-gateway-restart");
+        const policy = runtimePolicy("approval-required");
+        const modelSelection = { instanceId, model: "hermes-4" };
+        const session = yield* adapter.openSession({
+          threadId,
+          providerSessionId: ProviderSessionId.make("hermes-v2-session-gateway-restart"),
+          modelSelection,
+          runtimePolicy: policy,
+        });
+        const providerThread = yield* session.ensureThread({
+          threadId,
+          modelSelection,
+          runtimePolicy: policy,
+        });
+        const runTurn = (ordinal: number) =>
+          Effect.gen(function* () {
+            yield* session.startTurn(
+              turnInput({
+                threadId,
+                providerThread,
+                runtimePolicy: policy,
+                now: yield* DateTime.now,
+                model: modelSelection.model,
+                ordinal,
+              }),
+            );
+            return Array.from(
+              yield* session.events.pipe(
+                Stream.takeUntil((event) => event.type === "turn.terminal"),
+                Stream.runCollect,
+              ),
+            );
+          });
+
+        const lost = (yield* runTurn(1)).at(-1);
+        assert.equal(lost?.type === "turn.terminal" && lost.status, "failed");
+        assert.include(
+          lost?.type === "turn.terminal" ? (lost.failure?.message ?? "") : "",
+          "Hermes gateway restarted",
+        );
+
+        const next = yield* runTurn(2);
+        const terminal = next.at(-1);
+        assert.equal(terminal?.type === "turn.terminal" && terminal.status, "completed");
+        // A fresh process reads the lost turn on load, so nothing is queued behind it unseen.
+        assert.equal(spawned.length, 2);
+        assert.deepEqual(
+          spawned[1]!.map((text) => (text.includes("test prompt") ? "test prompt" : text)),
+          ["test prompt", "/discard lost-1", "test prompt"],
+        );
+        const replies = next.flatMap((event) =>
+          event.type === "turn_item.updated" && event.turnItem.type === "assistant_message"
+            ? [event.turnItem.text]
+            : [],
+        );
+        assert.include(replies.at(-1) ?? "", "Picking up where we left off.");
+        assert.notInclude(replies.join("\n"), "Discarded the lost turn");
+      }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 });

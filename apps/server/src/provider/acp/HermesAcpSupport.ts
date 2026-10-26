@@ -5,6 +5,7 @@
 import {
   type HermesSettings,
   type ProviderApprovalOption,
+  type OrchestrationV2ProviderFailure,
   ProviderDriverKind,
   type RuntimeMode,
   type ServerProviderSlashCommand,
@@ -12,11 +13,14 @@ import {
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
-import type * as EffectAcpErrors from "effect-acp/errors";
+import * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/compat";
+import { AgentScope } from "@t3tools/shared/AgentScope";
 import { normalizeModelSlug } from "@t3tools/shared/model";
+import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
 
 import type {
   AcpSessionModeState,
@@ -175,6 +179,13 @@ export interface HermesAcpRuntimeInput extends Omit<
   readonly childProcessSpawner: ChildProcessSpawner.ChildProcessSpawner["Service"];
   readonly hermesSettings: HermesAcpRuntimeHermesSettings | null | undefined;
   readonly environment?: NodeJS.ProcessEnv;
+  /**
+   * `probe` launches outside a per-agent systemd scope: `session/new` may start the shared
+   * Hermes gateway (setsid, idle-exit), and stopping a probe's scope would kill it mid-boot.
+   */
+  readonly launch?: "session" | "probe";
+  /** Reports each ACP request as it starts, e.g. `initialize` then `session/new`. */
+  readonly onRequestStarted?: (method: string) => Effect.Effect<void>;
 }
 
 export function buildHermesAcpSpawnInput(
@@ -197,9 +208,19 @@ export const makeHermesAcpRuntime = Effect.fn("HermesAcpSupport.makeHermesAcpRun
   EffectAcpErrors.AcpError,
   Crypto.Crypto | Scope.Scope
 > {
-  const acpContext = yield* Layer.build(
+  const { launch, onRequestStarted, ...runtimeInput } = input;
+  const requestLogger =
+    onRequestStarted === undefined
+      ? input.requestLogger
+      : (event: AcpSessionRuntime.AcpSessionRequestLogEvent) =>
+          Effect.andThen(
+            event.status === "started" ? onRequestStarted(event.method) : Effect.void,
+            input.requestLogger?.(event) ?? Effect.void,
+          );
+  const build = Layer.build(
     AcpSessionRuntime.layer({
-      ...input,
+      ...runtimeInput,
+      ...(requestLogger === undefined ? {} : { requestLogger }),
       spawn: buildHermesAcpSpawnInput(input.hermesSettings, input.cwd, input.environment),
       authMethodId: HERMES_AUTH_METHOD_ID,
     }).pipe(
@@ -208,6 +229,9 @@ export const makeHermesAcpRuntime = Effect.fn("HermesAcpSupport.makeHermesAcpRun
       ),
     ),
   );
+  const acpContext = yield* launch === "probe"
+    ? build.pipe(Effect.provideService(AgentScope, AgentScope.defaultValue()))
+    : build;
   return yield* Effect.service(AcpSessionRuntime.AcpSessionRuntime).pipe(
     Effect.provide(acpContext),
   );
@@ -329,4 +353,135 @@ export function hermesApprovalOptions(
       : []),
     ...(has("allow_once") ? [{ decision: "accept", label: "Allow once" } as const] : []),
   ];
+}
+
+const isAcpRequestError = Schema.is(EffectAcpErrors.AcpRequestError);
+
+/** `hermes acp` answers a failed prompt with `Internal error` and puts its own reason in `data.details`. */
+function hermesPromptErrorDetails(cause: unknown): string | undefined {
+  if (!isAcpRequestError(cause)) return undefined;
+  const details = (cause.data as { readonly details?: unknown } | null | undefined)?.details;
+  return typeof details === "string" && details.trim() !== "" ? details.trim() : undefined;
+}
+
+/**
+ * The gateway restarted or dropped the connection under a turn: Hermes fences that turn as
+ * `unknown` and will not say how it ended. The attached `hermes acp` only re-reads the fence
+ * after it has queued the next prompt behind it, so that process is replaced first.
+ */
+export function isHermesGatewayTurnLoss(cause: unknown): boolean {
+  const details = hermesPromptErrorDetails(cause);
+  return (
+    details !== undefined &&
+    (details.startsWith("Gateway disconnected;") ||
+      details.startsWith("unknown_execution:") ||
+      details === "session_replay_gap")
+  );
+}
+
+export function hermesPromptFailure(cause: unknown): OrchestrationV2ProviderFailure {
+  const details = hermesPromptErrorDetails(cause);
+  return makeProviderFailure({
+    cause,
+    message: isHermesGatewayTurnLoss(cause)
+      ? "The Hermes gateway restarted before this turn finished, so Hermes cannot tell whether it completed. The conversation is kept; send a message to continue."
+      : details === undefined
+        ? undefined
+        : `Hermes: ${details}`,
+    ...(isAcpRequestError(cause) ? { code: String(cause.code) } : {}),
+    class: "provider_error",
+  });
+}
+
+const HERMES_DISCARD_COMMAND = /`\/discard ([^`\s]+)`/g;
+const HERMES_DISCARD_REPLY = /^(?:Discarded the lost turn|No unknown \(lost\) admission)/;
+/** Hermes's notice naming `/discard` when it re-attaches a session with a lost turn; T3 sends it. */
+const HERMES_LOST_TURN_NOTICE = /^do not resend accepted input; a turn in this session was lost/;
+const HERMES_TURN_OUTPUT = new Set([
+  "agent_message_chunk",
+  "agent_thought_chunk",
+  "tool_call",
+  "tool_call_update",
+  "plan",
+]);
+
+/** How Hermes refused a prompt because a turn lost in a gateway restart blocks the session. */
+function lostTurnRefusal(
+  cause: unknown,
+): { readonly submitted: boolean; readonly lostAdmissionIds: ReadonlyArray<string> } | undefined {
+  const details = hermesPromptErrorDetails(cause);
+  if (!details?.startsWith("unknown_execution:")) return undefined;
+  const lostAdmissionIds = Array.from(
+    details.matchAll(HERMES_DISCARD_COMMAND),
+    (match) => match[1]!,
+  );
+  if (lostAdmissionIds.length === 0) return undefined;
+  if (details.includes("(nothing was submitted)")) return { submitted: false, lostAdmissionIds };
+  if (details.includes("(your input is accepted and kept)"))
+    return { submitted: true, lostAdmissionIds };
+  return undefined;
+}
+
+/**
+ * A lost turn blocks its Hermes session until `/discard <admission>`; the user's next message is
+ * that acknowledgement. Refused unsubmitted, the prompt is resent after the discard. Queued behind
+ * the lost turn (Hermes without `acp-lost-turn-refusal`), the discard runs it, so it is never
+ * resent. Output during the prompt means its own running turn was the one lost.
+ */
+export function discardLostHermesTurnsOnPrompt(
+  runtime: AcpSessionRuntime.AcpSessionRuntime["Service"],
+): AcpSessionRuntime.AcpSessionRuntime["Service"] {
+  let pendingDiscardReplies = 0;
+  let promptOutput = false;
+  const discard = (admissionIds: ReadonlyArray<string>) =>
+    Effect.forEach(
+      admissionIds,
+      (admissionId) =>
+        Effect.sync(() => {
+          pendingDiscardReplies += 1;
+        }).pipe(
+          Effect.andThen(
+            runtime.prompt({ prompt: [{ type: "text", text: `/discard ${admissionId}` }] }),
+          ),
+        ),
+      { discard: true },
+    );
+  return {
+    ...runtime,
+    handleSessionUpdate: (handler) =>
+      runtime.handleSessionUpdate((notification) => {
+        const update = notification.update;
+        if (update.sessionUpdate === "agent_message_chunk" && update.content.type === "text") {
+          if (HERMES_LOST_TURN_NOTICE.test(update.content.text)) return Effect.void;
+          if (pendingDiscardReplies > 0 && HERMES_DISCARD_REPLY.test(update.content.text)) {
+            pendingDiscardReplies -= 1;
+            return Effect.void;
+          }
+        }
+        if (HERMES_TURN_OUTPUT.has(update.sessionUpdate)) promptOutput = true;
+        return handler(notification);
+      }),
+    prompt: (payload, options) =>
+      Effect.sync(() => {
+        promptOutput = false;
+      }).pipe(
+        Effect.andThen(runtime.prompt(payload, options)),
+        Effect.catchIf(
+          (error) => {
+            const refusal = lostTurnRefusal(error);
+            return refusal !== undefined && (!refusal.submitted || !promptOutput);
+          },
+          (error) => {
+            const refusal = lostTurnRefusal(error)!;
+            return discard(refusal.lostAdmissionIds).pipe(
+              Effect.andThen(
+                refusal.submitted
+                  ? Effect.succeed({ stopReason: "end_turn" as const })
+                  : runtime.prompt(payload, options),
+              ),
+            );
+          },
+        ),
+      ),
+  };
 }

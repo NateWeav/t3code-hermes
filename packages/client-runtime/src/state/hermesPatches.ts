@@ -35,18 +35,26 @@ export const HERMES_PATCH_REASON_HINTS: Record<HermesPatchMisfitReason, string> 
     "Local changes in the files this patch touches. Commit or discard them in the Hermes checkout.",
 };
 
+/** What the patch is for, or that current Hermes no longer needs it. */
+export function describeHermesPatchNeed(patch: HermesPatch): string {
+  return patch.retired === true
+    ? "No longer needed: current Hermes handles this itself."
+    : `Needed for ${patch.neededFor}`;
+}
+
 /** The line under a patch: its reason when it doesn't apply and the server gave one. */
 export function describeHermesPatchHint(patch: HermesPatch): string {
+  if (patch.retired === true) return "Remove it, or Update Hermes, which takes it off for good.";
   return patch.state === "doesNotApply" && patch.reason !== undefined
     ? HERMES_PATCH_REASON_HINTS[patch.reason]
     : HERMES_PATCH_STATE_HINTS[patch.state];
 }
 
-/** Whether to offer Update Hermes: it can run, and it would make a patch fit. */
+/** Whether to offer Update Hermes: it can run, and it would make a patch fit or retire one. */
 export function shouldOfferHermesUpdate(snapshot: HermesPatchesSnapshot): boolean {
   return (
     snapshot.canUpdateHermes === true &&
-    snapshot.patches.some((patch) => patch.reason === "hermesTooOld")
+    snapshot.patches.some((patch) => patch.reason === "hermesTooOld" || patch.retired === true)
   );
 }
 

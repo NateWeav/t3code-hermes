@@ -24,7 +24,7 @@ import {
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { RefreshCwIcon } from "lucide-react";
-import { useContext, useMemo, useState } from "react";
+import { useContext, useState } from "react";
 
 import { isElectron } from "../../env";
 import { primarySessionStateAtom } from "../../environments/primary/sessionState";

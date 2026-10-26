@@ -1,0 +1,57 @@
+diff --git a/gateway/run_turn_persistence.py b/gateway/run_turn_persistence.py
+index 5bf9866e7f..b61af81ff9 100644
+--- a/gateway/run_turn_persistence.py
++++ b/gateway/run_turn_persistence.py
+@@ -43,16 +43,6 @@ if TYPE_CHECKING:  # string annotations only; never imported at runtime (cycle)
+ logger = logging.getLogger("gateway.run")
+ 
+ 
+-def _acp_launch(runner, source) -> bool:
+-    """An editor session: ACP shows no reasoning event yet, so its reply keeps the projected block."""
+-    from gateway.session_setting_commands import local_policy
+-    from hermes_state_runtime import RuntimeStoreError
+-    try:
+-        return getattr(local_policy(runner, source), "source", None) == "acp"
+-    except RuntimeStoreError:  # a local route with no restored policy is not an editor launch
+-        return False
+-
+-
+ class GatewayTurnPersistenceMixin:
+     async def _hmwa_shape_agent_response(
+         self, agent_result, source, history, session_entry, session_key,
+@@ -155,9 +145,9 @@ class GatewayTurnPersistenceMixin:
+     def _hmwa_prepend_reasoning(self, agent_result, response, source, _intentional_silence):
+         """Prepend the last reasoning block when show_reasoning is on for this platform. Mattermost
+         requires an explicit per-platform opt-in (scratch text, not final-answer content)."""
+-        if source.platform == Platform.LOCAL and not _acp_launch(self, source):
+-            # Local viewers receive reasoning.delta through their event stream; projecting it into
+-            # the final response duplicates it and leaks messaging-platform formatting into Desktop.
++        if source.platform == Platform.LOCAL:
++            # Local viewers (ACP editors included) receive reasoning.delta through their event stream;
++            # projecting it into the final response duplicates it and leaks messaging-platform formatting.
+             return response
+         from gateway.run import _load_gateway_config, _platform_config_key, _resolve_gateway_display_bool
+         try:
+diff --git a/tests/gateway/test_local_viewer_reasoning.py b/tests/gateway/test_local_viewer_reasoning.py
+index 4e942c78d9..ad01a13dd0 100644
+--- a/tests/gateway/test_local_viewer_reasoning.py
++++ b/tests/gateway/test_local_viewer_reasoning.py
+@@ -161,8 +161,9 @@ async def test_config_get_reports_the_reasoning_display_the_session_streams(tmp_
+         await connection.close()
+ 
+ 
+-@pytest.mark.parametrize(('source', 'projected'), [('acp', True), ('gui', False)])
+-def test_only_acp_keeps_the_reasoning_block_in_its_reply_text(monkeypatch, source, projected):
++@pytest.mark.parametrize('source', ['acp', 'gui'])
++def test_no_local_viewer_gets_the_reasoning_block_in_its_reply_text(monkeypatch, source):
++    """ACP streams reasoning.delta as thought chunks too: a projected block repeats it as reply text."""
+     import gateway.run as gateway_run
+     from gateway import session_setting_commands
+     from gateway.run_turn_persistence import GatewayTurnPersistenceMixin
+@@ -170,5 +171,4 @@ def test_only_acp_keeps_the_reasoning_block_in_its_reply_text(monkeypatch, sourc
+     monkeypatch.setattr(session_setting_commands, 'local_policy', lambda runner, src: SimpleNamespace(source=source))
+     reply = GatewayTurnPersistenceMixin()._hmwa_prepend_reasoning(
+         {'last_reasoning': 'weigh it'}, 'final answer', SimpleNamespace(platform=Platform.LOCAL), False)
+-    assert ('weigh it' in reply) is projected
+-    assert reply.endswith('final answer')
++    assert reply == 'final answer'

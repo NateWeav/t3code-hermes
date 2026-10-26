@@ -109,6 +109,18 @@
           "file": "acp-durable-completion-receipts/af8839df1038.patch"
         }
       ]
+    },
+    {
+      "id": "acp-reasoning-once",
+      "title": "Reasoning shown once",
+      "neededFor": "Hermes models that return reasoning text, with display.show_reasoning on. Without it, an ACP reply repeats the streamed reasoning as a code block, followed by a second copy of the reply.",
+      "versions": [
+        {
+          "hermesCommit": "749cb638ff43f9ce5333c186a1e4f67d473aa4f2",
+          "hermesCommitDate": "2026-10-26T01:54:09Z",
+          "file": "acp-reasoning-once/749cb638ff43.patch"
+        }
+      ]
     }
   ]
 }

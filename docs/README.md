@@ -25,6 +25,7 @@
 - [See your Hermes Kanban boards](./user/hermes-board.md)
 - [Configure Hermes reasoning](./user/hermes-reasoning.md)
 - [Use fast mode with Hermes](./user/hermes-fast-mode.md)
+- [Use T3 Code subagents with Hermes](./user/hermes-subagents.md)
 - [Keep Hermes patches in place](./user/hermes-patches.md)
 - [Product usage data](./user/telemetry.md)
 - [Remote access](./user/remote-access.md)

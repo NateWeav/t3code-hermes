@@ -850,9 +850,11 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         for (;;) {
           const live = yield* safeTick;
-          yield* Effect.raceFirst(
-            Queue.take(wake),
-            Effect.sleep(live ? LIVE_INTERVAL : IDLE_INTERVAL),
+          yield* Queue.take(wake).pipe(
+            Effect.timeoutOrElse({
+              duration: live ? LIVE_INTERVAL : IDLE_INTERVAL,
+              orElse: () => Effect.void,
+            }),
           );
         }
       }),

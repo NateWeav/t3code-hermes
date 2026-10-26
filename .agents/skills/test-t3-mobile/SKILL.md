@@ -42,6 +42,12 @@ prints one JSON line, including the development app ID (`appId`) from
 `apps/mobile/app.config.ts`; on failure it names the next command. Authorized mobile
 verification includes that step unless the user prohibits it.
 
+For a device you opened in an agent-device session elsewhere (a device pool,
+cloud, or remote host), run `vp run mobile:install <ios|android> --session <s>`
+from the directory you opened the session in. It installs the cached build into
+that session (`--abi arm64-v8a` for an ARM Android device; `--metro <url>` also
+opens it against Metro) and never builds.
+
 Start `vp run dev:client` from `apps/mobile`, or reuse a healthy Metro belonging
 to this checkout. Open its printed development-client URL with AgentDevice
 `open <appId> <url>` and all returned target arguments.

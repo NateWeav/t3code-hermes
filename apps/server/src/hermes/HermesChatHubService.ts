@@ -654,9 +654,11 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         for (;;) {
           const changed = yield* safePass;
-          yield* Effect.raceFirst(
-            Queue.take(wake),
-            Effect.sleep(changed ? AFTER_CHANGE_INTERVAL : IDLE_INTERVAL),
+          yield* Queue.take(wake).pipe(
+            Effect.timeoutOrElse({
+              duration: changed ? AFTER_CHANGE_INTERVAL : IDLE_INTERVAL,
+              orElse: () => Effect.void,
+            }),
           );
         }
       }),

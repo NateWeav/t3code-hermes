@@ -23,7 +23,7 @@ const decodeListInput = Schema.decodeUnknownSync(HermesCronListInput);
 const decodeSetEnabled = Schema.decodeUnknownSync(HermesCronSetEnabledInput);
 const decodeSetMuted = Schema.decodeUnknownSync(HermesCronSetMutedInput);
 
-const JOB_ID = Schema.decodeUnknownSync(HermesCronJobId)("job-1");
+const JOB_ID = Schema.decodeSync(HermesCronJobId)("job-1");
 
 const SNAPSHOT: HermesCronSnapshot = {
   contractVersion: HERMES_CRON_CONTRACT_VERSION,

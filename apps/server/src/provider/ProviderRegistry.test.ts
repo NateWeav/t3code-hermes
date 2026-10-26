@@ -696,6 +696,63 @@ it.layer(
       );
     });
 
+    it("retains Hermes discovery metadata only while an enabled probe is incomplete", () => {
+      const previousProvider = {
+        instanceId: ProviderInstanceId.make("hermes"),
+        driver: ProviderDriverKind.make("hermes"),
+        status: "ready",
+        enabled: true,
+        installed: true,
+        auth: { status: "authenticated" },
+        checkedAt: "2026-10-25T00:00:00.000Z",
+        version: "0.20.0",
+        models: [
+          { slug: "configured-model", name: "Configured", isCustom: false, capabilities: null },
+          { slug: "removed-custom", name: "Removed custom", isCustom: true, capabilities: null },
+        ],
+        slashCommands: [{ name: "help" }, { name: "discovered-command" }],
+        skills: [],
+      } as const satisfies ServerProvider;
+      const incompleteProvider = {
+        ...previousProvider,
+        checkedAt: "2026-10-25T00:01:00.000Z",
+        status: "warning",
+        auth: { status: "unknown" },
+        models: [{ slug: "hermes-4", name: "Hermes 4", isCustom: false, capabilities: null }],
+        slashCommands: [{ name: "Help" }],
+        message: "Hermes ACP model discovery timed out.",
+      } as const satisfies ServerProvider;
+      for (const status of ["warning", "error"] as const) {
+        const incomplete = { ...incompleteProvider, status };
+        const merged = ProviderRegistry.mergeProviderSnapshot(previousProvider, incomplete);
+        assert.deepStrictEqual(merged.models, [
+          ...incompleteProvider.models,
+          previousProvider.models[0],
+        ]);
+        assert.deepStrictEqual(merged.slashCommands, [
+          { name: "Help" },
+          { name: "discovered-command" },
+        ]);
+        assert.deepStrictEqual(merged.auth, incomplete.auth);
+        assert.strictEqual(merged.status, status);
+        assert.strictEqual(merged.message, incomplete.message);
+        assert.deepStrictEqual(
+          ProviderRegistry.mergeProviderSnapshot(merged, incomplete).slashCommands,
+          merged.slashCommands,
+        );
+      }
+      for (const definitive of [
+        { ...incompleteProvider, status: "ready", auth: { status: "authenticated" } },
+        { ...incompleteProvider, auth: { status: "unauthenticated" } },
+        { ...incompleteProvider, installed: false, status: "error" },
+        { ...incompleteProvider, enabled: false, status: "disabled" },
+      ] as const satisfies ReadonlyArray<ServerProvider>) {
+        const merged = ProviderRegistry.mergeProviderSnapshot(previousProvider, definitive);
+        assert.deepStrictEqual(merged.models, definitive.models);
+        assert.deepStrictEqual(merged.slashCommands, definitive.slashCommands);
+      }
+    });
+
     it("drops Grok models a completed probe no longer advertises", () => {
       const previousProvider = {
         instanceId: ProviderInstanceId.make("grok"),

@@ -1,9 +1,17 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
+import * as Sink from "effect/Sink";
+import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
+import { ChildProcessSpawner } from "effect/process";
+import { AgentScope } from "@t3tools/shared/AgentScope";
 import { HermesSettings } from "@t3tools/contracts";
 
 import { HERMES_BUILT_IN_SLASH_COMMANDS } from "./acp/HermesAcpSupport.ts";
@@ -329,4 +337,154 @@ it.live("replaces the seed with the commands Hermes advertises", () =>
       "brand-new",
     ]);
   }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+const makeColdHermesSpawner = Effect.fn("makeColdHermesSpawner")(function* (stage: string) {
+  const reached = yield* Deferred.make<void>();
+  const release = yield* Deferred.make<void>();
+  const exited = yield* Deferred.make<ChildProcessSpawner.ExitCode>();
+  const output = yield* Queue.unbounded<Uint8Array>();
+  const encoder = new TextEncoder();
+  const decode = Schema.decodeUnknownEffect(
+    Schema.fromJsonString(Schema.Struct({ id: Schema.Number, method: Schema.String })),
+  );
+  let versionProbe = true;
+  let gatewayRunning = false;
+  const send = (message: unknown) =>
+    Queue.offer(output, encoder.encode(encodeJsonString(message) + "\n"));
+  const stdin = Sink.forEach((chunk: Uint8Array) =>
+    Effect.gen(function* () {
+      for (const line of new TextDecoder().decode(chunk).trim().split("\n")) {
+        const request = yield* decode(line).pipe(Effect.orDie);
+        if (request.method === "session/new") gatewayRunning = true;
+        if (request.method === stage) {
+          yield* Deferred.succeed(reached, undefined);
+          yield* Deferred.await(release);
+        }
+        yield* send({
+          jsonrpc: "2.0",
+          id: request.id,
+          result:
+            request.method === "initialize"
+              ? { protocolVersion: 1, agentCapabilities: {} }
+              : request.method === "session/new"
+                ? {
+                    sessionId: "cold-session",
+                    models: {
+                      currentModelId: "openai/gpt-5",
+                      availableModels: [{ modelId: "openai/gpt-5", name: "GPT-5" }],
+                    },
+                  }
+                : {},
+        });
+        if (request.method === "session/new") {
+          yield* send({
+            jsonrpc: "2.0",
+            method: "session/update",
+            params: {
+              sessionId: "cold-session",
+              update: {
+                sessionUpdate: "available_commands_update",
+                availableCommands: [{ name: "help", description: "Help" }],
+              },
+            },
+          });
+        }
+      }
+    }),
+  );
+  const child = ChildProcessSpawner.makeHandle({
+    pid: ChildProcessSpawner.ProcessId(1),
+    exitCode: Deferred.await(exited),
+    isRunning: Deferred.isDone(exited).pipe(Effect.map((done) => !done)),
+    kill: () => Deferred.succeed(exited, ChildProcessSpawner.ExitCode(0)).pipe(Effect.asVoid),
+    unref: Effect.succeed(Effect.void),
+    stdin,
+    stdout: Stream.fromQueue(output),
+    stderr: Stream.empty,
+    all: Stream.empty,
+    getInputFd: () => Sink.drain,
+    getOutputFd: () => Stream.empty,
+  });
+  const spawner = ChildProcessSpawner.make(() => {
+    if (!versionProbe) {
+      return Effect.acquireRelease(Effect.succeed(child), (handle) =>
+        handle.kill().pipe(Effect.orDie),
+      );
+    }
+    versionProbe = false;
+    return Effect.succeed(
+      ChildProcessSpawner.makeHandle({
+        ...child,
+        exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
+        isRunning: Effect.succeed(false),
+        stdout: Stream.make(encoder.encode("hermes 0.20.0\n")),
+      }),
+    );
+  });
+  return {
+    reached,
+    release,
+    spawner,
+    child,
+    isGatewayRunning: () => gatewayRunning,
+    agentScope: {
+      ...AgentScope.defaultValue(),
+      wrap: ({ command, args }: { command: string; args: ReadonlyArray<string> }) =>
+        Effect.succeed({ command, args, unit: "t3code-acp-cold.scope" }),
+      stop: () =>
+        Effect.sync(() => {
+          gatewayRunning = false;
+        }),
+    },
+  };
+});
+
+it.effect.each(["initialize", "session/new"])(
+  "keeps a cold %s alive beyond the old discovery deadline",
+  (stage) =>
+    Effect.gen(function* () {
+      const fake = yield* makeColdHermesSpawner(stage);
+      const checking = yield* checkHermesProviderStatus(
+        decodeHermesSettings({ enabled: true, binaryPath: "/fake/hermes" }),
+      ).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, fake.spawner),
+        Effect.provideService(AgentScope, fake.agentScope),
+        Effect.forkChild,
+      );
+      yield* Deferred.await(fake.reached);
+      yield* TestClock.adjust("50 seconds");
+      expect(checking.pollUnsafe()).toBeUndefined();
+      yield* Deferred.succeed(fake.release, undefined);
+      const snapshot = yield* Fiber.join(checking);
+      expect(snapshot.status).toBe("ready");
+      expect(snapshot.models.map((model) => model.slug)).toContain("openai/gpt-5");
+      expect(fake.isGatewayRunning()).toBe(true);
+      expect(yield* fake.child.isRunning).toBe(false);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect.each(["initialize", "session/new"])(
+  "reports the timed-out %s stage without claiming the installed CLI is unavailable",
+  (stage) =>
+    Effect.gen(function* () {
+      const fake = yield* makeColdHermesSpawner(stage);
+      const checking = yield* checkHermesProviderStatus(
+        decodeHermesSettings({ enabled: true, binaryPath: "/fake/hermes" }),
+      ).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, fake.spawner),
+        Effect.provideService(AgentScope, fake.agentScope),
+        Effect.forkChild,
+      );
+      yield* Deferred.await(fake.reached);
+      yield* TestClock.adjust("120 seconds");
+      const snapshot = yield* Fiber.join(checking);
+      expect(snapshot.installed).toBe(true);
+      expect(snapshot.status).toBe("warning");
+      expect(snapshot.auth.status).toBe("unknown");
+      expect(snapshot.message).toContain(`during ${stage}`);
+      expect(snapshot.models.map((model) => model.slug)).toEqual(["hermes-4"]);
+      expect(yield* fake.child.isRunning).toBe(false);
+      expect(fake.isGatewayRunning()).toBe(stage === "session/new");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );

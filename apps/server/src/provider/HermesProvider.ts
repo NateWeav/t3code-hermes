@@ -12,6 +12,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
+import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
 import { HttpClient } from "effect/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
@@ -71,7 +72,11 @@ const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({
 });
 
 const VERSION_PROBE_TIMEOUT_MS = 10_000;
-const HERMES_ACP_MODEL_DISCOVERY_TIMEOUT_MS = 15_000;
+/**
+ * Whole-probe budget for spawn, `initialize`, `session/new`, and model listing. A cold Hermes can
+ * spend ~50s on SQLite maintenance during `initialize` and then start its gateway in `session/new`.
+ */
+const HERMES_ACP_MODEL_DISCOVERY_TIMEOUT_MS = 120_000;
 
 /**
  * Placeholder shown before the ACP handshake reports the models Hermes
@@ -255,16 +260,20 @@ const discoverHermesModelsViaAcp = Effect.fn("HermesProvider.discoverHermesModel
     hermesSettings: HermesSettings,
     environment: NodeJS.ProcessEnv = process.env,
     commandAdvertisementTimeoutMs: number = HERMES_ACP_COMMAND_ADVERTISEMENT_TIMEOUT_MS,
+    onRequestStarted?: (method: string) => Effect.Effect<void>,
   ) {
     const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const acp = yield* makeHermesAcpRuntime({
       hermesSettings,
       environment,
       childProcessSpawner,
+      launch: "probe",
+      ...(onRequestStarted === undefined ? {} : { onRequestStarted }),
       cwd: process.cwd(),
       clientInfo: { name: "t3-code-provider-probe", version: "0.0.0" },
     });
     const started = yield* acp.start();
+    if (onRequestStarted !== undefined) yield* onRequestStarted("command advertisement");
     const advertised = yield* acp.awaitSlashCommands.pipe(
       Effect.timeoutOption(commandAdvertisementTimeoutMs),
     );
@@ -407,10 +416,12 @@ export const checkHermesProviderStatus = Effect.fn("checkHermesProviderStatus")(
     });
   }
 
+  const discoveryStage = yield* Ref.make("process startup");
   const discoveryExit = yield* discoverHermesModelsViaAcp(
     hermesSettings,
     environment,
     options?.commandAdvertisementTimeoutMs,
+    (method) => Ref.set(discoveryStage, method),
   ).pipe(Effect.timeoutOption(HERMES_ACP_MODEL_DISCOVERY_TIMEOUT_MS), Effect.exit);
   if (Exit.isFailure(discoveryExit)) {
     yield* Effect.logWarning("Hermes ACP model discovery failed", {
@@ -432,8 +443,9 @@ export const checkHermesProviderStatus = Effect.fn("checkHermesProviderStatus")(
     });
   }
   if (Option.isNone(discoveryExit.value)) {
+    const stage = yield* Ref.get(discoveryStage);
     yield* Effect.logWarning(
-      `Hermes ACP model discovery timed out after ${HERMES_ACP_MODEL_DISCOVERY_TIMEOUT_MS}ms.`,
+      `Hermes ACP model discovery timed out after ${HERMES_ACP_MODEL_DISCOVERY_TIMEOUT_MS}ms during ${stage}.`,
     );
     return buildServerProvider({
       presentation: HERMES_PRESENTATION,
@@ -444,9 +456,9 @@ export const checkHermesProviderStatus = Effect.fn("checkHermesProviderStatus")(
       probe: {
         installed: true,
         version,
-        status: "error",
+        status: "warning",
         auth: { status: "unknown" },
-        message: `Hermes CLI is installed but ACP startup timed out after ${HERMES_ACP_MODEL_DISCOVERY_TIMEOUT_MS}ms.`,
+        message: `Hermes CLI is installed but ACP model discovery did not finish within ${HERMES_ACP_MODEL_DISCOVERY_TIMEOUT_MS / 1000}s during ${stage}; Hermes may still be starting up.`,
       },
     });
   }

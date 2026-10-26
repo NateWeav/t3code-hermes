@@ -125,8 +125,10 @@ const browserTestProject = {
   test: {
     name: "browser",
     include: ["src/**/*.browser.test.{ts,tsx}"],
-    hookTimeout: 15_000,
-    testTimeout: 15_000,
+    // Fork: the 4-vCPU GitHub-hosted runner is about half as wide as upstream's Blacksmith
+    // box; the table-heavy Word previews take 12-15s there against upstream's 15s ceiling.
+    hookTimeout: 30_000,
+    testTimeout: 30_000,
     setupFiles: ["./test/browserSetup.ts"],
     api: { port: browserTestApiPort, strictPort: false },
     browser: {

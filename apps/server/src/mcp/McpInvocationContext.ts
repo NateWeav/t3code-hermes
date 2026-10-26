@@ -47,6 +47,8 @@ export interface McpInvocationScope {
   readonly requestNamespace: string;
   readonly thread: McpThreadCaller | undefined;
   readonly client: McpClientCaller | undefined;
+  /** How long the calling transport lets one tool call run; blocking waits return before it. */
+  readonly callLimitMs?: number;
 }
 
 export class McpInvocationContext extends Context.Service<

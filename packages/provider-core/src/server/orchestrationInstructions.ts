@@ -34,6 +34,10 @@ export const T3_CODE_BROWSER_TOOL_INSTRUCTIONS = `
 When browser work was asked, \`preview_*\` is the browser you share with the user: \`preview_status\` first, then \`preview_open\` if no tab can be automated. Prefer snapshot locators over coordinates. Switch browsers only if the tools are absent or \`preview_open\` says unsupported, the user asks, or two preview calls fail on one step. Then quote the error and switch.
 `;
 
+export const T3_CODE_DEVICE_TOOL_INSTRUCTIONS = `## T3 Code devices
+
+For iOS Simulators and Android Emulators here, call \`device_list\`, then \`device_open\`. Drive the device with the exact \`agent-device\` launcher and flags it returns, on every command. Prefer \`agent-device snapshot -i\` refs over coordinates. Use \`device_screenshot\` to see the screen. Use \`xcrun simctl\` or \`adb\` only for builds, logs, and ports. If a platform is unavailable, say so.`;
+
 // ACP only: some ACP agents accept the injected MCP server but never expose
 // its tools, so they need the terminal transport other harnesses never use.
 // Hermes has a built-in tool that is also named `delegate_task`.
@@ -52,6 +56,9 @@ Investigate with read-only actions and do not edit files or otherwise execute th
 export interface T3AcpInstructionState {
   readonly interactionMode: ProviderInteractionMode;
   readonly hasT3Mcp: boolean;
+  /** Preview and device tools the user lets this thread's agent use. */
+  readonly browserTools: boolean;
+  readonly deviceTools: boolean;
 }
 
 /** ACP lacks system/developer fields; inject context on first prompt and tool/mode changes. */
@@ -64,7 +71,9 @@ export function t3AcpPromptWithInstructions(input: {
   if (input.prompt.trimStart().startsWith("/")) return input.prompt;
   if (
     input.previousState?.interactionMode === input.state.interactionMode &&
-    input.previousState.hasT3Mcp === input.state.hasT3Mcp
+    input.previousState.hasT3Mcp === input.state.hasT3Mcp &&
+    input.previousState.browserTools === input.state.browserTools &&
+    input.previousState.deviceTools === input.state.deviceTools
   ) {
     return input.prompt;
   }
@@ -74,7 +83,8 @@ export function t3AcpPromptWithInstructions(input: {
       : T3_CODE_ACP_DEFAULT_MODE_INSTRUCTIONS,
     ...(input.state.hasT3Mcp
       ? [
-          T3_CODE_BROWSER_TOOL_INSTRUCTIONS.trim(),
+          ...(input.state.browserTools ? [T3_CODE_BROWSER_TOOL_INSTRUCTIONS.trim()] : []),
+          ...(input.state.deviceTools ? [T3_CODE_DEVICE_TOOL_INSTRUCTIONS] : []),
           T3_CODE_ORCHESTRATION_INSTRUCTIONS.trim(),
           T3_CODE_ACP_TOOL_INSTRUCTIONS,
         ]

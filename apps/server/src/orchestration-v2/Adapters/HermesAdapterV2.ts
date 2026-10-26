@@ -30,6 +30,7 @@ import type * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSession
 import {
   applyHermesAcpModelSelection,
   currentHermesModelIdFromSessionSetup,
+  hermesApprovalOptions,
   discardLostHermesTurnsOnPrompt,
   hermesPromptFailure,
   isHermesGatewayTurnLoss,
@@ -156,6 +157,7 @@ export function makeHermesAcpAdapterFlavor(
     // those frames were dropped, so the agent woke and worked while its thread showed nothing.
     enablePostSettleContinuation: true,
     resolveModelId: (selection) => resolveHermesAcpBaseModelId(selection.model),
+    approvalOptions: hermesApprovalOptions,
     promptFailure: hermesPromptFailure,
     restartRuntimeAfterPromptFailure: isHermesGatewayTurnLoss,
     makeRuntime: (input) =>

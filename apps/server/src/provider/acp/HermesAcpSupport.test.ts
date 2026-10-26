@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import * as EffectAcpErrors from "effect-acp/errors";
 
 import {
+  hermesApprovalOptions,
   applyHermesAcpModelSelection,
   buildHermesAcpSpawnInput,
   HERMES_BUILT_IN_SLASH_COMMANDS,
@@ -405,6 +406,51 @@ describe("preserveHermesAgentActivityTitle", () => {
   it("leaves other tools on their shared summary", () => {
     const toolCall = parsed("read_file: src/app.ts", "read");
     expect(preserveHermesAgentActivityTitle(toolCall)).toBe(toolCall);
+  });
+});
+
+describe("hermesApprovalOptions", () => {
+  const request = (kinds: ReadonlyArray<[string, string]>) =>
+    ({
+      sessionId: "s",
+      toolCall: { toolCallId: "perm-check-1" },
+      options: kinds.map(([optionId, kind]) => ({ optionId, kind, name: optionId })),
+    }) as unknown as Parameters<typeof hermesApprovalOptions>[0];
+
+  it("offers no session scope when Hermes only allows once", () => {
+    expect(
+      hermesApprovalOptions(
+        request([
+          ["allow_once", "allow_once"],
+          ["deny", "reject_once"],
+        ]),
+      ).map((option) => option.decision),
+    ).toEqual(["cancel", "decline", "accept"]);
+  });
+
+  it("offers the session scope when Hermes does", () => {
+    expect(
+      hermesApprovalOptions(
+        request([
+          ["allow_once", "allow_once"],
+          ["allow_session", "allow_always"],
+          ["allow_always", "allow_always"],
+          ["deny", "reject_once"],
+        ]),
+      ).map((option) => option.decision),
+    ).toEqual(["cancel", "decline", "acceptForSession", "accept"]);
+  });
+
+  it("never offers a permanent grant as the session scope", () => {
+    expect(
+      hermesApprovalOptions(
+        request([
+          ["allow_once", "allow_once"],
+          ["allow_always", "allow_always"],
+          ["deny", "reject_once"],
+        ]),
+      ).map((option) => option.decision),
+    ).toEqual(["cancel", "decline", "accept"]);
   });
 });
 

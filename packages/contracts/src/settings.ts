@@ -770,7 +770,7 @@ export const HermesSettings = makeProviderSettingsSchema(
       Schema.annotateKey({
         title: "Use T3 Code subagents only",
         description:
-          "Turns off Hermes's own subagent tool so agents delegate through T3 Code, which tracks each subagent and returns its result. Adds `delegation` to `agent.disabled_toolsets` in Hermes's config.yaml, which also applies to the Hermes CLI and gateway.",
+          "Hides Hermes's own subagent tool so agents delegate through T3 Code, which tracks each subagent and returns its result. Disables the delegation toolset in Hermes's config.yaml, so this also applies to the Hermes CLI and gateway.",
         providerSettingsForm: { control: "switch" },
       }),
     ),

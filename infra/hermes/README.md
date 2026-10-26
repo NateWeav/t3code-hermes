@@ -206,3 +206,23 @@ only on top of the patches before it, never to stock Hermes alone.
 Restart the T3 Code server after applying the patch. Run the patch's
 `tests/acp_adapter/test_background_reports.py` and `tests/tools/test_async_delegation.py` in a
 scratch checkout, as for `acp-delegation-progress`.
+
+## `acp-launch-yolo-resume`
+
+**Needed by:** Full access on an existing Hermes thread. T3 Code launches `hermes acp` with
+`HERMES_YOLO_MODE=1` for Full access, and a runtime-mode change relaunches it and reopens the
+session. Stock Hermes freezes that flag into a session's policy only when `session.create` makes
+it, so a reopened session keeps the approval mode it was created with: switched to Full access it
+keeps asking for approval, and its subagents (which cannot ask) keep denying dangerous commands;
+switched away it keeps approving everything.
+
+The patch sets the session's `/yolo` on the gateway (`config.set yolo`) whenever `hermes acp`
+loads, resumes, or forks a session: on under `HERMES_YOLO_MODE`, off otherwise. It is the same
+persisted, session-scoped bypass as `/yolo` in the TUI, so it survives a gateway restart and
+covers the session's subagents. A gateway that refuses it fails the reopen instead of running in
+the wrong mode.
+
+Verified against hermes-agent `5b32cfc230` (`main`, 2026-10-26), alone and after every patch
+above. Restart the T3 Code server after applying it; the gateway needs no restart. Run the patch's
+`tests/acp_adapter/test_gateway_launch_yolo_resume.py` in a scratch checkout, as for
+`acp-delegation-progress`.

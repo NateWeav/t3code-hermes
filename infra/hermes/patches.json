@@ -109,6 +109,18 @@
           "file": "acp-durable-completion-receipts/af8839df1038.patch"
         }
       ]
+    },
+    {
+      "id": "acp-launch-yolo-resume",
+      "title": "Full access on reopened sessions",
+      "neededFor": "Full access on a Hermes thread that was opened, or last ran, in another approval mode. Without it, switching an existing thread to Full access keeps asking for approval and its subagents keep denying dangerous commands, and switching away from Full access keeps approving everything.",
+      "versions": [
+        {
+          "hermesCommit": "5b32cfc230078417fc523e12b9aabbc9b59f684b",
+          "hermesCommitDate": "2026-10-26T03:55:41Z",
+          "file": "acp-launch-yolo-resume/5b32cfc23007.patch"
+        }
+      ]
     }
   ]
 }

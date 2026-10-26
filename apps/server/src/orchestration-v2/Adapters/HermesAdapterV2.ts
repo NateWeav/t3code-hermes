@@ -97,10 +97,9 @@ export interface HermesAdapterV2Options {
 }
 
 /**
- * Environment `hermes acp` runs with. Hermes subagents cannot ask for
- * approval, so they deny dangerous commands unless YOLO is on; full access has
- * to reach them too. The flag is process-wide, which is safe because a
- * runtime-mode change reopens the session.
+ * Full access also has to reach Hermes subagents, which deny dangerous
+ * commands unless YOLO is on. A reopened session follows this flag only with
+ * the `acp-launch-yolo-resume` patch; stock Hermes reads it at creation.
  */
 export function hermesSpawnEnvironment(
   environment: NodeJS.ProcessEnv,

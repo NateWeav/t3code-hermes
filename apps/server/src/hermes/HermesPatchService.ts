@@ -490,9 +490,11 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
     if (userEdits.size > 0) return yield* refuseLocalChanges([...userEdits].sort());
 
     const removed: HermesPatchDefinition[] = [];
+    let updated = false;
     // Back on in stack order. Retired patches stay off only once Hermes updated:
-    // after a failed update the old revision may still run their code.
-    const restore = () => removed.toReversed();
+    // until then the old revision may still run their code.
+    const restore = () =>
+      removed.toReversed().filter((patch) => !updated || patch.retired !== true);
     // A dropped connection interrupts this request mid-update. Whatever was
     // lifted off by then goes back on; reapplying is a no-op for a patch that
     // already went back, so the normal path running it first is harmless.
@@ -522,15 +524,13 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
       }
 
       const update = yield* runHermesUpdate(checkout);
+      updated = update.ok;
       if (!update.ok) {
         yield* Effect.logWarning("hermes update failed").pipe(
           Effect.annotateLogs({ output: outputTail(update.output) }),
         );
       }
-      const restored = yield* reapply(
-        checkout,
-        restore().filter((patch) => !update.ok || patch.retired !== true),
-      );
+      const restored = yield* reapply(checkout, restore());
       // Hermes and its patches changed, so provider snapshots re-probe. The
       // fast mode config opt-in stays: the patch went back on, or comes back
       // once a T3 Code update brings a version that fits.

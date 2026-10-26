@@ -50,11 +50,11 @@ export function describeHermesPatchHint(patch: HermesPatch): string {
     : HERMES_PATCH_STATE_HINTS[patch.state];
 }
 
-/** Whether to offer Update Hermes: it can run, and it would make a patch fit. */
+/** Whether to offer Update Hermes: it can run, and it would make a patch fit or retire one. */
 export function shouldOfferHermesUpdate(snapshot: HermesPatchesSnapshot): boolean {
   return (
     snapshot.canUpdateHermes === true &&
-    snapshot.patches.some((patch) => patch.reason === "hermesTooOld")
+    snapshot.patches.some((patch) => patch.reason === "hermesTooOld" || patch.retired === true)
   );
 }
 

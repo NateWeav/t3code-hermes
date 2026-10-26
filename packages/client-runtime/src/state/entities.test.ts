@@ -12,7 +12,12 @@ import {
 import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
-import { presentThreadShell, resolveThreadWorkingStartedAt } from "./models.ts";
+import {
+  presentThreadShell,
+  resolveThreadWorkingStartedAt,
+  threadIsMonitoring,
+  threadRuntimeCanArchive,
+} from "./models.ts";
 import { v2Projection, v2ThreadShell } from "./orchestrationV2TestFixtures.ts";
 import { deriveLatestThreadRun, deriveThreadRuntime } from "./threadExecution.ts";
 import { isThreadWorking } from "./threadInbox.ts";
@@ -70,6 +75,46 @@ describe("V2 client presentation", () => {
       expect(shell.hasPendingUserInput).toBe(true);
       expect(isThreadWorking(shell)).toBe(false);
     }
+  });
+
+  it("shows a live mirrored Hermes run as Working, and as Monitoring between turns", () => {
+    const hermesRun = {
+      profile: "upstream-sync",
+      sourceKey: "webhook:upstream-sync",
+      sourceLabel: "webhook/upstream-sync",
+      sessionId: "s1",
+      latestSessionId: "s1",
+      live: true,
+    };
+    const mirrored = {
+      ...v2ThreadShell,
+      latestRunId: null,
+      activeRunId: null,
+      activeProviderThreadId: null,
+      status: "idle" as const,
+      pendingBackgroundTasks: [],
+    };
+    const busy = presentThreadShell(environmentId, { ...mirrored, hermesRun });
+    expect(busy.runtime?.status).toBe("waiting");
+    expect(isThreadWorking(busy)).toBe(true);
+    expect(threadIsMonitoring(busy)).toBe(false);
+    expect(threadRuntimeCanArchive(busy.runtime)).toBe(true);
+
+    const idle = presentThreadShell(environmentId, {
+      ...mirrored,
+      hermesRun: { ...hermesRun, idle: true },
+    });
+    expect(idle.runtime).toBeNull();
+    expect(threadIsMonitoring(idle)).toBe(true);
+    expect(isThreadWorking(idle)).toBe(true);
+    expect(threadIsMonitoring({ ...idle, settledOverride: "settled" })).toBe(false);
+
+    const ended = presentThreadShell(environmentId, {
+      ...mirrored,
+      hermesRun: { ...hermesRun, live: false, idle: true },
+    });
+    expect(ended.runtime).toBeNull();
+    expect(isThreadWorking(ended)).toBe(false);
   });
 
   it("parks a thread that never ran at idle while a pull request watch holds it", () => {

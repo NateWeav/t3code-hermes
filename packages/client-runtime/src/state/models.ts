@@ -223,6 +223,19 @@ function shellRuntime(thread: OrchestrationV2ThreadShell): ThreadRuntimeSummary 
   const parkAtIdle =
     backgroundWorkHoldsCompletion(thread.pendingBackgroundTasks ?? []) &&
     thread.status !== "failed";
+  // A mirrored Hermes run works outside T3's runs, so its liveness is the only signal. It reads
+  // as Working (Monitoring between turns) yet stays archivable, since nothing here can stop it.
+  const hermesRun = thread.hermesRun;
+  if (hermesRun?.live === true && hermesRun.idle !== true && thread.activeRunId === null) {
+    return {
+      status: "waiting",
+      activeRunId: null,
+      providerInstanceId: thread.providerInstanceId,
+      providerName: null,
+      lastError: null,
+      updatedAt: iso(thread.updatedAt),
+    };
+  }
   if (thread.latestRunId === null && thread.activeProviderThreadId === null && !parkAtIdle) {
     return null;
   }
@@ -245,9 +258,10 @@ function shellRuntime(thread: OrchestrationV2ThreadShell): ThreadRuntimeSummary 
 }
 
 /**
- * The turn is over but a watched pull request or the only held provider monitors will wake it, so
- * lists show Monitoring. Running or failed runs, held subagents, and ready plans outrank it;
- * settled threads are excluded because their watches are held.
+ * The turn is over but a watched pull request, the only held provider monitors, or a mirrored
+ * Hermes run waiting between turns will wake it, so lists show Monitoring. Running or failed runs,
+ * held subagents, and ready plans outrank it; settled threads are excluded because their watches
+ * are held.
  */
 export function threadIsMonitoring(
   thread: Pick<
@@ -259,11 +273,13 @@ export function threadIsMonitoring(
     | "runtime"
     | "settledAt"
     | "settledOverride"
-  >,
+  > &
+    Partial<Pick<EnvironmentThreadShell, "hermesRun">>,
 ): boolean {
   if (threadRuntimeIsActive(thread.runtime) || thread.runtime?.status === "failed") return false;
   if (thread.interactionMode === "plan" && thread.hasActionableProposedPlan) return false;
   if (thread.settledOverride === "settled" || thread.settledAt !== null) return false;
+  if (thread.hermesRun?.live === true && thread.hermesRun.idle === true) return true;
   const held = thread.pendingBackgroundTasks.filter((task) =>
     backgroundWorkHoldsCompletion([task]),
   );

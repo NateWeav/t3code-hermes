@@ -148,7 +148,18 @@ export function upsertProviderWorkspaceSnapshot(
   };
 }
 
+const isIncompleteHermesProbe = (provider: ServerProvider): boolean =>
+  provider.driver === ProviderDriverKind.make("hermes") &&
+  provider.enabled &&
+  provider.installed &&
+  provider.auth.status === "unknown" &&
+  (provider.status === "warning" || provider.status === "error");
+
 const shouldRetainMissingProviderModels = (provider: ServerProvider): boolean => {
+  if (provider.driver === ProviderDriverKind.make("hermes")) {
+    return isIncompleteHermesProbe(provider);
+  }
+
   if (provider.driver === ProviderDriverKind.make("pi")) {
     // Pi auth becomes known only after inventory discovery: empty means unauthenticated; failed/interactive discovery preserves unknown auth and cached models.
     return !(
@@ -268,6 +279,16 @@ export const mergeProviderSnapshot = (
       : previousProvider.workspaceSnapshots !== undefined
         ? { workspaceSnapshots: previousProvider.workspaceSnapshots }
         : {}),
+    ...(isIncompleteHermesProbe(nextProvider)
+      ? {
+          slashCommands: [
+            ...nextProvider.slashCommands,
+            ...previousProvider.slashCommands.filter(
+              (command) => !nextProvider.slashCommands.some((next) => next.name === command.name),
+            ),
+          ],
+        }
+      : {}),
     ...(shouldRetainMissingOpenCodeMetadata(nextProvider)
       ? {
           slashCommands:

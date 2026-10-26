@@ -31,6 +31,7 @@ import type * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSession
 import {
   applyHermesAcpModelSelection,
   currentHermesModelIdFromSessionSetup,
+  hermesApprovalOptions,
   makeHermesAcpRuntime,
   normalizeHermesTerminalResult,
   preserveHermesAgentActivityTitle,
@@ -161,6 +162,7 @@ export function makeHermesAcpAdapterFlavor(
     clientCapabilitiesMeta: { "hermes.backgroundNotifications": true },
     wakeReceiptPromptMetaKey: "hermes.notificationIds",
     resolveModelId: (selection) => resolveHermesAcpBaseModelId(selection.model),
+    approvalOptions: hermesApprovalOptions,
     makeRuntime: (input) =>
       (options.makeRuntime ?? spawnRuntime)(input).pipe(
         Effect.tap((runtime) =>

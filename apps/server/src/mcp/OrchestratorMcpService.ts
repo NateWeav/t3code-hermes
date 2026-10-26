@@ -116,6 +116,19 @@ import * as SecretRequests from "../secrets/SecretRequests.ts";
 
 const DEFAULT_WAIT_TIMEOUT_MS = 10 * 60 * 1_000;
 const MAX_WAIT_TIMEOUT_MS = 60 * 60 * 1_000;
+/** Time for a timed-out wait's result to reach a caller whose transport limits call length. */
+const CALL_LIMIT_MARGIN_MS = 30_000;
+
+/** A wait that outlives the caller's call limit fails as a transport error instead of timing out. */
+function waitTimeoutMs(scope: McpInvocationScope, requested: number | undefined): number {
+  const timeoutMs = Math.min(
+    MAX_WAIT_TIMEOUT_MS,
+    Math.max(1, requested ?? DEFAULT_WAIT_TIMEOUT_MS),
+  );
+  return scope.callLimitMs === undefined
+    ? timeoutMs
+    : Math.min(timeoutMs, Math.max(1_000, scope.callLimitMs - CALL_LIMIT_MARGIN_MS));
+}
 const TASK_WAKE_EVENTS = [
   { thread: "parent", eventType: "subagent.updated" },
   { thread: "child", eventType: "run.updated" },
@@ -2020,11 +2033,7 @@ const make = Effect.gen(function* () {
           yield* Effect.sleep(Duration.millis(SECRET_REQUEST_POLL_INTERVAL_MS));
         }
       }).pipe(
-        Effect.timeoutOption(
-          Duration.millis(
-            Math.min(input.timeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS, MAX_WAIT_TIMEOUT_MS),
-          ),
-        ),
+        Effect.timeoutOption(Duration.millis(waitTimeoutMs(scope, input.timeoutMs))),
         Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.void : closeCard)),
       );
       if (Option.isNone(answered)) yield* closeCard;
@@ -2264,11 +2273,7 @@ const make = Effect.gen(function* () {
       if (input.mode !== "wait") {
         return yield* readTask(scope, taskId, false, true);
       }
-      const timeoutMs = Math.min(
-        MAX_WAIT_TIMEOUT_MS,
-        Math.max(1, input.timeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS),
-      );
-      const waited = yield* waitForTask(scope, taskId, timeoutMs);
+      const waited = yield* waitForTask(scope, taskId, waitTimeoutMs(scope, input.timeoutMs));
       if (Option.isSome(waited) && isTerminalTaskStatus(waited.value.status)) {
         return waited.value;
       }
@@ -2869,10 +2874,7 @@ const make = Effect.gen(function* () {
           projectId: target.thread.projectId,
           threadId: input.threadId,
           ...(input.runId === undefined ? {} : { runId: input.runId }),
-          timeoutMs: Math.min(
-            MAX_WAIT_TIMEOUT_MS,
-            Math.max(1, input.timeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS),
-          ),
+          timeoutMs: waitTimeoutMs(scope, input.timeoutMs),
         })
         .pipe(Effect.mapError(threadManagementFailure));
       const status = result.run === null ? "idle" : runOutcome(result.run);

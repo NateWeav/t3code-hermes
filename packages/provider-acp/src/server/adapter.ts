@@ -362,6 +362,19 @@ export interface AcpAdapterV2Flavor {
     readonly appendOutput: string;
   }>;
   readonly isPersistentBackgroundTool?: (toolCall: AcpToolCallState) => boolean;
+  /**
+   * Opts into `t3_background_wait` for agents that show work starting but not reliably ending.
+   * Reads a tool call before `normalizeToolCall`: `running` will wake the agent when it ends,
+   * `ended` it saw end. Wake turns release every mark, so a missed end only releases early.
+   */
+  readonly extractAwaitableBackgroundTasks?: (
+    toolCall: AcpToolCallState,
+    runningTaskIds: ReadonlySet<string>,
+  ) => ReadonlyArray<{
+    readonly taskId: string;
+    readonly status: "running" | "ended";
+    readonly description?: string;
+  }>;
   readonly isProviderWakeNotification?: (
     notification: EffectAcpSchema.SessionNotification,
   ) => boolean;
@@ -1974,6 +1987,68 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
 
         const emitProviderEvent = (event: ProviderAdapter.ProviderAdapterV2Event) =>
           Queue.offer(events, event).pipe(Effect.asVoid);
+
+        // `t3_background_wait` state (see `extractAwaitableBackgroundTasks`): running work the
+        // agent may mark, with its description, and the marked ids published as the root roster.
+        const awaitableBackgroundTasks = new Map<string, string | undefined>();
+        const awaitedBackgroundTaskIds = new Set<string>();
+        // Every root-thread emit carries the roster, so none clobbers it with a stale copy.
+        const withAwaitedBackgroundRoster = (
+          providerThread: OrchestrationV2ProviderThread,
+        ): OrchestrationV2ProviderThread =>
+          flavor.extractAwaitableBackgroundTasks === undefined
+            ? providerThread
+            : {
+                ...providerThread,
+                pendingBackgroundTasks: Array.from(awaitedBackgroundTaskIds, (taskId) => {
+                  const description = awaitableBackgroundTasks.get(taskId);
+                  return {
+                    taskId,
+                    kind: "command" as const,
+                    awaited: true as const,
+                    ...(description === undefined ? {} : { description }),
+                  };
+                }),
+              };
+        const emitAwaitedBackgroundRoster = Effect.fnUntraced(function* () {
+          const sessionId = yield* Ref.get(activeSessionId);
+          if (sessionId === null) return;
+          const known = (yield* Ref.get(providerThreadByNativeSessionId)).get(sessionId);
+          if (known === undefined) return;
+          const providerThread = withAwaitedBackgroundRoster({
+            ...known,
+            updatedAt: yield* DateTime.now,
+          });
+          yield* Ref.update(providerThreadByNativeSessionId, (current) =>
+            new Map(current).set(sessionId, providerThread),
+          );
+          yield* emitProviderEvent({ type: "provider_thread.updated", driver, providerThread });
+        });
+        // A wake or Stop may follow the end of any of them, and nothing names which.
+        const releaseAwaitableBackgroundTasks = () => {
+          awaitableBackgroundTasks.clear();
+          awaitedBackgroundTaskIds.clear();
+        };
+        const trackAwaitableBackgroundTasks =
+          /* Provider events include streaming deltas; avoid a span for each update. */
+          Effect.fnUntraced(function* (toolCall: AcpToolCallState) {
+            if (flavor.extractAwaitableBackgroundTasks === undefined) return;
+            const tasks = flavor.extractAwaitableBackgroundTasks(
+              toolCall,
+              new Set(awaitableBackgroundTasks.keys()),
+            );
+            let rosterChanged = false;
+            for (const task of tasks) {
+              if (task.status === "running") {
+                awaitableBackgroundTasks.set(task.taskId, task.description);
+              } else {
+                awaitableBackgroundTasks.delete(task.taskId);
+                rosterChanged = awaitedBackgroundTaskIds.delete(task.taskId) || rosterChanged;
+              }
+            }
+            if (rosterChanged) yield* emitAwaitedBackgroundRoster();
+          });
+
         let scheduleDeferredFinalize: (context: ActiveAcpTurn) => Effect.Effect<void> = () =>
           Effect.void;
 
@@ -3453,6 +3528,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           yield* closeTextStream(context, "user");
           const previous = context.tools.get(incoming.toolCallId);
           const merged = mergeToolCallState(previous, incoming);
+          yield* trackAwaitableBackgroundTasks(merged);
           const normalized = flavor.normalizeToolCall?.(merged) ?? merged;
           const backgroundTaskId = flavor.extractBackgroundTaskId?.(normalized);
           const backgroundCommandTaskId =
@@ -4600,7 +4676,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             );
             if (knownProviderThread !== undefined) {
               const now = yield* DateTime.now;
-              const providerThread: OrchestrationV2ProviderThread = {
+              const updated: OrchestrationV2ProviderThread = {
                 ...knownProviderThread,
                 contextUsage:
                   (yield* Ref.get(contextUsageBySessionId)).get(notification.sessionId) ??
@@ -4612,6 +4688,10 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                   null,
                 updatedAt: now,
               };
+              const providerThread =
+                notification.sessionId === (yield* Ref.get(activeSessionId))
+                  ? withAwaitedBackgroundRoster(updated)
+                  : updated;
               yield* Ref.update(providerThreadByNativeSessionId, (current) =>
                 new Map(current).set(notification.sessionId, providerThread),
               );
@@ -6956,6 +7036,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               yield* Ref.set(wakeReports, noWakeReports);
               yield* Ref.set(continuationRequested, false);
               yield* Ref.set(runningBackgroundTaskIds, new Set());
+              releaseAwaitableBackgroundTasks();
               yield* Ref.set(midTurnUnreportedCompletedTaskIds, new Set());
               yield* Ref.set(carryoverSubagents, null);
               yield* Ref.set(lastTurnRoute, null);
@@ -7047,7 +7128,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             threadId: context.input.threadId,
             providerTurn: turn,
           });
-          const updatedProviderThread: OrchestrationV2ProviderThread = {
+          const updatedProviderThread = withAwaitedBackgroundRoster({
             ...context.input.providerThread,
             providerSessionId: input.providerSessionId,
             status: "active",
@@ -7057,7 +7138,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             contextUsage: context.contextUsage,
             nativeMetadata: context.nativeMetadata,
             updatedAt: now,
-          };
+          });
           yield* Ref.update(providerThreadByNativeSessionId, (current) =>
             new Map(current).set(context.nativeThreadId, updatedProviderThread),
           );
@@ -7179,6 +7260,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             hasT3Mcp: mcpSession !== undefined,
             browserTools: mcpSession?.browserToolsAvailable ?? false,
             deviceTools: mcpSession?.capabilities?.has("device") ?? false,
+            backgroundWait: flavor.extractAwaitableBackgroundTasks !== undefined,
           } satisfies T3AcpInstructionState;
           const previousInstructionState = (yield* Ref.get(promptInstructionStates)).get(sessionId);
           const compactionMarker = (yield* Ref.get(compactionMarkers)).get(sessionId);
@@ -7368,6 +7450,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             const isContinuationTurn =
               (postSettleContinuationEnabled || followsAgentWorkState) &&
               acpIsProviderContinuationMessage(turnInput.message);
+            if (isContinuationTurn) releaseAwaitableBackgroundTasks();
             const isAppOwnedWakeTurn = acpIsAppOwnedWakeTurn(turnInput.message);
             if (!isAppOwnedWakeTurn) {
               yield* Ref.set(midTurnUnreportedCompletedTaskIds, new Set());
@@ -7482,14 +7565,14 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               threadId: turnInput.threadId,
               providerTurn: runningTurn,
             });
-            const activeProviderThread: OrchestrationV2ProviderThread = {
+            const activeProviderThread = withAwaitedBackgroundRoster({
               ...turnInput.providerThread,
               providerSessionId: input.providerSessionId,
               status: "active",
               contextUsage: context.contextUsage,
               nativeMetadata: context.nativeMetadata,
               updatedAt: startedAt,
-            };
+            });
             yield* Ref.update(providerThreadByNativeSessionId, (current) =>
               new Map(current).set(requestedSessionId, activeProviderThread),
             );
@@ -7785,6 +7868,10 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           providerSessionId: input.providerSessionId,
           providerSession,
           events: Stream.fromEffectRepeat(Queue.take(events)),
+          // A closed runtime sees no wake turn, so nothing would release its marks.
+          ...(flavor.extractAwaitableBackgroundTasks === undefined
+            ? {}
+            : { backgroundTasksEndWithProcess: true as const }),
           ...(flavor.getModelContextWindow === undefined
             ? {}
             : {
@@ -7815,6 +7902,8 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                   if ((yield* Ref.get(wakeBuffer)).length > 0) return true;
                   if (yield* Ref.get(continuationRequested)) return true;
                   if ((yield* Ref.get(runningBackgroundTaskIds)).size > 0) return true;
+                  // Keeps the runtime that will see the wake turn alive.
+                  if (awaitedBackgroundTaskIds.size > 0) return true;
                   const active = yield* Ref.get(activeTurn);
                   if (
                     active !== null &&
@@ -7941,6 +8030,29 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                   }),
               }
             : {}),
+          ...(flavor.extractAwaitableBackgroundTasks === undefined
+            ? {}
+            : {
+                awaitBackgroundTasks: Effect.fn("AcpAdapterV2.awaitBackgroundTasks")(
+                  function* ({ providerThread, taskIds, awaited }) {
+                    const sessionId = yield* Ref.get(activeSessionId);
+                    if (providerThread.nativeThreadRef?.nativeId !== sessionId) {
+                      return { matched: [] };
+                    }
+                    const matched = [...new Set(taskIds)].filter((taskId) =>
+                      awaitableBackgroundTasks.has(taskId),
+                    );
+                    if (matched.length === 0) return { matched };
+                    for (const taskId of matched) {
+                      if (awaited) awaitedBackgroundTaskIds.add(taskId);
+                      else awaitedBackgroundTaskIds.delete(taskId);
+                    }
+                    yield* emitAwaitedBackgroundRoster();
+                    return { matched };
+                  },
+                  (effect) => runtimeCallbackPermit.withPermit(effect),
+                ),
+              }),
           steerTurn: (turnInput) =>
             Effect.fail(
               new ProviderAdapter.ProviderAdapterSteerRunUnsupportedError({
@@ -8428,6 +8540,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                             yield* Ref.set(continuationRequested, false);
                             yield* Ref.set(runningBackgroundTaskIds, new Set());
                             yield* Ref.set(endedBackgroundTaskIds, new Set());
+                            releaseAwaitableBackgroundTasks();
                             yield* Ref.set(midTurnUnreportedCompletedTaskIds, new Set());
                             yield* Ref.set(handledBackgroundTaskIdsInActiveTurn, new Set());
                             yield* Ref.set(carryoverSubagents, null);

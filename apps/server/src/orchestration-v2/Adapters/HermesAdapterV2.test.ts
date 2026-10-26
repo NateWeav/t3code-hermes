@@ -17,6 +17,7 @@ import {
 } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { resolveSelfInvocation } from "@t3tools/shared/nodeRuntime";
+import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -44,6 +45,7 @@ import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderS
 import {
   ProviderAdapterV2RuntimePolicy,
   type ProviderAdapterV2Event,
+  type ProviderAdapterV2SessionRuntime,
   type ProviderAdapterV2TurnInput,
 } from "@t3tools/provider-core/server/ProviderAdapter";
 import type { ProviderContinuationRequest } from "@t3tools/provider-core/server/ProviderContinuationRequests";
@@ -160,6 +162,13 @@ const runMockTurn = (input: {
   readonly idleUpdates?: ReadonlyArray<EffectAcpSchema.SessionUpdate>;
   /** Runs the buffered continuation the idle updates offered, through its quiet window. */
   readonly runContinuation?: boolean;
+  /** Runs after the first turn ends, before `idleUpdates`: what a caller does between runs. */
+  readonly afterTurn?: (input: {
+    readonly session: ProviderAdapterV2SessionRuntime;
+    readonly providerThread: OrchestrationV2ProviderThread;
+  }) => Effect.Effect<void>;
+  /** Session updates a second, user-sent prompt delivers, run after `afterTurn`. */
+  readonly followUpPromptUpdates?: ReadonlyArray<EffectAcpSchema.SessionUpdate>;
 }) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
@@ -185,7 +194,7 @@ const runMockTurn = (input: {
       ...input.mockEnvironment,
     };
     const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-    const promptUpdates = input.promptUpdates;
+    const promptUpdates = [input.promptUpdates, input.followUpPromptUpdates];
     const idleUpdates = input.idleUpdates;
     let sessionIdSeen: string | undefined;
     type Runtime = AcpSessionRuntime.AcpSessionRuntime["Service"];
@@ -194,7 +203,7 @@ const runMockTurn = (input: {
       instanceId,
       settings,
       environment,
-      ...(promptUpdates === undefined && idleUpdates === undefined
+      ...(input.promptUpdates === undefined && idleUpdates === undefined
         ? {}
         : {
             makeRuntime: ({ runtimePolicy: _policy, ...runtimeInput }) =>
@@ -214,7 +223,7 @@ const runMockTurn = (input: {
                     Effect.gen(function* () {
                       const { sessionId } = yield* runtime.start();
                       sessionIdSeen = sessionId;
-                      for (const update of promptUpdates ?? [])
+                      for (const update of promptUpdates.shift() ?? [])
                         yield* deliver!({ sessionId, update });
                       return { stopReason: "end_turn" as const };
                     }),
@@ -260,6 +269,22 @@ const runMockTurn = (input: {
       Stream.runCollect,
     );
     const events: Array<ProviderAdapterV2Event> = Array.from(yield* untilTerminal);
+    if (input.afterTurn !== undefined) yield* input.afterTurn({ session, providerThread });
+    let ordinal = 1;
+    if (input.followUpPromptUpdates !== undefined) {
+      ordinal += 1;
+      yield* session.startTurn(
+        turnInput({
+          threadId,
+          providerThread,
+          runtimePolicy: policy,
+          now: yield* DateTime.now,
+          model: modelSelection.model,
+          ordinal,
+        }),
+      );
+      events.push(...(yield* untilTerminal));
+    }
     for (const update of idleUpdates ?? []) {
       yield* deliver!({ sessionId: sessionIdSeen!, update });
     }
@@ -270,7 +295,7 @@ const runMockTurn = (input: {
         runtimePolicy: policy,
         now: yield* DateTime.now,
         model: modelSelection.model,
-        ordinal: 2,
+        ordinal: ordinal + 1,
       });
       yield* session.startTurn({
         ...continuation,
@@ -551,7 +576,146 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
       assert.equal(wakeTerminal?.type === "turn.terminal" && wakeTerminal.status, "completed");
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
+
+  it.effect("holds on a notifying background command the agent marks until it sees it end", () =>
+    Effect.gen(function* () {
+      let matched: ReadonlyArray<string> = [];
+      const { events } = yield* runMockTurn({
+        name: "background-wait-exit",
+        mockEnvironment: {},
+        promptUpdates: [
+          ...hermesBackgroundStart({ toolCallId: "tc-tests", processId: TESTS_PROC, notify: true }),
+          // No completion wake is armed, so nothing could release a hold on it.
+          ...hermesBackgroundStart({ toolCallId: "tc-dev", processId: DEV_PROC, notify: false }),
+        ],
+        afterTurn: ({ session, providerThread }) =>
+          Effect.gen(function* () {
+            ({ matched } = yield* session.awaitBackgroundTasks!({
+              providerThread,
+              taskIds: [TESTS_PROC, DEV_PROC],
+              awaited: true,
+            }));
+          }).pipe(Effect.orDie),
+        followUpPromptUpdates: [
+          {
+            sessionUpdate: "tool_call",
+            toolCallId: "tc-wait",
+            title: "process_manage: wait aaaa1111",
+            kind: "other",
+            // Hermes takes any unique prefix, and its `wait` result omits the id.
+            rawInput: { action: "wait", session_id: "aaaa1111" },
+          },
+          {
+            sessionUpdate: "tool_call_update",
+            toolCallId: "tc-wait",
+            kind: "other",
+            status: "completed",
+            content: [
+              {
+                type: "content",
+                content: {
+                  type: "text",
+                  text: "process_manage result\n- **status:** exited\n- **exit_code:** 0",
+                },
+              },
+            ],
+          },
+        ],
+      });
+      assert.deepEqual(matched, [TESTS_PROC]);
+      const rosters = providerThreadRosters(events);
+      const held = rosters.find((roster) => roster.length > 0);
+      assert.deepEqual(held, [
+        { taskId: TESTS_PROC, kind: "command", awaited: true, description: "pnpm test" },
+      ]);
+      assert.isTrue(backgroundWorkHoldsCompletion(held ?? []));
+      assert.deepEqual(rosters.at(-1), []);
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+
+  it.effect("releases the marks when Hermes wakes the agent", () =>
+    Effect.gen(function* () {
+      const offers = yield* Queue.unbounded<ProviderContinuationRequest>();
+      const { events } = yield* runMockTurn({
+        name: "background-wait-wake",
+        mockEnvironment: {},
+        promptUpdates: hermesBackgroundStart({
+          toolCallId: "tc-tests",
+          processId: TESTS_PROC,
+          notify: true,
+        }),
+        afterTurn: ({ session, providerThread }) =>
+          session.awaitBackgroundTasks!({
+            providerThread,
+            taskIds: [TESTS_PROC],
+            awaited: true,
+          }).pipe(Effect.asVoid, Effect.orDie),
+        idleUpdates: [
+          {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "Tests passed." },
+          },
+        ],
+        continuationRequests: {
+          offer: (request) => Queue.offer(offers, request).pipe(Effect.asVoid),
+        },
+        runContinuation: true,
+      });
+      // Hermes's notice names no process, so the wake releases every mark.
+      const firstTerminal = events.findIndex((event) => event.type === "turn.terminal");
+      const rosters = providerThreadRosters(events.slice(firstTerminal + 1));
+      assert.lengthOf(rosters[0] ?? [], 1);
+      assert.deepEqual(rosters.slice(1), [[], []]);
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
 });
+
+const TESTS_PROC = "proc_aaaa11112222";
+const DEV_PROC = "proc_bbbb33334444";
+
+/** A `terminal` background start as Hermes's gateway projects it to ACP viewers. */
+const hermesBackgroundStart = (input: {
+  readonly toolCallId: string;
+  readonly processId: string;
+  readonly notify: boolean;
+}): ReadonlyArray<EffectAcpSchema.SessionUpdate> => {
+  const command = input.notify ? "pnpm test" : "pnpm dev";
+  const fields = [
+    "- **output:** Background process started",
+    `- **session_id:** ${input.processId}`,
+    "- **pid:** 42",
+    "- **exit_code:** 0",
+    ...(input.notify ? ["- **notify_on_complete:** True"] : []),
+  ];
+  return [
+    {
+      sessionUpdate: "tool_call",
+      toolCallId: input.toolCallId,
+      title: `terminal: ${command}`,
+      kind: "execute",
+      content: [{ type: "content", content: { type: "text", text: `$ ${command}` } }],
+    },
+    {
+      sessionUpdate: "tool_call_update",
+      toolCallId: input.toolCallId,
+      kind: "execute",
+      status: "completed",
+      content: [
+        {
+          type: "content",
+          content: { type: "text", text: ["terminal result", ...fields].join("\n") },
+        },
+      ],
+    },
+  ];
+};
+
+const providerThreadRosters = (events: ReadonlyArray<ProviderAdapterV2Event>) =>
+  events.flatMap((event) =>
+    event.type === "provider_thread.updated"
+      ? [event.providerThread.pendingBackgroundTasks ?? []]
+      : [],
+  );
 
 const hermesPromptError = (details: string) =>
   new EffectAcpErrors.AcpRequestError({

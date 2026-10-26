@@ -66,7 +66,7 @@ describe("writeHermesT3SubagentsOnly", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("leaves missing, unparseable and string-valued configs alone", () =>
+  it.effect("leaves missing, unreadable, unparseable and string-valued configs alone", () =>
     Effect.gen(function* () {
       const missing = yield* withConfig(null);
       yield* writeHermesT3SubagentsOnly({ configFile: missing.configFile, enabled: false });
@@ -79,6 +79,17 @@ describe("writeHermesT3SubagentsOnly", () => {
       });
       assert.strictEqual(brokenOutcome._tag, "parseFailed");
       assert.strictEqual(yield* broken.read, "agent: [unclosed\n");
+
+      const unreadable = yield* withConfig("model:\n  default: gpt-6.1-sol\n");
+      const fileSystem = yield* FileSystem.FileSystem;
+      yield* fileSystem.chmod(unreadable.configFile, 0o000);
+      const unreadableOutcome = yield* writeHermesT3SubagentsOnly({
+        configFile: unreadable.configFile,
+        enabled: true,
+      });
+      yield* fileSystem.chmod(unreadable.configFile, 0o600);
+      assert.strictEqual(unreadableOutcome._tag, "readFailed");
+      assert.strictEqual(yield* unreadable.read, "model:\n  default: gpt-6.1-sol\n");
 
       const scalar = yield* withConfig("agent:\n  disabled_toolsets: web, memory\n");
       assert.deepStrictEqual(

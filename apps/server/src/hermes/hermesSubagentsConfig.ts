@@ -19,6 +19,7 @@ const MARKER = " managed by T3 Code (Use T3 Code subagents only)";
 type HermesSubagentsConfigOutcome =
   | { readonly _tag: "written" }
   | { readonly _tag: "unchanged" }
+  | { readonly _tag: "readFailed"; readonly detail: string }
   | { readonly _tag: "parseFailed"; readonly detail: string }
   /** `disabled_toolsets` is a string or other non-list value, left as the user wrote it. */
   | { readonly _tag: "unsupported" }
@@ -38,9 +39,11 @@ export const writeHermesT3SubagentsOnly = Effect.fn(
   readonly enabled: boolean;
 }): Effect.fn.Return<HermesSubagentsConfigOutcome, never, FileSystem.FileSystem | Path.Path> {
   const fs = yield* FileSystem.FileSystem;
-  const existing = yield* fs
-    .readFileString(input.configFile)
-    .pipe(Effect.orElseSucceed(() => null));
+  const read = yield* fs.readFileString(input.configFile).pipe(Effect.result);
+  if (Result.isFailure(read) && read.failure.reason._tag !== "NotFound") {
+    return { _tag: "readFailed", detail: read.failure.reason._tag } as const;
+  }
+  const existing = Result.isSuccess(read) ? read.success : null;
   if (existing === null && !input.enabled) return { _tag: "unchanged" } as const;
 
   const document = parseDocument(existing ?? "");

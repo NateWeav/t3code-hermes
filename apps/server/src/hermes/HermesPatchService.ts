@@ -490,7 +490,8 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
     if (userEdits.size > 0) return yield* refuseLocalChanges([...userEdits].sort());
 
     const removed: HermesPatchDefinition[] = [];
-    // Back on in stack order. Retired patches stay off once Hermes updated.
+    // Back on in stack order. Retired patches stay off only once Hermes updated:
+    // after a failed update the old revision may still run their code.
     const restore = () => removed.toReversed();
     // A dropped connection interrupts this request mid-update. Whatever was
     // lifted off by then goes back on; reapplying is a no-op for a patch that
@@ -528,7 +529,7 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
       }
       const restored = yield* reapply(
         checkout,
-        restore().filter((patch) => patch.retired !== true),
+        restore().filter((patch) => !update.ok || patch.retired !== true),
       );
       // Hermes and its patches changed, so provider snapshots re-probe. The
       // fast mode config opt-in stays: the patch went back on, or comes back

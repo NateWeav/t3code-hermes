@@ -409,6 +409,25 @@ describe("HermesPatchService.updateHermes", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("puts a retired patch back when the update fails, since Hermes did not move", () =>
+    Effect.gen(function* () {
+      const hermes = yield* makeHermes;
+      const patch = { ...hermes.patch([hermes.newerVersion, hermes.olderVersion]), retired: true };
+      NodeFS.writeFileSync(NodePath.join(hermes.base, "fail"), "");
+      NodeFS.writeFileSync(NodePath.join(hermes.base, "older.patch"), hermes.olderVersion.content);
+      git(hermes.root, "apply", NodePath.join(hermes.base, "older.patch"));
+      yield* Effect.gen(function* () {
+        const service = yield* HermesPatchService;
+        const result = yield* service.updateHermes;
+        assert.isTrue(result.updateFailed);
+        assert.deepStrictEqual(result.reapplied, [patch.id]);
+        assert.strictEqual(hermes.head(), hermes.older);
+        assert.strictEqual(hermes.read(), "backend = local\nremote_cwd = configured()\n");
+        assert.isTrue(result.snapshot.patches[0]?.retired);
+      }).pipe(withService(hermes.binaryPath, [patch]));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("lifts a patch built on another off first, and puts both back in stack order", () =>
     Effect.gen(function* () {
       const hermes = yield* makeHermes;

@@ -765,8 +765,17 @@ export const HermesSettings = makeProviderSettingsSchema(
       Schema.withDecodingDefault(Effect.succeed([])),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
+    t3SubagentsOnly: Schema.Boolean.pipe(
+      Schema.withDecodingDefault(Effect.succeed(false)),
+      Schema.annotateKey({
+        title: "Use T3 Code subagents only",
+        description:
+          "Turns off Hermes's own subagent tool so agents delegate through T3 Code, which tracks each subagent and returns its result. Adds `delegation` to `agent.disabled_toolsets` in Hermes's config.yaml, which also applies to the Hermes CLI and gateway.",
+        providerSettingsForm: { control: "switch" },
+      }),
+    ),
   },
-  { order: ["binaryPath"] },
+  { order: ["binaryPath", "t3SubagentsOnly"] },
 );
 export type HermesSettings = typeof HermesSettings.Type;
 

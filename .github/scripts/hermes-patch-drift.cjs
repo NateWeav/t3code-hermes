@@ -7,7 +7,14 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
-const STATUSES = ["ok", "doesNotApply", "obsolete", "stackConflict", "testsFailed"];
+const STATUSES = [
+  "ok",
+  "doesNotApply",
+  "obsolete",
+  "stackConflict",
+  "inProcessOnly",
+  "testsFailed",
+];
 // Run for every patch: the ACP adapter suite and the webhook close test cover
 // the code paths T3 Code relies on even where a patch adds no test of its own.
 const EXTRA_TEST_DIRS = ["tests/acp_adapter"];
@@ -15,12 +22,13 @@ const EXTRA_TEST_FILES = ["tests/gateway/test_webhook_session_close.py"];
 const TEST_TIMEOUT_MS = 600_000;
 const WHOLE_FILE = "(whole file: crashed or timed out)";
 
-/** The newest version of each patch, in manifest (stack) order. */
+/** The newest version of each live patch, in manifest (stack) order. Retired ones only get removed. */
 function newestVersions(manifest, manifestDir) {
-  if (!Array.isArray(manifest?.patches) || manifest.patches.length === 0) {
-    throw new Error("patches.json has no patches");
-  }
-  return manifest.patches.map((patch) => {
+  const live = Array.isArray(manifest?.patches)
+    ? manifest.patches.filter((patch) => !patch.retired)
+    : [];
+  if (live.length === 0) throw new Error("patches.json has no live patches");
+  return live.map((patch) => {
     const newest = patch.versions?.[0];
     if (!newest?.file || !/^[0-9a-f]{40}$/.test(newest.hermesCommit ?? "")) {
       throw new Error(`${patch.id}: newest version needs a file and a 40-hex hermesCommit`);
@@ -42,6 +50,32 @@ function patchTestFiles(patchText) {
     if (/^tests\/(?:.+\/)?test_[^/]+\.py$/.test(file)) files.push(file);
   }
   return [...new Set(files)];
+}
+
+/**
+ * `hermes acp` is a gateway viewer (`GatewayACPAgent`); the in-process server runs only in tests. A
+ * patch changing `acp_adapter/` must test the agent `hermes acp` builds, and must not force the
+ * in-process one, or it can pass every check while doing nothing.
+ */
+function inProcessOnly(patchText) {
+  let file = "";
+  let changesAdapter = false;
+  let viewerTest = false;
+  let forcesInProcess = false;
+  for (const line of patchText.split("\n")) {
+    const header = /^diff --git a\/\S+ b\/(\S+)$/.exec(line);
+    if (header) {
+      file = header[1];
+      if (file.startsWith("acp_adapter/")) changesAdapter = true;
+      continue;
+    }
+    if (!file.startsWith("tests/") || !line.startsWith("+") || line.startsWith("+++")) continue;
+    if (/\bGatewayACPAgent\b|\bHermesACPAgent\(\s*\)/.test(line)) viewerTest = true;
+    if (/\bHermesACPAgent\.__new__\(|\bHermesACPAgent\(\s*session_manager\b/.test(line)) {
+      forcesInProcess = true;
+    }
+  }
+  return changesAdapter && (!viewerTest || forcesInProcess);
 }
 
 /** Every test file to run: each patch's own, plus the fixed extras present in the checkout. */
@@ -139,6 +173,7 @@ function decide(state) {
     // Applying on the patches before it is enough: it may build on them.
     else if (!patch.apply && !patch.stack) status = "doesNotApply";
     else if (patch.stack === false) status = "stackConflict";
+    else if (patch.inProcessOnly) status = "inProcessOnly";
     else if (failing.get(patch.id).length > 0) status = "testsFailed";
     return {
       id: patch.id,
@@ -175,6 +210,9 @@ function formatReport({ hermesSha, results, runUrl }) {
     "`doesNotApply`: the newest version applies neither alone nor on top of the patches listed",
     "before it. `obsolete`: it reverse-applies, so Hermes main already carries the change.",
     "`stackConflict`: it applies alone but not on top of the patches listed before it.",
+    "`inProcessOnly`: it changes `acp_adapter/`, but no test of it builds the agent `hermes acp`",
+    "builds (`HermesACPAgent()` or `GatewayACPAgent`), or one forces the in-process server, which",
+    "`hermes acp` no longer runs. Port it to the gateway viewer, or retire it.",
     "`testsFailed`: the listed test files fail with every patch applied but not on unpatched main.",
     "",
     "Add a rebased version (see `infra/hermes/README.md`), or delete an obsolete patch.",
@@ -210,6 +248,7 @@ function check({ hermes, state: statePath, manifest: manifestPath }) {
   if (status) throw new Error(`${hermes} has local changes; check needs a clean checkout`);
 
   const patches = newestVersions(manifest, path.dirname(manifestFile)).map((patch) => {
+    const text = fs.readFileSync(patch.path, "utf8");
     const apply = git(hermes, ["apply", "--check", patch.path]);
     const reverse = git(hermes, ["apply", "--check", "-R", patch.path]);
     const onMain =
@@ -218,7 +257,7 @@ function check({ hermes, state: statePath, manifest: manifestPath }) {
       ? Number(git(hermes, ["rev-list", "--count", `${patch.hermesCommit}..HEAD`]).stdout.trim())
       : null;
     console.log(
-      `${patch.id}: apply=${apply.status === 0} reverse=${reverse.status === 0} onMain=${onMain} behind=${behind}`,
+      `${patch.id}: apply=${apply.status === 0} reverse=${reverse.status === 0} onMain=${onMain} behind=${behind} inProcessOnly=${inProcessOnly(text)}`,
     );
     if (apply.status !== 0) console.log(apply.stderr.trim());
     return {
@@ -228,7 +267,8 @@ function check({ hermes, state: statePath, manifest: manifestPath }) {
       onMain,
       behind,
       stack: null,
-      testFiles: patchTestFiles(fs.readFileSync(patch.path, "utf8")),
+      testFiles: patchTestFiles(text),
+      inProcessOnly: inProcessOnly(text),
     };
   });
 
@@ -381,6 +421,7 @@ module.exports = {
   WHOLE_FILE,
   newestVersions,
   patchTestFiles,
+  inProcessOnly,
   allTestFiles,
   ownersOfTestFile,
   parsePytestFailures,

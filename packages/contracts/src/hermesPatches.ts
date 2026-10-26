@@ -44,6 +44,8 @@ export const HermesPatch = Schema.Struct({
   state: HermesPatchState,
   /** Set only for `doesNotApply`. Absent from older servers. */
   reason: ForwardCompatibleOptional(HermesPatchMisfitReason),
+  /** No longer applied, only removed. Listed only while still applied. */
+  retired: ForwardCompatibleOptional(Schema.Boolean),
 });
 export type HermesPatch = typeof HermesPatch.Type;
 

@@ -29,6 +29,8 @@ export interface HermesPatchDefinition {
   readonly id: HermesPatchId;
   readonly title: string;
   readonly neededFor: string;
+  /** Kept only so a checkout that has it can remove it: never applied, and listed only while applied. */
+  readonly retired?: boolean;
   /** Newest first. */
   readonly versions: ReadonlyArray<HermesPatchVersion>;
 }
@@ -44,6 +46,7 @@ export const HERMES_PATCHES: ReadonlyArray<HermesPatchDefinition> = HERMES_PATCH
     id: HermesPatchId.make(patch.id),
     title: patch.title,
     neededFor: patch.neededFor,
+    ...(patch.retired === true ? { retired: true } : {}),
     versions: patch.versions.map(({ hermesCommit, hermesCommitDate, content }) => ({
       hermesCommit,
       hermesCommitDate,
@@ -288,20 +291,28 @@ const pickAppliedVersion = Effect.fn("pickHermesAppliedVersion")(function* (
   if (exact.length > 0) {
     return exact.every((check) => check.tree === exact[0]!.tree) ? exact[0]!.file : null;
   }
-  // Otherwise take only a lone version that applies to HEAD without also reversing from it: HEAD
-  // can hold a patch's before and after text in different places, and reversing would rewrite
-  // upstream text.
+  // Otherwise take only a lone version that applies to HEAD, or on another patch's version it
+  // builds on, without also reversing from HEAD: HEAD can hold a patch's before and after text in
+  // different places, and reversing would rewrite upstream text.
   if (candidates.length !== 1) return null;
-  const onHead = checks.filter((check) => check.onHead);
-  if (onHead.length !== 1) return null;
+  const only = candidates[0]!;
   const headEnv = { GIT_INDEX_FILE: path.join(directory, "index-head") };
   if ((yield* runGit(checkoutRoot, ["read-tree", "HEAD"], headEnv)).code !== 0) return null;
   const reversesOnHead = yield* runGit(
     checkoutRoot,
-    ["apply", "--check", "--cached", "-R", onHead[0]!.file],
+    ["apply", "--check", "--cached", "-R", only],
     headEnv,
   );
-  return reversesOnHead.code === 0 ? null : onHead[0]!.file;
+  if (reversesOnHead.code === 0) return null;
+  if (checks[0]!.onHead) return only;
+  for (const [index, base] of allOthers.flat().entries()) {
+    const env = { GIT_INDEX_FILE: path.join(directory, `index-base-${index}`) };
+    if ((yield* runGit(checkoutRoot, ["read-tree", "HEAD"], env)).code !== 0) continue;
+    if ((yield* runGit(checkoutRoot, ["apply", "--cached", base], env)).code !== 0) continue;
+    const builds = yield* runGit(checkoutRoot, ["apply", "--check", "--cached", only], env);
+    if (builds.code === 0) return only;
+  }
+  return null;
 }, Effect.scoped);
 
 /**
@@ -610,11 +621,13 @@ export const readHermesPatches = Effect.fn("readHermesPatches")(function* (
     : null;
   const statuses: HermesPatch[] = [];
   for (const { patch, state } of resolved) {
+    if (patch.retired === true && state !== "applied") continue;
     const status: HermesPatch = {
       id: patch.id,
       title: patch.title,
       neededFor: patch.neededFor,
       state,
+      ...(patch.retired === true ? { retired: true } : {}),
     };
     statuses.push(
       state === "doesNotApply" && userEdits !== null
@@ -627,7 +640,7 @@ export const readHermesPatches = Effect.fn("readHermesPatches")(function* (
 
 /**
  * Applies (`forward`) or removes (`reverse`) one patch all-or-nothing, returning whether git
- * accepted it. `patches` are those that may be applied alongside, so shared-file changes are told
+ * accepted it and the state it found. `patches` are those that may be applied alongside, so shared-file changes are told
  * apart.
  */
 export const changeHermesPatch = Effect.fn("changeHermesPatch")(function* (
@@ -642,10 +655,10 @@ export const changeHermesPatch = Effect.fn("changeHermesPatch")(function* (
   ]);
   const { state, file } = yield* resolvePatchState(checkoutRoot, patch, files);
   const expected: HermesPatchState = direction === "forward" ? "notApplied" : "applied";
-  if (state !== expected || file === null) return { ok: false } as const;
+  if (state !== expected || file === null) return { ok: false, state } as const;
   const result = yield* runGit(
     checkoutRoot,
     direction === "forward" ? ["apply", file] : ["apply", "-R", file],
   );
-  return { ok: result.code === 0 } as const;
+  return { ok: result.code === 0, state } as const;
 }, Effect.scoped);

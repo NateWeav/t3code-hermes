@@ -158,8 +158,6 @@ const runMockTurn = (input: {
    * gateway projects when it runs a turn of its own for a finished background job.
    */
   readonly idleUpdates?: ReadonlyArray<EffectAcpSchema.SessionUpdate>;
-  /** Text of a wake turn run after the first, as the continuation worker would send it. */
-  readonly wakeTurnText?: Effect.Effect<string>;
   /** Runs the buffered continuation the idle updates offered, through its quiet window. */
   readonly runContinuation?: boolean;
 }) =>
@@ -284,26 +282,6 @@ const runMockTurn = (input: {
         },
       });
       yield* TestClock.adjust("3 seconds");
-      events.push(...(yield* untilTerminal));
-    }
-    if (input.wakeTurnText !== undefined) {
-      const wake = turnInput({
-        threadId,
-        providerThread,
-        runtimePolicy: policy,
-        now: yield* DateTime.now,
-        model: modelSelection.model,
-        ordinal: 2,
-      });
-      yield* session.startTurn({
-        ...wake,
-        message: {
-          ...wake.message,
-          createdBy: "agent",
-          creationSource: "server",
-          text: yield* input.wakeTurnText,
-        },
-      });
       events.push(...(yield* untilTerminal));
     }
     const requests = (yield* fileSystem.readFileString(requestLogPath))
@@ -480,26 +458,6 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 
-  it.effect("prompts Hermes with its notice once background work finishes", () =>
-    Effect.gen(function* () {
-      const offers = yield* Queue.unbounded<ProviderContinuationRequest>();
-      yield* runMockTurn({
-        name: "wake",
-        mockEnvironment: {
-          T3_ACP_HERMES_BACKGROUND: "1",
-          T3_ACP_HERMES_BACKGROUND_FINISH: "after-turn",
-        },
-        continuationRequests: {
-          offer: (request) => Queue.offer(offers, request).pipe(Effect.asVoid),
-        },
-      });
-      const offer = yield* Queue.take(offers);
-      assert.equal(offer.delivery, "message_text");
-      assert.include(offer.detail ?? "", "Background process proc_ci000001 exited");
-      assert.equal(offer.notification?.source.kind, "background_task");
-    }).pipe(Effect.provide(testLayer), Effect.scoped),
-  );
-
   it.effect("offers a wake run for a turn the Hermes gateway runs after the prompt settled", () =>
     Effect.gen(function* () {
       const offers = yield* Queue.unbounded<ProviderContinuationRequest>();
@@ -535,37 +493,6 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
       );
       const wakeTerminal = wakeEvents.at(-1);
       assert.equal(wakeTerminal?.type === "turn.terminal" && wakeTerminal.status, "completed");
-    }).pipe(Effect.provide(testLayer), Effect.scoped),
-  );
-
-  it.effect("hands a notice's receipt back on its wake prompt and ignores re-sends", () =>
-    Effect.gen(function* () {
-      const offers = yield* Queue.unbounded<ProviderContinuationRequest>();
-      const { requests } = yield* runMockTurn({
-        name: "wake-receipt",
-        mockEnvironment: {
-          T3_ACP_HERMES_BACKGROUND: "1",
-          T3_ACP_HERMES_BACKGROUND_FINISH: "after-turn",
-          T3_ACP_HERMES_NOTIFICATION_ID: "deleg-receipt-1",
-          T3_ACP_HERMES_REPEAT_NOTIFICATION: "1",
-        },
-        continuationRequests: {
-          offer: (request) => Queue.offer(offers, request).pipe(Effect.asVoid),
-        },
-        wakeTurnText: Queue.take(offers).pipe(Effect.map((offer) => offer.detail ?? "")),
-      });
-      const initialize = requests.find((request) => request.method === "initialize");
-      assert.deepEqual(
-        (initialize?.params as { readonly clientCapabilities?: { readonly _meta?: unknown } })
-          ?.clientCapabilities?._meta,
-        { "hermes.backgroundNotifications": true },
-      );
-      const promptMeta = requests
-        .filter((request) => request.method === "session/prompt")
-        .map((request) => (request.params as { readonly _meta?: unknown })._meta);
-      assert.deepEqual(promptMeta, [undefined, { "hermes.notificationIds": ["deleg-receipt-1"] }]);
-      // The notice arrived three times before the wake turn finished; one woke it.
-      assert.equal(yield* Queue.size(offers), 0);
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 });

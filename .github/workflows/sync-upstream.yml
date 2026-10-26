@@ -49,7 +49,6 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       UPSTREAM_URL: https://github.com/pingdotgg/t3code
       CONFLICT_LABEL: upstream-sync-conflict
-      PARITY_LABEL: hermes-parity-review
     steps:
       # GitHub holds `pull_request` runs on a PR opened with GITHUB_TOKEN until
       # a maintainer approves them, so auto-merge never fires. A GitHub App
@@ -347,89 +346,6 @@ jobs:
           fi
           echo "pr_url=$pr_url" >> "$GITHUB_OUTPUT"
           gh pr merge "$pr_url" --auto --merge --match-head-commit "$head_sha"
-
-      # Advisory, after proposing the sync: this heuristic must never prevent
-      # a clean merge from reaching its PR.
-      - id: drift
-        name: Check sibling adapter drift
-        if: steps.merge.outputs.status == 'ready' || steps.merge.outputs.refreshed_sha != ''
-        shell: bash
-        env:
-          BEFORE_SHA: ${{ steps.merge.outputs.before }}
-        run: |
-          set -uo pipefail
-
-          # ORIG_HEAD is the pre-merge main, so this diff is exactly what the
-          # incoming upstream commits changed. Fall back to the recorded sha.
-          base="$(git rev-parse --verify --quiet ORIG_HEAD || echo "$BEFORE_SHA")"
-          git diff --name-only "$base..HEAD" > "$RUNNER_TEMP/incoming.txt"
-
-          # grep -a throughout: some tracked sources contain NUL bytes and grep
-          # would otherwise treat the stream as binary and print nothing useful.
-          #
-          # `|| true` on every grep: the runner's default shell is `bash -e -o
-          # pipefail`, which `set -uo pipefail` above does not undo. A grep that
-          # matches nothing — the ordinary case for an upstream day that left
-          # the adapters alone — exits 1 and would otherwise kill the step.
-          adapters="$(
-            grep -aE '^apps/server/src/(provider/Drivers|orchestration-v2/Adapters)/(Claude|Codex|Cursor|Grok|OpenCode)' "$RUNNER_TEMP/incoming.txt" \
-              | sed -E 's#^apps/server/src/(provider/Drivers|orchestration-v2/Adapters)/(Claude|Codex|Cursor|Grok|OpenCode).*#\2#' \
-              | sort -u \
-              || true
-          )"
-          adapter_count="$(printf '%s' "$adapters" | grep -ac . || true)"
-
-          acp_files="$(grep -aE '^apps/server/src/(provider/acp/|orchestration-v2/Adapters/Acp)' "$RUNNER_TEMP/incoming.txt" | grep -av '/Hermes' || true)"
-
-          if [[ "$adapter_count" -ge 2 || -n "$acp_files" ]]; then
-            echo "review=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "review=false" >> "$GITHUB_OUTPUT"
-          fi
-
-          {
-            echo "### Hermes parity heuristic"
-            echo
-            echo "- sibling adapters touched: ${adapter_count} (${adapters//$'\n'/, })"
-            echo "- ACP runtime files touched: $(printf '%s' "$acp_files" | grep -ac . || true)"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-          {
-            echo "Upstream commits \`${base}..$(git rev-parse HEAD)\` touched the shared provider layer."
-            echo
-            echo "Sibling adapters touched: **${adapter_count}**"
-            echo
-            if [[ -n "$adapters" ]]; then
-              printf '%s\n' "$adapters" | sed 's/^/- /'
-            else
-              echo "- (none)"
-            fi
-            echo
-            echo "ACP runtime files touched:"
-            echo
-            if [[ -n "$acp_files" ]]; then
-              printf '%s\n' "$acp_files" | sed 's/^/- `/; s/$/`/'
-            else
-              echo "- (none)"
-            fi
-            echo
-            echo "Check whether the same change is needed in the Hermes adapter"
-            echo "(\`HermesAdapterV2.ts\`, \`HermesDriver.ts\`, \`HermesAcpSupport.ts\`, \`HermesTextGeneration.ts\`)."
-            echo "Upstream has previously fixed a bug across every sibling adapter in a"
-            echo "commit that merged cleanly while leaving the Hermes copy broken — git"
-            echo "cannot see that kind of drift. The sync PR is open; this is advisory."
-          } > "$RUNNER_TEMP/parity-issue.md"
-
-      - name: Open Hermes parity review issue
-        if: steps.drift.outputs.review == 'true'
-        uses: ./.github/actions/report-automation-failure
-        with:
-          title: Hermes parity review (${{ github.run_id }})
-          body-file: ${{ runner.temp }}/parity-issue.md
-          label: hermes-parity-review
-          label-color: fbca04
-          label-description: Upstream changed sibling provider adapters; check the Hermes copy.
-          github-token: ${{ github.token }}
 
       # Not gated on success: a refresh push that fails still leaves the PR stuck.
       - name: Compose stuck sync PR report

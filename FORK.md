@@ -230,7 +230,7 @@ sync PR merges. A release that fails before publishing is retried by the next ru
 published and then failed a later job, like the IPA, counts as shipped. `release.yml` has no
 schedule of its own.
 
-Four kinds of issue come out of it:
+Three kinds of issue come out of it:
 
 - **`upstream-sync-conflict`**: the merge conflicted and was aborted, so `main` is untouched. The
   issue lists the conflicted files (from `git ls-files -u`) and the run fails. Outside this repo,
@@ -238,18 +238,12 @@ Four kinds of issue come out of it:
   worktree, opens a `hermes/upstream-sync-<sha>` PR, merges it (merge commit, never squash) once CI
   is green, and re-dispatches the sync so the release follows. Where upstream now covers something
   the fork built, the resolver takes upstream's version and re-applies only the Hermes behavior it
-  lacks. It must merge the commit the issue names, not `upstream/main`. Later runs leave the issue
-  alone until a newer upstream nightly appears, then retry and comment with the new commit.
+  lacks. It must merge the commit the issue names, not `upstream/main`. Each resolution PR also
+  answers the Hermes parity check below. Later runs leave the issue alone until a newer upstream
+  nightly appears, then retry and comment with the new commit.
 - **`upstream-sync-stuck`**: a sync PR has been open for over three hours, so its checks failed or
   are blocked. Upstream's nightly already passed its own release, so the cause is usually in the
   fork. Filed once per PR.
-- **`hermes-parity-review`**: advisory, filed once the sync PR is open. It fires when the incoming
-  upstream commits touched two or more sibling provider adapters
-  (`{provider/Drivers,orchestration-v2/Adapters}/{Claude,Codex,Cursor,Grok,OpenCode}*.ts`), the
-  shared ACP adapter, or anything under `provider/acp/`, because
-  upstream has fixed a bug across every sibling adapter in a commit that merged cleanly while
-  leaving the Hermes copy broken. Git cannot see that kind of drift; a human has to check
-  `HermesAdapterV2.ts`, `HermesDriver.ts`, `HermesAcpSupport.ts`, and `HermesTextGeneration.ts`.
 - **`upstream-sync-failed`**: the run failed for any reason other than a conflict, such as a
   rejected push or a `gh` outage.
 
@@ -268,6 +262,40 @@ limited to `builtInDrivers.ts`, `settings.ts`, and the client branding lists. Re
 `apps/web/src/components/chat/ChatComposer.tsx`, `apps/web/src/components/ChatView.tsx`, and both
 `usageProviders.ts` files (`apps/web/src/components/usage/`, `apps/mobile/src/features/usage/`) by
 reading both sides rather than taking one wholesale.
+
+**Hermes parity.** Hermes runs on upstream's shared provider code, so fixes there reach it through
+the merge. What git cannot flag is a hook or optional input that upstream adds to shared code, that
+the sibling providers start using, and that Hermes never sets: Hermes still compiles and quietly
+goes without the feature. Each resolution PR checks for this and reports the result under a
+**Hermes parity** heading in its body. The range R runs from the upstream commit the previous
+resolution PR merged to the one this PR merges, so it also covers what clean sync PRs brought in.
+The previous PR's branch, named by
+`git log origin/main --first-parent --merges -1 --format=%s --grep=hermes/upstream-sync-`, ends in
+that commit's first 12 characters.
+
+1. ACP flavor hooks. List the `AcpAdapterV2Flavor` members
+   (`packages/provider-acp/src/server/adapter.ts`) that at least two of Grok
+   (`packages/provider-grok/src/server/adapter.ts`), the ACP Registry
+   (`packages/provider-acp-registry/src/server/adapter.ts`), and Antigravity
+   (`apps/server/src/orchestration-v2/Adapters/AntigravityAdapterV2.ts`) set and
+   `HermesAdapterV2.ts` does not. These are unset on purpose:
+   - `extractSubagentUpdate`: Hermes sets the plural `extractSubagentUpdates`, because one delegate
+     call starts several children.
+   - `assertComplete`: only replay tests set it.
+2. New optional inputs. In `git diff R -- packages/provider-core/src/server packages/provider-acp/src/server`,
+   find optional fields added to input types and options. Where Hermes builds that input itself,
+   check that it passes the field on as its siblings do.
+3. Grok templates. Hermes's driver, provider status, ACP support, and text generation
+   (`apps/server/src/textGeneration/HermesTextGeneration.ts`) follow the same structure as Grok's,
+   including building text generation on provider-core's `TextGenerationOperations.fromRunner`. Port
+   fixes from `git log R -- packages/provider-grok/src/server/{driver,status,acpSupport,textGeneration}.ts`
+   that are not specific to Grok.
+
+Fix each gap in its own commit on the resolution PR, with a test that fails without the fix. A gap
+that would change approval, auth, or data handling, or that needs more than a focused change, is
+listed for a maintainer instead and does not hold up the merge. To stop step 1 from listing a hook
+again, add it to the exceptions there with the reason. When nothing is missing, the section says so
+in one line.
 
 **Keeping patches current.** The Hermes patches in [`infra/hermes/`](./infra/hermes) follow Hermes
 `main`, not T3 Code upstream. [`hermes-patches.yml`](./.github/workflows/hermes-patches.yml) checks

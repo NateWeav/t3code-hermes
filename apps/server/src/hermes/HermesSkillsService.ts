@@ -204,13 +204,11 @@ export const make = Effect.gen(function* () {
   );
 
   return HermesSkillsService.of({
-    list: (input) =>
-      input.refresh
-        ? refresh
-        : Effect.gen(function* () {
-            const cached = yield* Ref.get(snapshotRef);
-            return cached ?? (yield* refresh);
-          }),
+    list: Effect.fn("HermesSkillsService.list")(function* (input) {
+      if (input.refresh) return yield* refresh;
+      const cached = yield* Ref.get(snapshotRef);
+      return cached ?? (yield* refresh);
+    }),
     get: Effect.fn("HermesSkillsService.get")(function* (input) {
       const root = yield* skillsPath;
       if (root === null)

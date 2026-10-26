@@ -36,10 +36,11 @@ if (!Array.isArray(patches) || patches.length === 0) fail("expected a non-empty 
 const ids = new Set<string>();
 const listed = new Set<string>();
 const generated = (patches as ReadonlyArray<Record<string, unknown>>).map((patch) => {
-  const { id, title, neededFor, versions } = patch;
+  const { id, title, neededFor, versions, retired } = patch;
   if (!isText(id) || !isText(title) || !isText(neededFor)) {
     return fail(`every patch needs an id, title, and neededFor (${JSON.stringify(id)})`);
   }
+  if (retired !== undefined && retired !== true) fail(`${id}: retired must be true or absent`);
   if (ids.has(id)) fail(`duplicate patch id ${id}`);
   ids.add(id);
   if (!Array.isArray(versions) || versions.length === 0) fail(`${id} has no versions`);
@@ -72,7 +73,7 @@ const generated = (patches as ReadonlyArray<Record<string, unknown>>).map((patch
       content: NodeFS.readFileSync(NodePath.join(sourceDir, file), "utf8"),
     };
   });
-  return { id, title, neededFor, versions: embedded };
+  return { id, title, neededFor, ...(retired === true ? { retired } : {}), versions: embedded };
 });
 
 for (const file of patchFilesOnDisk(sourceDir)) {
@@ -98,6 +99,8 @@ NodeFS.writeFileSync(
     "  readonly id: string;",
     "  readonly title: string;",
     "  readonly neededFor: string;",
+    "  /** No longer applied, only removed: current Hermes does not run its code. */",
+    "  readonly retired?: true;",
     "  /** Newest first. */",
     "  readonly versions: ReadonlyArray<HermesPatchFileVersion>;",
     "}",

@@ -3,8 +3,13 @@
     {
       "id": "acp-central-ssh-execution",
       "title": "Central SSH execution",
-      "neededFor": "Hermes instances that run tools on an SSH host without copying credentials, skills, or cache to it.",
+      "neededFor": "Hermes homes whose config runs tools on an SSH host without copying credentials, skills, or cache to it.",
       "versions": [
+        {
+          "hermesCommit": "5b32cfc230078417fc523e12b9aabbc9b59f684b",
+          "hermesCommitDate": "2026-10-26T03:55:41Z",
+          "file": "acp-central-ssh-execution/5b32cfc23007.patch"
+        },
         {
           "hermesCommit": "41dfcf2c1bd7146d4ad46aea08b7dd007900602e",
           "hermesCommitDate": "2026-10-22T15:56:19Z",
@@ -35,8 +40,13 @@
     {
       "id": "acp-delegation-progress",
       "title": "Live subagent progress",
-      "neededFor": "Live progress and background results for subagents Hermes delegates to. Without it, background subagents show as idle once dispatched.",
+      "neededFor": "Live progress for subagents Hermes delegates to. Without it, background subagents show as idle once dispatched.",
       "versions": [
+        {
+          "hermesCommit": "5b32cfc230078417fc523e12b9aabbc9b59f684b",
+          "hermesCommitDate": "2026-10-26T03:55:41Z",
+          "file": "acp-delegation-progress/5b32cfc23007.patch"
+        },
         {
           "hermesCommit": "8e3d11f9378636a009289fe9f151077787f0e673",
           "hermesCommitDate": "2026-10-16T23:39:48Z",
@@ -63,6 +73,7 @@
       "id": "acp-background-reports",
       "title": "Background process reports",
       "neededFor": "Monitoring status while Hermes's background processes run, and waking the agent when they finish. Without it, a background command reads as finished the moment it starts, and the agent never hears that it is done.",
+      "retired": true,
       "versions": [
         {
           "hermesCommit": "5a8dea85fbb636ae09adafa2272d511ae1e227a3",
@@ -97,6 +108,7 @@
       "id": "acp-durable-completion-receipts",
       "title": "Durable background results",
       "neededFor": "Apply after Live subagent progress and Background process reports. Keeps a finished subagent's result until the agent has actually been woken with it, and redelivers results missed while T3 Code was disconnected or restarting.",
+      "retired": true,
       "versions": [
         {
           "hermesCommit": "5575a0859d6278bfcef79c28189a24594952efd3",
@@ -107,6 +119,42 @@
           "hermesCommit": "af8839df1038cc026075fb254afa22edc19d911d",
           "hermesCommitDate": "2026-10-04T22:20:18Z",
           "file": "acp-durable-completion-receipts/af8839df1038.patch"
+        }
+      ]
+    },
+    {
+      "id": "acp-reasoning-once",
+      "title": "Reasoning shown once",
+      "neededFor": "Hermes models that return reasoning text, with display.show_reasoning on. Without it, an ACP reply repeats the streamed reasoning as a code block, followed by a second copy of the reply.",
+      "versions": [
+        {
+          "hermesCommit": "749cb638ff43f9ce5333c186a1e4f67d473aa4f2",
+          "hermesCommitDate": "2026-10-26T01:54:09Z",
+          "file": "acp-reasoning-once/749cb638ff43.patch"
+        }
+      ]
+    },
+    {
+      "id": "acp-lost-turn-refusal",
+      "title": "Lost-turn refusals",
+      "neededFor": "Recovering a Hermes session after a gateway restart loses a turn. Without it, a prompt sent from T3 can be queued behind the lost turn while T3 shows it as failed, then run unseen once the lost turn is discarded.",
+      "versions": [
+        {
+          "hermesCommit": "edfa1c2a135532a8b64f7825c0ac0af6cfe73d4d",
+          "hermesCommitDate": "2026-10-26T15:58:39Z",
+          "file": "acp-lost-turn-refusal/edfa1c2a1355.patch"
+        }
+      ]
+    },
+    {
+      "id": "acp-launch-yolo-resume",
+      "title": "Full access on reopened sessions",
+      "neededFor": "Full access on a Hermes thread that was opened, or last ran, in another approval mode. Without it, switching an existing thread to Full access keeps asking for approval and its subagents keep denying dangerous commands, and switching away from Full access keeps approving everything.",
+      "versions": [
+        {
+          "hermesCommit": "5b32cfc230078417fc523e12b9aabbc9b59f684b",
+          "hermesCommitDate": "2026-10-26T03:55:41Z",
+          "file": "acp-launch-yolo-resume/5b32cfc23007.patch"
         }
       ]
     }

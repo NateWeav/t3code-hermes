@@ -51,6 +51,9 @@ describe("Hermes patch wording", () => {
         snapshot({ patches: [patch("a", { reason: "awaitingPatchUpdate" })] }),
       ),
     ).toBe(false);
+    // Update Hermes is how a retired patch comes off for good.
+    const retired = patch("r", { state: "applied", retired: true });
+    expect(shouldOfferHermesUpdate(snapshot({ patches: [retired] }))).toBe(true);
   });
 
   it("summarizes an update by what happened to each patch", () => {

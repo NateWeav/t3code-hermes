@@ -4,6 +4,7 @@ import * as NodeReadline from "node:readline";
 
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
+import * as Result from "effect/Result";
 import * as Fiber from "effect/Fiber";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
@@ -28,6 +29,12 @@ interface JsonRpcEnvelope {
 }
 
 const MCP_PROTOCOL_VERSION = "2025-06-18";
+
+/** Tells the server how long this transport lets one call run, so blocking waits return first. */
+export const MCP_CALL_LIMIT_HEADER = "t3-mcp-call-limit-ms";
+// T3 answers a call with one JSON body, and Node's fetch drops a response whose headers take
+// 300 s. Hermes, the main ACP client, also ends MCP calls at 300 s.
+const ACP_MCP_CALL_LIMIT_MS = 300_000;
 
 export interface AcpMcpStdioBridgeOptions {
   readonly endpoint: string;
@@ -80,6 +87,7 @@ export const mcpToolSession = (
   const headers = () => ({
     accept: "application/json, text/event-stream",
     authorization: options.authorization,
+    [MCP_CALL_LIMIT_HEADER]: String(ACP_MCP_CALL_LIMIT_MS),
     ...(sessionId === null ? {} : { "mcp-session-id": sessionId }),
     ...(protocolVersion === null ? {} : { "mcp-protocol-version": protocolVersion }),
   });
@@ -216,6 +224,7 @@ export function runAcpMcpStdioBridge(options: AcpMcpStdioBridgeOptions): Effect.
                 "content-type": "application/json",
                 accept: "application/json, text/event-stream",
                 authorization: options.authorization,
+                [MCP_CALL_LIMIT_HEADER]: String(ACP_MCP_CALL_LIMIT_MS),
                 ...(sessionId === null ? {} : { "mcp-session-id": sessionId }),
                 ...(protocolVersion === null ? {} : { "mcp-protocol-version": protocolVersion }),
               },
@@ -273,13 +282,11 @@ export function runAcpMcpStdioBridge(options: AcpMcpStdioBridgeOptions): Effect.
       line: string,
     ): Effect.fn.Return<void> {
       if (line.trim().length === 0) return;
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(line);
-      } catch {
+      const parsed = yield* Effect.try((): unknown => JSON.parse(line)).pipe(Effect.result);
+      if (Result.isFailure(parsed)) {
         return yield* respondWithError(null, "Parse error", -32700);
       }
-      const envelope = asEnvelope(parsed);
+      const envelope = asEnvelope(parsed.success);
       if (envelope === null) return;
       const isResponse = envelope.id !== undefined && ("result" in envelope || "error" in envelope);
       const isSessionHandshake =
@@ -314,7 +321,7 @@ export function runAcpMcpStdioBridge(options: AcpMcpStdioBridgeOptions): Effect.
 
     const reader = NodeReadline.createInterface({ input: options.input });
     yield* Stream.runForEach(Stream.fromAsyncIterable(reader, bridgeError), dispatch).pipe(
-      Effect.catchCause(() => Effect.void),
+      Effect.ignoreCause,
     );
     yield* Fiber.awaitAll(running);
   });

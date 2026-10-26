@@ -30,6 +30,11 @@ export const ThreadHermesRun = Schema.Struct({
   /** Newest session in the run's compression chain. */
   latestSessionId: TrimmedNonEmptyString,
   live: Schema.Boolean,
+  /**
+   * A live run between turns, waiting on background work it started (a CI watch, a long test).
+   * Absent from servers that predate it.
+   */
+  idle: Schema.optional(Schema.Boolean),
 });
 export type ThreadHermesRun = typeof ThreadHermesRun.Type;
 

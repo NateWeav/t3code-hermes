@@ -153,7 +153,12 @@ for the security model.
 
 ## Checks
 
-`vp run check:changed` runs CI's fast checks for your branch's changes: format and lint of the
+In this fork, `vp run check:changed` runs the full CI workflow on GitHub instead of on your machine.
+It pushes a snapshot of the working tree, uncommitted and untracked files included, to a throwaway
+`ci-check/*` branch, dispatches CI there, prints each job's result and the failed job logs, and
+deletes the branch. Interrupting it cancels the run. It needs `gh` signed in to GitHub.
+
+`vp run check:changed --local` runs CI's fast checks for your branch's changes: format and lint of the
 changed files, `knip:check` when code or a manifest changes, the generated GraphQL checks, typecheck
 of the affected packages and their dependents, and the test files beside the changed files. It maps
 files to packages with [ci-changes.cjs](../../.github/scripts/ci-changes.cjs), as CI does. It

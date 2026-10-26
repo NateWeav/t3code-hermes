@@ -194,6 +194,87 @@ export function normalizeHermesTerminalResult(toolCall: AcpToolCallState): AcpTo
   };
 }
 
+/** The heading and first value of each `- **field:** value` line of a Hermes result summary. */
+function hermesResultSummary(
+  toolCall: AcpToolCallState,
+): { readonly heading: string; readonly fields: ReadonlyMap<string, string> } | undefined {
+  if (toolCall.status !== "completed" && toolCall.status !== "failed") return undefined;
+  const content = toolCall.data.content;
+  if (!Array.isArray(content) || content.length !== 1) return undefined;
+  const entry = content[0] as EffectAcpSchema.ToolCallContent;
+  if (entry.type !== "content" || entry.content.type !== "text") return undefined;
+  const [heading = "", ...lines] = entry.content.text.split("\n");
+  const fields = new Map<string, string>();
+  for (const line of lines) {
+    const match = /^- \*\*([\w-]+):\*\* (.*)$/.exec(line);
+    if (match !== null && !fields.has(match[1]!)) fields.set(match[1]!, match[2]!);
+  }
+  return { heading: heading.trim(), fields };
+}
+
+// `process_manage` statuses after which the process sends no completion wake.
+const HERMES_PROCESS_ENDED_STATUSES = new Set([
+  "exited",
+  "killed",
+  "already_exited",
+  "not_found",
+  "handed_off",
+]);
+
+/** Hermes accepts a full `proc_…` id, or any unique prefix with or without `proc_`. */
+function resolveHermesProcessId(
+  reference: string,
+  runningTaskIds: ReadonlySet<string>,
+): string | undefined {
+  if (runningTaskIds.has(reference)) return reference;
+  const prefix = reference.startsWith("proc_") ? reference : `proc_${reference}`;
+  const matches = [...runningTaskIds].filter((taskId) => taskId.startsWith(prefix));
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+/**
+ * Background processes `t3_background_wait` can hold a Hermes thread on. The gateway reports no
+ * process lifecycle to ACP viewers, so they are read from the agent's own results: a background
+ * `terminal` start Hermes armed a completion wake for, keyed by the `proc_…` id its result gives
+ * the agent, and a `process_manage` result that saw one end.
+ */
+export function extractHermesAwaitableBackgroundTasks(
+  toolCall: AcpToolCallState,
+  runningTaskIds: ReadonlySet<string>,
+): ReadonlyArray<{
+  readonly taskId: string;
+  readonly status: "running" | "ended";
+  readonly description?: string;
+}> {
+  const summary = hermesResultSummary(toolCall);
+  if (summary === undefined) return [];
+  const sessionId = summary.fields.get("session_id");
+  if (HERMES_TERMINAL_RESULT_HEADINGS.has(summary.heading)) {
+    // Without a wake nothing would release a hold, so only notifying processes are awaitable.
+    if (!sessionId?.startsWith("proc_") || summary.fields.get("notify_on_complete") !== "True") {
+      return [];
+    }
+    return [
+      {
+        taskId: sessionId,
+        status: "running",
+        ...(toolCall.command === undefined ? {} : { description: toolCall.command }),
+      },
+    ];
+  }
+  if (summary.heading !== "process_manage result") return [];
+  const status = summary.fields.get("status");
+  if (status === undefined || !HERMES_PROCESS_ENDED_STATUSES.has(status)) return [];
+  // `wait` results omit the id; the call's own arguments carry it.
+  const rawInput = toolCall.data.rawInput;
+  const argument =
+    typeof rawInput === "object" && rawInput !== null ? Reflect.get(rawInput, "session_id") : null;
+  const reference = typeof argument === "string" ? argument : sessionId;
+  const taskId =
+    reference === undefined ? undefined : resolveHermesProcessId(reference, runningTaskIds);
+  return taskId === undefined ? [] : [{ taskId, status: "ended" }];
+}
+
 type HermesAcpRuntimeHermesSettings = Pick<HermesSettings, "binaryPath">;
 
 export interface HermesAcpRuntimeInput extends Omit<

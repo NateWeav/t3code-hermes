@@ -45,6 +45,12 @@ const T3_CODE_ACP_TOOL_INSTRUCTIONS = `T3 tool names may carry an MCP server pre
 
 ACP fallback: if the T3 tools are absent and \`T3_ACP_MCP_NODE\` is present, call them through the terminal: \`ELECTRON_RUN_AS_NODE=1 "$T3_ACP_MCP_NODE" \${T3_ACP_MCP_ENTRYPOINT:+"$T3_ACP_MCP_ENTRYPOINT"} acp-mcp-call orchestrator_capabilities '{}'\` (\`T3_ACP_MCP_ENTRYPOINT\` is unset for a standalone executable). Delegate with \`acp-mcp-call delegate_task '{"task":"...","target":{"providerInstanceId":"...","model":"..."},"mode":"async","clientRequestId":"..."}'\`.`;
 
+// Hermes only: the ACP adapter can release a hold only on a wake it sees, so this names the
+// terminal flag that arms one and the tool that sees an end.
+const T3_CODE_ACP_BACKGROUND_WAIT_INSTRUCTIONS = `### Background work you wait on
+
+To wait for a background command you started (tests, a build), start it with \`background=true, notify=true\` and call \`t3_background_wait\` with its \`proc_…\` ID before you end your turn. Do not mark work you leave running, or PRs. Your next wake releases every mark; to keep waiting then, wait in that turn with \`process_manage\`.`;
+
 const T3_CODE_ACP_DEFAULT_MODE_INSTRUCTIONS = `## T3 Code interaction mode: Default
 
 Prefer making reasonable assumptions and carrying out the user's request. Ask a concise question only when a missing user decision would materially change the result. Treat this mode as active until T3 Code supplies a different interaction-mode instruction.`;
@@ -59,6 +65,8 @@ export interface T3AcpInstructionState {
   /** Preview and device tools the user lets this thread's agent use. */
   readonly browserTools: boolean;
   readonly deviceTools: boolean;
+  /** The adapter implements `t3_background_wait`. */
+  readonly backgroundWait: boolean;
 }
 
 /** ACP lacks system/developer fields; inject context on first prompt and tool/mode changes. */
@@ -73,7 +81,8 @@ export function t3AcpPromptWithInstructions(input: {
     input.previousState?.interactionMode === input.state.interactionMode &&
     input.previousState.hasT3Mcp === input.state.hasT3Mcp &&
     input.previousState.browserTools === input.state.browserTools &&
-    input.previousState.deviceTools === input.state.deviceTools
+    input.previousState.deviceTools === input.state.deviceTools &&
+    input.previousState.backgroundWait === input.state.backgroundWait
   ) {
     return input.prompt;
   }
@@ -86,6 +95,7 @@ export function t3AcpPromptWithInstructions(input: {
           ...(input.state.browserTools ? [T3_CODE_BROWSER_TOOL_INSTRUCTIONS.trim()] : []),
           ...(input.state.deviceTools ? [T3_CODE_DEVICE_TOOL_INSTRUCTIONS] : []),
           T3_CODE_ORCHESTRATION_INSTRUCTIONS.trim(),
+          ...(input.state.backgroundWait ? [T3_CODE_ACP_BACKGROUND_WAIT_INSTRUCTIONS] : []),
           T3_CODE_ACP_TOOL_INSTRUCTIONS,
         ]
       : []),

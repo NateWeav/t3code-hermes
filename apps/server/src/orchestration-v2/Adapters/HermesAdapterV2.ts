@@ -1,6 +1,7 @@
 /**
  * Hermes Agent over ACP stdio (`hermes acp`) as a flavor of the shared ACP adapter. Differs by:
- * reasoning effort in `config.yaml` and delegations as one `delegate_task` call.
+ * reasoning effort in `config.yaml`, delegations as one `delegate_task` call, and background
+ * processes read from the agent's own tool results for `t3_background_wait`.
  */
 import {
   HermesSettings,
@@ -32,6 +33,7 @@ import {
   currentHermesModelIdFromSessionSetup,
   hermesApprovalOptions,
   discardLostHermesTurnsOnPrompt,
+  extractHermesAwaitableBackgroundTasks,
   hermesPromptFailure,
   isHermesGatewayTurnLoss,
   makeHermesAcpRuntime,
@@ -240,6 +242,7 @@ export function makeHermesAcpAdapterFlavor(
         normalizeHermesTerminalResult(normalizeHermesT3McpToolCall(toolCall)),
       ),
     extractSubagentUpdates: makeHermesSubagentExtractor(),
+    extractAwaitableBackgroundTasks: extractHermesAwaitableBackgroundTasks,
   };
 }
 

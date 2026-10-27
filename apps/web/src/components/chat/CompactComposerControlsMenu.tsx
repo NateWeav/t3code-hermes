@@ -1,4 +1,9 @@
-import { ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
+import type {
+  ExecutionEndpointId,
+  ExecutionEndpointPresentation,
+  ProviderInteractionMode,
+  RuntimeMode,
+} from "@t3tools/contracts";
 import { memo, type ReactNode } from "react";
 import { EllipsisIcon } from "lucide-react";
 import {
@@ -16,6 +21,9 @@ import { useComposerMenuState } from "./useComposerMenuState";
 export const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(props: {
   interactionMode: ProviderInteractionMode;
   runtimeMode: RuntimeMode;
+  executionEndpointId: ExecutionEndpointId;
+  executionEndpoints: Readonly<Record<string, ExecutionEndpointPresentation>>;
+  executionEndpointLocked: boolean;
   showInteractionModeToggle: boolean;
   traitsMenuContent?: ReactNode;
   size?: "sm" | "xs";
@@ -27,6 +35,7 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
   hidden?: boolean;
   onToggleInteractionMode: () => void;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
+  onExecutionEndpointChange: (endpointId: ExecutionEndpointId) => void;
 }) {
   const composerFloatingLayerProps = useComposerMenuProps();
   const size = props.size ?? "sm";
@@ -71,6 +80,26 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
             <MenuDivider />
           </>
         ) : null}
+        <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Execution</div>
+        <MenuRadioGroup
+          value={props.executionEndpointId}
+          onValueChange={(value) => {
+            if (!value || value === props.executionEndpointId || props.executionEndpointLocked)
+              return;
+            props.onExecutionEndpointChange(value as ExecutionEndpointId);
+          }}
+        >
+          {Object.entries(props.executionEndpoints).map(([id, endpoint]) => (
+            <MenuRadioItem
+              key={id}
+              value={id}
+              disabled={props.executionEndpointLocked || !endpoint.enabled || !endpoint.available}
+            >
+              {endpoint.displayName}
+            </MenuRadioItem>
+          ))}
+        </MenuRadioGroup>
+        <MenuDivider />
         <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Access</div>
         <MenuRadioGroup
           value={props.runtimeMode}

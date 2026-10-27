@@ -87,13 +87,20 @@ function formatValue(key: keyof ServerSettings, value: unknown): string {
  */
 export function settingInheritanceLayers(
   target: ScopedSettingsTarget,
-  environmentSettings: ServerSettings,
+  environmentSettings: Omit<ServerSettings, "executionEndpoints">,
   key: keyof ServerSettings,
 ): readonly InheritanceLayer[] {
+<<<<<<< HEAD
   const environmentValue = environmentSettings[key];
   const source = isProjectScopedSettingKey(key) ? target.sources[key] : "environment";
   const environmentSet = !Equal.equals(environmentValue, DEFAULT_SERVER_SETTINGS[key]);
   const fileBacked = isProjectFileBackedSettingKey(key);
+=======
+  const builtIn = DEFAULT_SERVER_SETTINGS[key];
+  const environmentValue = (environmentSettings as Record<string, unknown>)[key];
+  const projectSource = isProjectScopedSettingKey(key) ? target.sources[key] : "environment";
+  const environmentSet = !Equal.equals(environmentValue, builtIn);
+>>>>>>> 2701de6a2 (feat(execution): add per-thread execution endpoints)
   const layers: InheritanceLayer[] = [];
   if (target.projectId !== null && isProjectScopedSettingKey(key)) {
     layers.push({

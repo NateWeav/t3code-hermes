@@ -11,6 +11,7 @@ import {
   AuthEnvironmentBootstrapTokenType,
   AuthTokenExchangeGrantType,
   CommandId,
+  DEFAULT_CLIENT_SERVER_SETTINGS,
   DEFAULT_SERVER_SETTINGS,
   type DpopFailureReason,
   EnvironmentId,
@@ -6772,9 +6773,13 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assert.equal(first.config.observability.otlpTracesEnabled, true);
         assert.equal(first.config.observability.otlpMetricsUrl, "http://localhost:4318/v1/metrics");
         assert.equal(first.config.observability.otlpMetricsEnabled, true);
+<<<<<<< HEAD
         assert.equal(first.config.observability.otlpLogsUrl, "http://localhost:4318/v1/logs");
         assert.equal(first.config.observability.otlpLogsEnabled, true);
         assert.deepEqual(first.config.settings, DEFAULT_SERVER_SETTINGS);
+=======
+        assert.deepEqual(first.config.settings, DEFAULT_CLIENT_SERVER_SETTINGS);
+>>>>>>> 2701de6a2 (feat(execution): add per-thread execution endpoints)
       }
       assert.deepEqual(second, {
         version: 1,

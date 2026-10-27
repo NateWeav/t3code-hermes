@@ -58,7 +58,7 @@ export function splitSharedServerPatch(patch: ServerSettingsPatch): {
 export function filterSharedServerPatch(
   patch: ServerSettingsPatch,
   capabilities: Pick<ExecutionEnvironmentCapabilities, "threadRestartContinuation"> | undefined,
-  settings?: ServerSettings,
+  settings?: Omit<ServerSettings, "executionEndpoints">,
   sourceSettings = settings,
   targetIsSource = false,
 ): ServerSettingsPatch {
@@ -86,7 +86,7 @@ export function filterSharedServerPatch(
 
 /** The shared subset supported by one environment. */
 export function pickSharedServerSettings(
-  settings: ServerSettings,
+  settings: Omit<ServerSettings, "executionEndpoints">,
   capabilities?: Pick<ExecutionEnvironmentCapabilities, "threadRestartContinuation">,
 ): ServerSettingsPatch {
   return filterSharedServerPatch(
@@ -118,7 +118,7 @@ export interface SharedSettingsEnvironment {
   readonly environmentId: EnvironmentId;
   readonly label: string;
   readonly syncEligible: boolean;
-  readonly settings: ServerSettings | null;
+  readonly settings: Omit<ServerSettings, "executionEndpoints"> | null;
   readonly capabilities?:
     | Pick<ExecutionEnvironmentCapabilities, "threadRestartContinuation">
     | undefined;
@@ -134,7 +134,7 @@ export interface SharedSettingsEnvironment {
  */
 export function findSharedSettingsMismatches(input: {
   readonly primaryEnvironmentId: EnvironmentId | null;
-  readonly primarySettings: ServerSettings | null;
+  readonly primarySettings: Omit<ServerSettings, "executionEndpoints"> | null;
   readonly primaryCapabilities?:
     | Pick<ExecutionEnvironmentCapabilities, "threadRestartContinuation">
     | undefined;

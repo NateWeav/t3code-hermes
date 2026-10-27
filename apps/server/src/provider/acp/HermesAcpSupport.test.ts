@@ -4,7 +4,9 @@ import * as EffectAcpErrors from "effect-acp/errors";
 
 import {
   applyHermesAcpModelSelection,
+  buildHermesExecutionContext,
   buildHermesAcpSpawnInput,
+  buildHermesSessionEnvironment,
   hermesSessionInfoIndicatesCompaction,
   HERMES_BUILT_IN_SLASH_COMMANDS,
   resolveHermesAcpBaseModelId,
@@ -53,6 +55,7 @@ describe("buildHermesAcpSpawnInput", () => {
   });
 });
 
+<<<<<<< HEAD
 describe("isHermesDerivedTitle", () => {
   // Observed from Hermes 0.21.0: the instant title, then the model's title.
   const prompt =
@@ -77,6 +80,89 @@ describe("isHermesDerivedTitle", () => {
   it("keeps a model-written title", () => {
     expect(isHermesDerivedTitle("Check if 391 is prime", [prompt])).toBe(false);
     expect(isHermesDerivedTitle("Check if 391 is prime", [])).toBe(false);
+=======
+describe("buildHermesSessionEnvironment", () => {
+  it("strips inherited remote routing variables for a local session", () => {
+    const base = {
+      HERMES_HOME: "/home/dev/.hermes",
+      TERMINAL_ENV: "ssh",
+      TERMINAL_SSH_HOST: "stale-host",
+      TERMINAL_CWD: "/stale",
+    };
+
+    const environment = buildHermesSessionEnvironment(base, { kind: "local" });
+
+    expect(environment).toEqual({ HERMES_HOME: "/home/dev/.hermes" });
+    expect(Object.isFrozen(environment)).toBe(true);
+    expect(base.TERMINAL_ENV).toBe("ssh");
+  });
+
+  it("layers SSH routing over a fresh copy of the provider environment", () => {
+    const base = { HERMES_HOME: "/home/dev/.hermes", SHARED: "value" };
+    const environment = buildHermesSessionEnvironment(base, {
+      kind: "ssh",
+      host: "builder.internal",
+      user: "aeris",
+      port: 2222,
+      identityFile: "/home/aeris/.ssh/id_ed25519",
+      cwd: "/srv/work",
+      persistentShell: true,
+    });
+
+    expect(environment).toEqual({
+      HERMES_HOME: "/home/dev/.hermes",
+      SHARED: "value",
+      HERMES_TERMINAL_ENV_AUTHORITY: "session",
+      TERMINAL_ENV: "ssh",
+      TERMINAL_SSH_HOST: "builder.internal",
+      TERMINAL_SSH_USER: "aeris",
+      TERMINAL_SSH_PORT: "2222",
+      TERMINAL_SSH_KEY: "/home/aeris/.ssh/id_ed25519",
+      TERMINAL_CWD: "/srv/work",
+      TERMINAL_SSH_SYNC_FILES: "false",
+      TERMINAL_SSH_PERSISTENT: "true",
+    });
+    expect(Object.isFrozen(environment)).toBe(true);
+    expect(base).toEqual({ HERMES_HOME: "/home/dev/.hermes", SHARED: "value" });
+  });
+
+  it("returns distinct environments for concurrent local and SSH children", () => {
+    const base = { HERMES_HOME: "/home/dev/.hermes" };
+    const local = buildHermesSessionEnvironment(base, { kind: "local" });
+    const remote = buildHermesSessionEnvironment(base, {
+      kind: "ssh",
+      host: "builder.internal",
+      user: "aeris",
+      port: 22,
+      identityFile: "/key",
+      cwd: "/srv/work",
+      persistentShell: false,
+    });
+
+    expect(local).not.toBe(remote);
+    expect(local.TERMINAL_ENV).toBeUndefined();
+    expect(remote.TERMINAL_ENV).toBe("ssh");
+  });
+});
+
+describe("buildHermesExecutionContext", () => {
+  it("names the endpoint, type, and authoritative working directory", () => {
+    expect(
+      buildHermesExecutionContext(
+        "builder" as never,
+        {
+          kind: "ssh",
+          host: "builder.internal",
+          user: "aeris",
+          port: 22,
+          identityFile: "/key",
+          cwd: "/srv/work",
+          persistentShell: false,
+        },
+        "/local/placeholder",
+      ),
+    ).toBe("Execution endpoint: builder\nExecution type: ssh\nExecution cwd: /srv/work");
+>>>>>>> 2701de6a2 (feat(execution): add per-thread execution endpoints)
   });
 });
 

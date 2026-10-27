@@ -21,6 +21,8 @@ import type {
   AssistantCitation,
   ChatFileAttachment,
   EnvironmentId,
+  ExecutionEndpointId,
+  ExecutionEndpointPresentation,
   ModelSelection,
   ProjectId,
   PullRequestListInput,
@@ -276,6 +278,7 @@ import {
   renderProviderTraitsPicker,
 } from "./composerProviderState";
 import { ContextWindowMeter, ContextWindowMeterPlaceholder } from "./ContextWindowMeter";
+import { ExecutionEndpointPicker } from "./ExecutionEndpointPicker";
 import {
   providerSupportsManualCompaction,
   resolveContextWindowModelDisplayName,
@@ -1392,6 +1395,9 @@ export interface ChatComposerProps {
   // Mode
   runtimeMode: RuntimeMode;
   interactionMode: ProviderInteractionMode;
+  executionEndpointId: ExecutionEndpointId;
+  executionEndpoints: Readonly<Record<string, ExecutionEndpointPresentation>>;
+  executionEndpointLocked: boolean;
 
   // Provider / model
   lockedProvider: ProviderDriverKind | null;
@@ -1470,6 +1476,7 @@ export interface ChatComposerProps {
   toggleInteractionMode: () => void;
   handleRuntimeModeChange: (mode: RuntimeMode) => void;
   handleInteractionModeChange: (mode: ProviderInteractionMode) => void;
+  handleExecutionEndpointChange: (endpointId: ExecutionEndpointId) => void;
 
   focusComposer: () => void;
   scheduleComposerFocus: () => void;
@@ -1524,6 +1531,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeProposedPlan,
     runtimeMode,
     interactionMode: requestedInteractionMode,
+    executionEndpointId,
+    executionEndpoints,
+    executionEndpointLocked,
     lockedProvider,
     providerStatuses,
     providerCatalogKnown,
@@ -1572,6 +1582,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     toggleInteractionMode,
     handleRuntimeModeChange,
     handleInteractionModeChange,
+    handleExecutionEndpointChange,
     focusComposer,
     scheduleComposerFocus,
     setThreadError,
@@ -5100,10 +5111,56 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         onOpenProviderSetup={onOpenProviderSetup}
       />
 
+<<<<<<< HEAD
       <>
         {restingBlockDefs.map((def, index) => {
           const hidden = index >= restingBlockDefs.length - restingHiddenBlockCount;
           return (
+=======
+      {composerControlsCompact ? (
+        <CompactComposerControlsMenu
+          interactionMode={interactionMode}
+          runtimeMode={runtimeMode}
+          executionEndpointId={executionEndpointId}
+          executionEndpoints={executionEndpoints}
+          executionEndpointLocked={executionEndpointLocked}
+          showInteractionModeToggle={planModeUiEnabled}
+          traitsMenuContent={providerTraitsMenuContent}
+          onToggleInteractionMode={toggleInteractionMode}
+          onRuntimeModeChange={handleRuntimeModeChange}
+          onExecutionEndpointChange={handleExecutionEndpointChange}
+        />
+      ) : (
+        <>
+          <ComposerControlSeparator size={composerControlsInStrip ? "xs" : "sm"} />
+          <ExecutionEndpointPicker
+            value={executionEndpointId}
+            endpoints={executionEndpoints}
+            locked={executionEndpointLocked}
+            onChange={handleExecutionEndpointChange}
+          />
+          {restingBlockDefs.map((def, index) => {
+            if (!composerControlsInStrip) {
+              return <Fragment key={def.id}>{def.content}</Fragment>;
+            }
+            const hidden = index >= restingBlockDefs.length - restingHiddenBlockCount;
+            return (
+              <div
+                key={def.id}
+                data-resting-block={def.id}
+                aria-hidden={hidden || undefined}
+                inert={hidden || undefined}
+                className={cn(
+                  "flex w-max min-w-max shrink-0 items-center gap-1",
+                  hidden && "pointer-events-none invisible absolute",
+                )}
+              >
+                {def.content}
+              </div>
+            );
+          })}
+          {composerControlsInStrip ? (
+>>>>>>> 2701de6a2 (feat(execution): add per-thread execution endpoints)
             <div
               key={def.id}
               data-resting-block={def.id}
@@ -5119,7 +5176,28 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   "[&_[data-composer-control-label]]:pointer-events-none [&_[data-composer-control-label]]:invisible [&_[data-composer-control-label]]:absolute [&_[data-composer-control-label]]:w-max [&_[data-composer-control-label]]:max-w-none [&_[data-composer-control-compact-icon]]:[visibility:inherit] [&_[data-composer-control-compact-icon]]:relative",
               )}
             >
+<<<<<<< HEAD
               {def.content}
+=======
+              <CompactComposerControlsMenu
+                interactionMode={interactionMode}
+                runtimeMode={runtimeMode}
+                executionEndpointId={executionEndpointId}
+                executionEndpoints={executionEndpoints}
+                executionEndpointLocked={executionEndpointLocked}
+                size="xs"
+                hidden={composerControlsHidden || hiddenRestingBlockIds.length === 0}
+                showInteractionModeToggle={
+                  planModeUiEnabled && hiddenRestingBlockIds.includes("mode")
+                }
+                traitsMenuContent={
+                  hiddenRestingBlockIds.includes("traits") ? providerTraitsMenuContent : undefined
+                }
+                onToggleInteractionMode={toggleInteractionMode}
+                onRuntimeModeChange={handleRuntimeModeChange}
+                onExecutionEndpointChange={handleExecutionEndpointChange}
+              />
+>>>>>>> 2701de6a2 (feat(execution): add per-thread execution endpoints)
             </div>
           );
         })}

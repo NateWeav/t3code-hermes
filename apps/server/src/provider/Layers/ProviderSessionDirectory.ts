@@ -1,4 +1,9 @@
-import { defaultInstanceIdForDriver, ProviderDriverKind, type ThreadId } from "@t3tools/contracts";
+import {
+  defaultInstanceIdForDriver,
+  ExecutionEndpointId,
+  ProviderDriverKind,
+  type ThreadId,
+} from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -14,6 +19,7 @@ import {
   type ProviderSessionDirectoryShape,
 } from "../Services/ProviderSessionDirectory.ts";
 const decodeProviderDriverKindValue = Schema.decodeUnknownEffect(ProviderDriverKind);
+const isExecutionEndpointId = Schema.is(ExecutionEndpointId);
 
 function toPersistenceError(operation: string) {
   return (cause: unknown) =>
@@ -57,6 +63,12 @@ function mergeRuntimePayload(
   return next;
 }
 
+function readExecutionEndpointId(runtimePayload: unknown): ExecutionEndpointId | undefined {
+  if (!isRecord(runtimePayload)) return undefined;
+  const value = runtimePayload.executionEndpointId;
+  return isExecutionEndpointId(value) ? value : undefined;
+}
+
 function toRuntimeBinding(
   runtime: ProviderSessionRuntime.ProviderSessionRuntime,
   operation: string,
@@ -72,6 +84,9 @@ function toRuntimeBinding(
           // persistence so hot routing code never has to infer an instance
           // from a driver kind.
           providerInstanceId: runtime.providerInstanceId ?? defaultInstanceIdForDriver(provider),
+          ...(readExecutionEndpointId(runtime.runtimePayload)
+            ? { executionEndpointId: readExecutionEndpointId(runtime.runtimePayload)! }
+            : {}),
           adapterKey: runtime.adapterKey,
           runtimeMode: runtime.runtimeMode,
           status: runtime.status,

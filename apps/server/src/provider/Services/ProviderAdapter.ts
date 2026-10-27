@@ -9,6 +9,7 @@
  */
 import type {
   ApprovalRequestId,
+  ExecutionEndpointId,
   ProviderApprovalDecision,
   ProviderDriverKind,
   ProviderUserInputAnswers,
@@ -24,6 +25,27 @@ import type {
 } from "@t3tools/contracts";
 import type * as Effect from "effect/Effect";
 import type * as Stream from "effect/Stream";
+
+/** Server-resolved execution details. This payload is never decoded from a client request. */
+export type ProviderSessionExecutionEnvironment =
+  | { readonly kind: "local" }
+  | {
+      readonly kind: "ssh";
+      readonly host: string;
+      readonly user: string;
+      readonly port: number;
+      readonly identityFile: string;
+      readonly cwd: string;
+      readonly persistentShell: boolean;
+    };
+
+export type ProviderSessionRuntimeStartInput = Omit<
+  ProviderSessionStartInput,
+  "executionEndpointId"
+> & {
+  readonly executionEndpointId?: ExecutionEndpointId;
+  readonly executionEnvironment?: ProviderSessionExecutionEnvironment;
+};
 
 export type ProviderSessionModelSwitchMode = "in-session" | "unsupported";
 
@@ -75,7 +97,7 @@ export interface ProviderAdapterShape<TError> {
    * Start a provider-backed session.
    */
   readonly startSession: (
-    input: ProviderSessionStartInput,
+    input: ProviderSessionRuntimeStartInput,
   ) => Effect.Effect<ProviderSession, TError>;
 
   /**

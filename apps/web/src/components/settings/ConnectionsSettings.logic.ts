@@ -1,6 +1,57 @@
-import type { AdvertisedEndpoint, DesktopBridge, DesktopWslState } from "@t3tools/contracts";
+import {
+  ExecutionEndpointId,
+  type AdvertisedEndpoint,
+  type DesktopBridge,
+  type DesktopWslState,
+  type ExecutionEndpointUpsertInput,
+} from "@t3tools/contracts";
 
 type WslEnableBridge = Pick<DesktopBridge, "setWslBackendEnabled" | "setWslDistro" | "setWslOnly">;
+
+export type SshExecutionEndpointForm = {
+  readonly endpointId: string;
+  readonly displayName: string;
+  readonly host: string;
+  readonly user: string;
+  readonly port: string;
+  readonly identityFile?: string;
+  readonly cwd: string;
+};
+
+export function buildSshExecutionEndpointInput(
+  form: SshExecutionEndpointForm,
+): ExecutionEndpointUpsertInput {
+  const endpointId = form.endpointId.trim();
+  const displayName = form.displayName.trim();
+  const host = form.host.trim();
+  const user = form.user.trim();
+  const identityFile = form.identityFile?.trim() ?? "";
+  const cwd = form.cwd.trim();
+  const portInput = form.port.trim();
+  const port = portInput.length === 0 ? 22 : Number(portInput);
+
+  if (!endpointId) throw new Error("Endpoint ID is required.");
+  if (!displayName) throw new Error("Display name is required.");
+  if (!host) throw new Error("SSH host is required.");
+  if (!user) throw new Error("SSH user is required.");
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new Error("SSH port must be between 1 and 65535.");
+  }
+  if (!cwd) throw new Error("Working directory is required.");
+
+  return {
+    endpointId: ExecutionEndpointId.make(endpointId),
+    endpoint: {
+      displayName,
+      enabled: true,
+      host,
+      user,
+      port,
+      ...(identityFile ? { identityFile } : {}),
+      cwd,
+    },
+  };
+}
 
 /**
  * A QR code encoding a loopback URL makes the scanning device dial itself, so

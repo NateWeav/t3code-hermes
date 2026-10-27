@@ -27,7 +27,13 @@ export type ProjectSettingSources = Readonly<
   Record<ProjectScopedServerSettingKey, ProjectSettingSource>
 >;
 
+<<<<<<< HEAD
 export interface ResolvedProjectSettings<Settings extends ServerSettings = ServerSettings> {
+=======
+type ProjectSettingsInput = Omit<ServerSettings, "executionEndpoints">;
+
+export interface ResolvedProjectSettings<Settings extends ProjectSettingsInput = ServerSettings> {
+>>>>>>> 2701de6a2 (feat(execution): add per-thread execution endpoints)
   /** Environment settings with the project's overrides applied. */
   readonly settings: Settings;
   /** Where each scopable key's effective value came from. */
@@ -70,12 +76,13 @@ export interface LegacyProjectSettingsFields {
  * override whose provider is disabled on this environment falls back to the
  * environment value, the same guard the environment-level selection gets.
  */
-export function resolveProjectSettings(
-  settings: ServerSettings,
+export function resolveProjectSettings<Settings extends ProjectSettingsInput>(
+  settings: Settings,
   projectId: ProjectId | null,
   // Nullable, not just optional: the mobile new-task flow passes its selected
   // project straight through, and that is null until the shell snapshot lands.
   project?: LegacyProjectSettingsFields | null,
+<<<<<<< HEAD
 ): ResolvedProjectSettings;
 /**
  * With the checkout's decoded t3.json (or null for a missing or invalid
@@ -146,6 +153,9 @@ function resolveProjectOverrides(
   projectId: ProjectId | null,
   project?: LegacyProjectSettingsFields | null,
 ): ResolvedProjectSettings {
+=======
+): ResolvedProjectSettings<Settings> {
+>>>>>>> 2701de6a2 (feat(execution): add per-thread execution endpoints)
   const stored = projectId === null ? undefined : settings.projectSettingsOverrides[projectId];
   const overrides: ProjectSettingsOverrides =
     project == null || settings.projectSettingsFolded
@@ -185,7 +195,7 @@ function resolveProjectOverrides(
     effective[key] = value;
     sources[key] = "project";
   }
-  return { settings: effective as ServerSettings, sources, overrides };
+  return { settings: effective as Settings, sources, overrides };
 }
 
 /** Replace the project's entry, dropping it entirely when nothing is overridden. */

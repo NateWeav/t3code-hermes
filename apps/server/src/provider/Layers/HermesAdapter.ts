@@ -2,6 +2,7 @@ import * as NodeURL from "node:url";
 
 import {
   ApprovalRequestId,
+  DEFAULT_EXECUTION_ENDPOINT_ID,
   type HermesSettings,
   EventId,
   type ProviderApprovalDecision,
@@ -63,6 +64,8 @@ import { applyHermesReasoningSelection } from "../../hermes/hermesReasoningOptio
 import type { HermesReasoningLevel } from "../../hermes/hermesReasoning.ts";
 import {
   applyHermesAcpModelSelection,
+  buildHermesExecutionContext,
+  buildHermesSessionEnvironment,
   currentHermesModelIdFromSessionSetup,
   hermesSessionInfoIndicatesCompaction,
   HERMES_TITLE_PROMPT_LIMIT,
@@ -133,6 +136,7 @@ interface HermesSessionContext {
   session: ProviderSession;
   readonly scope: Scope.Closeable;
   readonly acp: AcpSessionRuntime.AcpSessionRuntime["Service"];
+  readonly executionContext: string;
   notificationFiber: Fiber.Fiber<void, never> | undefined;
   readonly pendingApprovals: Map<ApprovalRequestId, PendingApproval>;
   turns: Array<{ id: TurnId; items: Array<unknown> }>;
@@ -707,6 +711,10 @@ export function makeHermesAdapter(
           }
 
           const cwd = path.resolve(input.cwd.trim());
+          const sessionEnvironment = buildHermesSessionEnvironment(
+            options?.environment,
+            input.executionEnvironment,
+          );
           const hermesModelSelection =
             input.modelSelection?.instanceId === boundInstanceId ? input.modelSelection : undefined;
           const existing = sessions.get(input.threadId);
@@ -735,7 +743,7 @@ export function makeHermesAdapter(
           const startReasoningLevel = yield* applyHermesReasoningSelection({
             model: hermesModelSelection?.model,
             selections: hermesModelSelection?.options,
-            ...(options?.environment ? { environment: options.environment } : {}),
+            environment: sessionEnvironment,
           }).pipe(
             Effect.provideService(FileSystem.FileSystem, fileSystem),
             Effect.provideService(Path.Path, path),
@@ -751,7 +759,7 @@ export function makeHermesAdapter(
           const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
           const acp = yield* makeHermesAcpRuntime({
             hermesSettings,
-            ...(options?.environment ? { environment: options.environment } : {}),
+            environment: sessionEnvironment,
             childProcessSpawner,
             cwd,
             ...(resumeSessionId ? { resumeSessionId } : {}),
@@ -903,6 +911,7 @@ export function makeHermesAdapter(
           const session: ProviderSession = {
             provider: PROVIDER,
             providerInstanceId: boundInstanceId,
+            executionEndpointId: input.executionEndpointId ?? DEFAULT_EXECUTION_ENDPOINT_ID,
             status: "ready",
             runtimeMode: input.runtimeMode,
             cwd,
@@ -922,6 +931,11 @@ export function makeHermesAdapter(
             session,
             scope: sessionScope,
             acp,
+            executionContext: buildHermesExecutionContext(
+              session.executionEndpointId ?? DEFAULT_EXECUTION_ENDPOINT_ID,
+              input.executionEnvironment,
+              cwd,
+            ),
             notificationFiber: undefined,
             pendingApprovals,
             turns: [],
@@ -1303,6 +1317,7 @@ export function makeHermesAdapter(
                 acp: ctx.acp,
                 acpSessionId: ctx.acpSessionId,
                 displayModel,
+                executionContext: ctx.executionContext,
                 promptParts,
                 turnId,
                 steeringTurnId,
@@ -1349,6 +1364,7 @@ export function makeHermesAdapter(
             ? prepared.acp.promptWhileRunning({ prompt: prepared.promptParts })
             : prepared.acp.prompt(
                 {
+<<<<<<< HEAD
                   // ACP has no system-message field; keep runtime context separate from user input.
                   prompt: [
                     ...prepared.promptParts,
@@ -1360,6 +1376,13 @@ export function makeHermesAdapter(
                       }),
                     },
                   ],
+=======
+                  type: "text",
+                  text: `${buildRuntimeInstructions({
+                    harness: "Hermes",
+                    model: prepared.displayModel,
+                  })}\n\n${prepared.executionContext}`,
+>>>>>>> 2701de6a2 (feat(execution): add per-thread execution endpoints)
                 },
                 prepared.steeringTurnId === undefined && prepared.firstPromptDispatched
                   ? { dispatched: prepared.firstPromptDispatched }

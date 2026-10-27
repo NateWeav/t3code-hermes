@@ -12,7 +12,12 @@ import {
   ProjectionThreadRepository,
   type ProjectionThreadRepositoryShape,
 } from "../Services/ProjectionThreads.ts";
-import { ModelSelection, ThreadLinkedPullRequest, ThreadTitleState } from "@t3tools/contracts";
+import {
+  DEFAULT_EXECUTION_ENDPOINT_ID,
+  ModelSelection,
+  ThreadLinkedPullRequest,
+  ThreadTitleState,
+} from "@t3tools/contracts";
 
 const ProjectionThreadDbRow = ProjectionThread.mapFields(
   Struct.assign({
@@ -36,6 +41,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           title,
           title_state_json,
           model_selection_json,
+          execution_endpoint_id,
           runtime_mode,
           interaction_mode,
           branch,
@@ -69,6 +75,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           ${row.title},
           ${row.titleState == null ? null : JSON.stringify(row.titleState)},
           ${JSON.stringify(row.modelSelection)},
+          ${row.executionEndpointId ?? DEFAULT_EXECUTION_ENDPOINT_ID},
           ${row.runtimeMode},
           ${row.interactionMode},
           ${row.branch},
@@ -102,6 +109,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           title = excluded.title,
           title_state_json = excluded.title_state_json,
           model_selection_json = excluded.model_selection_json,
+          execution_endpoint_id = excluded.execution_endpoint_id,
           runtime_mode = excluded.runtime_mode,
           interaction_mode = excluded.interaction_mode,
           branch = excluded.branch,
@@ -142,6 +150,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           title,
           title_state_json AS "titleState",
           model_selection_json AS "modelSelection",
+          execution_endpoint_id AS "executionEndpointId",
           runtime_mode AS "runtimeMode",
           interaction_mode AS "interactionMode",
           branch,

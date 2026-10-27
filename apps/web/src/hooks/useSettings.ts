@@ -12,7 +12,8 @@
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import {
-  DEFAULT_SERVER_SETTINGS,
+  type ClientServerSettings,
+  DEFAULT_CLIENT_SERVER_SETTINGS,
   type EnvironmentId,
   ServerSettings,
   type ServerSettingsPatch,
@@ -48,7 +49,7 @@ import { useTheme } from "./useTheme";
 
 const CLIENT_SETTINGS_PERSISTENCE_ERROR_SCOPE = "[CLIENT_SETTINGS]";
 
-type UnifiedSettingsPatch = ServerSettingsPatch & ClientSettingsPatch;
+type UnifiedSettingsPatch = Omit<ServerSettingsPatch, "executionEndpoints"> & ClientSettingsPatch;
 
 const clientSettingsListeners = new Set<() => void>();
 const clientSettingsHydrationListeners = new Set<() => void>();
@@ -301,16 +302,20 @@ function useClientSettingsValue(): ClientSettings {
 }
 
 export function mergeEnvironmentSettings(
-  serverSettings: ServerSettings,
+  serverSettings: Omit<ServerSettings, "executionEndpoints"> & {
+    readonly executionEndpoints?:
+      | ServerSettings["executionEndpoints"]
+      | ClientServerSettings["executionEndpoints"];
+  },
   clientSettings: ClientSettings,
 ): UnifiedSettings {
   // Decode drops retired client keys, but older untyped persistence adapters
   // can still return them. Server-owned values must always win.
-  return { ...clientSettings, ...serverSettings };
+  return { ...clientSettings, ...serverSettings } as UnifiedSettings;
 }
 
 function useMergedSettings<T>(
-  serverSettings: ServerSettings,
+  serverSettings: ClientServerSettings,
   selector: ((settings: UnifiedSettings) => T) | undefined,
 ): T {
   const clientSettings = useClientSettingsValue();
@@ -385,7 +390,7 @@ export function useEnvironmentSettings<T = UnifiedSettings>(
   selector?: (settings: UnifiedSettings) => T,
 ): T {
   const serverSettings = useAtomValue(serverEnvironment.settingsValueAtom(environmentId));
-  return useMergedSettings(serverSettings ?? DEFAULT_SERVER_SETTINGS, selector);
+  return useMergedSettings(serverSettings ?? DEFAULT_CLIENT_SERVER_SETTINGS, selector);
 }
 
 /** Primary-only settings access for the settings UI and other explicitly global surfaces. */

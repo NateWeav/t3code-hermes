@@ -9,6 +9,7 @@
  * @module provider/acp/HermesAcpSupport
  */
 import {
+  type ExecutionEndpointId,
   type HermesSettings,
   ProviderDriverKind,
   type RuntimeMode,
@@ -25,6 +26,7 @@ import { normalizeModelSlug } from "@t3tools/shared/model";
 
 import type { AcpSessionModeState } from "./AcpRuntimeModel.ts";
 import * as AcpSessionRuntime from "./AcpSessionRuntime.ts";
+import type { ProviderSessionExecutionEnvironment } from "../Services/ProviderAdapter.ts";
 
 const HERMES_DRIVER_KIND = ProviderDriverKind.make("hermes");
 /** Hermes authenticates from `~/.hermes/.env`; the method id is a formality. */
@@ -158,6 +160,54 @@ export interface HermesAcpRuntimeInput extends Omit<
   readonly childProcessSpawner: ChildProcessSpawner.ChildProcessSpawner["Service"];
   readonly hermesSettings: HermesAcpRuntimeHermesSettings | null | undefined;
   readonly environment?: NodeJS.ProcessEnv;
+}
+
+const HERMES_REMOTE_ENVIRONMENT_KEYS = [
+  "HERMES_TERMINAL_ENV_AUTHORITY",
+  "TERMINAL_ENV",
+  "TERMINAL_SSH_HOST",
+  "TERMINAL_SSH_USER",
+  "TERMINAL_SSH_PORT",
+  "TERMINAL_SSH_KEY",
+  "TERMINAL_CWD",
+  "TERMINAL_SSH_SYNC_FILES",
+  "TERMINAL_SSH_PERSISTENT",
+] as const;
+
+export function buildHermesSessionEnvironment(
+  providerEnvironment: NodeJS.ProcessEnv | undefined,
+  executionEnvironment: ProviderSessionExecutionEnvironment | undefined,
+): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = { ...(providerEnvironment ?? {}) };
+  for (const key of HERMES_REMOTE_ENVIRONMENT_KEYS) delete environment[key];
+  if (executionEnvironment?.kind === "ssh") {
+    Object.assign(environment, {
+      HERMES_TERMINAL_ENV_AUTHORITY: "session",
+      TERMINAL_ENV: "ssh",
+      TERMINAL_SSH_HOST: executionEnvironment.host,
+      TERMINAL_SSH_USER: executionEnvironment.user,
+      TERMINAL_SSH_PORT: String(executionEnvironment.port),
+      TERMINAL_SSH_KEY: executionEnvironment.identityFile,
+      TERMINAL_CWD: executionEnvironment.cwd,
+      TERMINAL_SSH_SYNC_FILES: "false",
+      TERMINAL_SSH_PERSISTENT: String(executionEnvironment.persistentShell),
+    });
+  }
+  return Object.freeze(environment);
+}
+
+export function buildHermesExecutionContext(
+  endpointId: ExecutionEndpointId,
+  executionEnvironment: ProviderSessionExecutionEnvironment | undefined,
+  localCwd: string,
+): string {
+  const type = executionEnvironment?.kind ?? "local";
+  const cwd = executionEnvironment?.kind === "ssh" ? executionEnvironment.cwd : localCwd;
+  return [
+    `Execution endpoint: ${endpointId}`,
+    `Execution type: ${type}`,
+    `Execution cwd: ${cwd}`,
+  ].join("\n");
 }
 
 export function buildHermesAcpSpawnInput(

@@ -1,5 +1,6 @@
 import {
   CommandId,
+  DEFAULT_EXECUTION_ENDPOINT_ID,
   type CheckpointRef,
   EventId,
   MessageId,
@@ -209,10 +210,19 @@ const make = Effect.gen(function* () {
   // a git repository.
   const resolveCheckpointCwd = Effect.fn("resolveCheckpointCwd")(function* (input: {
     readonly threadId: ThreadId;
-    readonly thread: { readonly projectId: ProjectId; readonly worktreePath: string | null };
+    readonly thread: {
+      readonly projectId: ProjectId;
+      readonly worktreePath: string | null;
+      readonly executionEndpointId?: string | undefined;
+    };
     readonly projects: ReadonlyArray<{ readonly id: ProjectId; readonly workspaceRoot: string }>;
     readonly preferSessionRuntime: boolean;
   }): Effect.fn.Return<string | undefined, CheckpointStoreError> {
+    if (
+      (input.thread.executionEndpointId ?? DEFAULT_EXECUTION_ENDPOINT_ID) !==
+      DEFAULT_EXECUTION_ENDPOINT_ID
+    )
+      return undefined;
     const fromSession = yield* resolveSessionRuntimeForThread(input.threadId);
     const fromThread = resolveThreadWorkspaceCwd({
       thread: input.thread,
@@ -511,6 +521,13 @@ const make = Effect.gen(function* () {
   const refreshLocalGitStatusFromTurnCompletion = Effect.fn(
     "refreshLocalGitStatusFromTurnCompletion",
   )(function* (event: Extract<ProviderRuntimeEvent, { type: "turn.completed" }>) {
+    const thread = yield* resolveThreadDetail(event.threadId);
+    if (
+      thread &&
+      (thread.executionEndpointId ?? DEFAULT_EXECUTION_ENDPOINT_ID) !==
+        DEFAULT_EXECUTION_ENDPOINT_ID
+    )
+      return;
     const sessionRuntime = yield* resolveSessionRuntimeForThread(event.threadId);
     if (Option.isNone(sessionRuntime)) {
       return;

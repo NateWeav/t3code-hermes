@@ -1,5 +1,5 @@
 import {
-  DEFAULT_SERVER_SETTINGS,
+  DEFAULT_CLIENT_SERVER_SETTINGS,
   type ProjectScopedServerSettingKey,
   type ServerSettings,
   type UnifiedSettings,
@@ -32,7 +32,7 @@ export function useScopedSettings<T = UnifiedSettings>(
 ): T {
   const { target } = useSettingsScope();
   const clientSettings = useClientSettings();
-  const serverSettings = target?.settings ?? DEFAULT_SERVER_SETTINGS;
+  const serverSettings = target?.settings ?? DEFAULT_CLIENT_SERVER_SETTINGS;
   const settings = useMemo(
     () => mergeEnvironmentSettings(serverSettings, clientSettings),
     [clientSettings, serverSettings],

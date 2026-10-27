@@ -29,7 +29,7 @@ interface ScopedSettingsEnvironment {
   readonly label: string;
   readonly connection: { readonly phase: EnvironmentConnectionPhase };
   readonly serverConfig: {
-    readonly settings: ServerSettings;
+    readonly settings: Omit<ServerSettings, "executionEndpoints">;
     readonly environment?: {
       readonly capabilities: { readonly projectSettingsOverrides?: boolean | undefined };
     };
@@ -79,7 +79,7 @@ export interface ScopedSettingsTarget {
   /** The environment's label; a project is the same project on every environment. */
   readonly label: string;
   readonly projectId: ProjectId | null;
-  readonly settings: ServerSettings;
+  readonly settings: Omit<ServerSettings, "executionEndpoints">;
   readonly sources: Readonly<Record<ProjectScopedServerSettingKey, ProjectSettingSource>>;
 }
 
@@ -137,7 +137,13 @@ export function scopedSettingsAreMixed(
   return (
     first !== undefined &&
     targets.some((candidate) =>
-      keys.some((key) => !Equal.equals(first.settings[key], candidate.settings[key])),
+      keys.some(
+        (key) =>
+          !Equal.equals(
+            (first.settings as Record<string, unknown>)[key],
+            (candidate.settings as Record<string, unknown>)[key],
+          ),
+      ),
     )
   );
 }
@@ -172,7 +178,7 @@ function projectOverrideWrites(
   environments: readonly ScopedSettingsEnvironment[],
   update: (
     current: ProjectSettingsOverrides,
-    settings: ServerSettings,
+    settings: Omit<ServerSettings, "executionEndpoints">,
     projectId: ProjectId,
   ) => ProjectSettingsOverrides | null,
 ): ScopedServerWrite[] {
@@ -239,6 +245,7 @@ export function planScopedSettingsPatch(
               const effective = resolveProjectSettings(settings, projectId).settings;
               const next: Record<string, unknown> = { ...current };
               for (const [key, value] of Object.entries(serverPatch)) {
+<<<<<<< HEAD
                 if (key === "worktreeCleanup" && serverPatch.worktreeCleanup?.mode === "custom") {
                   next[key] = {
                     mode: "custom",
@@ -259,6 +266,9 @@ export function planScopedSettingsPatch(
                   continue;
                 }
                 const base = effective[key as keyof ServerSettings];
+=======
+                const base = (effective as Record<string, unknown>)[key];
+>>>>>>> 2701de6a2 (feat(execution): add per-thread execution endpoints)
                 next[key] =
                   isPlainObject(value) && isPlainObject(base) ? { ...base, ...value } : value;
               }

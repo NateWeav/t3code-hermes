@@ -1,5 +1,6 @@
 import {
   ApprovalRequestId,
+  DEFAULT_EXECUTION_ENDPOINT_ID,
   isImportedAgentSessionMessageId,
   UserInputAttachmentAnswerPayload,
   type ChatAttachment,
@@ -615,6 +616,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             projectId: event.payload.projectId,
             title: event.payload.title,
             modelSelection: event.payload.modelSelection,
+            executionEndpointId: event.payload.executionEndpointId ?? DEFAULT_EXECUTION_ENDPOINT_ID,
             runtimeMode: event.payload.runtimeMode,
             interactionMode: event.payload.interactionMode,
             branch: event.payload.branch,

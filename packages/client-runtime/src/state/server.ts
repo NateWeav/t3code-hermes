@@ -1162,6 +1162,18 @@ export function createServerEnvironmentAtoms<R, E>(
       scheduler: configScheduler,
       concurrency: configConcurrency,
     }),
+    upsertExecutionEndpoint: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:upsert-execution-endpoint",
+      tag: WS_METHODS.serverUpsertExecutionEndpoint,
+      scheduler: configScheduler,
+      concurrency: configConcurrency,
+    }),
+    removeExecutionEndpoint: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:remove-execution-endpoint",
+      tag: WS_METHODS.serverRemoveExecutionEndpoint,
+      scheduler: configScheduler,
+      concurrency: configConcurrency,
+    }),
     signalProcess: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:signal-process",
       tag: WS_METHODS.serverSignalProcess,

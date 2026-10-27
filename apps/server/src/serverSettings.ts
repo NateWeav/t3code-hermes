@@ -15,6 +15,9 @@ import {
   DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER,
   DEFAULT_MODEL_BY_PROVIDER,
   DEFAULT_SERVER_SETTINGS,
+  DEFAULT_EXECUTION_ENDPOINT_ID,
+  type ClientServerSettings,
+  type ExecutionEndpointId,
   ModelSelection,
   ProjectScript,
   type ProjectSettingsOverrides,
@@ -23,10 +26,12 @@ import {
   type UsageLimitSourceConfig,
   ProviderDriverKind,
   ProviderInstanceId,
+  presentExecutionEndpoint,
   resolveProviderInstanceEnabled,
   ServerSettings,
   ServerSettingsError,
   type ServerSettingsPatch,
+  type SshExecutionEndpointUpsert,
 } from "@t3tools/contracts";
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
@@ -164,7 +169,7 @@ function redactProviderEnvironmentVariable(
   };
 }
 
-export function redactServerSettingsForClient(settings: ServerSettings): ServerSettings {
+export function redactServerSettingsForClient(settings: ServerSettings): ClientServerSettings {
   const providerInstances = Object.fromEntries(
     Object.entries(settings.providerInstances).map(([instanceId, instance]) => [
       instanceId,
@@ -174,6 +179,12 @@ export function redactServerSettingsForClient(settings: ServerSettings): ServerS
             environment: instance.environment.map(redactProviderEnvironmentVariable),
           }
         : instance,
+    ]),
+  );
+  const executionEndpoints = Object.fromEntries(
+    Object.entries(settings.executionEndpoints).map(([endpointId, endpoint]) => [
+      endpointId,
+      presentExecutionEndpoint(endpoint),
     ]),
   );
   // The Hindsight key is dropped outright rather than blanked: no client has
@@ -192,6 +203,7 @@ export function redactServerSettingsForClient(settings: ServerSettings): ServerS
   return {
     ...settings,
     providerInstances,
+    executionEndpoints,
     integrations: { ...settings.integrations, hindsight },
     usageLimitSources,
   };
@@ -212,6 +224,15 @@ export class ServerSettingsService extends Context.Service<
     /** Patch settings and persist. Returns the new full settings object. */
     readonly updateSettings: (
       patch: ServerSettingsPatch,
+    ) => Effect.Effect<ServerSettings, ServerSettingsError>;
+
+    readonly upsertExecutionEndpoint?: (
+      endpointId: ExecutionEndpointId,
+      endpoint: SshExecutionEndpointUpsert,
+    ) => Effect.Effect<ServerSettings, ServerSettingsError>;
+
+    readonly removeExecutionEndpoint?: (
+      endpointId: ExecutionEndpointId,
     ) => Effect.Effect<ServerSettings, ServerSettingsError>;
 
     /** Stream of settings change events. */
@@ -254,6 +275,22 @@ const makeTest = (overrides: DeepPartial<ServerSettings> = {}) =>
           Effect.map((currentSettings) => applyServerSettingsPatch(currentSettings, patch)),
           Effect.flatMap(normalizeServerSettings),
           Effect.tap((nextSettings) => Ref.set(currentSettingsRef, nextSettings)),
+          Effect.map(resolveTextGenerationProvider),
+        ),
+      upsertExecutionEndpoint: (endpointId, endpoint) =>
+        Ref.get(currentSettingsRef).pipe(
+          Effect.flatMap((settings) =>
+            applyExecutionEndpointUpsert(settings, endpointId, endpoint),
+          ),
+          Effect.flatMap(normalizeServerSettings),
+          Effect.tap((settings) => Ref.set(currentSettingsRef, settings)),
+          Effect.map(resolveTextGenerationProvider),
+        ),
+      removeExecutionEndpoint: (endpointId) =>
+        Ref.get(currentSettingsRef).pipe(
+          Effect.flatMap((settings) => applyExecutionEndpointRemove(settings, endpointId)),
+          Effect.flatMap(normalizeServerSettings),
+          Effect.tap((settings) => Ref.set(currentSettingsRef, settings)),
           Effect.map(resolveTextGenerationProvider),
         ),
       streamChanges: Stream.empty,
@@ -356,6 +393,78 @@ function fallbackTextGenerationProvider(settings: ServerSettings): ServerSetting
         DEFAULT_TEXT_GENERATION_MODEL,
     } satisfies ModelSelection,
   };
+}
+
+function executionEndpointMutationError(
+  operation: "upsert-execution-endpoint" | "remove-execution-endpoint",
+  message: string,
+): ServerSettingsError {
+  return new ServerSettingsError({
+    settingsPath: "<memory>",
+    operation,
+    cause: new Error(message),
+  });
+}
+
+function applyExecutionEndpointUpsert(
+  settings: ServerSettings,
+  endpointId: ExecutionEndpointId,
+  endpoint: SshExecutionEndpointUpsert,
+): Effect.Effect<ServerSettings, ServerSettingsError> {
+  if (endpointId === DEFAULT_EXECUTION_ENDPOINT_ID) {
+    return Effect.fail(
+      executionEndpointMutationError(
+        "upsert-execution-endpoint",
+        "The Local endpoint is built in.",
+      ),
+    );
+  }
+  const existing = settings.executionEndpoints[endpointId];
+  const identityFile =
+    endpoint.identityFile ?? (existing?.kind === "ssh" ? existing.identityFile : null);
+  if (identityFile === null) {
+    return Effect.fail(
+      executionEndpointMutationError(
+        "upsert-execution-endpoint",
+        "A new SSH endpoint requires an identity file.",
+      ),
+    );
+  }
+  return Effect.succeed({
+    ...settings,
+    executionEndpoints: {
+      ...settings.executionEndpoints,
+      [endpointId]: {
+        kind: "ssh",
+        displayName: endpoint.displayName,
+        enabled: endpoint.enabled,
+        host: endpoint.host,
+        user: endpoint.user,
+        port: endpoint.port,
+        identityFile,
+        cwd: endpoint.cwd,
+        syncFiles: false,
+        persistentShell: false,
+      },
+    },
+  });
+}
+
+function applyExecutionEndpointRemove(
+  settings: ServerSettings,
+  endpointId: ExecutionEndpointId,
+): Effect.Effect<ServerSettings, ServerSettingsError> {
+  if (endpointId === DEFAULT_EXECUTION_ENDPOINT_ID) {
+    return Effect.fail(
+      executionEndpointMutationError(
+        "remove-execution-endpoint",
+        "The Local endpoint is built in.",
+      ),
+    );
+  }
+  if (!(endpointId in settings.executionEndpoints)) return Effect.succeed(settings);
+  const { [endpointId]: _removed, ...executionEndpoints } = settings.executionEndpoints;
+  return Effect.succeed({ ...settings, executionEndpoints });
 }
 
 // Values under these keys are compared as a whole — never stripped field-by-field.
@@ -1059,6 +1168,34 @@ const make = Effect.gen(function* () {
       Effect.map(resolveTextGenerationProvider),
     ),
     updateSettings,
+    upsertExecutionEndpoint: (endpointId, endpoint) =>
+      writeSemaphore.withPermits(1)(
+        Effect.gen(function* () {
+          const current = yield* getSettingsFromCache;
+          const next = yield* applyExecutionEndpointUpsert(current, endpointId, endpoint).pipe(
+            Effect.flatMap(normalizeServerSettings),
+          );
+          yield* writeSettingsAtomically(next);
+          yield* Cache.set(settingsCache, cacheKey, next);
+          yield* emitChange(next);
+          const materialized = yield* materializeProviderEnvironmentSecrets(next);
+          return resolveTextGenerationProvider(materialized);
+        }),
+      ),
+    removeExecutionEndpoint: (endpointId) =>
+      writeSemaphore.withPermits(1)(
+        Effect.gen(function* () {
+          const current = yield* getSettingsFromCache;
+          const next = yield* applyExecutionEndpointRemove(current, endpointId).pipe(
+            Effect.flatMap(normalizeServerSettings),
+          );
+          yield* writeSettingsAtomically(next);
+          yield* Cache.set(settingsCache, cacheKey, next);
+          yield* emitChange(next);
+          const materialized = yield* materializeProviderEnvironmentSecrets(next);
+          return resolveTextGenerationProvider(materialized);
+        }),
+      ),
     get streamChanges() {
       return materializeChanges(Stream.fromPubSub(changesPubSub));
     },

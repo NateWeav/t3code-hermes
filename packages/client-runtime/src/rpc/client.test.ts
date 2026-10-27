@@ -1,5 +1,5 @@
 import {
-  DEFAULT_SERVER_SETTINGS,
+  DEFAULT_CLIENT_SERVER_SETTINGS,
   EnvironmentId,
   PreviewTabId,
   ThreadId,
@@ -246,7 +246,7 @@ describe("environment RPC", () => {
       const event: ServerConfigStreamEvent = {
         version: 1,
         type: "settingsUpdated",
-        payload: { settings: DEFAULT_SERVER_SETTINGS },
+        payload: { settings: DEFAULT_CLIENT_SERVER_SETTINGS },
       };
       let duplicateSubscriptions = 0;
       const client = {

@@ -6,6 +6,7 @@ import { AntigravityDriver, type AntigravityDriverEnv } from "./Drivers/Antigrav
 import { ClaudeDriver, type ClaudeDriverEnv } from "./Drivers/ClaudeDriver.ts";
 import { CodexDriver, type CodexDriverEnv } from "./Drivers/CodexDriver.ts";
 import { CursorDriver, type CursorDriverEnv } from "@t3tools/provider-cursor/server";
+import { FxDriver, type FxDriverEnv } from "@t3tools/provider-fx/server";
 import { GrokDriver, type GrokDriverEnv } from "@t3tools/provider-grok/server";
 import { OpenCodeDriver, type OpenCodeDriverEnv } from "@t3tools/provider-opencode/server";
 import { HermesDriver, type HermesDriverEnv } from "./Drivers/HermesDriver.ts";
@@ -22,6 +23,7 @@ export type BuiltInDriversEnv =
   | ClaudeDriverEnv
   | CodexDriverEnv
   | CursorDriverEnv
+  | FxDriverEnv
   | GrokDriverEnv
   | HermesDriverEnv
   | OpenCodeDriverEnv
@@ -34,6 +36,7 @@ export const BUILT_IN_DRIVERS: ReadonlyArray<AnyProviderDriver<BuiltInDriversEnv
   CursorDriver,
   GrokDriver,
   HermesDriver,
+  FxDriver,
   OpenCodeDriver,
   AntigravityDriver,
   PiDriver,

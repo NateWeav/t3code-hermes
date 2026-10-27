@@ -234,7 +234,7 @@ function HindsightMemorySection({
         <Button
           onClick={() =>
             void navigate({
-              to: "/settings/integrations",
+              to: "/settings/devices",
               search: environmentId === null ? {} : { machine: environmentId },
               hash: "memory",
             })

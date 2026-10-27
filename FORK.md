@@ -263,6 +263,21 @@ limited to `builtInDrivers.ts`, `settings.ts`, and the client branding lists. Re
 `usageProviders.ts` files (`apps/web/src/components/usage/`, `apps/mobile/src/features/usage/`) by
 reading both sides rather than taking one wholesale.
 
+To see what each side did to a conflicted file, diff it against the merge base
+(`git diff "$(git merge-base HEAD MERGE_HEAD)" HEAD -- <file>`, and `MERGE_HEAD` for upstream).
+That is quicker than walking history with `git log -S` and gives the same answer.
+
+**Verifying a resolution.** The repo uses pnpm through `vp`, never `bun` or `npm`. Check only what
+the merge touched and leave the repo-wide typecheck and test suite to the PR's CI:
+
+| Step                                                                  | Command (from the repo root unless noted)                                                                                      |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Install, and again after resolving `package.json` or `pnpm-lock.yaml` | `CI=true vp install`                                                                                                           |
+| Typecheck the touched packages                                        | `vp run --filter @t3tools/web --filter @t3tools/contracts typecheck` (`apps/server` is `t3-hermes`, the rest `@t3tools/<dir>`) |
+| Test a file in `apps/web`                                             | `vp test run --project unit <file>`, from `apps/web`                                                                           |
+| Test a file in `apps/server` or another package                       | `vp test run <file>`, from the package; `vp run test <file>` in `packages/contracts`                                           |
+| Format and lint                                                       | `vp fmt --check <files>` and `vp lint --report-unused-disable-directives <files>`                                              |
+
 **Hermes parity.** Hermes runs on upstream's shared provider code, so fixes there reach it through
 the merge. What git cannot flag is a hook or optional input that upstream adds to shared code, that
 the sibling providers start using, and that Hermes never sets: Hermes still compiles and quietly

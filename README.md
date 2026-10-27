@@ -88,6 +88,7 @@ Other providers are set up the same way as upstream; see
 User and developer docs live in [docs/](./docs/README.md). Fork-specific setup, known limitations,
 and how the fork follows upstream are in [FORK.md](./FORK.md).
 
+- [FAQ](./docs/user/faq.md)
 - [Install and first run](./docs/user/install.md)
 - [Remote access from a phone or another machine](./docs/user/remote-access.md)
 - [Run as a background service](./docs/user/background-service.md)

@@ -53,6 +53,9 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   // part of operating threads; listing the links is a read.
   [WS_METHODS.hermesChatLink]: AuthOrchestrationOperateScope,
   [WS_METHODS.hermesChatUnlink]: AuthOrchestrationOperateScope,
+  // A board's linked project and icon are T3 Code preferences shared by every client.
+  [WS_METHODS.hermesKanbanSetBoardProject]: AuthOrchestrationOperateScope,
+  [WS_METHODS.hermesKanbanSetBoardIcon]: AuthOrchestrationOperateScope,
   [ORCHESTRATION_V2_WS_METHODS.stopWorkflow]: AuthOrchestrationOperateScope,
   // A guest link hands thread access to someone outside, like a pairing link.
   [WS_METHODS.guestShareCreate]: AuthAccessWriteScope,

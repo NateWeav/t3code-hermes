@@ -371,9 +371,13 @@ import {
 } from "./hermesChat.ts";
 import {
   HermesKanbanBoard,
+  HermesKanbanBoardPreferences,
+  HermesKanbanError,
   HermesKanbanGetBoardInput,
   HermesKanbanGetTaskInput,
   HermesKanbanListBoardsResult,
+  HermesKanbanSetBoardIconInput,
+  HermesKanbanSetBoardProjectInput,
   HermesKanbanTaskResult,
 } from "./hermesKanban.ts";
 import {
@@ -604,6 +608,8 @@ export const WS_METHODS = {
   hermesKanbanListBoards: "hermesKanban.listBoards",
   hermesKanbanGetBoard: "hermesKanban.getBoard",
   hermesKanbanGetTask: "hermesKanban.getTask",
+  hermesKanbanSetBoardProject: "hermesKanban.setBoardProject",
+  hermesKanbanSetBoardIcon: "hermesKanban.setBoardIcon",
   hermesPatchList: "hermes.patchList",
   hermesPatchApply: "hermes.patchApply",
   hermesPatchRevert: "hermes.patchRevert",
@@ -1146,6 +1152,20 @@ const WsHermesKanbanGetTaskRpc = Rpc.make(WS_METHODS.hermesKanbanGetTask, {
   payload: HermesKanbanGetTaskInput,
   success: HermesKanbanTaskResult,
   error: EnvironmentAuthorizationError,
+});
+
+/** Links a board to a T3 project (T3 Code state; Hermes is never written). */
+const WsHermesKanbanSetBoardProjectRpc = Rpc.make(WS_METHODS.hermesKanbanSetBoardProject, {
+  payload: HermesKanbanSetBoardProjectInput,
+  success: HermesKanbanBoardPreferences,
+  error: Schema.Union([EnvironmentAuthorizationError, HermesKanbanError]),
+});
+
+/** Stores or removes a board's uploaded icon (T3 Code state; Hermes is never written). */
+const WsHermesKanbanSetBoardIconRpc = Rpc.make(WS_METHODS.hermesKanbanSetBoardIcon, {
+  payload: HermesKanbanSetBoardIconInput,
+  success: HermesKanbanBoardPreferences,
+  error: Schema.Union([EnvironmentAuthorizationError, HermesKanbanError]),
 });
 
 const WsHermesPatchListRpc = Rpc.make(WS_METHODS.hermesPatchList, {
@@ -2281,6 +2301,8 @@ export const HermesWsRpcGroup = RpcGroup.make(
   WsHermesKanbanListBoardsRpc,
   WsHermesKanbanGetBoardRpc,
   WsHermesKanbanGetTaskRpc,
+  WsHermesKanbanSetBoardProjectRpc,
+  WsHermesKanbanSetBoardIconRpc,
   WsHermesPatchListRpc,
   WsHermesPatchApplyRpc,
   WsHermesPatchRevertRpc,

@@ -117,6 +117,15 @@ it("keeps Hermes Kanban boards read-only", () => {
   }
 });
 
+it("requires operate permission to change a board's T3 project or icon", () => {
+  for (const method of [
+    WS_METHODS.hermesKanbanSetBoardProject,
+    WS_METHODS.hermesKanbanSetBoardIcon,
+  ]) {
+    expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
+  }
+});
+
 it("requires operate permission to change a conversation's links", () => {
   for (const method of [WS_METHODS.hermesChatLink, WS_METHODS.hermesChatUnlink]) {
     expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);

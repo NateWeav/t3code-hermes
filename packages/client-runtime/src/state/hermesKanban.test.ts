@@ -4,6 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   HERMES_KANBAN_DEFAULT_COLUMNS,
   formatHermesKanbanAge,
+  hermesKanbanBoardIconSource,
   hermesKanbanColumnCards,
   hermesKanbanMilestoneView,
   hermesKanbanProgressPercent,
@@ -45,6 +46,8 @@ const board = (
   blockedCount,
   statusCounts: {},
   lastActivityAt,
+  projectId: null,
+  customIcon: null,
 });
 
 describe("hermesKanbanColumnCards", () => {
@@ -131,5 +134,36 @@ describe("hermesKanbanMilestoneView", () => {
       view.features.map((feature) => [feature.task.id, feature.milestones.map((m) => m.id)]),
     ).toEqual([["f", ["m1"]]]);
     expect(view.standalone.map((entry) => entry.id)).toEqual(["solo"]);
+  });
+});
+
+describe("hermesKanbanBoardIconSource", () => {
+  const upload = { dataUrl: "data:image/png;base64,iVBORw0KGgo=", mimeType: "image/png" as const };
+  const exists = (id: string) => id === "p1";
+  const PROJECT = "p1" as HermesKanbanBoardSummary["projectId"];
+  const GONE = "gone" as HermesKanbanBoardSummary["projectId"];
+
+  it("prefers the upload, then the linked project, then the emoji", () => {
+    expect(
+      hermesKanbanBoardIconSource({ customIcon: upload, projectId: PROJECT, icon: "🧩" }, exists),
+    ).toEqual({ kind: "upload", icon: upload });
+    expect(
+      hermesKanbanBoardIconSource({ customIcon: null, projectId: PROJECT, icon: "🧩" }, exists),
+    ).toEqual({ kind: "project", projectId: "p1" });
+    expect(
+      hermesKanbanBoardIconSource({ customIcon: null, projectId: null, icon: "🧩" }, exists),
+    ).toEqual({ kind: "emoji", emoji: "🧩" });
+    expect(
+      hermesKanbanBoardIconSource({ customIcon: null, projectId: null, icon: null }, exists),
+    ).toEqual({ kind: "none" });
+  });
+
+  it("falls through a project that no longer exists to the emoji", () => {
+    expect(
+      hermesKanbanBoardIconSource({ customIcon: null, projectId: GONE, icon: "🧩" }, exists),
+    ).toEqual({ kind: "emoji", emoji: "🧩" });
+    expect(
+      hermesKanbanBoardIconSource({ customIcon: null, projectId: GONE, icon: "  " }, exists),
+    ).toEqual({ kind: "none" });
   });
 });

@@ -99,6 +99,8 @@ const RPC_AGGREGATES = {
   [WS_METHODS.hermesKanbanListBoards]: "server",
   [WS_METHODS.hermesKanbanGetBoard]: "server",
   [WS_METHODS.hermesKanbanGetTask]: "server",
+  [WS_METHODS.hermesKanbanSetBoardProject]: "server",
+  [WS_METHODS.hermesKanbanSetBoardIcon]: "server",
   [WS_METHODS.hermesPatchList]: "server",
   [WS_METHODS.hermesPatchApply]: "server",
   [WS_METHODS.hermesPatchRevert]: "server",

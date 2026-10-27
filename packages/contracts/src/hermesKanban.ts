@@ -1,14 +1,17 @@
 /**
  * Read-only views of Hermes Kanban boards, read on demand from each board's own `kanban.db`.
  * Nothing here can move, complete, or dispatch a card: Hermes stays the source of truth and T3 Code
- * keeps no copy.
+ * keeps no copy. The only writes are T3 Code's own per-board preferences (a linked T3 project and
+ * an uploaded icon), stored beside the server's state and never in Hermes.
  */
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import {
   ForwardCompatibleArray,
   IsoDateTime,
   NonNegativeInt,
+  ProjectId,
   ThreadId,
   TrimmedNonEmptyString,
 } from "./baseSchemas.ts";
@@ -25,6 +28,31 @@ export const HermesKanbanBoardSlug = TrimmedNonEmptyString.check(
 export type HermesKanbanBoardSlug = typeof HermesKanbanBoardSlug.Type;
 
 const HermesKanbanTaskId = TrimmedNonEmptyString.check(Schema.isMaxLength(128));
+
+/** Decoded size cap for an uploaded board icon. Clients downscale to ~128px well below it. */
+export const HERMES_KANBAN_BOARD_ICON_MAX_BYTES = 256 * 1024;
+
+export const HermesKanbanBoardIconMimeType = Schema.Literals([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+  "image/svg+xml",
+]);
+export type HermesKanbanBoardIconMimeType = typeof HermesKanbanBoardIconMimeType.Type;
+
+/**
+ * An uploaded board icon as a base64 `data:` URL. Clients render it only as `<img src>`, never
+ * inline, so an SVG's scripts and external loads stay inert. The server checks the URL's media
+ * type and decoded size; the length check here only bounds the payload.
+ */
+export const HermesKanbanBoardIcon = Schema.Struct({
+  dataUrl: Schema.String.check(
+    Schema.isMaxLength(Math.ceil(HERMES_KANBAN_BOARD_ICON_MAX_BYTES / 3) * 4 + 64),
+  ),
+  mimeType: HermesKanbanBoardIconMimeType,
+});
+export type HermesKanbanBoardIcon = typeof HermesKanbanBoardIcon.Type;
 
 export const HermesKanbanBoardSummary = Schema.Struct({
   slug: HermesKanbanBoardSlug,
@@ -45,6 +73,15 @@ export const HermesKanbanBoardSummary = Schema.Struct({
   statusCounts: Schema.Record(Schema.String, NonNegativeInt),
   /** The newest task event on the board. */
   lastActivityAt: Schema.NullOr(IsoDateTime),
+  /**
+   * The T3 project this board is linked to, a T3 Code preference. Unrelated to Hermes's own
+   * `project_id`. Defaults to null so an older server's summaries still decode.
+   */
+  projectId: Schema.NullOr(ProjectId).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  /** An uploaded icon, a T3 Code preference that wins over the project icon and the emoji. */
+  customIcon: Schema.NullOr(HermesKanbanBoardIcon).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
 });
 export type HermesKanbanBoardSummary = typeof HermesKanbanBoardSummary.Type;
 
@@ -150,3 +187,39 @@ export const HermesKanbanTaskResult = Schema.Struct({
   comments: ForwardCompatibleArray(HermesKanbanComment),
 });
 export type HermesKanbanTaskResult = typeof HermesKanbanTaskResult.Type;
+
+/** Link a board to a T3 project, or unlink it with null. */
+export const HermesKanbanSetBoardProjectInput = Schema.Struct({
+  slug: HermesKanbanBoardSlug,
+  projectId: Schema.NullOr(ProjectId),
+});
+export type HermesKanbanSetBoardProjectInput = typeof HermesKanbanSetBoardProjectInput.Type;
+
+/** Upload a board icon, or remove it with null. */
+export const HermesKanbanSetBoardIconInput = Schema.Struct({
+  slug: HermesKanbanBoardSlug,
+  icon: Schema.NullOr(HermesKanbanBoardIcon),
+});
+export type HermesKanbanSetBoardIconInput = typeof HermesKanbanSetBoardIconInput.Type;
+
+/** A board's T3 Code preferences after a change. */
+export const HermesKanbanBoardPreferences = Schema.Struct({
+  slug: HermesKanbanBoardSlug,
+  projectId: Schema.NullOr(ProjectId),
+  customIcon: Schema.NullOr(HermesKanbanBoardIcon),
+});
+export type HermesKanbanBoardPreferences = typeof HermesKanbanBoardPreferences.Type;
+
+export class HermesKanbanError extends Schema.TaggedError<HermesKanbanError>()(
+  "HermesKanbanError",
+  {
+    reason: Schema.Literals(["providerDisabled", "unknownBoard", "invalidIcon", "writeFailed"]),
+    /** Stable, bounded description. The underlying failure travels in `cause`. */
+    detail: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  override get message(): string {
+    return `Hermes board request failed (${this.reason}): ${this.detail}`;
+  }
+}

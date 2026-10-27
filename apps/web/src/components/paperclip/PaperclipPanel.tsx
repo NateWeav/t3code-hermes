@@ -97,7 +97,7 @@ export function PaperclipPanel({ environmentId }: { readonly environmentId: Envi
   );
   usePaperclipAutoRefresh(query, enabled ? autoRefreshSeconds : 0);
   const navigate = useNavigate();
-  const openSettings = () => void navigate({ to: "/settings/integrations" });
+  const openSettings = () => void navigate({ to: "/settings/devices", hash: "paperclip" });
 
   const result = query.data;
   if (!enabled || (result !== null && result.status.availability !== "ready")) {

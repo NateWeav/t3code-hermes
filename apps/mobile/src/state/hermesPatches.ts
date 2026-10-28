@@ -61,6 +61,7 @@ export function useHermesPatches(environmentId: EnvironmentId | null) {
   const restarting = query.data?.gateway?.state === "restarting";
 
   // The restart runs on the server after the request returns; re-read until it is done.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- interval timer that re-reads gateway status while the server restarts it
   useEffect(() => {
     if (!restarting) return;
     const timer = setInterval(refresh, GATEWAY_RESTART_POLL_MS);

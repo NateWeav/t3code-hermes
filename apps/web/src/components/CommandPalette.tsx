@@ -278,6 +278,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
   // A full-page view (Hermes Tasks) can queue a prompt template while no
   // composer is mounted. Claim it once one exists, on this mount and on any
   // later request.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- hands a queued template to the imperative composer handle once it mounts, via animation frames
   useEffect(() => {
     let frame = 0;
     const applyPendingTemplate = (attempt = 0) => {
@@ -739,6 +740,7 @@ function OpenCommandPaletteDialog(props: {
     });
   };
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- invalidates the browse navigation coordinator and in-flight clone lookups when the palette session unmounts
   useEffect(
     () => () => {
       browseNavigation.invalidate();

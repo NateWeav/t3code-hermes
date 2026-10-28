@@ -27,6 +27,7 @@ export function useHermesCronNotifications({
   // are disabled so enabling them cannot replay the last completed run.
   const lastSeen = useRef<HermesCronView["lastCompletion"]>(null);
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- shows an imperative toast and desktop notification for each new Hermes task completion
   useEffect(() => {
     const completion = view.lastCompletion;
     if (completion === null || completion === lastSeen.current) return;

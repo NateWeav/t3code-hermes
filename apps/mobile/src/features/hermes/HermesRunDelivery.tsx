@@ -114,6 +114,7 @@ function RunOutput(props: {
   const [state, setState] = useState<OutputState>({ status: "pending" });
   const { environmentId, run } = props;
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fetches this run's output from the server once per run and ignores a late reply after unmount
   useEffect(() => {
     let active = true;
     void getRunOutput({ environmentId, input: { jobId: run.jobId, runId: run.id } }).then(

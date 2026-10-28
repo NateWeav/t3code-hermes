@@ -73,6 +73,9 @@ import Migration0066 from "./Migrations/066_RepairClientSettlementTimestamps.ts"
 import Migration0067 from "./Migrations/067_WebhookDedupe.ts";
 import Migration0068 from "./Migrations/068_ShellStopRequestIndex.ts";
 import Migration0069 from "./Migrations/069_ThreadMessageSearch.ts";
+import Migration0070 from "./Migrations/070_PeerLinks.ts";
+import Migration0071 from "./Migrations/071_PeerLinkFence.ts";
+import Migration0072 from "./Migrations/072_WaitingLinkRequestIndex.ts";
 
 const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
@@ -145,6 +148,9 @@ const migrationEntries = [
   [67, "WebhookDedupe", Migration0067],
   [68, "ShellStopRequestIndex", Migration0068],
   [69, "ThreadMessageSearch", Migration0069],
+  [70, "PeerLinks", Migration0070],
+  [71, "PeerLinkFence", Migration0071],
+  [72, "WaitingLinkRequestIndex", Migration0072],
   // Fork: never add fork migrations here. Any id this fork takes is one upstream
   // will assign later, and the migrator would skip upstream's migration at it
   // (see reconcileForkMigrations and docs/internals/legacy-orchestration-migration.md).

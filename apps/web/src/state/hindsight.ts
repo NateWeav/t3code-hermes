@@ -103,6 +103,7 @@ export function useHindsightMemory(
       ? selectedBank
       : (banksQuery.data?.defaultBank ?? banks[0]?.id ?? null);
   // A reflection that lands after the bank changed belongs to the old bank.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- keeps a ref in step with the selected bank so a late reflection reply can detect a bank change
   useEffect(() => {
     selectedBankRef.current = bank;
   }, [bank]);

@@ -211,7 +211,7 @@ export function startThreadNotifications(
       notification.addEventListener("click", () => {
         notification.close();
         window.focus();
-        void window.desktopBridge?.revealWindow?.().catch(() => undefined);
+        void window.desktopBridge?.revealWindow().catch(() => undefined);
         void router.navigate({
           to: "/$environmentId/$threadId",
           params: { environmentId, threadId: thread.id },
@@ -365,7 +365,7 @@ export function startThreadNotifications(
 
   // The badge is shown in every mode, so focusing the window always clears it.
   clearPending();
-  const unsubscribeBadgeClear = window.desktopBridge?.onNotificationBadgeClear?.(clearPending);
+  const unsubscribeBadgeClear = window.desktopBridge?.onNotificationBadgeClear(clearPending);
   window.addEventListener("focus", clearPending);
 
   // Listeners that only exist for some notification modes, rebuilt when the mode changes.

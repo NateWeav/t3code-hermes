@@ -1,3 +1,4 @@
+import { workspaceAreaProps } from "../lib/workspaceFocus";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
 import { queuedRunEditBlockedReason } from "@t3tools/client-runtime/queued-run-edit";
 import { ScrollToEndButton, WorkspaceFileDropOverlay } from "./chat/TimelineOverlays";
@@ -114,6 +115,7 @@ import { useLocation, useNavigate } from "@tanstack/react-router";
 import { assistantCitationFromLocation } from "../lib/assistantCitationNavigation";
 import type { AssistantCitationSourceAnchor } from "~/lib/assistantTextSelection";
 import { useStore } from "zustand";
+import { shallow } from "zustand/vanilla/shallow";
 import { useShallow } from "zustand/react/shallow";
 import {
   isAtomCommandInterrupted,
@@ -141,7 +143,7 @@ import { useWorkspaceMutationRefresh } from "../hooks/useWorkspaceMutationRefres
 import { DEFAULT_INTERACTION_MODE, type ChatMessage } from "../types";
 import { buildThreadRouteParams } from "../threadRoutes";
 import { useTheme } from "../hooks/useTheme";
-import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
+import { copyThreadReference } from "../lib/copyThreadReference";
 import { subscribeSnapShotComposerFocus } from "../lib/desktopSnapShot";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { FileMetadataThreadProvider } from "../hooks/FileMetadataThreadProvider";
@@ -181,7 +183,7 @@ import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import { shortcutLabelForCommand } from "../keybindings";
 import { cn } from "~/lib/utils";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
-import { stackedThreadToast, toastManager } from "./ui/toast";
+import { toastManager } from "./ui/toast";
 import { projectScriptIdFromCommand } from "~/projectScripts";
 import { newMessageId } from "~/lib/utils";
 import {
@@ -205,7 +207,7 @@ import { focusTerminalOnThreadEnter, getTerminalFocusOwner } from "../lib/termin
 import {
   deriveLogicalProjectKeyFromSettings,
   selectProjectGroupingSettings,
-} from "../logicalProject";
+} from "@t3tools/client-runtime/state/project-grouping";
 import {
   isSameSidebarThreadRef,
   useSidebarPendingFileDropStore,
@@ -357,6 +359,7 @@ import { ChatRightPanel } from "./chat/ChatRightPanel";
 import { useDraftEnvironmentRouting } from "./chat/useDraftEnvironmentRouting";
 import { branchMismatchBannerItem } from "./chat/ThreadActivityBanners";
 import { ThreadNow } from "./chat/ThreadNow";
+import type { ThreadStructure } from "@t3tools/client-runtime/state/shell";
 import { useDelayedStatus } from "../hooks/useDelayedStatus";
 import { useTimelineFollow } from "./chat/useTimelineFollow";
 import {
@@ -379,6 +382,7 @@ import type { CodexArtifactTemplate } from "@t3tools/shared/codexArtifactTemplat
 
 const EMPTY_FEEDBACK_SUBMISSIONS: ReadonlyArray<CodexFeedbackSubmission> = [];
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
+const EMPTY_TURN_ITEMS: ThreadStructure["turnItems"] = [];
 const EMPTY_AUTO_UPDATE_ENVIRONMENTS: ReadonlyArray<EnvironmentPresentation> = [];
 
 const EMPTY_PENDING_FILE_SURFACE_IDS: ReadonlySet<string> = new Set();
@@ -667,7 +671,6 @@ export default function ChatView(props: ChatViewProps) {
   const [localServerErrorsByThreadKey, setLocalServerErrorsByThreadKey] = useState<
     Record<string, LocalThreadErrorEntry>
   >({});
-  const [isConnecting, _setIsConnecting] = useState(false);
   const isRevertingCheckpoint = useComposerDraftStore((store) =>
     store.rewindingThreadKeys.has(routeThreadKey),
   );
@@ -708,6 +711,8 @@ export default function ChatView(props: ChatViewProps) {
   const legendListRef = useRef<LegendListRef | null>(null);
   const getTimelineScrollableNode = () => legendListRef.current?.getScrollableNode() ?? null;
   const getTimelineScrollableNodeStable = useStableCallback(getTimelineScrollableNode);
+  const conversationArea = workspaceAreaProps("conversation", 1, "Conversation");
+  const composerArea = workspaceAreaProps("composer", 2, "Message input");
   const [composerOverlayElement, setComposerOverlayElement] = useState<HTMLDivElement | null>(null);
   const [composerTimelineInset, setComposerTimelineInset] = useState(0);
   const composerTimelineInsetRef = useRef(0);
@@ -1186,13 +1191,11 @@ export default function ChatView(props: ChatViewProps) {
   });
   const modelPickerLockedProvider = supportsProviderSwitchingViaHandoff ? null : lockedProvider;
   const pullRequestsCapabilityKnown = serverConfig !== null;
-  const supportsPullRequests = serverConfig?.environment.capabilities.pullRequests === true;
+  const supportsPullRequests = serverConfig !== null;
   const attachmentEnvironmentConfig = environmentById.get(environmentId)?.serverConfig ?? null;
   const attachmentUploadsCapabilityKnown = attachmentEnvironmentConfig !== null;
-  const supportsQuestionAttachments =
-    attachmentEnvironmentConfig?.environment.capabilities.questionAttachments === true;
-  const supportsAttachmentUploads =
-    attachmentEnvironmentConfig?.environment.capabilities.attachmentUploads === true;
+  const supportsQuestionAttachments = attachmentEnvironmentConfig !== null;
+  const supportsAttachmentUploads = attachmentEnvironmentConfig !== null;
   const advertisedFileAttachmentBytes =
     attachmentEnvironmentConfig?.environment.capabilities.fileAttachments?.maxUploadBytes ?? null;
   const maxFileAttachmentBytes =
@@ -1315,6 +1318,12 @@ export default function ChatView(props: ChatViewProps) {
     composerRef,
     setThreadError,
   });
+  const [heldApprovalRequestIds, setHeldApprovalRequestIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const onHeldRequestIdsChange = useStableCallback((requestIds: ReadonlySet<string>) => {
+    setHeldApprovalRequestIds((current) => (shallow(current, requestIds) ? current : requestIds));
+  });
   const activeProposedPlan = (() => {
     if (!latestRunSettled) {
       return null;
@@ -1402,11 +1411,7 @@ export default function ChatView(props: ChatViewProps) {
     (isSendBusy || phase === "connecting" || phase === "running") &&
     (compactionRunning || (compactRequestIsActive && !compactionSettled));
   const isWorking =
-    phase === "running" ||
-    isSendBusy ||
-    isConnecting ||
-    isCompacting ||
-    runlessWorkStartedAt !== null;
+    phase === "running" || isSendBusy || isCompacting || runlessWorkStartedAt !== null;
   const activeContextWindow = deriveLatestContextWindowSnapshot(
     serverVisibleTurnItems ?? [],
     activeThreadLiveTokenUsage,
@@ -1917,8 +1922,7 @@ export default function ChatView(props: ChatViewProps) {
       threadPanelPresentation,
     ),
   );
-  const supportsThreadPullRequests =
-    serverConfig?.environment.capabilities.threadPullRequests === true;
+  const supportsThreadPullRequests = serverConfig !== null;
   const visiblePullRequests = visibleThreadPullRequests(
     (activeThreadShell ?? activeThread)?.pullRequests ?? [],
   );
@@ -2301,37 +2305,18 @@ export default function ChatView(props: ChatViewProps) {
   ]);
   const openPanelPullRequestUrl = useOpenPanelPullRequestUrl(activeThreadRef);
   const activeThreadReferenceCopyTarget =
-    activeThreadId === null || !isServerThread
+    activeThreadRef === null || !isServerThread
       ? null
       : resolveThreadReferenceCopyTarget({
-          threadId: activeThreadId,
+          threadRef: activeThreadRef,
+          title: activeThread?.title ?? "",
           openPanelPullRequestUrl,
           pullRequests: activeThread?.pullRequests,
           linkedPullRequestUrl: linkedThreadPullRequest?.url ?? null,
         });
   const copyActiveThreadReference = () => {
-    const target = activeThreadReferenceCopyTarget;
-    if (target === null) return;
-    void writeTextToClipboard(target.value, target.clipboardTarget).then(
-      (didCopy) => {
-        if (!didCopy) return;
-        toastManager.add({
-          type: "success",
-          title: target.successTitle,
-          description: target.value,
-        });
-      },
-      (error) => {
-        console.error(error);
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: target.failureTitle,
-            description: error instanceof Error ? error.message : "An error occurred.",
-          }),
-        );
-      },
-    );
+    if (activeThreadReferenceCopyTarget === null) return;
+    void copyThreadReference(activeThreadReferenceCopyTarget);
   };
   const pullRequestPanelTarget = activeThread
     ? threadPullRequestPanelTarget({
@@ -2426,6 +2411,7 @@ export default function ChatView(props: ChatViewProps) {
     runtimeMode,
     isWorking,
     pendingBackgroundTasks,
+    turnItems: serverProjection?.turnItems ?? EMPTY_TURN_ITEMS,
     activePendingApproval,
     activePendingUserInput,
     localCheckoutBranchMismatch,
@@ -2700,31 +2686,26 @@ export default function ChatView(props: ChatViewProps) {
   }, [toggleRightPanelStable, toggleRightPanelMaximizedStable]);
 
   usePasteToFocusComposer(activeThreadId, composerRef);
-  const {
-    onConfirmRevertStable,
-    onForkFromRunStable,
-    onRevertTimelineTurnStable,
-    onTimelineRollbackCheckpointStable,
-  } = useTimelineRewind({
-    environmentId,
-    routeThreadRef,
-    routeThreadKey,
-    currentRouteThreadKeyRef,
-    serverProjection,
-    activeThread,
-    timelineMessages,
-    phase,
-    isConnecting,
-    isSendBusy,
-    isRevertingCheckpoint,
-    supportsConversationRollback,
-    activeEnvironmentUnavailable,
-    activeEnvironmentUnavailableLabel,
-    promptRef,
-    composerRef,
-    composerDraftTarget,
-    setThreadError,
-  });
+  const { onConfirmRevertStable, onForkFromRunStable, onRevertTimelineTurnStable } =
+    useTimelineRewind({
+      environmentId,
+      routeThreadRef,
+      routeThreadKey,
+      currentRouteThreadKeyRef,
+      serverProjection,
+      activeThread,
+      timelineMessages,
+      phase,
+      isSendBusy,
+      isRevertingCheckpoint,
+      supportsConversationRollback,
+      activeEnvironmentUnavailable,
+      activeEnvironmentUnavailableLabel,
+      promptRef,
+      composerRef,
+      composerDraftTarget,
+      setThreadError,
+    });
   const onCompactContext = () => {
     if (compactDisabled) return;
     void sendStandaloneCommand("/compact", "Failed to compact context.");
@@ -2769,7 +2750,6 @@ export default function ChatView(props: ChatViewProps) {
     resumableRunId,
     hasHeldQueuedRuns,
     isSendBusy,
-    isConnecting,
     isRevertingCheckpoint,
     threadDetailLoading,
     activeEnvironmentUnavailable,
@@ -2790,7 +2770,6 @@ export default function ChatView(props: ChatViewProps) {
     activeProposedPlan,
     isServerThread,
     isSendBusy,
-    isConnecting,
     composerRef,
     beginLocalDispatch,
     resetLocalDispatch,
@@ -2829,7 +2808,6 @@ export default function ChatView(props: ChatViewProps) {
     composerTerminalContextsRef,
     feedbackUploadsInFlightRef,
     queuedRunEdit,
-    isConnecting,
     isRevertingCheckpoint,
     threadDetailLoading,
     activeEnvironmentUnavailable,
@@ -2958,7 +2936,6 @@ export default function ChatView(props: ChatViewProps) {
     workLocallyResendDraftId === draftId &&
     isLocalDraftThread &&
     !isSendBusy &&
-    !isConnecting &&
     !isRevertingCheckpoint &&
     !threadDetailLoading &&
     clientSettingsHydrated &&
@@ -3210,6 +3187,7 @@ export default function ChatView(props: ChatViewProps) {
         )}
         data-chat-column-maximized-away={rightPanelMaximized ? "true" : "false"}
         data-chat-column
+        inert={rightPanelMaximized}
       >
         <header
           ref={threadPanelPopoverAnchorRef}
@@ -3290,8 +3268,16 @@ export default function ChatView(props: ChatViewProps) {
               setThreadError={setThreadError}
               setThreadErrorBannerDismissTick={setThreadErrorBannerDismissTick}
             />
-            <div className="relative flex min-h-0 flex-1 flex-col bg-background">
+            <div
+              {...conversationArea}
+              className="relative flex min-h-0 flex-1 flex-col bg-background"
+            >
               <ThreadTimeline
+                pendingApprovals={pendingApprovals}
+                heldApprovalRequestIds={heldApprovalRequestIds}
+                respondingRequestIds={respondingRequestIds}
+                onRespondToApproval={onRespondToApprovalStable}
+                canOperateThread={canOperateThread}
                 threadDetailRef={routeThreadDetailRef}
                 entriesInput={timelineEntriesInput}
                 draftEntries={isServerThread ? null : draftTimelineEntries}
@@ -3304,7 +3290,6 @@ export default function ChatView(props: ChatViewProps) {
                 {...(activeProject ? { onRunShellCommand: runShellCommandStable } : {})}
                 isWorking={isWorking}
                 runlessWorkActive={runlessWorkStartedAt !== null}
-                activeTurnInProgress={isWorking || !latestRunSettled}
                 isCompacting={isCompacting}
                 awaitingUser={
                   activePendingApproval !== null
@@ -3350,7 +3335,6 @@ export default function ChatView(props: ChatViewProps) {
                 parentThreadLink={parentThreadLink}
                 workflowOpening={workflowOpening}
                 onForkFromRun={onForkFromRunStable}
-                onRollbackCheckpoint={onTimelineRollbackCheckpointStable}
                 supportsConversationRollback={supportsConversationRollback}
                 threadStartCheckpointReady={threadStartCheckpointReady}
                 availableRevertTurnCounts={availableRevertTurnCounts}
@@ -3397,6 +3381,7 @@ export default function ChatView(props: ChatViewProps) {
             </div>
 
             <div
+              {...composerArea}
               ref={(overlay: HTMLDivElement | null) => {
                 setComposerOverlayElement(overlay);
                 attachFollowComposerOverlay(overlay);
@@ -3486,12 +3471,9 @@ export default function ChatView(props: ChatViewProps) {
                               routeThreadRef={routeThreadRef}
                               draftId={draftId}
                               activeThreadId={activeThreadId}
-                              activeThreadEnvironmentId={activeThread?.environmentId}
                               activeThread={activeThread}
                               activeThreadShell={activeThreadShell}
                               promptHistoryMessages={timelineMessages}
-                              isServerThread={isServerThread}
-                              isLocalDraftThread={isLocalDraftThread}
                               forceExpandedOnMobile={
                                 forceExpandedMobileComposer && isDraftHeroState
                               }
@@ -3505,7 +3487,6 @@ export default function ChatView(props: ChatViewProps) {
                                 canInterruptRunningThread &&
                                 activeThreadShell?.hermesRun?.live !== true
                               }
-                              isConnecting={isConnecting}
                               isSendBusy={
                                 (isSendBusy && !sendQueuesBehindSetup) ||
                                 (setupQueueSendThreadKey !== null &&
@@ -3547,6 +3528,7 @@ export default function ChatView(props: ChatViewProps) {
                               environmentUnavailable={activeEnvironmentUnavailableState}
                               activePendingApproval={activePendingApproval}
                               pendingApprovals={pendingApprovals}
+                              onHeldRequestIdsChange={onHeldRequestIdsChange}
                               pendingUserInputs={pendingUserInputs}
                               activePendingProgress={activePendingProgress}
                               activePendingResolvedAnswers={activePendingResolvedAnswers}
@@ -3608,7 +3590,6 @@ export default function ChatView(props: ChatViewProps) {
                               onResume={onComposerResumeStable}
                               onInterrupt={onInterruptStable}
                               onImplementPlanInNewThread={onImplementPlanInNewThreadStable}
-                              onRespondToApproval={onRespondToApprovalStable}
                               onSelectActivePendingUserInputOption={
                                 onSelectActivePendingUserInputOptionStable
                               }

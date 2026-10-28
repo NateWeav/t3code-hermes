@@ -7337,9 +7337,9 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           const mcpSession = yield* mcpSessions.read(turnInput.threadId);
           const instructionState = {
             interactionMode: turnInput.runtimePolicy.interactionMode,
-            hasT3Mcp: mcpSession !== undefined,
+            hasT3Mcp: acpMcpContext(mcpSession, self).servers.length > 0,
             browserTools: mcpSession?.browserToolsAvailable ?? false,
-            deviceTools: mcpSession?.capabilities?.has("device") ?? false,
+            hasDeviceTools: mcpSession?.capabilities?.has("device") === true,
             backgroundWait: flavor.extractAwaitableBackgroundTasks !== undefined,
           } satisfies T3AcpInstructionState;
           const previousInstructionState = (yield* Ref.get(promptInstructionStates)).get(sessionId);

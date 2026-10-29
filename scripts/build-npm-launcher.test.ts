@@ -264,7 +264,7 @@ fs.readFileSync = (file, ...rest) => {
         const recovered = yield* run(
           process.execPath,
           ["--import", peerHook, launcher, "--version"],
-          { cwd: root, env: { ...env, T3CODE_HOME: staleHome } },
+          { cwd: root, env: { ...env, T3HERMES_HOME: staleHome } },
         );
         const checks = (yield* fs.readFileString(peerChecks)).trim().split("\n");
         assert.isAtLeast(checks.length, 2);
@@ -284,7 +284,7 @@ fs.readFileSync = (file, ...rest) => {
         yield* fs.makeDirectory(`${staleOnlyDir}.lock`);
         const locked = yield* run(process.execPath, [launcher, "--version"], {
           cwd: root,
-          env: { ...env, T3CODE_HOME: staleOnlyHome },
+          env: { ...env, T3HERMES_HOME: staleOnlyHome },
         });
         assert.equal(locked.exitCode, 1);
         assert.include(locked.stderr, `delete ${staleOnlyDir}.lock`);
@@ -294,7 +294,7 @@ fs.readFileSync = (file, ...rest) => {
         yield* fs.remove(`${staleOnlyDir}.lock`, { recursive: true });
         const replaced = yield* run(process.execPath, [launcher, "--version"], {
           cwd: root,
-          env: { ...env, T3CODE_HOME: staleOnlyHome },
+          env: { ...env, T3HERMES_HOME: staleOnlyHome },
         });
         assert.equal(
           replaced.stdout.trim(),

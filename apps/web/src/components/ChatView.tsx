@@ -3797,6 +3797,12 @@ export default function ChatView(props: ChatViewProps) {
               onAddProjectScript={saveProjectScriptStable}
               onUpdateProjectScript={updateProjectScriptStable}
               onDeleteProjectScript={deleteProjectScriptStable}
+              usage={{
+                providerInstanceId: activeProviderInstanceId,
+                providers: providerStatuses,
+                sources: serverConfig?.usageLimitSources ?? EMPTY_USAGE_LIMIT_SOURCES,
+                contextWindow: activeContextWindow,
+              }}
             />
 
             <PullRequestThreadDialogHost

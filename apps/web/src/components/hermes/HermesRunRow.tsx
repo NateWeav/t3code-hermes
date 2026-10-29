@@ -28,6 +28,7 @@ function HermesRunOutput({
   const [result, setResult] = useState<HermesCronRunOutput | "loading" | "error">("loading");
   const available = run.delivery?.contentAvailable === true;
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- fetches this run's recorded output from the server and ignores a late reply after unmount
   useEffect(() => {
     if (!available) return;
     let active = true;
@@ -90,6 +91,7 @@ export function HermesRunRow({
 }) {
   const [expanded, setExpanded] = useState(targeted);
   const rowRef = useRef<HTMLLIElement>(null);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- scrolls the DOM row into view when a deep link targets this run
   useEffect(() => {
     if (targeted) rowRef.current?.scrollIntoView({ block: "nearest" });
   }, [targeted]);

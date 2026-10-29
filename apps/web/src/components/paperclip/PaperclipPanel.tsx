@@ -76,6 +76,7 @@ function usePaperclipAutoRefresh(
   const tick = useEffectEvent(() => {
     if (document.visibilityState === "visible" && !query.isPending) query.refresh();
   });
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- interval timer that auto-refreshes the Paperclip query at the configured rate
   useEffect(() => {
     if (intervalSeconds <= 0) return;
     const timer = setInterval(tick, intervalSeconds * 1000);

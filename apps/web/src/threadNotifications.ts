@@ -89,9 +89,8 @@ export function setNotificationBadge(count: number, statusDot?: StatusDot) {
     } else showFaviconCount(count);
     return;
   }
-  const image =
-    count > 0 && bridge.getClientPlatform?.() === "win32" ? drawCountBadge(count) : null;
-  void bridge.setNotificationBadge?.({ count, image }).catch(() => undefined);
+  const image = count > 0 && bridge.getClientPlatform() === "win32" ? drawCountBadge(count) : null;
+  void bridge.setNotificationBadge({ count, image }).catch(() => undefined);
 }
 
 function drawCountBadge(count: number) {

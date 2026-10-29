@@ -185,6 +185,7 @@ export function useHermesPatches(environmentId: EnvironmentId | null) {
   const restarting = query.data?.gateway?.state === "restarting";
   const { registry } = actions;
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- registers gateway restart polling in the action registry until the restart ends or unmount
   useEffect(
     () =>
       environmentId !== null && restarting
@@ -295,6 +296,7 @@ export function useHermesPatchesEverywhere(
       .map((device) => device.environmentId),
   );
 
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- registers gateway restart polling for every restarting device until those restarts end or unmount
   useEffect(
     () => startGatewayPolling(registry, JSON.parse(restartingKey) as EnvironmentId[]),
     [restartingKey, registry],

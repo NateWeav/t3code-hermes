@@ -22,7 +22,6 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
-import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import { HttpClient, HttpClientResponse } from "effect/http";
 
@@ -41,6 +40,7 @@ import * as ResetCreditCoordinator from "./resetCreditCoordinator.ts";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 import { makeProviderInstanceRegistry } from "./ProviderInstanceRegistry.ts";
 import * as ProviderOrchestrationAdapterInfrastructure from "./ProviderOrchestrationAdapterInfrastructure.ts";
+import * as PortScanner from "../preview/PortScanner.ts";
 import * as ProviderHostLive from "./ProviderHostLive.ts";
 
 vi.mock("@anthropic-ai/claude-agent-sdk", { spy: true });
@@ -60,7 +60,6 @@ const TEST_EPOCH = DateTime.makeUnsafe("1970-01-01T00:00:00.000Z");
 const layerBackgroundPolicyAlwaysRun = Layer.mock(BackgroundPolicy.BackgroundPolicy)({
   reportClientActivity: () => Effect.void,
   removeRpcClient: () => Effect.void,
-  reportHostPowerState: () => Effect.void,
   snapshot: Effect.succeed({
     hostPower: {
       source: "unknown",
@@ -80,8 +79,6 @@ const layerBackgroundPolicyAlwaysRun = Layer.mock(BackgroundPolicy.BackgroundPol
     shouldRunOpportunisticWork: true,
     updatedAt: TEST_EPOCH,
   }),
-  streamChanges: Stream.empty,
-  hasDemand: () => Effect.succeed(true),
   shouldRunScopeWork: () => Effect.succeed(true),
   shouldRunOpportunisticWork: Effect.succeed(true),
 });
@@ -205,6 +202,7 @@ describe("ProviderInstanceRegistry — multi-instance codex slice", () => {
   );
   const layerBase = ProviderHostLive.layer.pipe(Layer.provideMerge(layerBaseDeps));
   const layerTest = ProviderOrchestrationAdapterInfrastructure.layer.pipe(
+    Layer.provide(PortScanner.layerTest),
     Layer.provideMerge(layerBase),
   );
 
@@ -703,6 +701,7 @@ describe("ProviderInstanceRegistry — OpenCode Go usage source", () => {
   const layerBase = ProviderHostLive.layer.pipe(Layer.provideMerge(layerBaseDeps));
   const layerTest = ProviderOrchestrationAdapterInfrastructure.layer.pipe(
     Layer.provideMerge(layerBase),
+    Layer.provideMerge(PortScanner.layerTest),
   );
 
   it.live("keeps an explicit OpenCode dashboard source through the merged driver probe", () =>

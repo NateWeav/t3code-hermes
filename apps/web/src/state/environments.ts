@@ -91,6 +91,7 @@ export function useRelayEnvironmentDiscovery(): Discovery.RelayEnvironmentDiscov
   return useAtomValue(relayEnvironmentDiscovery.stateValueAtom);
 }
 
+// Hermes cron notifications watch every environment.
 export function useEnvironmentIds() {
   return useAtomValue(environmentSummaries.environmentIdsAtom);
 }

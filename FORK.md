@@ -282,6 +282,8 @@ that commit's first 12 characters.
    - `extractSubagentUpdate`: Hermes sets the plural `extractSubagentUpdates`, because one delegate
      call starts several children.
    - `assertComplete`: only replay tests set it.
+   - `registerExtensions`: siblings register their own vendor methods (`x.ai/*`, Mistral, Copilot);
+     Hermes's ACP adapter sends none.
 2. New optional inputs. In `git diff R -- packages/provider-core/src/server packages/provider-acp/src/server`,
    find optional fields added to input types and options. Where Hermes builds that input itself,
    check that it passes the field on as its siblings do.

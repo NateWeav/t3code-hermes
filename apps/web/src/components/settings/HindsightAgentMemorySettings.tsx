@@ -26,7 +26,6 @@ import { AsyncResult, Atom } from "effect/reactivity";
 import { RefreshCwIcon } from "lucide-react";
 import { useContext, useState } from "react";
 
-import { isElectron } from "../../env";
 import { primarySessionStateAtom } from "../../environments/primary/sessionState";
 import { cn } from "../../lib/utils";
 import { type EnvironmentPresentation, useEnvironments } from "../../state/environments";
@@ -38,10 +37,7 @@ import { Button } from "../ui/button";
 import { DraftInput } from "../ui/draft-input";
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
-import {
-  resolvePrimaryOperateAccess,
-  resolveRemoteOperateAccess,
-} from "./ProviderSettingsPanel.logic";
+import { resolveRemoteOperateAccess } from "./ProviderSettingsPanel.logic";
 import { SettingResetButton, SettingsRow, SettingsSection } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 
@@ -121,9 +117,7 @@ export function HindsightAgentMemorySettings() {
           isPending: sessionResult.waiting,
           hasError: sessionResult._tag === "Failure",
         };
-        const operate = isPrimary
-          ? resolvePrimaryOperateAccess({ ...access, isPrimary, hasDesktopBridge: isElectron })
-          : resolveRemoteOperateAccess(access);
+        const operate = resolveRemoteOperateAccess(access);
         const saved =
           get(serverEnvironment.settingsValueAtom(environmentId))?.integrations.hindsight ??
           environment.serverConfig!.settings.integrations.hindsight;

@@ -54,6 +54,7 @@ function useHermesChatLiveRefresh(query: {
   const tick = useEffectEvent(() => {
     if (document.visibilityState === "visible" && !query.isPending) query.refresh();
   });
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- interval timer that refreshes the Hermes chat query while mounted
   useEffect(() => {
     const timer = setInterval(tick, LIVE_REFRESH_MS);
     return () => clearInterval(timer);
@@ -285,9 +286,11 @@ function HermesChatTranscriptView(props: {
   // Follow new messages only while the reader is already at the bottom.
   const bottomRef = useRef<HTMLDivElement>(null);
   const pinnedRef = useRef(true);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- scrolls the DOM transcript to the newest message while the reader is pinned to the bottom
   useLayoutEffect(() => {
     if (newestId !== null && pinnedRef.current) bottomRef.current?.scrollIntoView({ block: "end" });
   }, [newestId]);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- IntersectionObserver on the bottom sentinel tracks whether the reader is pinned
   useEffect(() => {
     const bottom = bottomRef.current;
     if (bottom === null) return;

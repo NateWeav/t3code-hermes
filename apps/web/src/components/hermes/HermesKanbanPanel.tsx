@@ -726,7 +726,7 @@ function HermesKanbanTaskView(props: {
               Thread
               <MarkdownThreadLink
                 environmentId={props.environmentId}
-                threadId={task.threadId}
+                link={{ environmentId: props.environmentId, threadId: task.threadId }}
                 label={task.title}
               />
             </div>

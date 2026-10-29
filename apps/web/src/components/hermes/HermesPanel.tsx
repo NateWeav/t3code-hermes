@@ -82,6 +82,7 @@ export function HermesPanel({ target = EMPTY_HERMES_SEARCH }: { readonly target?
   };
 
   // Opening the panel is what clears the sidebar's unread dot.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- marks Hermes tasks seen in the unread registry while the panel is mounted
   useEffect(() => {
     if (environmentId !== null) markHermesTasksSeen(environmentId);
   }, [environmentId]);

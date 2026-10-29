@@ -39,7 +39,7 @@ device, the local cache, or the shared cache in seconds, building once only
 when no machine has that fingerprint yet (5-15 minutes, logged to the file it
 names). The device id may be omitted when exactly one device is booted. It
 prints one JSON line, including the development app ID (`appId`) from
-`apps/mobile/app.config.ts`; on failure it names the next command. Authorized mobile
+`apps/mobile/app.config.ts`; on failure it names the next command. Mobile
 verification includes that step unless the user prohibits it.
 
 For a device you opened in an agent-device session elsewhere (a device pool,

@@ -700,9 +700,10 @@ export const layer: Layer.Layer<
                 }),
               ];
             }
+            case "background_work.updated":
+            // Live throughput only; RunExecutionService consumes it before ingestion.
             case "output.progress":
             case "output.measured":
-              // Live throughput only; RunExecutionService consumes it before ingestion.
               return [];
             case "command_output.delta":
               // Live output is routed to the command output hub before ingestion.

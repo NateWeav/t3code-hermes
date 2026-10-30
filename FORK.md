@@ -318,8 +318,9 @@ upstream-only infrastructure. This fork therefore diverges in `.github/workflows
   (`[self-hosted, macOS, ARM64, t3code-mac-arm64]`, declared in `.github/actionlint.yaml`); those
   jobs queue while it is offline. `desktop-macos-preview*.yml` (the `preview:mac` label) and
   `windows-tests.yml` (dispatch only) still name Blacksmith runners and would wait forever here.
-- **Guarded workflows.** `deploy-relay.yml`, `mobile-eas-preview.yml`, `mobile-eas-production.yml`,
-  `web-preview.yml`, `publish-aur.yml`, `pr-vouch.yml`, and `issue-labels.yml`, plus `release.yml`'s
+- **Guarded workflows.** `deploy-relay.yml`, `mobile-eas-preview.yml`, `mobile-eas-preview-fork.yml`,
+  `mobile-eas-production.yml`, `web-preview.yml`, `publish-aur.yml`, `pr-vouch.yml`, and
+  `issue-labels.yml`, plus `release.yml`'s
   `publish_aur` and `deploy_marketing` jobs, carry `github.repository == 'pingdotgg/t3code'`, so
   they skip here and still work if this fork is ever merged back. The reverse guard
   (`!= 'pingdotgg/t3code'`) keeps the fork-only jobs inert upstream: `sync-upstream.yml`, the mobile

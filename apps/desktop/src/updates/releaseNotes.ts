@@ -144,9 +144,7 @@ function extractReleaseNoteItems(note: string | null | undefined): ExtractedRele
       .replace(/^\d+[.)]\s+/, "")
       .replace(/\s+/g, " ");
     const normalized = normalizeReleaseNoteLine(item);
-    // GitHub's HTML feed renders the compare link as its range text, so the
-    // footer arrives as "Full Changelog: v1...v2" without a /compare/ URL.
-    if (normalized === "new contributors" || normalized.startsWith("full changelog")) break;
+    if (normalized === "new contributors" || normalized === "full changelog") break;
     if (/^#{1,6}\s+/.test(item)) continue;
     if (isIgnoredReleaseNoteLine(item)) continue;
     totalItems += 1;

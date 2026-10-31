@@ -17,6 +17,10 @@ vi.mock("../hooks/useTheme", () => ({
   useTheme: () => ({ theme: "t3-chat", resolvedTheme: "light", appearanceMode: "light" }),
 }));
 vi.mock("../hooks/useCustomThemes", () => ({ useCustomThemes: () => [] }));
+vi.mock("../state/hermesCron", async (original) => ({
+  ...(await original<typeof import("../state/hermesCron")>()),
+  useHermesEnvironmentEnabled: () => false,
+}));
 vi.mock("../hooks/useEnvironmentTheme", () => ({ useEnvironmentThemeDefinitions: () => [] }));
 vi.mock("../hooks/useSettings", async (original) => ({
   ...(await original<typeof import("../hooks/useSettings")>()),

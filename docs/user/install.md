@@ -39,6 +39,9 @@ different `--base-dir` for an independent server.
 To return freed database space to disk, run `npx t3-hermes@nightly doctor`
 (see [Reclaim database space](./background-service.md#reclaim-database-space)).
 
+To use it from your other devices, run `npx t3-hermes@nightly up` (see
+[Remote access](./remote-access.md)).
+
 The executable is built for Apple Silicon Macs, Linux, and Windows. There is
 no Intel Mac build of it, because Node cannot produce a single executable for
 that platform; the Intel desktop app is unaffected. To run a standalone server

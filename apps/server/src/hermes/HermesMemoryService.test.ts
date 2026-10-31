@@ -27,7 +27,7 @@ function enabledSettings(home: string): Settings {
       hermes: {
         driver: "hermes",
         config: { enabled: true, binaryPath: "hermes" },
-        environment: [{ name: "HERMES_HOME", value: home }],
+        environment: [{ name: "HERMES_HOME", value: home, sensitive: false }],
       },
     },
   } as Settings;

@@ -198,8 +198,8 @@ reasoning event, but the ACP gateway bridge streams `reasoning.delta` as thought
 reasoning model's ACP reply therefore repeated its reasoning as reply text. Because that final text
 no longer began with what had streamed, the bridge also sent the whole reply a second time.
 
-The patch removes the ACP exception. Verified against hermes-agent `749cb638ff` (`main`,
-2026-10-26), alone and after the other patches. Restart the Hermes gateway after applying it. Run
+The patch removes the ACP exception. Verified against hermes-agent `c419cf7c86` (`main`,
+2026-10-31), alone and after the other patches. Restart the Hermes gateway after applying it. Run
 the patch's `tests/gateway/test_local_viewer_reasoning.py` in a scratch checkout, as for
 `acp-delegation-progress`.
 

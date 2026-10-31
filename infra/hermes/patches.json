@@ -128,6 +128,11 @@
       "neededFor": "Hermes models that return reasoning text, with display.show_reasoning on. Without it, an ACP reply repeats the streamed reasoning as a code block, followed by a second copy of the reply.",
       "versions": [
         {
+          "hermesCommit": "c419cf7c864ac0ee511dbd9f7091a8bba0b567ee",
+          "hermesCommitDate": "2026-10-31T10:03:49Z",
+          "file": "acp-reasoning-once/c419cf7c864a.patch"
+        },
+        {
           "hermesCommit": "749cb638ff43f9ce5333c186a1e4f67d473aa4f2",
           "hermesCommitDate": "2026-10-26T01:54:09Z",
           "file": "acp-reasoning-once/749cb638ff43.patch"

@@ -336,11 +336,34 @@ export const OpenCodeDriver: ProviderDriver<
       ),
     );
 
-    const checkUsageLimits = readOpenCodeGoUsageLimits({
+    const upstreamUsageLimits = readOpenCodeGoUsageLimits({
       enabled: effectiveConfig.enabled,
       serverUrl: effectiveConfig.serverUrl,
       environment: processEnv,
-    }).pipe(
+    });
+    // Fork: fall back to the OpenCode Go dashboard/usage reader when the
+    // upstream probe is unavailable, on both the check and the usage recovery.
+    const checkUsageLimits = upstreamUsageLimits.pipe(
+      Effect.flatMap((usageLimits) => {
+        const hasDashboardOverride =
+          Boolean(processEnv.OPENCODE_GO_AUTH_COOKIE?.trim()) &&
+          Boolean(processEnv.OPENCODE_GO_WORKSPACE_ID?.trim());
+        if (
+          !enabled ||
+          (!hasDashboardOverride &&
+            (usageLimits.unavailable === undefined || effectiveConfig.serverUrl.trim().length > 0))
+        ) {
+          return Effect.succeed(usageLimits);
+        }
+        return readForkOpenCodeGoUsageLimits({
+          environment: processEnv,
+          isExternalServer: effectiveConfig.serverUrl.trim().length > 0,
+        }).pipe(
+          Effect.map((fallback) =>
+            hasDashboardOverride || fallback.unavailable === undefined ? fallback : usageLimits,
+          ),
+        );
+      }),
       Effect.provideService(FileSystem.FileSystem, fileSystem),
       Effect.provideService(Path.Path, pathService),
       Effect.provideService(HttpClient.HttpClient, httpClient),
@@ -361,28 +384,6 @@ export const OpenCodeDriver: ProviderDriver<
       },
       { concurrency: "unbounded" },
     ).pipe(
-      Effect.flatMap(({ provider, usageLimits }) => {
-        const hasDashboardOverride =
-          Boolean(processEnv.OPENCODE_GO_AUTH_COOKIE?.trim()) &&
-          Boolean(processEnv.OPENCODE_GO_WORKSPACE_ID?.trim());
-        if (
-          !enabled ||
-          (!hasDashboardOverride &&
-            (usageLimits.unavailable === undefined || effectiveConfig.serverUrl.trim().length > 0))
-        ) {
-          return Effect.succeed({ provider, usageLimits });
-        }
-        return readForkOpenCodeGoUsageLimits({
-          environment: processEnv,
-          isExternalServer: effectiveConfig.serverUrl.trim().length > 0,
-        }).pipe(
-          Effect.map((fallback) => ({
-            provider,
-            usageLimits:
-              hasDashboardOverride || fallback.unavailable === undefined ? fallback : usageLimits,
-          })),
-        );
-      }),
       Effect.map(({ provider, usageLimits }) => ({ ...provider, usageLimits })),
       Effect.map(stampIdentity),
       Effect.provideService(OpenCodeServerOwner.OpenCodeServerOwner, serverOwner),

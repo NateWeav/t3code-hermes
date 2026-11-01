@@ -329,8 +329,9 @@ jobs:
     name: Release web tests
     needs: [preflight]
     if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' }}
+    # The suite alone takes about 9 minutes on a hosted runner; upstream's 10 assume Blacksmith.
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -680,7 +681,7 @@ jobs:
       clerk_cli_oauth_client_id: ${{ needs.relay_public_config.outputs.clerk_cli_oauth_client_id }}
       relay_url: ${{ needs.relay_public_config.outputs.relay_url }}
       label: macOS arm64
-      runner: macos-14
+      runner: macos-26
       platform: mac
       target: dmg
       arch: arm64
@@ -704,7 +705,7 @@ jobs:
       clerk_cli_oauth_client_id: ${{ needs.relay_public_config.outputs.clerk_cli_oauth_client_id }}
       relay_url: ${{ needs.relay_public_config.outputs.relay_url }}
       label: macOS x64
-      runner: macos-14
+      runner: macos-26
       platform: mac
       target: dmg
       arch: x64

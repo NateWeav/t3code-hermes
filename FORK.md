@@ -312,7 +312,7 @@ Upstream's workflows target paid Blacksmith runners that only exist in its org, 
 upstream-only infrastructure. This fork therefore diverges in `.github/workflows/` as follows.
 
 - **Runners.** Fork jobs run on GitHub-hosted runners, free on this public repo: `ubuntu-24.04`,
-  `ubuntu-24.04-arm`, `windows-latest`, `windows-11-arm`, `macos-14`, `macos-26`, and
+  `ubuntu-24.04-arm`, `windows-latest`, `windows-11-arm`, `macos-26`, and
   `macos-latest`. Only `macos-self-hosted-build.yml` (every push to `main`) and the iOS half of
   `mobile-showcase-screenshots.yml` use the self-hosted Apple Silicon laptop
   (`[self-hosted, macOS, ARM64, t3code-mac-arm64]`, declared in `.github/actionlint.yaml`); those

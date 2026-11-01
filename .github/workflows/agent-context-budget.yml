@@ -3,6 +3,9 @@ name: Agent Context Budget
 # Fails when a PR raises a value in agentContextBudget.json above main's. AgentContextBudget.test.ts
 # keeps that file equal to the measured context, so the context cannot grow by editing the file.
 # To accept growth on purpose, a maintainer adds the agent-context-increase label.
+#
+# Fork: growth a PR merges in from upstream was already accepted upstream, so only the fork's own
+# growth fails. Otherwise every upstream sync that adds tool text waits on the label.
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled]
@@ -22,28 +25,48 @@ jobs:
     env:
       BUDGET: apps/server/src/provider/agentContextBudget.json
       ALLOW_INCREASE: ${{ contains(github.event.pull_request.labels.*.name, 'agent-context-increase') }}
+      UPSTREAM_URL: https://github.com/pingdotgg/t3code
     steps:
       - name: Checkout
         uses: actions/checkout@v6
         with:
           sparse-checkout: apps/server/src/provider/agentContextBudget.json
           sparse-checkout-cone-mode: false
+          # History without files: finding where main and the PR last merged upstream needs commits.
+          fetch-depth: 0
+          filter: tree:0
 
       - name: Compare with main
         run: |
-          git fetch --quiet --depth=1 origin main
+          git fetch --quiet origin main
           if ! git cat-file -e "FETCH_HEAD:$BUDGET" 2>/dev/null; then
             echo "main has no agent context budget yet."
             exit 0
           fi
           git show "FETCH_HEAD:$BUDGET" > "$RUNNER_TEMP/main.json"
-          grown=$(jq -r --slurpfile main "$RUNNER_TEMP/main.json" '
+          main_sha=$(git rev-parse FETCH_HEAD)
+          git remote add upstream "$UPSTREAM_URL"
+          git fetch --quiet --filter=tree:0 upstream main
+          # Upstream's budget at the last upstream commit merged into $1.
+          upstream_budget() {
+            local base
+            base=$(git merge-base "$1" upstream/main) && git show "$base:$BUDGET" 2>/dev/null || echo '{}'
+          }
+          upstream_budget "$main_sha" > "$RUNNER_TEMP/upstream-main.json"
+          upstream_budget HEAD > "$RUNNER_TEMP/upstream-head.json"
+          grown=$(jq -r --slurpfile main "$RUNNER_TEMP/main.json" \
+            --slurpfile upMain "$RUNNER_TEMP/upstream-main.json" \
+            --slurpfile upHead "$RUNNER_TEMP/upstream-head.json" '
             to_entries[]
             | select($main[0][.key] != null and .value > $main[0][.key])
-            | "\(.key): \($main[0][.key]) -> \(.value) (+\(.value - $main[0][.key]))"
+            | (if $upMain[0][.key] != null and $upHead[0][.key] != null
+               then $upHead[0][.key] - $upMain[0][.key] else 0 end) as $upstream
+            | select(.value - $main[0][.key] > $upstream)
+            | "\(.key): \($main[0][.key]) -> \(.value) (+\(.value - $main[0][.key])"
+              + (if $upstream > 0 then ", \($upstream) of it from upstream)" else ")" end)
           ' "$BUDGET")
           if [ -z "$grown" ]; then
-            echo "Agent context is not larger than main."
+            echo "Agent context is not larger than main, apart from growth merged from upstream."
             exit 0
           fi
           printf 'Agent context grew compared to main:\n%s\n' "$grown"

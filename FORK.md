@@ -339,6 +339,9 @@ upstream-only infrastructure. This fork therefore diverges in `.github/workflows
   feed is derived from `GITHUB_REPOSITORY`, so fork builds self-update from fork releases.
   Dispatching `release.yml` by hand defaults to the `preview` channel, which nothing installs
   unless asked for by name.
+- **Agent context budget.** `agent-context-budget.yml` subtracts the growth a PR merges in from
+  upstream, so a sync PR fails only when the fork's own agent text grew. Keep that when resolving
+  it; without it, every sync that adds upstream tool text waits on the `agent-context-increase` label.
 - **npm.** The CLI publishes as the `t3-hermes` launcher under the `nightly` dist-tag, through
   trusted publishing, after the GitHub Release. On first run it downloads its version's CLI archive
   from this fork's releases into `~/.t3-hermes/runtime/versions/` (`scripts/npm-launcher/t3.mjs`).

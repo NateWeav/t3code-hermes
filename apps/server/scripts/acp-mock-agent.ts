@@ -29,6 +29,11 @@ const hermesDelegationDelayMs = Math.max(
   0,
   Number(process.env.T3_ACP_HERMES_DELEGATION_DELAY_MS) || 0,
 );
+// GitHub Copilot CLI advertises URL-shaped session mode ids.
+const copilotModesProfile = process.env.T3_ACP_COPILOT_MODES === "1";
+const copilotModeId = (name: string) =>
+  `https://agentclientprotocol.com/protocol/session-modes#${name}`;
+const modeOptionCategory = process.env.T3_ACP_MODE_OPTION_CATEGORY ?? "mode";
 const emitToolCalls = process.env.T3_ACP_EMIT_TOOL_CALLS === "1";
 /** `T3_ACP_EMIT_USAGE_UPDATE=used/size` sends an ACP `usage_update` per prompt. */
 const usageUpdate = process.env.T3_ACP_EMIT_USAGE_UPDATE;
@@ -98,7 +103,11 @@ const permissionOptionIds = {
 };
 const sessionId = "mock-session-1";
 
-let currentModeId = antigravityProfile ? "default" : "ask";
+let currentModeId = antigravityProfile
+  ? "default"
+  : copilotModesProfile
+    ? copilotModeId("agent")
+    : "ask";
 let currentModelId = antigravityProfile ? "gemini-test-low" : "default";
 let parameterizedModelPicker = false;
 let currentReasoning = "medium";
@@ -288,7 +297,7 @@ function configOptions(): ReadonlyArray<AcpSchema.SessionConfigOption> {
     {
       configId: "mode",
       name: "Mode",
-      category: "mode",
+      category: modeOptionCategory,
       type: "select" as const,
       currentValue: currentModeId,
       options: availableModes.map((mode) => ({
@@ -356,23 +365,29 @@ const availableModes: ReadonlyArray<AcpCompat.SessionMode> = antigravityProfile
       { id: "auto_edit", name: "Auto edit" },
       { id: "yolo", name: "YOLO" },
     ]
-  : [
-      {
-        id: "ask",
-        name: "Ask",
-        description: "Request permission before making any changes",
-      },
-      {
-        id: "architect",
-        name: "Architect",
-        description: "Design and plan software systems without implementation",
-      },
-      {
-        id: "code",
-        name: "Code",
-        description: "Write and modify code with full tool access",
-      },
-    ];
+  : copilotModesProfile
+    ? [
+        { id: copilotModeId("agent"), name: "Agent" },
+        { id: copilotModeId("plan"), name: "Plan" },
+        { id: copilotModeId("autopilot"), name: "Autopilot" },
+      ]
+    : [
+        {
+          id: "ask",
+          name: "Ask",
+          description: "Request permission before making any changes",
+        },
+        {
+          id: "architect",
+          name: "Architect",
+          description: "Design and plan software systems without implementation",
+        },
+        {
+          id: "code",
+          name: "Code",
+          description: "Write and modify code with full tool access",
+        },
+      ];
 
 function modeState(): AcpCompat.SessionModeState {
   return {
@@ -1155,6 +1170,18 @@ const program = Effect.gen(function* () {
               type: "items",
               planId: "plan-b",
               entries: [{ content: "Ship B", priority: "high", status: "in_progress" }],
+            },
+          },
+          {
+            sessionUpdate: "plan_update",
+            plan: {
+              type: "items",
+              planId: "plan-c",
+              entries: [
+                { content: "Write the fix", priority: "high", status: "completed" },
+                { content: "Try another approach", priority: "low", status: "cancelled" },
+                { content: "Add a test", priority: "medium", status: "completed" },
+              ],
             },
           },
           { sessionUpdate: "plan_removed", planId: "plan-a" },

@@ -35,7 +35,6 @@ const makeEnvironment = (path: Path.Path, overrides: Record<string, unknown> = {
     isDevelopment: false,
     displayName: "T3 Hermes (Alpha)",
     linuxDesktopEntryName: "com.nateweav.T3Hermes.desktop",
-    linuxWmClass: "t3-hermes",
     linuxApplicationsDir: "/home/alice/.local/share/applications",
     desktopLauncherPath: Option.none(),
     appImagePath: Option.some("/home/alice/Applications/T3-Code.AppImage"),

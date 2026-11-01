@@ -2,8 +2,8 @@
 
 A fork of [T3 Code](https://github.com/pingdotgg/t3code) that adds
 [Hermes Agent](https://github.com/NousResearch/hermes-agent) as a first-class provider. Drive
-Hermes, alongside Claude Code, Codex, Cursor, Grok Build, OpenCode, Antigravity, and the rest of
-upstream's providers, from one desktop, web, and mobile app.
+Hermes, alongside Claude Code, Codex, Cursor, Grok Build, OpenCode, Antigravity, fx, and the rest
+of upstream's providers, from one desktop, web, and mobile app.
 
 T3 Hermes installs beside upstream T3 Code instead of replacing it. It has its own app, its own
 `t3-hermes` CLI, and its own data in `~/.t3-hermes`, so existing T3 Code threads and settings in

@@ -3,8 +3,8 @@
 This fork builds **T3 Hermes**, with separate iOS/Android identifiers and launch links. Configure
 your own signing and Expo project before distributing it; see [Hermes build setup](../../docs/operations/connect-setup.md#t3-hermes-builds).
 
-> [!WARNING]
-> T3 Code Mobile is currently in development and is not distributed yet. If you want to try it out, you can build it from source.
+> [!NOTE]
+> To install a T3 Hermes build instead, see [Mobile app](../../docs/user/install.md#mobile-app). This guide covers building it from source.
 
 ## Quickstart
 

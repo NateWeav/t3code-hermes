@@ -336,6 +336,39 @@ export const OpenCodeDriver: ProviderDriver<
       ),
     );
 
+    const upstreamUsageLimits = readOpenCodeGoUsageLimits({
+      enabled: effectiveConfig.enabled,
+      serverUrl: effectiveConfig.serverUrl,
+      environment: processEnv,
+    });
+    // Fork: fall back to the OpenCode Go dashboard/usage reader when the
+    // upstream probe is unavailable, on both the check and the usage recovery.
+    const checkUsageLimits = upstreamUsageLimits.pipe(
+      Effect.flatMap((usageLimits) => {
+        const hasDashboardOverride =
+          Boolean(processEnv.OPENCODE_GO_AUTH_COOKIE?.trim()) &&
+          Boolean(processEnv.OPENCODE_GO_WORKSPACE_ID?.trim());
+        if (
+          !enabled ||
+          (!hasDashboardOverride &&
+            (usageLimits.unavailable === undefined || effectiveConfig.serverUrl.trim().length > 0))
+        ) {
+          return Effect.succeed(usageLimits);
+        }
+        return readForkOpenCodeGoUsageLimits({
+          environment: processEnv,
+          isExternalServer: effectiveConfig.serverUrl.trim().length > 0,
+        }).pipe(
+          Effect.map((fallback) =>
+            hasDashboardOverride || fallback.unavailable === undefined ? fallback : usageLimits,
+          ),
+        );
+      }),
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(Path.Path, pathService),
+      Effect.provideService(HttpClient.HttpClient, httpClient),
+      Effect.provideService(Crypto.Crypto, crypto),
+    );
     const checkProvider = Effect.all(
       {
         provider: checkOpenCodeProviderStatus(
@@ -347,42 +380,12 @@ export const OpenCodeDriver: ProviderDriver<
           Effect.annotateLogs({ providerInstanceId: instanceId }),
           Effect.annotateSpans({ providerInstanceId: instanceId }),
         ),
-        usageLimits: readOpenCodeGoUsageLimits({
-          enabled: effectiveConfig.enabled,
-          serverUrl: effectiveConfig.serverUrl,
-          environment: processEnv,
-        }),
+        usageLimits: checkUsageLimits,
       },
       { concurrency: "unbounded" },
     ).pipe(
-      Effect.flatMap(({ provider, usageLimits }) => {
-        const hasDashboardOverride =
-          Boolean(processEnv.OPENCODE_GO_AUTH_COOKIE?.trim()) &&
-          Boolean(processEnv.OPENCODE_GO_WORKSPACE_ID?.trim());
-        if (
-          !enabled ||
-          (!hasDashboardOverride &&
-            (usageLimits.unavailable === undefined || effectiveConfig.serverUrl.trim().length > 0))
-        ) {
-          return Effect.succeed({ provider, usageLimits });
-        }
-        return readForkOpenCodeGoUsageLimits({
-          environment: processEnv,
-          isExternalServer: effectiveConfig.serverUrl.trim().length > 0,
-        }).pipe(
-          Effect.map((fallback) => ({
-            provider,
-            usageLimits:
-              hasDashboardOverride || fallback.unavailable === undefined ? fallback : usageLimits,
-          })),
-        );
-      }),
       Effect.map(({ provider, usageLimits }) => ({ ...provider, usageLimits })),
       Effect.map(stampIdentity),
-      Effect.provideService(FileSystem.FileSystem, fileSystem),
-      Effect.provideService(Path.Path, pathService),
-      Effect.provideService(HttpClient.HttpClient, httpClient),
-      Effect.provideService(Crypto.Crypto, crypto),
       Effect.provideService(OpenCodeServerOwner.OpenCodeServerOwner, serverOwner),
       Effect.provideService(OpenCodeRuntime.OpenCodeRuntime, openCodeRuntime),
     );
@@ -468,6 +471,7 @@ export const OpenCodeDriver: ProviderDriver<
       initialSnapshot: (settings) =>
         makePendingOpenCodeProvider(settings.provider).pipe(Effect.map(stampIdentity)),
       checkProvider,
+      checkUsageLimits,
       enrichSnapshot: ({ settings, snapshot, publishSnapshot }) =>
         resolveMaintenance().pipe(
           Effect.flatMap((maintenanceCapabilities) =>

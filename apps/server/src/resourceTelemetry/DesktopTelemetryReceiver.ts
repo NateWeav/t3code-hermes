@@ -220,12 +220,15 @@ class DesktopShellCertificatesUpdateFailed extends Schema.TaggedError<DesktopShe
 export function makeApplyDesktopShellEnvironmentSnapshot(
   environment: NodeJS.ProcessEnv,
   platform: NodeJS.Platform,
+  serverRepairedEnvironment = false,
 ) {
   let baseCertificates: Array<string> | undefined;
   return Effect.fn("resourceTelemetry.desktopTelemetryReceiver.applyShellEnvironment")(function* (
     message: DesktopShellEnvironmentSnapshot,
   ) {
     if (message.platform !== platform) return;
+    // A failed desktop probe carries only the launcher env; applying it would undo fixPath's repair.
+    if (serverRepairedEnvironment && !message.discovered) return;
     // Node's first default-CA enumeration consults process.env, so capture it before the patch.
     if (message.environment.NODE_EXTRA_CA_CERTS !== undefined && baseCertificates === undefined) {
       // Remove only the startup extras, preserving duplicates from bundled or system trust.
@@ -400,7 +403,11 @@ export const make = Effect.fn("resourceTelemetry.desktopTelemetryReceiver.make")
   const config = yield* ServerConfig.ServerConfig;
   const environment = yield* HostProcess.Environment;
   const platform = yield* HostProcess.Platform;
-  const applyShellSnapshot = makeApplyDesktopShellEnvironmentSnapshot(environment, platform);
+  const applyShellSnapshot = makeApplyDesktopShellEnvironmentSnapshot(
+    environment,
+    platform,
+    config.shellEnvironmentPrepared !== true,
+  );
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const latest = yield* Ref.make(Option.none<DesktopHostTelemetrySnapshot>());
   const receiverStartedAt = yield* DateTime.now;

@@ -158,12 +158,14 @@ NodeAssert.deepEqual(fingerprints(NodeTls.getCACertificates("default")), expecte
   );
 
   it.effect.each([
-    { platform: "darwin", discovered: true, applied: true, pending: false },
-    { platform: "win32", discovered: true, applied: false, pending: true },
-    { platform: "darwin", discovered: false, applied: true, pending: true },
+    { platform: "darwin", discovered: true, repaired: false, applied: true, pending: false },
+    { platform: "win32", discovered: true, repaired: false, applied: false, pending: true },
+    { platform: "darwin", discovered: false, repaired: false, applied: true, pending: true },
+    { platform: "darwin", discovered: false, repaired: true, applied: false, pending: true },
+    { platform: "darwin", discovered: true, repaired: true, applied: true, pending: false },
   ])(
-    "applies platform=$platform discovered=$discovered with pending=$pending",
-    ({ platform, discovered, applied, pending }) =>
+    "applies platform=$platform discovered=$discovered repaired=$repaired with pending=$pending",
+    ({ platform, discovered, repaired, applied, pending }) =>
       Effect.gen(function* () {
         const environment: NodeJS.ProcessEnv = {
           PATH: "/old/bin",
@@ -174,16 +176,18 @@ NodeAssert.deepEqual(fingerprints(NodeTls.getCACertificates("default")), expecte
         yield* makeApplyDesktopShellEnvironmentSnapshot(
           environment,
           "darwin",
+          repaired,
         )({
           version: 1,
           type: "shellEnvironment",
           platform,
           discovered,
-          environment: { PATH: "/fresh/bin", JAVA_HOME: null },
+          environment: { PATH: "/fresh/bin", JAVA_HOME: null, LC_CTYPE: "en_US.UTF-8" },
         });
         expect(environment).toEqual({
           PATH: applied ? "/fresh/bin" : "/old/bin",
           ...(applied ? {} : { JAVA_HOME: "/old/java" }),
+          ...(platform === "darwin" ? { LC_CTYPE: "en_US.UTF-8" } : {}),
           UNRELATED: "keep",
           ...(pending ? { T3CODE_DESKTOP_SHELL_DISCOVERY_PENDING: "1" } : {}),
         });

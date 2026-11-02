@@ -227,10 +227,18 @@ export function makeApplyDesktopShellEnvironmentSnapshot(
     message: DesktopShellEnvironmentSnapshot,
   ) {
     if (message.platform !== platform) return;
-    // A failed desktop probe carries only the launcher env; applying it would undo fixPath's repair.
-    if (serverRepairedEnvironment && !message.discovered) return;
+    // A failed desktop probe carries the launcher env plus fallbacks such as LC_CTYPE; it may
+    // fill gaps but must not undo fixPath's PATH repair.
+    const patch =
+      serverRepairedEnvironment && !message.discovered
+        ? Object.fromEntries(
+            Object.entries(message.environment).filter(
+              ([name, value]) => value !== null && environment[name] === undefined,
+            ),
+          )
+        : message.environment;
     // Node's first default-CA enumeration consults process.env, so capture it before the patch.
-    if (message.environment.NODE_EXTRA_CA_CERTS !== undefined && baseCertificates === undefined) {
+    if (patch.NODE_EXTRA_CA_CERTS !== undefined && baseCertificates === undefined) {
       // Remove only the startup extras, preserving duplicates from bundled or system trust.
       const extras = [...NodeTls.getCACertificates("extra")];
       baseCertificates = NodeTls.getCACertificates("default").filter((certificate) => {
@@ -240,8 +248,8 @@ export function makeApplyDesktopShellEnvironmentSnapshot(
         return false;
       });
     }
-    applyShellEnvironment(environment, message.environment, platform);
-    if (message.environment.NODE_EXTRA_CA_CERTS !== undefined) {
+    applyShellEnvironment(environment, patch, platform);
+    if (patch.NODE_EXTRA_CA_CERTS !== undefined) {
       yield* Effect.gen(function* () {
         const certificates = baseCertificates;
         // --use-openssl-ca roots are not enumerable; replacing the list would discard them.
@@ -252,7 +260,7 @@ export function makeApplyDesktopShellEnvironmentSnapshot(
           return;
         }
         const fs = yield* FileSystem.FileSystem;
-        const file = message.environment.NODE_EXTRA_CA_CERTS;
+        const file = patch.NODE_EXTRA_CA_CERTS;
         const bundle = file ? yield* fs.readFileString(file) : undefined;
         yield* Effect.try({
           try: () => {

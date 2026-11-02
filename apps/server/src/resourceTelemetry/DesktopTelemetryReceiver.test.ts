@@ -182,11 +182,12 @@ NodeAssert.deepEqual(fingerprints(NodeTls.getCACertificates("default")), expecte
           type: "shellEnvironment",
           platform,
           discovered,
-          environment: { PATH: "/fresh/bin", JAVA_HOME: null },
+          environment: { PATH: "/fresh/bin", JAVA_HOME: null, LC_CTYPE: "en_US.UTF-8" },
         });
         expect(environment).toEqual({
           PATH: applied ? "/fresh/bin" : "/old/bin",
           ...(applied ? {} : { JAVA_HOME: "/old/java" }),
+          ...(platform === "darwin" ? { LC_CTYPE: "en_US.UTF-8" } : {}),
           UNRELATED: "keep",
           ...(pending ? { T3CODE_DESKTOP_SHELL_DISCOVERY_PENDING: "1" } : {}),
         });

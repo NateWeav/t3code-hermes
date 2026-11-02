@@ -7,7 +7,6 @@ import {
   isThreadWorking,
   sortInboxThreadsByReturn,
   sortWorkingThreadsBySend,
-  WORKING_EXIT_GRACE_MS,
 } from "./threadInbox.ts";
 
 const environmentId = EnvironmentId.make("environment-1");
@@ -345,7 +344,7 @@ describe("threadIsMonitoring", () => {
       const ended = { ...settled, pullRequests: [] };
       tracker.observe([ended]);
       expect(tracker.isWorking(ended)).toBe(true);
-      vi.advanceTimersByTime(WORKING_EXIT_GRACE_MS);
+      vi.advanceTimersByTime(2_000);
       expect(tracker.isWorking(ended)).toBe(false);
       expect(tracker.returnedAt(ended)).toBeDefined();
     } finally {

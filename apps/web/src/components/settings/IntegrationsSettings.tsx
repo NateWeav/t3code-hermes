@@ -2,8 +2,6 @@ import { DeviceHostUpdates } from "../device/DeviceHostUpdates";
 import { DeviceToolVersions } from "../device/DeviceToolVersions";
 import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
 import { ScopedSwitch } from "./ScopedSwitch";
-import { HermesRunsSettingsSection } from "./HermesRunsSettings";
-import { HermesHubsSettingsSection } from "./HermesHubsSettings";
 import { MemorySettingsSection } from "./MemorySettings";
 import { PaperclipSettingsSection } from "./PaperclipSettings";
 import { DeviceSourcesSettings } from "./DeviceSourcesSettings";
@@ -1621,8 +1619,6 @@ export function DevicesSettingsPanel() {
       <DeviceIntegrationSettings />
       <MemorySettingsSection />
       <PaperclipSettingsSection />
-      <HermesRunsSettingsSection />
-      <HermesHubsSettingsSection />
     </SettingsPageContainer>
   );
 }

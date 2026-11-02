@@ -49,8 +49,8 @@ Editing and deleting tasks also happens in chat, or through the `hermes` command
 ## Follow runs as threads
 
 Hermes's background work (scheduled jobs and webhook routes, in any Hermes profile) can show up as
-threads, so a run reads like work you started in T3 Code. Open **Settings → Integrations → Hermes
-runs** to see every job and route Hermes has, and switch on the ones you want. Each switched-on
+threads, so a run reads like work you started in T3 Code. Open **Settings → Hermes → Hermes runs**
+to see every job and route Hermes has, and switch on the ones you want. Each switched-on
 source sends its runs to the project picked next to it; T3 Code preselects a project when the job's
 working directory or the route's config names one.
 

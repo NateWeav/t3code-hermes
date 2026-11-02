@@ -1,5 +1,5 @@
 /**
- * Everything the Patches tab decides: the latest read of each environment's
+ * Everything the Hermes patches settings decide: the latest read of each environment's
  * Hermes checkout, and what applying or removing a patch, or updating Hermes,
  * does afterwards — on one environment, or on every one at once.
  *
@@ -7,6 +7,7 @@
  */
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import {
+  applyEveryFittingHermesPatch,
   describeHermesPatchFailure,
   describeHermesUpdateResult,
 } from "@t3tools/client-runtime/state/hermes-patches";
@@ -40,6 +41,8 @@ export interface HermesPatchWork {
     readonly patchId: HermesPatchId;
     readonly direction: "apply" | "remove";
   } | null;
+  /** Apply all is working through the patches; `changing` names the one in flight. */
+  readonly applyingAll: boolean;
   readonly updating: boolean;
   /** What the last Update Hermes did, kept as a line in the tab. */
   readonly updateSummary: string | null;
@@ -48,6 +51,7 @@ export interface HermesPatchWork {
 
 const IDLE_WORK: HermesPatchWork = {
   changing: null,
+  applyingAll: false,
   updating: false,
   updateSummary: null,
   requestingRestart: false,
@@ -70,7 +74,7 @@ const patchesQuery = (environmentId: EnvironmentId) =>
   serverEnvironment.hermesPatches({ environmentId, input: {} });
 
 export const isHermesPatchWorkBusy = (work: HermesPatchWork) =>
-  work.changing !== null || work.updating;
+  work.changing !== null || work.applyingAll || work.updating;
 
 const startGatewayPolling = (
   registry: AtomRegistry.AtomRegistry,
@@ -112,6 +116,19 @@ function useHermesPatchActions() {
     registry.set(patchWorkAtom(environmentId), { ...workOf(environmentId), ...next });
   const refresh = (environmentId: EnvironmentId) => registry.refresh(patchesQuery(environmentId));
 
+  const runChange = async (
+    environmentId: EnvironmentId,
+    patchId: HermesPatchId,
+    direction: "apply" | "remove",
+  ) => {
+    setWork(environmentId, { changing: { patchId, direction } });
+    const command = direction === "apply" ? applyCommand : revertCommand;
+    const result = await command({ environmentId, input: { patchId } });
+    await reread(registry, environmentId);
+    setWork(environmentId, { changing: null });
+    return result;
+  };
+
   /** The command's result, or null when other patch work already holds the environment. */
   const change = async (
     environmentId: EnvironmentId,
@@ -119,12 +136,22 @@ function useHermesPatchActions() {
     direction: "apply" | "remove",
   ) => {
     if (isHermesPatchWorkBusy(workOf(environmentId))) return null;
-    setWork(environmentId, { changing: { patchId, direction } });
-    const command = direction === "apply" ? applyCommand : revertCommand;
-    const result = await command({ environmentId, input: { patchId } });
-    await reread(registry, environmentId);
-    setWork(environmentId, { changing: null });
-    return result;
+    return runChange(environmentId, patchId, direction);
+  };
+
+  /** What Apply all did, or null when other patch work already holds the environment. */
+  const applyAll = async (environmentId: EnvironmentId) => {
+    if (isHermesPatchWorkBusy(workOf(environmentId))) return null;
+    setWork(environmentId, { applyingAll: true });
+    const outcome = await applyEveryFittingHermesPatch({
+      read: () => Option.getOrNull(AsyncResult.value(registry.get(patchesQuery(environmentId)))),
+      apply: async (patch) => {
+        const result = await runChange(environmentId, patch.id, "apply");
+        return result._tag === "Success" ? null : result;
+      },
+    });
+    setWork(environmentId, { applyingAll: false });
+    return outcome;
   };
 
   /** Removes the patches, updates Hermes, and reapplies; the outcome stays as a line in the tab. */
@@ -175,7 +202,38 @@ function useHermesPatchActions() {
     setWork(environmentId, { requestingRestart: false });
   };
 
-  return { registry, change, updateHermes, restartGateway, refresh };
+  return { registry, change, applyAll, updateHermes, restartGateway, refresh };
+}
+
+type ApplyAllOutcome = NonNullable<
+  Awaited<ReturnType<ReturnType<typeof useHermesPatchActions>["applyAll"]>>
+>;
+
+const countPatches = (count: number) => `${count} ${count === 1 ? "patch" : "patches"}`;
+
+/** One toast for what applied, and one naming the patch that stopped the run. */
+function reportApplyAll(
+  outcomes: ReadonlyArray<{ readonly outcome: ApplyAllOutcome; readonly where: string | null }>,
+) {
+  const applied = outcomes.reduce((total, { outcome }) => total + outcome.applied.length, 0);
+  if (applied > 0) {
+    toastManager.add({
+      type: "success",
+      title: `${countPatches(applied)} applied`,
+      description: CHANGED_DESCRIPTION,
+    });
+  }
+  for (const { outcome, where } of outcomes) {
+    if (outcome.failed === null || isAtomCommandInterrupted(outcome.failed.failure)) continue;
+    toastManager.add({
+      type: "error",
+      title: `${outcome.failed.patch.title} not applied${where === null ? "" : ` on ${where}`}`,
+      description: describeHermesPatchFailure(
+        squashAtomCommandFailure(outcome.failed.failure),
+        "The Hermes checkout could not be changed.",
+      ),
+    });
+  }
 }
 
 export function useHermesPatches(environmentId: EnvironmentId | null) {
@@ -231,6 +289,13 @@ export function useHermesPatches(environmentId: EnvironmentId | null) {
     },
     apply: (patchId: HermesPatchId) => void change(patchId, "apply"),
     remove: (patchId: HermesPatchId) => void change(patchId, "remove"),
+    applyingAll: work.applyingAll,
+    applyAll: () => {
+      if (environmentId === null) return;
+      void actions.applyAll(environmentId).then((outcome) => {
+        if (outcome !== null) reportApplyAll([{ outcome, where: null }]);
+      });
+    },
     requestingRestart: work.requestingRestart,
     restartGateway: () => {
       if (environmentId !== null) void actions.restartGateway(environmentId);
@@ -346,6 +411,17 @@ export function useHermesPatchesEverywhere(
     },
     apply: (patchId: HermesPatchId) => void changeEverywhere(patchId, "apply"),
     remove: (patchId: HermesPatchId) => void changeEverywhere(patchId, "remove"),
+    applyAll: () =>
+      void Promise.all(
+        environmentIds.map(async (environmentId) => ({
+          outcome: await actions.applyAll(environmentId),
+          where: labelOf(environmentId),
+        })),
+      ).then((outcomes) =>
+        reportApplyAll(
+          outcomes.flatMap(({ outcome, where }) => (outcome === null ? [] : [{ outcome, where }])),
+        ),
+      ),
     updateHermes: (environmentId: EnvironmentId) => void actions.updateHermes(environmentId),
     restartGateway: (environmentId: EnvironmentId) => void actions.restartGateway(environmentId),
   };

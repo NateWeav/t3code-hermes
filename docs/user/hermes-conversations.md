@@ -43,7 +43,7 @@ reading to the thread the panel belongs to, use **Link to this thread** in its h
 ## Thread hubs
 
 A hub is one pinned thread that collects the conversations from Discord channels you name. Set
-them up in **Settings › Integrations › External thread hubs**: add a hub, give it a name and the
+them up in **Settings › Hermes › External thread hubs**: add a hub, give it a name and the
 channel ids (separated by commas or spaces), then pick one of the environment's pinned threads or
 create one. A hub marked **Needs a thread** has no thread, or its thread is gone or unpinned, and
 links nothing until you pick one.

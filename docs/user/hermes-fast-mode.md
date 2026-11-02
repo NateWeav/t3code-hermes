@@ -8,7 +8,7 @@ applies to that thread from your next message.
 
 Hermes decides, using the same rules as its own `/fast` command: the model has to support fast mode
 and Hermes has to be talking to the provider that bills for it, such as OpenAI, ChatGPT, Anthropic,
-or xAI. Hermes needs the Fast mode patch from the Patches tab of the Hermes panel; without it the
+or xAI. Hermes needs the Fast mode patch from **Settings → Hermes**; without it the
 toggle does not appear.
 
 ## Using it through a proxy

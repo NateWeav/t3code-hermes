@@ -1,7 +1,13 @@
-import type { HermesPatch, HermesPatchesSnapshot, HermesPatchId } from "@t3tools/contracts";
+import type {
+  HermesPatch,
+  HermesPatchesSnapshot,
+  HermesPatchId,
+  HermesPatchState,
+} from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  applyEveryFittingHermesPatch,
   describeHermesGateway,
   describeHermesPatchHint,
   describeHermesUpdateResult,
@@ -133,5 +139,59 @@ describe("describeHermesGateway", () => {
         restart: false,
       },
     );
+  });
+});
+
+describe("applyEveryFittingHermesPatch", () => {
+  const checkout = (states: Record<string, HermesPatchState>) => () =>
+    snapshot({
+      patches: Object.entries(states).map(([id, state]) => patch(id, { state })),
+    });
+
+  it("applies in stack order, taking each next patch from a fresh read", async () => {
+    // b only fits once a is on; c is already on.
+    const states: Record<string, HermesPatchState> = {
+      a: "notApplied",
+      b: "doesNotApply",
+      c: "applied",
+    };
+    const attempted: string[] = [];
+    const result = await applyEveryFittingHermesPatch({
+      read: checkout(states),
+      apply: async (next) => {
+        attempted.push(next.id);
+        states[next.id] = "applied";
+        if (next.id === "a") states.b = "notApplied";
+        return null;
+      },
+    });
+
+    expect(attempted).toEqual(["a", "b"]);
+    expect(result.applied.map((applied) => applied.id)).toEqual(["a", "b"]);
+    expect(result.failed).toBeNull();
+  });
+
+  it("stops at the first failure and never retries a patch that stays unapplied", async () => {
+    const states: Record<string, HermesPatchState> = {
+      a: "notApplied",
+      b: "notApplied",
+      c: "notApplied",
+    };
+    const attempted: string[] = [];
+    const result = await applyEveryFittingHermesPatch({
+      read: checkout(states),
+      // a reports success but the re-read still shows it unapplied; b fails.
+      apply: async (next) => {
+        attempted.push(next.id);
+        return next.id === "b" ? "git refused" : null;
+      },
+    });
+
+    expect(attempted).toEqual(["a", "b"]);
+    expect(result.applied.map((applied) => applied.id)).toEqual(["a"]);
+    expect(result.failed).toEqual({
+      patch: patch("b", { state: "notApplied" }),
+      failure: "git refused",
+    });
   });
 });

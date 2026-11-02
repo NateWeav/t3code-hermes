@@ -1,5 +1,4 @@
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
-import { WORKING_EXIT_GRACE_MS } from "@t3tools/client-runtime/state/thread-inbox";
 import type { AnyRouter } from "@tanstack/react-router";
 import { HermesCronJobId, type HermesCronRunCompleted } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
@@ -7,7 +6,7 @@ import * as Option from "effect/Option";
 import { Atom, AtomRegistry } from "effect/reactivity";
 import { expect, it, vi } from "vite-plus/test";
 
-import { fakeTimers, render, stubGlobal, type Screen } from "../../test/render";
+import { render, stubGlobal, type Screen } from "../../test/render";
 
 // Hermes Tasks alerts render per environment and share the thread notification service's badge.
 const state = vi.hoisted(() => ({
@@ -300,10 +299,8 @@ it("shares Hermes and thread badge counts and opens the exact remote run", async
   state.hermes.set("two", null);
   app.start();
   await app.flush();
-  using _timers = fakeTimers();
   complete("one");
   await app.flush();
-  await vi.advanceTimersByTimeAsync(WORKING_EXIT_GRACE_MS);
   completeHermes();
   await app.flush();
   expect(lastBadge()).toBe(2);

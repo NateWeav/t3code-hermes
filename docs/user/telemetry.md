@@ -4,12 +4,13 @@ The T3 Hermes server sends product usage events to the fork's PostHog project, a
 hashed account or installation identifier. To count how many installations one person uses, the
 server also sends hashed account identifiers: your T3 Connect account, your OpenAI and Claude
 accounts when you are signed in, and a random identifier for each device that connects. Events
-include the provider, model, reasoning effort,
-permission mode, turn result, duration, release channel, and main-agent token totals when
-available.
+include the provider, model, reasoning effort, permission mode, turn and request results, duration,
+release channel, and token counts when available. Child-agent token counts are reported separately
+from the main agent's. Model names are sent only when they appear in a provider's public model
+list.
 
 Events do not include prompts, responses, file contents, authentication tokens, conversation IDs,
-raw provider events, or child-agent output. Child-agent token use is excluded from the totals.
+raw provider events, or child-agent output.
 
 To send product events to your own PostHog project instead, set `T3CODE_POSTHOG_KEY` to its
 project key, and `T3CODE_POSTHOG_HOST` if it is not on PostHog's US cloud.

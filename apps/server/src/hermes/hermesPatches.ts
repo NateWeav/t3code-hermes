@@ -354,10 +354,41 @@ const pickForwardVersion = Effect.fn("pickHermesForwardVersion")(function* (
 }, Effect.scoped);
 
 /**
+ * Files the patch adds that already sit untracked in the checkout, byte for byte as one of its
+ * versions writes them. A `hermes update` whose autostash restore conflicts resets tracked files
+ * only, leaving the stash's untracked ones behind, and `git apply` refuses to create a file that
+ * exists. Anything else at those paths is the user's and blocks applying.
+ */
+const readLeftoverAddedFiles = Effect.fn("readHermesLeftoverAddedFiles")(function* (
+  checkoutRoot: string,
+  patch: HermesPatchDefinition,
+) {
+  const added = /^diff --git a\/\S+ b\/(\S+)\nnew file mode \d+\nindex 0+\.\.([0-9a-f]+)$/gm;
+  const blobs = new Map<string, string[]>();
+  for (const version of patch.versions) {
+    for (const [, file, blob] of version.content.matchAll(added)) {
+      // `--exclude` takes a glob.
+      if (file === undefined || blob === undefined || /[*?[\\]/.test(file)) continue;
+      blobs.set(file, [...(blobs.get(file) ?? []), blob]);
+    }
+  }
+  const leftovers: string[] = [];
+  for (const [file, known] of blobs) {
+    const tracked = yield* runGit(checkoutRoot, ["ls-files", "--error-unmatch", "--", file]);
+    if (tracked.code === 0) continue;
+    const hash = yield* runGit(checkoutRoot, ["hash-object", "--", file]);
+    if (hash.code !== 0) continue;
+    const object = hash.stdout.trim();
+    if (known.some((blob) => object.startsWith(blob))) leftovers.push(file);
+  }
+  return leftovers;
+});
+
+/**
  * Where one patch stands, and the version file that got it there: the version
  * whose change the checkout contains, or the one that applies cleanly. A null
  * file means the state is known but not which version made it, and changing it
- * is refused.
+ * is refused. `leftovers` are added files to clear before applying.
  */
 const resolvePatchState = Effect.fn("resolveHermesPatchState")(function* (
   checkoutRoot: string,
@@ -366,7 +397,11 @@ const resolvePatchState = Effect.fn("resolveHermesPatchState")(function* (
 ) {
   const versionFiles = files.get(patch.id) ?? [];
   const others = [...files].filter(([id]) => id !== patch.id).map(([, other]) => other);
-  const result = (state: HermesPatchState, file: string | null) => ({ state, file });
+  const result = (
+    state: HermesPatchState,
+    file: string | null,
+    leftovers: ReadonlyArray<string> = [],
+  ) => ({ state, file, leftovers });
   // Reverse first, over every version: a checkout that already has a change
   // must read as applied, not as a conflict of a forward patch with itself.
   // Even a lone candidate is checked against HEAD: a change upstream now
@@ -375,14 +410,20 @@ const resolvePatchState = Effect.fn("resolveHermesPatchState")(function* (
   if (reverse.length > 0) {
     return result("applied", yield* pickAppliedVersion(checkoutRoot, reverse, others));
   }
-  const forward = yield* fitting(checkoutRoot, versionFiles, ["apply", "--check"]);
-  if (forward.length === 1) return result("notApplied", forward[0]!);
+  let forward = yield* fitting(checkoutRoot, versionFiles, ["apply", "--check"]);
+  const leftovers = forward.length === 0 ? yield* readLeftoverAddedFiles(checkoutRoot, patch) : [];
+  if (leftovers.length > 0) {
+    const exclude = leftovers.map((leftover) => `--exclude=${leftover}`);
+    forward = yield* fitting(checkoutRoot, versionFiles, ["apply", "--check", ...exclude]);
+  }
+  const fits = (file: string | null) => result("notApplied", file, leftovers);
+  if (forward.length === 1) return fits(forward[0]!);
   if (forward.length > 1) {
     const candidates = forward.map((file) => ({
       file,
       hermesCommit: patch.versions[versionFiles.indexOf(file)]?.hermesCommit ?? "",
     }));
-    return result("notApplied", yield* pickForwardVersion(checkoutRoot, candidates));
+    return fits(yield* pickForwardVersion(checkoutRoot, candidates));
   }
   return result("doesNotApply", null);
 });
@@ -653,12 +694,25 @@ export const changeHermesPatch = Effect.fn("changeHermesPatch")(function* (
     patch,
     ...patches.filter((other) => other.id !== patch.id),
   ]);
-  const { state, file } = yield* resolvePatchState(checkoutRoot, patch, files);
+  const { state, file, leftovers } = yield* resolvePatchState(checkoutRoot, patch, files);
   const expected: HermesPatchState = direction === "forward" ? "notApplied" : "applied";
   if (state !== expected || file === null) return { ok: false, state } as const;
-  const result = yield* runGit(
-    checkoutRoot,
-    direction === "forward" ? ["apply", file] : ["apply", "-R", file],
+  if (direction === "reverse") {
+    const result = yield* runGit(checkoutRoot, ["apply", "-R", file]);
+    return { ok: result.code === 0, state } as const;
+  }
+  // Cleared so the version writes its own copy, and put back if git refuses.
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const cleared = yield* Effect.forEach(leftovers, (leftover) =>
+    fileSystem
+      .readFile(path.join(checkoutRoot, leftover))
+      .pipe(Effect.map((bytes) => [path.join(checkoutRoot, leftover), bytes] as const)),
   );
+  yield* Effect.forEach(cleared, ([target]) => fileSystem.remove(target));
+  const result = yield* runGit(checkoutRoot, ["apply", file]);
+  if (result.code !== 0) {
+    yield* Effect.forEach(cleared, ([target, bytes]) => fileSystem.writeFile(target, bytes));
+  }
   return { ok: result.code === 0, state } as const;
 }, Effect.scoped);

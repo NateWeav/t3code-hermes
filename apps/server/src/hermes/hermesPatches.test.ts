@@ -576,6 +576,47 @@ describe("hermes patches", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("applies over a file it adds that an interrupted update left behind", () =>
+    Effect.gen(function* () {
+      // A conflicted `hermes update` autostash restore resets tracked files but leaves the stash's
+      // untracked ones, so the patch's added file is already there and its edits are not.
+      const fileSystem = yield* FileSystem.FileSystem;
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hermes-checkout-" });
+      git(root, "init", "--quiet");
+      const session = NodePath.join(root, "session.py");
+      const added = NodePath.join(root, "helper.py");
+      NodeFS.writeFileSync(session, "remote_cwd = None\n");
+      const base = commit(root, "base");
+      const adding = (helper: string) => {
+        NodeFS.writeFileSync(added, helper);
+        git(root, "add", "--intent-to-add", "helper.py");
+        const version = diffAt(root, "session.py", "remote_cwd = configured()\n", base);
+        git(root, "rm", "--quiet", "--cached", "helper.py");
+        return version;
+      };
+      // The leftover can be an older version's copy of the file.
+      const patch = definition([
+        adding("def helper(): return 2\n"),
+        adding("def helper(): pass\n"),
+      ]);
+
+      assert.strictEqual(yield* stateOf(root, patch), "notApplied");
+      assert.isTrue((yield* changeHermesPatch(root, patch, "forward")).ok);
+      assert.strictEqual(NodeFS.readFileSync(session, "utf8"), "remote_cwd = configured()\n");
+      assert.strictEqual(NodeFS.readFileSync(added, "utf8"), "def helper(): return 2\n");
+      assert.strictEqual(yield* stateOf(root, patch), "applied");
+      assert.isTrue((yield* changeHermesPatch(root, patch, "reverse")).ok);
+      assert.strictEqual(git(root, "status", "--porcelain"), "");
+
+      // A file of the user's own at that path is never overwritten.
+      NodeFS.writeFileSync(added, "def mine(): pass\n");
+      assert.strictEqual(yield* stateOf(root, patch), "doesNotApply");
+      assert.isFalse((yield* changeHermesPatch(root, patch, "forward")).ok);
+      assert.strictEqual(NodeFS.readFileSync(added, "utf8"), "def mine(): pass\n");
+      assert.strictEqual(NodeFS.readFileSync(session, "utf8"), "remote_cwd = None\n");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("does not remove from a clean checkout the patch fits both ways", () =>
     Effect.gen(function* () {
       // HEAD has the patch's before text in one block and its after text in

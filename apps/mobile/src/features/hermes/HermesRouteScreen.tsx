@@ -42,6 +42,7 @@ import type {
 } from "@t3tools/contracts";
 import { HINDSIGHT_MAX_NOTE_LENGTH } from "@t3tools/contracts";
 import { LegendList, type LegendListRenderItemProps } from "@legendapp/list/react-native";
+import { HeaderHeightContext } from "@react-navigation/elements";
 import {
   IconBell,
   IconBellOff,
@@ -55,7 +56,7 @@ import {
   IconSparkles,
   IconX,
 } from "@tabler/icons-react-native";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useContext, useMemo, useState } from "react";
 import { Alert, Platform, Pressable, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -111,6 +112,9 @@ export function useHermesProviderPresent(): boolean {
 
 export function HermesRouteScreen() {
   const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
+  // iOS lays screens out under the native header, which would cover the pinned chips and tabs.
+  const headerHeight = useContext(HeaderHeightContext) ?? insets.top + 44;
   const environments = useHermesEnvironmentOptions();
   const [selectedEnvironmentId, setSelectedEnvironmentId] = useState<EnvironmentId | null>(null);
   const [tab, setTab] = useState<HermesTab>("tasks");
@@ -121,7 +125,11 @@ export function HermesRouteScreen() {
       : (environments[0]?.environmentId ?? null);
 
   return (
-    <View collapsable={false} className="flex-1 bg-sheet">
+    <View
+      collapsable={false}
+      className="flex-1 bg-sheet"
+      style={Platform.OS === "ios" ? { paddingTop: headerHeight } : undefined}
+    >
       {Platform.OS === "android" ? (
         <>
           <NativeStackScreenOptions options={{ headerShown: false }} />
@@ -469,6 +477,11 @@ function HermesPatchesScreen({ environmentId }: { readonly environmentId: Enviro
     }
   };
 
+  const applyAll = async () => {
+    const failure = await patches.applyAll();
+    if (failure !== null) Alert.alert("Patch not applied", failure);
+  };
+
   const updateHermes = async () => {
     const failure = await patches.updateHermes();
     if (failure !== null) Alert.alert("Hermes not updated", failure);
@@ -506,6 +519,13 @@ function HermesPatchesScreen({ environmentId }: { readonly environmentId: Enviro
       contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 18) + 18 }}
       showsVerticalScrollIndicator={false}
     >
+      {snapshot.patches.length === 0 ? null : (
+        <ActionButton
+          label={patches.applyingAll ? "Applying…" : "Apply all"}
+          disabled={patches.busy || !snapshot.patches.some((patch) => patch.state === "notApplied")}
+          onPress={() => void applyAll()}
+        />
+      )}
       {shouldOfferHermesUpdate(snapshot) || patches.updating ? (
         <View className="gap-2">
           <NoticeText text={HERMES_UPDATE_DESCRIPTION} />

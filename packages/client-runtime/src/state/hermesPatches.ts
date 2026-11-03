@@ -50,6 +50,32 @@ export function describeHermesPatchHint(patch: HermesPatch): string {
     : HERMES_PATCH_STATE_HINTS[patch.state];
 }
 
+/**
+ * Apply all: every patch that fits, one at a time in stack order. Applying one can make the next
+ * fit, so each pick comes from a fresh read. The first failure stops the run.
+ */
+export async function applyEveryFittingHermesPatch<Failure>(options: {
+  readonly read: () => HermesPatchesSnapshot | null;
+  /** Null on success. */
+  readonly apply: (patch: HermesPatch) => Promise<Failure | null>;
+}): Promise<{
+  readonly applied: ReadonlyArray<HermesPatch>;
+  readonly failed: { readonly patch: HermesPatch; readonly failure: Failure } | null;
+}> {
+  const applied: HermesPatch[] = [];
+  for (;;) {
+    const next = options
+      .read()
+      ?.patches.find(
+        (patch) => patch.state === "notApplied" && !applied.some((done) => done.id === patch.id),
+      );
+    if (next === undefined) return { applied, failed: null };
+    const failure = await options.apply(next);
+    if (failure !== null) return { applied, failed: { patch: next, failure } };
+    applied.push(next);
+  }
+}
+
 /** Whether to offer Update Hermes: it can run, and it would make a patch fit or retire one. */
 export function shouldOfferHermesUpdate(snapshot: HermesPatchesSnapshot): boolean {
   return (

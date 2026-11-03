@@ -14,7 +14,10 @@ import {
 } from "../components/settings/SettingsScopeContext";
 import { useEnvironments } from "../state/environments";
 import { SettingsScopeNotice } from "../components/settings/SettingsScopeNotice";
-import { SETTINGS_DEVICE_ONLY_PATHS } from "../components/settings/SettingsScopeSentence";
+import {
+  SETTINGS_DEVICE_ONLY_PATHS,
+  SETTINGS_MACHINE_ONLY_PATHS,
+} from "../components/settings/SettingsScopeSentence";
 import { SettingsPageContainer } from "../components/settings/settingsLayout";
 import {
   retainSettingsScope,
@@ -147,9 +150,13 @@ function SettingsRouteLayout() {
   const rawSearch = Route.useSearch();
   const navigate = Route.useNavigate();
   const pathname = useLocation({ select: (location) => location.pathname });
+  // A project kept from another page would narrow the machines here with no picker to undo it.
+  const search = SETTINGS_MACHINE_ONLY_PATHS.has(pathname)
+    ? { machine: rawSearch.machine }
+    : rawSearch;
   return (
     <SettingsScopeProvider
-      search={rawSearch}
+      search={search}
       singleEnvironment={pathname === "/settings/providers" || pathname === "/settings/secrets"}
       onChange={(next) => {
         // Send every axis so retain middleware recognizes "all" as an explicit target.

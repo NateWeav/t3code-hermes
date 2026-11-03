@@ -1,4 +1,5 @@
 import {
+  applyEveryFittingHermesPatch,
   describeHermesPatchFailure,
   describeHermesUpdateResult,
 } from "@t3tools/client-runtime/state/hermes-patches";
@@ -27,9 +28,9 @@ const without = <V>(
 
 /**
  * The Patches tab's read of one environment's Hermes checkout. `change`,
- * `updateHermes` and `restartGateway` resolve to null on success, or the
- * reason to show when they failed; a finished update leaves its outcome in
- * `updateSummary`.
+ * `applyAll`, `updateHermes` and `restartGateway` resolve to null on success,
+ * or the reason to show when they failed; a finished update leaves its outcome
+ * in `updateSummary`.
  */
 export function useHermesPatches(environmentId: EnvironmentId | null) {
   const query = useEnvironmentQuery(
@@ -48,12 +49,14 @@ export function useHermesPatches(environmentId: EnvironmentId | null) {
   // environments must neither show nor clear another's progress or result.
   const [changing, setChanging] = useState<Partial<Record<EnvironmentId, HermesPatchId>>>({});
   const [updatingIn, setUpdatingIn] = useState<ReadonlySet<EnvironmentId>>(new Set());
+  const [applyingAllIn, setApplyingAllIn] = useState<ReadonlySet<EnvironmentId>>(new Set());
   const [summaries, setSummaries] = useState<Partial<Record<EnvironmentId, string>>>({});
   const changingPatchId = environmentId === null ? null : (changing[environmentId] ?? null);
   const updating = environmentId !== null && updatingIn.has(environmentId);
+  const applyingAll = environmentId !== null && applyingAllIn.has(environmentId);
   const updateSummary = environmentId === null ? null : (summaries[environmentId] ?? null);
   const refresh = query.refresh;
-  const busy = changingPatchId !== null || updating;
+  const busy = changingPatchId !== null || applyingAll || updating;
   const restartCommand = useAtomCommand(serverEnvironment.hermesGatewayRestart, {
     reportFailure: false,
   });
@@ -106,6 +109,40 @@ export function useHermesPatches(environmentId: EnvironmentId | null) {
     }
   };
 
+  const applyAll = async (): Promise<string | null> => {
+    if (environmentId === null || busy) return null;
+    setApplyingAllIn((current) => new Set(current).add(environmentId));
+    // Each apply answers with the checkout as it now stands, which picks the next patch.
+    let latest = query.data;
+    try {
+      const { failed } = await applyEveryFittingHermesPatch({
+        read: () => latest,
+        apply: async (patch) => {
+          setChanging((current) => ({ ...current, [environmentId]: patch.id }));
+          const result = await applyCommand({ environmentId, input: { patchId: patch.id } });
+          setChanging((current) => without(current, environmentId));
+          if (result._tag !== "Success") return result;
+          latest = result.value;
+          // So each row shows Applied as it lands, not only once the run ends.
+          refresh();
+          return null;
+        },
+      });
+      if (failed === null || isAtomCommandInterrupted(failed.failure)) return null;
+      return `${failed.patch.title}: ${describeHermesPatchFailure(
+        squashAtomCommandFailure(failed.failure),
+        "The Hermes checkout could not be changed.",
+      )}`;
+    } finally {
+      setApplyingAllIn((current) => {
+        const next = new Set(current);
+        next.delete(environmentId);
+        return next;
+      });
+      refresh();
+    }
+  };
+
   const updateHermes = async (): Promise<string | null> => {
     if (environmentId === null || busy) return null;
     setUpdatingIn((current) => new Set(current).add(environmentId));
@@ -142,6 +179,8 @@ export function useHermesPatches(environmentId: EnvironmentId | null) {
     busy,
     refresh,
     change,
+    applyingAll,
+    applyAll,
     updateHermes,
     requestingRestart,
     restartGateway,

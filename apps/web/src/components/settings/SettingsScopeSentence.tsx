@@ -54,6 +54,9 @@ export const SETTINGS_DEVICE_ONLY_PATHS: ReadonlySet<string> = new Set([
   "/settings/about",
 ]);
 
+/** Pages about whole machines, where a project choice means nothing: only the machine picker shows. */
+export const SETTINGS_MACHINE_ONLY_PATHS: ReadonlySet<string> = new Set(["/settings/hermes"]);
+
 interface SettingsScopeMenuProps {
   readonly value: SettingsScopeSearch;
   readonly groups: readonly SidebarProjectSnapshot[];
@@ -74,14 +77,18 @@ export function SettingsScopeSentence() {
     environments,
     onChange: scope.selectScope,
   };
+  const machineOnly = SETTINGS_MACHINE_ONLY_PATHS.has(pathname);
   return (
     <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 px-3 text-sm text-muted-foreground sm:px-4">
-      <span className="flex min-w-0 items-center gap-1.5">
-        <span className="shrink-0">Applying settings for</span>
-        <ProjectScopeMenu {...props} />
-      </span>
+      {machineOnly ? null : (
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="shrink-0">Applying settings for</span>
+          <ProjectScopeMenu {...props} />
+        </span>
+      )}
       <span className="flex min-w-0 items-center gap-1.5">
         <span className="shrink-0">
+          {machineOnly ? "Applying settings " : null}
           {scope.search.machine || scope.scope.kind === "checkout" ? "on" : "across"}
         </span>
         <EnvironmentScopeMenu {...props} />

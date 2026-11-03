@@ -533,7 +533,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ "$PREVIEW" == "true" ]]; then
+          # Forks have no relay of their own and use upstream's, so their ids come from .env.example.
+          if [[ "$PREVIEW" == "true" || "$GITHUB_REPOSITORY" != "pingdotgg/t3code" ]]; then
             env_example() { sed -n "s|^T3CODE_$1=||p" .env.example; }
             CLERK_PUBLISHABLE_KEY="$(env_example CLERK_PUBLISHABLE_KEY)"
             CLERK_JWT_TEMPLATE="$(env_example CLERK_JWT_TEMPLATE)"
@@ -558,22 +559,8 @@ jobs:
             fi
           done
           if (( ${#missing[@]} > 0 )); then
-            if [[ "${GITHUB_REPOSITORY}" == "pingdotgg/t3code" ]]; then
-              printf 'Missing required relay deployment configuration: %s\n' "${missing[*]}" >&2
-              exit 1
-            fi
-
-            # Forks have no T3 Connect infrastructure. Emit empty outputs so the
-            # desktop/CLI builds run with T3 Connect disabled instead of taking
-            # the whole release chain down with them.
-            printf 'Relay public config unavailable (%s); building without T3 Connect.\n' "${missing[*]}"
-            {
-              echo "clerk_publishable_key="
-              echo "clerk_jwt_template="
-              echo "clerk_cli_oauth_client_id="
-              echo "relay_url="
-            } >> "$GITHUB_OUTPUT"
-            exit 0
+            printf 'Missing required relay deployment configuration: %s\n' "${missing[*]}" >&2
+            exit 1
           fi
 
           echo "clerk_publishable_key=$CLERK_PUBLISHABLE_KEY" >> "$GITHUB_OUTPUT"

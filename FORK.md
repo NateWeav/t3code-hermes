@@ -118,7 +118,13 @@ systemctl --user daemon-reload && npx t3-hermes@nightly service restart
 npx t3-hermes@nightly pair
 ```
 
-T3 Connect is unavailable: fork builds ship with it disabled (see "CI on the fork").
+**T3 Connect.** Fork builds use upstream's production T3 Connect, which upstream allows for forks
+as long as it isn't abused. Run `npx t3-hermes@nightly connect link` on the host (over SSH it
+prints a sign-in code), then `npx t3-hermes@nightly service restart`. Webhook tasks then get a
+public URL. Each linked machine takes one of your account's tunnels (three by default), so link
+long-lived hosts only, not dev servers. Desktop sign-in shares T3 Code's callback (see
+[Connect setup](./docs/operations/connect-setup.md#t3-hermes-builds)). Mobile builds ship without
+it: upstream's Clerk does not allow the Hermes app's redirects.
 
 **Bind deliberately.** The server controls agents on the host, which is remote code execution by
 design. Bind to a private interface: a Tailscale address, or loopback behind a reverse proxy.
@@ -329,10 +335,11 @@ upstream-only infrastructure. This fork therefore diverges in `.github/workflows
 - **Nightly release.** `release.yml` is dispatched by the upstream sync (see "Tracking upstream").
   It builds macOS dmg/zip (arm64 and x64), Linux AppImage and `.deb`, and Windows nsis, each for
   x64 and arm64, plus the updater manifests and CLI archives, attached to a GitHub prerelease. Its
-  notes list the upstream commits it ships (`.github/scripts/fork-release-notes.cjs`). Everything
-  that needs upstream credentials degrades instead of failing: the T3 Connect config resolves to
-  empty values (so builds ship with T3 Connect disabled), and the Vercel deploy, the version-bump
-  commit, and the Discord announcement skip when their secrets are absent. Windows code signing
+  notes list the upstream commits it ships (`.github/scripts/fork-release-notes.cjs`). The T3
+  Connect config comes from `.env.example` (upstream's public ids), as for upstream previews.
+  Everything that needs upstream credentials degrades instead of failing: the Vercel deploy, the
+  version-bump commit, and the Discord announcement skip when their secrets are absent, and relay
+  client tracing stays off without Cloudflare credentials. Windows code signing
   degrades to unsigned; macOS builds are signed with the stable self-signed identity in
   `MACOS_SELF_SIGNED_P12` when set, so in-app updates pass Squirrel.Mac's same-signer check (see
   [self-signed fallback](./docs/operations/release.md#self-signed-fallback)). The desktop updater

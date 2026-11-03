@@ -10,7 +10,7 @@ import {
   type RuntimeMode,
   type ServerProviderSlashCommand,
 } from "@t3tools/contracts";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -311,7 +311,7 @@ export const makeHermesAcpRuntime = Effect.fn("HermesAcpSupport.makeHermesAcpRun
 ): Effect.fn.Return<
   AcpSessionRuntime.AcpSessionRuntime["Service"],
   EffectAcpErrors.AcpError,
-  Crypto.Crypto | Scope.Scope
+  SecureRandom.SecureRandom | Scope.Scope
 > {
   const { launch, onRequestStarted, ...runtimeInput } = input;
   const requestLogger =

@@ -1,7 +1,9 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -128,77 +130,80 @@ describe("buildInitialHermesProviderSnapshot", () => {
   );
 });
 
-it.layer(NodeServices.layer)("checkHermesProviderStatus", (it) => {
-  it.effect("reports the binary as missing when the binary path does not resolve", () =>
-    Effect.gen(function* () {
-      const snapshot = yield* checkHermesProviderStatus(
-        decodeHermesSettings({
-          enabled: true,
-          binaryPath: "/definitely/not/installed/hermes-binary",
-        }),
-      );
-      expect(snapshot.enabled).toBe(true);
-      expect(snapshot.installed).toBe(false);
-      expect(snapshot.status).toBe("error");
-      expect(snapshot.message).toMatch(/not installed|not on PATH|Failed to execute/);
-    }),
-  );
+it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))(
+  "checkHermesProviderStatus",
+  (it) => {
+    it.effect("reports the binary as missing when the binary path does not resolve", () =>
+      Effect.gen(function* () {
+        const snapshot = yield* checkHermesProviderStatus(
+          decodeHermesSettings({
+            enabled: true,
+            binaryPath: "/definitely/not/installed/hermes-binary",
+          }),
+        );
+        expect(snapshot.enabled).toBe(true);
+        expect(snapshot.installed).toBe(false);
+        expect(snapshot.status).toBe("error");
+        expect(snapshot.message).toMatch(/not installed|not on PATH|Failed to execute/);
+      }),
+    );
 
-  it.effect("keeps CLI stderr out of the snapshot when --version exits non-zero", () =>
-    Effect.gen(function* () {
-      const secretStderr = "broken hermes install: secret-token-value";
-      const snapshot = yield* Effect.scoped(
-        Effect.gen(function* () {
-          const fs = yield* FileSystem.FileSystem;
-          const path = yield* Path.Path;
-          const dir = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-hermes-version-" });
-          const hermesPath = path.join(dir, "hermes");
-          yield* fs.writeFileString(
-            hermesPath,
-            ["#!/bin/sh", `printf "%s\\n" "${secretStderr}" >&2`, "exit 2", ""].join("\n"),
-          );
-          yield* fs.chmod(hermesPath, 0o755);
+    it.effect("keeps CLI stderr out of the snapshot when --version exits non-zero", () =>
+      Effect.gen(function* () {
+        const secretStderr = "broken hermes install: secret-token-value";
+        const snapshot = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const fs = yield* FileSystem.FileSystem;
+            const path = yield* Path.Path;
+            const dir = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-hermes-version-" });
+            const hermesPath = path.join(dir, "hermes");
+            yield* fs.writeFileString(
+              hermesPath,
+              ["#!/bin/sh", `printf "%s\\n" "${secretStderr}" >&2`, "exit 2", ""].join("\n"),
+            );
+            yield* fs.chmod(hermesPath, 0o755);
 
-          return yield* checkHermesProviderStatus(
-            decodeHermesSettings({ enabled: true, binaryPath: hermesPath }),
-          );
-        }),
-      );
+            return yield* checkHermesProviderStatus(
+              decodeHermesSettings({ enabled: true, binaryPath: hermesPath }),
+            );
+          }),
+        );
 
-      expect(snapshot.installed).toBe(true);
-      expect(snapshot.status).toBe("error");
-      expect(snapshot.message).toBe("Hermes CLI is installed but failed to run.");
-      expect(snapshot.message).not.toContain(secretStderr);
-    }),
-  );
+        expect(snapshot.installed).toBe(true);
+        expect(snapshot.status).toBe("error");
+        expect(snapshot.message).toBe("Hermes CLI is installed but failed to run.");
+        expect(snapshot.message).not.toContain(secretStderr);
+      }),
+    );
 
-  it.effect("falls back to the placeholder model when ACP discovery is unavailable", () =>
-    Effect.gen(function* () {
-      const snapshot = yield* Effect.scoped(
-        Effect.gen(function* () {
-          const fs = yield* FileSystem.FileSystem;
-          const path = yield* Path.Path;
-          const dir = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-hermes-success-" });
-          const hermesPath = path.join(dir, "hermes");
-          yield* fs.writeFileString(
-            hermesPath,
-            ["#!/bin/sh", 'printf "hermes 0.0.99\\n"', "exit 0", ""].join("\n"),
-          );
-          yield* fs.chmod(hermesPath, 0o755);
+    it.effect("falls back to the placeholder model when ACP discovery is unavailable", () =>
+      Effect.gen(function* () {
+        const snapshot = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const fs = yield* FileSystem.FileSystem;
+            const path = yield* Path.Path;
+            const dir = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-hermes-success-" });
+            const hermesPath = path.join(dir, "hermes");
+            yield* fs.writeFileString(
+              hermesPath,
+              ["#!/bin/sh", 'printf "hermes 0.0.99\\n"', "exit 0", ""].join("\n"),
+            );
+            yield* fs.chmod(hermesPath, 0o755);
 
-          return yield* checkHermesProviderStatus(
-            decodeHermesSettings({ enabled: true, binaryPath: hermesPath }),
-          );
-        }),
-      );
+            return yield* checkHermesProviderStatus(
+              decodeHermesSettings({ enabled: true, binaryPath: hermesPath }),
+            );
+          }),
+        );
 
-      expect(snapshot.status).toBe("error");
-      expect(snapshot.installed).toBe(true);
-      expect(snapshot.models.map((model) => model.slug)).toEqual(["hermes-4"]);
-      expect(snapshot.message).toContain("ACP startup failed");
-    }),
-  );
-});
+        expect(snapshot.status).toBe("error");
+        expect(snapshot.installed).toBe(true);
+        expect(snapshot.models.map((model) => model.slug)).toEqual(["hermes-4"]);
+        expect(snapshot.message).toContain("ACP startup failed");
+      }),
+    );
+  },
+);
 
 // it.live: these spawn a real child process and the probe's bounded wait for
 // Hermes's command advertisement uses the clock. Under it.effect's TestClock
@@ -231,7 +236,7 @@ it.live("reports authenticated with derived upstreams once ACP returns models", 
       "openai/gpt-5",
       "anthropic/claude-sonnet-4",
     ]);
-  }).pipe(Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
 );
 
 it.live("offers fast mode only on the models Hermes marked for it", () =>
@@ -262,7 +267,7 @@ it.live("offers fast mode only on the models Hermes marked for it", () =>
         .map((descriptor) => descriptor.id);
     expect(fastModeIds("custom:proxy:gpt-5.5")).toEqual(["fastMode"]);
     expect(fastModeIds("custom:proxy:glm-5.1")).toEqual([]);
-  }).pipe(Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
 );
 
 it.live("reports unauthenticated when the handshake works but no models are configured", () =>
@@ -284,7 +289,7 @@ it.live("reports unauthenticated when the handshake works but no models are conf
     expect(snapshot.auth.status).toBe("unauthenticated");
     expect(snapshot.message).toContain("no models");
     expect(snapshot.models.map((model) => model.slug)).toEqual(["hermes-4"]);
-  }).pipe(Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
 );
 
 it.live("seeds the built-in slash commands when Hermes advertises none", () =>
@@ -306,7 +311,7 @@ it.live("seeds the built-in slash commands when Hermes advertises none", () =>
       "compact",
       ...HERMES_BUILT_IN_SLASH_COMMANDS.map((command) => command.name),
     ]);
-  }).pipe(Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
 );
 
 it.live("replaces the seed with the commands Hermes advertises", () =>
@@ -336,7 +341,7 @@ it.live("replaces the seed with the commands Hermes advertises", () =>
       "compress",
       "brand-new",
     ]);
-  }).pipe(Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
 );
 
 const makeColdHermesSpawner = Effect.fn("makeColdHermesSpawner")(function* (stage: string) {
@@ -461,7 +466,7 @@ it.effect.each(["initialize", "session/new"])(
       expect(snapshot.models.map((model) => model.slug)).toContain("openai/gpt-5");
       expect(fake.isGatewayRunning()).toBe(true);
       expect(yield* fake.child.isRunning).toBe(false);
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
 );
 
 it.effect.each(["initialize", "session/new"])(
@@ -486,5 +491,5 @@ it.effect.each(["initialize", "session/new"])(
       expect(snapshot.models.map((model) => model.slug)).toEqual(["hermes-4"]);
       expect(yield* fake.child.isRunning).toBe(false);
       expect(fake.isGatewayRunning()).toBe(stage === "session/new");
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
 );

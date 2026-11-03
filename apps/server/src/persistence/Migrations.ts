@@ -81,6 +81,7 @@ import Migration0074 from "./Migrations/074_ExcludeAttachmentPlaceholdersFromSea
 import Migration0075 from "./Migrations/075_SubagentDeliveryState.ts";
 import Migration0076 from "./Migrations/076_ProjectionProjectsPinArchive.ts";
 import Migration0077 from "./Migrations/077_RepairBooleanSettledOverride.ts";
+import Migration0078 from "./Migrations/078_DropOrchestrationEventCorrelationIndex.ts";
 
 const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
@@ -161,6 +162,7 @@ const migrationEntries = [
   [75, "SubagentDeliveryState", Migration0075],
   [76, "ProjectionProjectsPinArchive", Migration0076],
   [77, "RepairBooleanSettledOverride", Migration0077],
+  [78, "DropOrchestrationEventCorrelationIndex", Migration0078],
   // Fork: never add fork migrations here. Any id this fork takes is one upstream
   // will assign later, and the migrator would skip upstream's migration at it
   // (see reconcileForkMigrations and docs/internals/legacy-orchestration-migration.md).

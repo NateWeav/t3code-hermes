@@ -5,9 +5,11 @@
  * Hermes reads its credentials from `~/.hermes/.env` (or `HERMES_HOME`), so
  * the probe needs a configured Hermes install rather than any T3-side env.
  */
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import { ChildProcessSpawner } from "effect/process";
 import { describe, expect } from "vite-plus/test";
 
@@ -31,7 +33,7 @@ describe.runIf(process.env.T3_HERMES_ACP_PROBE === "1")("Hermes ACP CLI probe", 
       const started = yield* runtime.start();
       expect(started.initializeResult).toBeDefined();
       expect(started.initializeResult.agentCapabilities?.loadSession).toBe(true);
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
   );
 
   it.effect("session/new advertises a model picker built from the Hermes provider config", () =>
@@ -44,6 +46,6 @@ describe.runIf(process.env.T3_HERMES_ACP_PROBE === "1")("Hermes ACP CLI probe", 
       expect(models).toBeDefined();
       expect(typeof models?.currentModelId).toBe("string");
       expect(models?.availableModels.length ?? 0).toBeGreaterThan(0);
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
   );
 });

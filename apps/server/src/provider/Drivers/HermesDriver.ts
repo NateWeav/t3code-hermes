@@ -1,5 +1,5 @@
 import { HermesSettings, ProviderDriverKind, type ServerProvider } from "@t3tools/contracts";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -85,7 +85,7 @@ export type HermesDriverEnv =
   | HermesAdapterV2DriverEnv
   | BackgroundPolicy.BackgroundPolicy
   | ChildProcessSpawner.ChildProcessSpawner
-  | Crypto.Crypto
+  | SecureRandom.SecureRandom
   | FileSystem.FileSystem
   | HttpClient.HttpClient
   | Path.Path
@@ -127,7 +127,7 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv, Herme
     enabled,
     config,
   }) {
-    const crypto = yield* Crypto.Crypto;
+    const random = yield* SecureRandom.SecureRandom;
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -183,7 +183,7 @@ export const HermesDriver: ProviderDriver<HermesSettings, HermesDriverEnv, Herme
 
     const checkProvider = checkHermesProviderStatus(effectiveConfig, processEnv).pipe(
       Effect.map(stampIdentity),
-      Effect.provideService(Crypto.Crypto, crypto),
+      Effect.provideService(SecureRandom.SecureRandom, random),
       Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
     );
 

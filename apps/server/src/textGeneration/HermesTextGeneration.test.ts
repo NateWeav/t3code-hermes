@@ -1,9 +1,11 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import { HermesSettings, ProviderInstanceId } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
@@ -62,7 +64,7 @@ const withMockHermes = <A, E, R>(
 describe.skipIf(HostProcess.Platform.defaultValue() === "win32")(
   "HermesTextGeneration against the mock agent",
   () => {
-    it.layer(NodeServices.layer)((it) => {
+    it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))((it) => {
       it.effect("applies the configured branch prefix and naming instructions", () =>
         Effect.gen(function* () {
           const { result, prompt } = yield* withMockHermes(

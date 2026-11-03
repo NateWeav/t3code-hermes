@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 // Fork: Hermes background runs mirrored as threads carry `hermesRun` through V2.
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
@@ -39,8 +40,9 @@ import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderS
 import * as RuntimeLayer from "./runtimeLayer.ts";
 import * as ThreadCommandExecutor from "./ThreadCommandExecutor.ts";
 
-const PlatformTestLayer = Layer.merge(
+const PlatformTestLayer = Layer.mergeAll(
   NodeServices.layer,
+  NodeCrypto.layer,
   Layer.mock(SourceControlProviderRegistry.SourceControlProviderRegistry)({
     resolveLink: () => Effect.die("unused title link"),
   }),

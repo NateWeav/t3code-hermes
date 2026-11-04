@@ -29,11 +29,6 @@
           "hermesCommit": "517b5e10febd619ce30bb22580e29b160266eb43",
           "hermesCommitDate": "2026-10-08T17:49:31Z",
           "file": "acp-central-ssh-execution/517b5e10febd.patch"
-        },
-        {
-          "hermesCommit": "5a8dea85fbb636ae09adafa2272d511ae1e227a3",
-          "hermesCommitDate": "2026-10-01T19:37:31Z",
-          "file": "acp-central-ssh-execution/5a8dea85fbb6.patch"
         }
       ]
     },
@@ -61,11 +56,6 @@
           "hermesCommit": "517b5e10febd619ce30bb22580e29b160266eb43",
           "hermesCommitDate": "2026-10-08T17:49:31Z",
           "file": "acp-delegation-progress/517b5e10febd.patch"
-        },
-        {
-          "hermesCommit": "5a8dea85fbb636ae09adafa2272d511ae1e227a3",
-          "hermesCommitDate": "2026-10-01T19:37:31Z",
-          "file": "acp-delegation-progress/5a8dea85fbb6.patch"
         }
       ]
     },
@@ -88,6 +78,11 @@
       "neededFor": "Fast Mode on Hermes models. Applying it also turns fast mode on for CLIProxyAPI endpoints in your Hermes config. Without it, the Fast Mode toggle does not appear.",
       "versions": [
         {
+          "hermesCommit": "27cbcb122ff47a1d6878cf3c390b24395f98ee14",
+          "hermesCommitDate": "2026-11-04T16:58:03Z",
+          "file": "acp-fast-mode/27cbcb122ff4.patch"
+        },
+        {
           "hermesCommit": "d05095663342556788cf2a198bfa7844cc7968ab",
           "hermesCommitDate": "2026-10-25T15:41:09Z",
           "file": "acp-fast-mode/d05095663342.patch"
@@ -96,11 +91,6 @@
           "hermesCommit": "349e4f7e620ea1be6a8b5703d7152cf1e5ed9998",
           "hermesCommitDate": "2026-10-19T13:07:41Z",
           "file": "acp-fast-mode/349e4f7e620e.patch"
-        },
-        {
-          "hermesCommit": "439334127f012e1ee0685acd5dba288e459af0ec",
-          "hermesCommitDate": "2026-10-04T19:49:39Z",
-          "file": "acp-fast-mode/439334127f01.patch"
         }
       ]
     },
@@ -114,11 +104,6 @@
           "hermesCommit": "5575a0859d6278bfcef79c28189a24594952efd3",
           "hermesCommitDate": "2026-10-14T22:19:38Z",
           "file": "acp-durable-completion-receipts/5575a0859d62.patch"
-        },
-        {
-          "hermesCommit": "af8839df1038cc026075fb254afa22edc19d911d",
-          "hermesCommitDate": "2026-10-04T22:20:18Z",
-          "file": "acp-durable-completion-receipts/af8839df1038.patch"
         }
       ]
     },
@@ -156,6 +141,11 @@
       "title": "Full access on reopened sessions",
       "neededFor": "Full access on a Hermes thread that was opened, or last ran, in another approval mode. Without it, switching an existing thread to Full access keeps asking for approval and its subagents keep denying dangerous commands, and switching away from Full access keeps approving everything.",
       "versions": [
+        {
+          "hermesCommit": "27cbcb122ff47a1d6878cf3c390b24395f98ee14",
+          "hermesCommitDate": "2026-11-04T16:58:03Z",
+          "file": "acp-launch-yolo-resume/27cbcb122ff4.patch"
+        },
         {
           "hermesCommit": "5b32cfc230078417fc523e12b9aabbc9b59f684b",
           "hermesCommitDate": "2026-10-26T03:55:41Z",

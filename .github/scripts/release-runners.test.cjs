@@ -8,7 +8,7 @@ const path = require("node:path");
 const test = require("node:test");
 
 const HOSTED =
-  /^(ubuntu-(latest|\d+\.\d+)(-arm)?|windows-(latest|\d{4}|11-arm)|macos-(latest|\d+))$/;
+  /^(ubuntu-(latest|\d+\.\d+)(-arm)?|windows-(latest|\d{4}|11-arm)|macos-(latest|\d+)|xcode-\d+)$/;
 const UPSTREAM_ONLY = "github.repository == 'pingdotgg/t3code'";
 const FORWARDED_INPUT = /^\$\{\{\s*inputs\.[\w-]+\s*\}\}$/;
 

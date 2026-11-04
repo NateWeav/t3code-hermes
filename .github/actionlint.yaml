@@ -1,6 +1,8 @@
 # actionlint cannot know about the fork's self-hosted runner labels, so declare
 # them here. The runner is a MacBook Air on Apple Silicon; several macOS jobs in
-# this repo target it (see FORK.md, "CI on the fork").
+# this repo target it (see FORK.md, "CI on the fork"). `xcode-27` is GitHub's
+# hosted preview image, which actionlint does not list yet.
 self-hosted-runner:
   labels:
     - t3code-mac-arm64
+    - xcode-27

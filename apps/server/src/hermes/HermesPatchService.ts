@@ -70,6 +70,14 @@ export class HermesPatchService extends Context.Service<
       input: HermesPatchChangeInput,
     ) => Effect.Effect<HermesPatchesSnapshot, HermesPatchError>;
     readonly updateHermes: Effect.Effect<HermesPatchUpdateHermesResult, HermesPatchError>;
+    /**
+     * `updateHermes` for the checkout `executable` runs from, then a restart of a gateway left on
+     * the old code. The caller must already hold the Hermes update lock: it is not reentrant.
+     */
+    readonly updateInstallHoldingLock: (input: {
+      readonly executable: string;
+      readonly env: NodeJS.ProcessEnv;
+    }) => Effect.Effect<HermesPatchUpdateHermesResult, HermesPatchError>;
     /** Emits after a patch was applied or removed, so provider snapshots can re-probe. */
     readonly changes: Stream.Stream<void>;
     /**
@@ -459,14 +467,13 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
     ),
   );
 
-  const updateHermes = Effect.gen(function* () {
-    const checkout = yield* locateCheckout;
-    if (checkout.availability !== "ready") {
-      return yield* new HermesPatchError({
-        reason: "unavailable",
-        detail: "Hermes is not installed from a git checkout, so T3 Code cannot update it.",
-      });
-    }
+  const notGitCheckout = new HermesPatchError({
+    reason: "unavailable",
+    detail: "Hermes is not installed from a git checkout, so T3 Code cannot update it.",
+  });
+
+  /** Lifts the patches off, runs `hermes update`, and puts them back. Callers hold the change lock. */
+  const runUpdate = Effect.fn("HermesPatchService.runUpdate")(function* (checkout: Checkout) {
     const { checkoutRoot } = checkout;
     const before = yield* readSnapshot(checkout);
     // A patch whose change HEAD already holds (committed, or now carried
@@ -551,6 +558,12 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
         ),
       ),
     );
+  });
+
+  const updateHermes = Effect.gen(function* () {
+    const checkout = yield* locateCheckout;
+    if (checkout.availability !== "ready") return yield* notGitCheckout;
+    return yield* runUpdate(checkout);
   }).pipe(changeLock.withPermits(1));
 
   /** The gateway answering once one other than `previousPid` does, or the last read. */
@@ -679,6 +692,31 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
     return yield* readSnapshot(checkout);
   });
 
+  const updateInstallHoldingLock = Effect.fn("HermesPatchService.updateInstallHoldingLock")(
+    function* (input: { readonly executable: string; readonly env: NodeJS.ProcessEnv }) {
+      const realPath = yield* fileSystem
+        .realPath(input.executable)
+        .pipe(Effect.orElseSucceed(() => null));
+      const checkoutRoot =
+        realPath === null ? null : yield* provide(resolveHermesGitCheckout(realPath));
+      if (checkoutRoot === null) return yield* notGitCheckout;
+      const result = yield* runUpdate({
+        availability: "ready",
+        checkoutRoot,
+        commandPath: input.executable,
+        binary: input.executable,
+        env: input.env,
+        hermesHome: resolveHermesHome(input.env),
+      });
+      // The update deferred the gateway restart until the patches were back on. The restart
+      // queues on the change lock, so it starts once the caller lets go.
+      if (result.snapshot.gateway?.state === "outdated" && result.snapshot.gateway.canRestart) {
+        yield* restartGateway.pipe(Effect.ignore);
+      }
+      return result;
+    },
+  );
+
   return HermesPatchService.of({
     list,
     apply: Effect.fn("HermesPatchService.apply")(function* (input) {
@@ -688,6 +726,7 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
       return yield* change(input, "reverse");
     }),
     updateHermes,
+    updateInstallHoldingLock,
     changes: Stream.fromPubSub(changesPubSub),
     restartGateway,
     awaitGatewayRestart: Ref.get(restartRef).pipe(

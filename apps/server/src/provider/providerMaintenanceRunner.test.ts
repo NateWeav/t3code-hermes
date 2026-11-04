@@ -1,5 +1,6 @@
 import { describe, it, assert } from "@effect/vitest";
 import {
+  HermesPatchId,
   ProviderDriverKind,
   ProviderInstanceId,
   type ServerProvider,
@@ -24,6 +25,8 @@ import { ChildProcessSpawner } from "effect/process";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { SpawnExecutableResolution } from "@t3tools/shared/shell";
 
+import * as HermesPatchService from "../hermes/HermesPatchService.ts";
+import { HERMES_UPDATE_LOCK_KEY } from "../hermes/hermesPatches.ts";
 import * as ProviderRegistry from "./ProviderRegistry.ts";
 import * as ModelManifest from "./ModelManifest.ts";
 import * as ProviderMaintenanceRunner from "./providerMaintenanceRunner.ts";
@@ -241,6 +244,7 @@ const makeTestRunner = (
     })),
   },
   latestVersions: Layer.Layer<ProviderLatestVersions.ProviderLatestVersions> = ProviderLatestVersions.layer,
+  hermesPatches: Layer.PartialEffectful<HermesPatchService.HermesPatchService["Service"]> = {},
 ) =>
   // Build into the test's scope: the runner's update fibers live as long as
   // its layer, so `Effect.provide` would close them as soon as it returned.
@@ -249,6 +253,7 @@ const makeTestRunner = (
       Layer.provide(
         Layer.mergeAll(
           Layer.succeed(ProviderRegistry.ProviderRegistry, registry),
+          Layer.mock(HermesPatchService.HermesPatchService)(hermesPatches),
           Layer.succeed(ModelManifest.ModelManifest, {
             current: Effect.succeed(manifest),
             refresh: Effect.succeed(manifest),
@@ -564,6 +569,79 @@ describe("providerMaintenanceRunner", () => {
           layerLatestVersionHttpClient("1.0.0"),
           layerMockSpawner((_command, _args, options) => {
             seen.push(options.env);
+            return { stdout: "updated" };
+          }),
+        ),
+      ),
+    );
+  });
+
+  it.effect("updates Hermes through the Patches path so applied patches go back on", () => {
+    const calls: Array<{ command: string; args: ReadonlyArray<string> }> = [];
+    const updates: Array<{ executable: string; env: NodeJS.ProcessEnv }> = [];
+    return Effect.gen(function* () {
+      const { registry } = yield* makeRegistry(baseProvider);
+      const updater = yield* makeTestRunner(
+        {
+          ...registry,
+          getProviderMaintenanceCapabilitiesForInstance: (_instanceId, provider) =>
+            Effect.succeed(
+              makeProviderMaintenanceCapabilities({
+                provider,
+                packageName: null,
+                updateExecutable: "/opt/hermes-agent/venv/bin/hermes",
+                updateArgs: ["update", "--yes"],
+                updateLockKey: HERMES_UPDATE_LOCK_KEY,
+                env: { HERMES_HOME: "/work/hermes-home" },
+              }),
+            ),
+        },
+        undefined,
+        undefined,
+        {
+          updateInstallHoldingLock: (input) =>
+            Effect.sync(() => {
+              updates.push(input);
+              return {
+                snapshot: {
+                  availability: "ready",
+                  checkoutPath: "/opt/hermes-agent",
+                  detachedHead: false,
+                  patches: [],
+                  gateway: null,
+                  gatewayRestartFailure: null,
+                },
+                previousHeadCommit: null,
+                updateFailed: false,
+                failureOutput: null,
+                reapplied: [HermesPatchId.make("acp-fast-mode")],
+                awaitingPatchUpdate: [],
+                notReapplied: [],
+              };
+            }),
+        },
+      );
+
+      const result = yield* updater.updateProvider(CODEX_DRIVER);
+      assert.deepStrictEqual(calls, []);
+      assert.deepStrictEqual(updates, [
+        {
+          executable: "/opt/hermes-agent/venv/bin/hermes",
+          env: { HERMES_HOME: "/work/hermes-home" },
+        },
+      ]);
+      assert.strictEqual(result.providers[0]?.updateState?.status, "succeeded");
+      assert.strictEqual(
+        result.providers[0]?.updateState?.output,
+        "Patches reapplied: acp-fast-mode",
+      );
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          layerNonWindowsPlatform,
+          layerLatestVersionHttpClient("1.0.0"),
+          layerMockSpawner((command, args) => {
+            calls.push({ command, args });
             return { stdout: "updated" };
           }),
         ),

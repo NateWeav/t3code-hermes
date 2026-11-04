@@ -182,6 +182,12 @@ The opt-in covers `service_tier: priority` (OpenAI and xAI models) only. Anthrop
 is a Messages API parameter, and custom endpoints speak chat completions, so Claude models behind a
 proxy stay ungated.
 
+Hermes now advertises its own session-scoped **Service tier** picker in `configOptions` (upstream
+`42500a10d9`), shown only on routes the fast-mode gate admits. The patch keeps `fast_mode` beside it:
+T3 Code's toggle still needs the per-row `_meta` tags, the per-prompt re-pin, and the endpoint
+opt-in, which also makes that picker appear for an opted-in proxy. Verified against hermes-agent
+`27cbcb122f` (`main`, 2026-11-04), alone and after the other patches.
+
 Restart the Hermes gateway and the T3 Code server after applying the patch: the gateway runs the
 fast-mode gate and the endpoint opt-in. The patch's `tests/acp_adapter/test_fast_mode.py` drives the real config, gate,
 ACP gateway viewer, and gateway session controls, with only the model inventory and the model call
@@ -235,7 +241,7 @@ persisted, session-scoped bypass as `/yolo` in the TUI, so it survives a gateway
 covers the session's subagents. A gateway that refuses it fails the reopen instead of running in
 the wrong mode.
 
-Verified against hermes-agent `5b32cfc230` (`main`, 2026-10-26), alone and after the other
+Verified against hermes-agent `27cbcb122f` (`main`, 2026-11-04), alone and after the other
 patches. New `hermes acp` processes pick it up; restarting the gateway is not required. Run the
 patch's `tests/acp_adapter/test_gateway_launch_yolo_resume.py` in a scratch checkout, as for
 `acp-delegation-progress`.

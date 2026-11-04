@@ -1539,7 +1539,9 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
       // Saving Paperclip leaves Hindsight's defaults alone.
       assert.equal(saved.integrations.hindsight.enabled, true);
 
-      const forClient = ServerSettingsModule.redactServerSettingsForClient(saved);
+      const forClient = ServerSettingsModule.redactServerSettingsForClient(saved, {
+        secretReferences: true,
+      });
       assert.notInclude(forClient.integrations.paperclip.apiKey ?? "", "pcp-secret");
       assert.isAbove((forClient.integrations.paperclip.apiKey ?? "").length, 0);
 
@@ -1570,7 +1572,9 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
       assert.equal(saved.integrations.hindsight.apiKey, "hs-secret");
       assert.notInclude(yield* fileSystem.readFileString(serverConfig.settingsPath), "hs-secret");
 
-      const forClient = ServerSettingsModule.redactServerSettingsForClient(saved);
+      const forClient = ServerSettingsModule.redactServerSettingsForClient(saved, {
+        secretReferences: true,
+      });
       const redactedKey = forClient.integrations.hindsight.apiKey ?? "";
       assert.notInclude(redactedKey, "hs-secret");
       assert.isAbove(redactedKey.length, 0);
@@ -1590,7 +1594,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
       assert.isTrue(Option.isNone(yield* secrets.get("hindsight-api-key")));
       assert.equal(
         "apiKey" in
-          ServerSettingsModule.redactServerSettingsForClient(cleared).integrations.hindsight,
+          ServerSettingsModule.redactServerSettingsForClient(cleared, { secretReferences: true })
+            .integrations.hindsight,
         false,
       );
     }).pipe(Effect.provide(layerServerSettingsWithSecrets())),

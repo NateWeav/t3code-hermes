@@ -96,7 +96,7 @@ export function mapSettingsSecrets(
     return next;
   };
 
-  return mapSecretFieldGroups(settings, mapFields, (instanceId, environment) =>
+  const mapped = mapSecretFieldGroups(settings, mapFields, (instanceId, environment) =>
     environment.map((variable) => {
       const { valueRedacted: _omit, ...rest } = variable;
       // A secret reference is not itself secret; storage sees the value cleared.
@@ -118,6 +118,49 @@ export function mapSettingsSecrets(
       };
     }),
   );
+
+  // Hermes fork: the Hindsight and Paperclip keys are optional, so a cleared or unset key drops the field.
+  const { apiKey: hindsightApiKey, ...hindsight } = mapped.integrations.hindsight;
+  const hindsightResult =
+    hindsightApiKey === undefined
+      ? undefined
+      : map({
+          secretName: HINDSIGHT_API_KEY_SECRET_NAME,
+          kind: "field",
+          value: hindsightApiKey,
+          redacted: hindsightApiKey === SECRET_REDACTED,
+          sensitive: true,
+        });
+  const hindsightKey =
+    hindsightResult === undefined
+      ? ""
+      : hindsightResult.redacted
+        ? SECRET_REDACTED
+        : hindsightResult.value;
+  const { apiKey: paperclipApiKey, ...paperclip } = mapped.integrations.paperclip;
+  const paperclipResult =
+    paperclipApiKey === undefined
+      ? undefined
+      : map({
+          secretName: PAPERCLIP_API_KEY_SECRET_NAME,
+          kind: "field",
+          value: paperclipApiKey,
+          redacted: paperclipApiKey === SECRET_REDACTED,
+          sensitive: true,
+        });
+  const paperclipKey =
+    paperclipResult === undefined
+      ? ""
+      : paperclipResult.redacted
+        ? SECRET_REDACTED
+        : paperclipResult.value;
+  const integrations = {
+    ...mapped.integrations,
+    hindsight: hindsightKey.length > 0 ? { ...hindsight, apiKey: hindsightKey } : hindsight,
+    paperclip: paperclipKey.length > 0 ? { ...paperclip, apiKey: paperclipKey } : paperclip,
+  };
+
+  return { ...mapped, integrations };
 }
 
 /**
@@ -210,47 +253,6 @@ function mapSecretFieldGroups(
     ]),
   ) as ServerSettings["usageLimitSources"];
 
-  // Hermes fork: the Hindsight and Paperclip keys are optional, so a cleared or unset key drops the field.
-  const { apiKey: hindsightApiKey, ...hindsight } = settings.integrations.hindsight;
-  const hindsightResult =
-    hindsightApiKey === undefined
-      ? undefined
-      : map({
-          secretName: HINDSIGHT_API_KEY_SECRET_NAME,
-          kind: "field",
-          value: hindsightApiKey,
-          redacted: hindsightApiKey === SECRET_REDACTED,
-          sensitive: true,
-        });
-  const hindsightKey =
-    hindsightResult === undefined
-      ? ""
-      : hindsightResult.redacted
-        ? SECRET_REDACTED
-        : hindsightResult.value;
-  const { apiKey: paperclipApiKey, ...paperclip } = settings.integrations.paperclip;
-  const paperclipResult =
-    paperclipApiKey === undefined
-      ? undefined
-      : map({
-          secretName: PAPERCLIP_API_KEY_SECRET_NAME,
-          kind: "field",
-          value: paperclipApiKey,
-          redacted: paperclipApiKey === SECRET_REDACTED,
-          sensitive: true,
-        });
-  const paperclipKey =
-    paperclipResult === undefined
-      ? ""
-      : paperclipResult.redacted
-        ? SECRET_REDACTED
-        : paperclipResult.value;
-  const integrations = {
-    ...settings.integrations,
-    hindsight: hindsightKey.length > 0 ? { ...hindsight, apiKey: hindsightKey } : hindsight,
-    paperclip: paperclipKey.length > 0 ? { ...paperclip, apiKey: paperclipKey } : paperclip,
-  };
-
   const easDeviceHosts = settings.easDeviceHosts.map(
     (host) =>
       mapFields(
@@ -280,7 +282,6 @@ function mapSecretFieldGroups(
     sourceControlHosts,
     usageLimitSources,
     easDeviceHosts,
-    integrations,
     simlockDeviceHosts,
   };
 }

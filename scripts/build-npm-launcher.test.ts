@@ -375,7 +375,7 @@ syncBuiltinESMExports();
           );
           const env = {
             PATH: process.env.PATH,
-            T3CODE_HOME: home,
+            T3HERMES_HOME: home,
             T3CODE_RELEASE_BASE_URL: release.baseUrl,
             T3CODE_TEST_READY: path.join(root, "probe-ready"),
             T3CODE_TEST_TERM: path.join(root, "probe-term"),

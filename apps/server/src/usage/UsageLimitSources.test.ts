@@ -44,10 +44,10 @@ describe("UsageLimitSources", () => {
     }).pipe(
       Effect.provide([
         Layer.succeed(SecretResolver.SecretResolver, {
-        read: (references) => Effect.succeed(references.map(() => undefined)),
-        invalidate: () => Effect.void,
-      }),
-      ServerSettings.layerTest({
+          read: (references) => Effect.succeed(references.map(() => undefined)),
+          invalidate: () => Effect.void,
+        }),
+        ServerSettings.layerTest({
           usageLimitSources: {
             [UsageLimitSourceId.make("local-hub")]: {
               kind: "cliproxy",
@@ -127,9 +127,15 @@ describe("UsageLimitSources", () => {
       expect(attempts).toEqual(["Bearer wrong", "Bearer fixed", "Bearer fixed"]);
     }).pipe(
       Effect.provide(
-        UsageLimitSources.layer.pipe(
+        Layer.effect(UsageLimitSources.UsageLimitSources, UsageLimitSources.make).pipe(
           Layer.provideMerge(ServerSettings.layerTest({ usageLimitSources: hub("wrong") })),
           Layer.provide(Layer.mock(BackgroundPolicy.BackgroundPolicy)({})),
+          Layer.provide(
+            Layer.succeed(SecretResolver.SecretResolver, {
+              read: (references) => Effect.succeed(references.map(() => undefined)),
+              invalidate: () => Effect.void,
+            }),
+          ),
           Layer.provide(Layer.succeed(HttpClient.HttpClient, http)),
           Layer.provide(NodeCrypto.layer),
         ),

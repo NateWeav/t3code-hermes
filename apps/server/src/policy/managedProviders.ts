@@ -3,6 +3,7 @@ import {
   ClaudeSettings,
   CodexSettings,
   defaultInstanceIdForDriver,
+  HermesSettings,
   disallowedProviderMessage,
   type ManagedProviderInstance,
   type ManagedProviderLimits,
@@ -72,6 +73,8 @@ const KNOWN_DRIVERS: ReadonlyMap<ProviderDriverKind, KnownDriver> = new Map([
   known("codex", "Codex", CodexSettings),
   known("claudeAgent", "Claude", ClaudeSettings),
   known("antigravity", "Antigravity", AntigravitySettings),
+  // Hermes fork: the built-in Hermes driver is a provider policies can name.
+  known("hermes", "Hermes", HermesSettings),
   ...PACKAGED_CLIENTS.map((client) =>
     known(client.driverKind, client.label, client.settingsSchema, client.hasDefaultInstance),
   ),

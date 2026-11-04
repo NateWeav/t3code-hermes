@@ -1,9 +1,6 @@
 import { DEFAULT_HOSTED_APP_URL } from "@t3tools/shared/connectAuth";
 import { afterEach, expect, it, vi } from "vite-plus/test";
 
-import appleAppSiteAssociation from "../web/public/.well-known/apple-app-site-association.json";
-import assetLinks from "../web/public/.well-known/assetlinks.json";
-
 // Keep config parsing independent of local env files and build credentials.
 vi.mock("../../scripts/lib/public-config.ts", () => ({
   loadRepoEnv: () => ({ APP_VARIANT: process.env.APP_VARIANT }),
@@ -35,13 +32,11 @@ it.each([
   expect(config.ios?.bundleIdentifier).toBe(identifier);
   expect(config.android?.package).toBe(identifier);
   // Copied thread links open this app only while app.t3.codes lists it.
+  // Hermes fork: app.t3.codes is served by upstream, so its apple-app-site-association and
+  // assetlinks files list upstream's app IDs, not this fork's; only the app side is checked here.
   const host = new URL(DEFAULT_HOSTED_APP_URL).host;
   expect(config.ios?.associatedDomains).toContain(`applinks:${host}`);
-  expect(appleAppSiteAssociation.applinks.details[0]?.appIDs).toContain(
-    `${config.ios?.appleTeamId}.${identifier}`,
-  );
   expect(config.android?.intentFilters?.[0]?.data).toEqual([
     { scheme: "https", host, pathPrefix: "/threads/" },
   ]);
-  expect(assetLinks.map((link) => link.target.package_name)).toContain(identifier);
 });

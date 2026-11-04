@@ -318,11 +318,11 @@ Upstream's workflows target paid Blacksmith runners that only exist in its org, 
 upstream-only infrastructure. This fork therefore diverges in `.github/workflows/` as follows.
 
 - **Runners.** Fork jobs run on GitHub-hosted runners, free on this public repo: `ubuntu-24.04`,
-  `ubuntu-24.04-arm`, `windows-latest`, `windows-11-arm`, `macos-26`, and
-  `macos-latest`. Only `macos-self-hosted-build.yml` (every push to `main`) and the iOS half of
-  `mobile-showcase-screenshots.yml` use the self-hosted Apple Silicon laptop
-  (`[self-hosted, macOS, ARM64, t3code-mac-arm64]`, declared in `.github/actionlint.yaml`); those
-  jobs queue while it is offline. `desktop-macos-preview*.yml` (the `preview:mac` label) and
+  `ubuntu-24.04-arm`, `windows-latest`, `windows-11-arm`, `macos-26`, `macos-latest`, and
+  `xcode-27` (the IPA build, which needs the iOS 27.1 SDK). Only `macos-self-hosted-build.yml`
+  (every push to `main`) and the iOS half of `mobile-showcase-screenshots.yml` use the self-hosted
+  Apple Silicon laptop (`[self-hosted, macOS, ARM64, t3code-mac-arm64]`, declared in
+  `.github/actionlint.yaml`); those jobs queue while it is offline. `desktop-macos-preview*.yml` (the `preview:mac` label) and
   `windows-tests.yml` (dispatch only) still name Blacksmith runners and would wait forever here.
 - **Guarded workflows.** `deploy-relay.yml`, `mobile-eas-preview.yml`, `mobile-eas-preview-fork.yml`,
   `mobile-eas-production.yml`, `web-preview.yml`, `publish-aur.yml`, `pr-vouch.yml`, and

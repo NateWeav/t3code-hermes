@@ -11,6 +11,7 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import { ChildProcess } from "effect/process";
 
@@ -372,8 +373,15 @@ const readLeftoverAddedFiles = Effect.fn("readHermesLeftoverAddedFiles")(functio
       blobs.set(file, [...(blobs.get(file) ?? []), blob]);
     }
   }
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
   const leftovers: string[] = [];
   for (const [file, known] of blobs) {
+    // A link may share its content with a file of the user's, which deleting it would lose.
+    const info = yield* fileSystem
+      .lstat(path.join(checkoutRoot, file))
+      .pipe(Effect.orElseSucceed(() => null));
+    if (info?.type !== "File" || Option.getOrElse(info.nlink, () => 1n) !== 1n) continue;
     const tracked = yield* runGit(checkoutRoot, ["ls-files", "--error-unmatch", "--", file]);
     if (tracked.code === 0) continue;
     const hash = yield* runGit(checkoutRoot, ["hash-object", "--", file]);

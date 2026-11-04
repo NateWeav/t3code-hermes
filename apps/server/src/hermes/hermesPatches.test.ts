@@ -614,6 +614,17 @@ describe("hermes patches", () => {
       assert.isFalse((yield* changeHermesPatch(root, patch, "forward")).ok);
       assert.strictEqual(NodeFS.readFileSync(added, "utf8"), "def mine(): pass\n");
       assert.strictEqual(NodeFS.readFileSync(session, "utf8"), "remote_cwd = None\n");
+
+      // Nor is a link with the patch's content, which may lead to a file of the user's.
+      const outside = NodePath.join(root, "mine.py");
+      NodeFS.writeFileSync(outside, "def helper(): pass\n");
+      for (const link of [NodeFS.symlinkSync, NodeFS.linkSync]) {
+        NodeFS.rmSync(added);
+        link(outside, added);
+        assert.strictEqual(yield* stateOf(root, patch), "doesNotApply");
+        assert.isFalse((yield* changeHermesPatch(root, patch, "forward")).ok);
+        assert.strictEqual(NodeFS.readFileSync(added, "utf8"), "def helper(): pass\n");
+      }
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 

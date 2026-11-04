@@ -647,8 +647,10 @@ it.effect("explains a rejected SSH push after creating the repository", () =>
   }).pipe(Effect.provide(layer({ git: failingPush("authentication_failed") }))),
 );
 
-// regression: an auto-selected SSH remote kept failing every later fetch after a refused push
-it.effect("switches an auto-selected remote to HTTPS when the SSH push is refused", () => {
+// regression: an auto-selected SSH remote kept failing every later fetch after a refused push.
+// Hermes fork: "auto" already selects HTTPS, so upstream's SSH-refusal fallback never triggers for
+// it; assert the remote is HTTPS from the first push instead.
+it.effect("publishes an auto-selected remote over HTTPS without an SSH attempt", () => {
   const gitArgs: Array<ReadonlyArray<string>> = [];
   let pushAttempts = 0;
   return Effect.gen(function* () {
@@ -662,11 +664,8 @@ it.effect("switches an auto-selected remote to HTTPS when the SSH push is refuse
 
     assert.strictEqual(result.status, "pushed");
     assert.strictEqual(result.remoteUrl, CLONE_URLS.url);
-    assert.strictEqual(pushAttempts, 2);
-    assert.deepStrictEqual(gitArgs, [
-      ["rev-parse", "--verify", "HEAD"],
-      ["remote", "set-url", "origin", CLONE_URLS.url],
-    ]);
+    assert.strictEqual(pushAttempts, 1);
+    assert.deepStrictEqual(gitArgs, [["rev-parse", "--verify", "HEAD"]]);
   }).pipe(
     Effect.provide(
       layer({
@@ -676,16 +675,14 @@ it.effect("switches an auto-selected remote to HTTPS when the SSH push is refuse
               gitArgs.push(input.args);
               return processOutput();
             }),
-          pushCurrentBranch: (cwd) => {
+          pushCurrentBranch: () => {
             pushAttempts += 1;
-            return pushAttempts === 1
-              ? failingPush("authentication_failed").pushCurrentBranch(cwd)
-              : Effect.succeed({
-                  status: "pushed" as const,
-                  branch: "main",
-                  upstreamBranch: "origin/main",
-                  setUpstream: true,
-                });
+            return Effect.succeed({
+              status: "pushed" as const,
+              branch: "main",
+              upstreamBranch: "origin/main",
+              setUpstream: true,
+            });
           },
         },
       }),

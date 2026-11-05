@@ -125,7 +125,7 @@ export class EnvironmentSigningKey extends Context.Service<
       readonly payload: Readonly<Record<string, unknown>>;
     }) => Effect.Effect<string, RelayJwtError>;
   }
->()("t3/cloud/environmentKeys/EnvironmentSigningKey") {}
+>()("t3-hermes/cloud/environmentKeys/EnvironmentSigningKey") {}
 
 export const layer = Layer.effect(
   EnvironmentSigningKey,

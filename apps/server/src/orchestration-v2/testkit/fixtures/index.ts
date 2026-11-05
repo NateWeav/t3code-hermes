@@ -25,6 +25,7 @@ import { assertClaudeCompactAfterPeerTurnNoEchoOutput } from "./claude_compact_a
 import { claudeCompactAfterResumeWakeInput } from "./claude_compact_after_resume_wake/input.ts";
 import { assertClaudeCompactAfterResumeWakeOutput } from "./claude_compact_after_resume_wake/output.ts";
 import { claudeIdleResumeInput } from "./claude_idle_resume/input.ts";
+import { assertHermesIdleResumeOutput } from "./claude_idle_resume/hermes_output.ts";
 import { assertClaudeIdleResumeOutput } from "./claude_idle_resume/output.ts";
 import { claudeLocalBashTaskInput } from "./claude_local_bash_task/input.ts";
 import { assertClaudeLocalBashTaskOutput } from "./claude_local_bash_task/output.ts";
@@ -179,6 +180,7 @@ import { threadRollbackAfterRestartInput } from "./thread_rollback_after_restart
 import { threadRollbackAfterStopInput } from "./thread_rollback_after_stop/input.ts";
 import { assertPiThreadRollbackAfterStopOutput } from "./thread_rollback_after_stop/pi_output.ts";
 import { assertThreadRollbackToStoppedTurnOutput } from "./thread_rollback_to_stopped_turn/codex_output.ts";
+import { assertHermesThreadRollbackToStoppedTurnOutput } from "./thread_rollback_to_stopped_turn/hermes_output.ts";
 import { threadRollbackToStoppedTurnInput } from "./thread_rollback_to_stopped_turn/input.ts";
 import { assertTodoListOutput } from "./todo_list/codex_output.ts";
 import { assertTodoListCursorOutput } from "./todo_list/cursor_output.ts";
@@ -504,6 +506,12 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         transcriptFile: new URL("./claude_idle_resume/claude_transcript.ndjson", import.meta.url),
         modelSelection: CLAUDE_MODEL_SELECTION,
         assertOutput: assertClaudeIdleResumeOutput,
+      },
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL("./claude_idle_resume/hermes_transcript.ndjson", import.meta.url),
+        modelSelection: HERMES_MODEL_SELECTION,
+        assertOutput: assertHermesIdleResumeOutput,
       },
     ],
   },
@@ -2035,6 +2043,12 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         modelSelection: PI_MODEL_SELECTION,
         assertOutput: assertPiThreadRollbackOutput,
       },
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL("./thread_rollback/hermes_transcript.ndjson", import.meta.url),
+        modelSelection: HERMES_MODEL_SELECTION,
+        assertOutput: assertThreadRollbackOutput,
+      },
     ],
   },
   {
@@ -2080,6 +2094,16 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         modelSelection: CODEX_MODEL_SELECTION,
         runtimePolicyOverride: WORKSPACE_NEVER_POLICY,
         assertOutput: assertThreadRollbackToStoppedTurnOutput,
+      },
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./thread_rollback_to_stopped_turn/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runtimePolicyOverride: WORKSPACE_NEVER_POLICY,
+        assertOutput: assertHermesThreadRollbackToStoppedTurnOutput,
       },
     ],
   },

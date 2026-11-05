@@ -455,6 +455,16 @@ export interface AcpAdapterV2Flavor {
     runtime: AcpSessionRuntime.AcpSessionRuntime["Service"],
     sessionId: string,
   ) => Effect.Effect<void, EffectAcpErrors.AcpError>;
+  /**
+   * Rolls back in place: the `command` prompt drops the session's last user turns, and its reply
+   * belongs to no turn. A reply `confirmed` rejects falls back to a replacement session.
+   */
+  readonly rewindSession?: {
+    readonly command: (userTurns: number) => string;
+    readonly confirmed: (reply: string, userTurns: number) => boolean;
+    /** False for a prompt the agent answered without adding a user turn (its own slash command). */
+    readonly promptAddedUserTurn: (response: EffectAcpSchema.PromptResponse) => boolean;
+  };
   readonly runtimeHarness?: string;
   readonly registerExtensions?: (
     context: AcpAdapterV2ExtensionContext,
@@ -905,6 +915,26 @@ function nativeThreadId(
     );
   }
   return Effect.succeed(id);
+}
+
+/** The agent's user turns after a rollback target, or null when the target is another thread's. */
+function acpUserTurnsAfterRollbackTarget(
+  input: ProviderAdapter.ProviderAdapterV2RollbackThreadInput,
+): number | null {
+  const { target, providerThread } = input;
+  if (target.type === "provider_turn" && target.providerTurn.providerThreadId !== providerThread.id)
+    return null;
+  const boundary = target.type === "provider_turn" ? target.providerTurn.ordinal : 0;
+  return input.providerThreadTurns.filter(
+    (turn) =>
+      turn.providerThreadId === providerThread.id &&
+      turn.ordinal > boundary &&
+      turn.nativeTurnRef !== null &&
+      (turn.status === "completed" ||
+        turn.status === "interrupted" ||
+        turn.status === "failed" ||
+        turn.status === "cancelled"),
+  ).length;
 }
 
 function makeProviderThread(input: {
@@ -1413,6 +1443,8 @@ interface ActiveAcpTurn {
   backgroundFinalizeGeneration: number;
   /** The agent's own id for this turn's prompt, from `forkFromTurn.nativeTurnId`. */
   nativePromptId: string | undefined;
+  /** False when the agent kept no user turn for it: a continuation, or `promptAddedUserTurn`. */
+  addedUserTurn: boolean;
 }
 
 type AcpRuntimeTeardownState =
@@ -1729,6 +1761,8 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
     openSession: Effect.fn("AcpAdapterV2.openSession")(
       function* (input: ProviderAdapter.ProviderAdapterV2OpenSessionInput) {
         const sessionScope = yield* Effect.scope;
+        /** While a rollback's rewind prompt runs, its session's updates are its reply, not a turn. */
+        let rewindReply: { readonly sessionId: string; text: string } | null = null;
         let itemIdentityVersion: 2 | undefined =
           input.initialProviderItemIdentityVersion ??
           (input.initialNativeThreadId === undefined ? 2 : undefined);
@@ -6316,6 +6350,15 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           /* Provider events include streaming deltas; avoid a span for each update. */
           Effect.fnUntraced(
             function* (rawNotification: EffectAcpSchema.SessionNotification) {
+              if (rewindReply !== null && rawNotification.sessionId === rewindReply.sessionId) {
+                const update = rawNotification.update;
+                if (
+                  update.sessionUpdate === "agent_message_chunk" &&
+                  update.content.type === "text"
+                )
+                  rewindReply.text += update.content.text;
+                return;
+              }
               if (flavor.ignoreSessionUpdate?.(rawNotification) === true) return;
               const nativePromptId = flavor.forkFromTurn?.nativeTurnId(rawNotification);
               if (nativePromptId !== undefined) {
@@ -7529,10 +7572,13 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           providerThreadId: context.input.providerThread.id,
           nodeId: context.input.rootNodeId,
           runAttemptId: context.input.attemptId,
+          // A rewinding flavor counts native user turns by this ref: null left none behind.
           nativeTurnRef:
-            context.nativePromptId === undefined
-              ? { driver, nativeId: context.nativeTurnId, strength: "weak" }
-              : { driver, nativeId: context.nativePromptId, strength: "strong" },
+            flavor.rewindSession !== undefined && !context.addedUserTurn
+              ? null
+              : context.nativePromptId === undefined
+                ? { driver, nativeId: context.nativeTurnId, strength: "weak" }
+                : { driver, nativeId: context.nativePromptId, strength: "strong" },
           ordinal: context.input.providerTurnOrdinal,
           status,
           startedAt: context.startedAt,
@@ -7994,6 +8040,60 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           return true;
         });
 
+        /** True when the provider thread's own session now ends at the rollback target. */
+        const rewindNativeSession = Effect.fn("AcpAdapterV2.rewindNativeSession")(function* (
+          rewind: NonNullable<AcpAdapterV2Flavor["rewindSession"]>,
+          rollbackInput: ProviderAdapter.ProviderAdapterV2RollbackThreadInput,
+        ) {
+          const userTurns = acpUserTurnsAfterRollbackTarget(rollbackInput);
+          if (userTurns === null) return false;
+          if (userTurns === 0) return true;
+          const { providerThread } = rollbackInput;
+          useProviderThreadIdentity(providerThread);
+          const requestedSessionId = yield* nativeThreadId(driver, providerThread);
+          const restarted = yield* restartRuntimeAfterTeardownIfRequired(
+            providerThread.appThreadId,
+          );
+          if (restarted || (yield* Ref.get(activeSessionId)) !== requestedSessionId) {
+            const activated = yield* activateSession(
+              requestedSessionId,
+              providerThread.appThreadId,
+            );
+            yield* Ref.set(activeSessionId, activated.sessionId);
+            yield* setActiveSessionSetup(activated);
+            yield* Ref.set(activeSelection, null);
+            yield* Ref.set(activeInteractionMode, null);
+          }
+          const sessionId = (yield* Ref.get(activeSessionId)) ?? requestedSessionId;
+          const reply = { sessionId, text: "" };
+          rewindReply = reply;
+          yield* runtime
+            .prompt({ prompt: [{ type: "text", text: rewind.command(userTurns) }] })
+            .pipe(
+              Effect.ensuring(
+                Effect.sync(() => {
+                  rewindReply = null;
+                }),
+              ),
+            );
+          if (!rewind.confirmed(reply.text, userTurns)) return false;
+          // The turn that carried T3's instructions may be gone, so the next prompt resends them.
+          yield* Ref.update(promptInstructionStates, (current) => {
+            const updated = new Map(current);
+            updated.delete(sessionId);
+            return updated;
+          });
+          const boundary =
+            rollbackInput.target.type === "provider_turn"
+              ? rollbackInput.target.providerTurn.ordinal
+              : 0;
+          yield* Ref.update(
+            providerTurns,
+            (current) => new Map([...current].filter(([, turn]) => turn.ordinal <= boundary)),
+          );
+          return true;
+        });
+
         const startTurnUnlocked = Effect.fn("AcpAdapterV2.startTurn")(
           function* (turnInput: ProviderAdapter.ProviderAdapterV2TurnInput) {
             yield* awaitRuntimeTeardown();
@@ -8153,6 +8253,8 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               promptUsage: undefined,
               backgroundFinalizeGeneration: 0,
               nativePromptId: undefined,
+              // A continuation drains the agent's own turn; no T3 prompt reached its history.
+              addedUserTurn: !isContinuationTurn,
             };
             const carryover = yield* Ref.getAndSet(carryoverSubagents, null);
             let rehydratedCarryoverSubagents: ReadonlyArray<ActiveAcpSubagent> = [];
@@ -8336,6 +8438,9 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                 Effect.sync(() => {
                   if (flavor.reportsPerTurnPromptUsage === true && !context.finalized) {
                     context.promptUsage = result.usage ?? undefined;
+                  }
+                  if (flavor.rewindSession?.promptAddedUserTurn(result) === false) {
+                    context.addedUserTurn = false;
                   }
                 }).pipe(
                   Effect.andThen(
@@ -9266,6 +9371,33 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                     });
                   }
                   yield* awaitRuntimeTeardown();
+                  if (flavor.rewindSession !== undefined) {
+                    const rewound = yield* rewindNativeSession(
+                      flavor.rewindSession,
+                      rollbackInput,
+                    ).pipe(
+                      Effect.catch((cause) =>
+                        Effect.logWarning("ACP session rewind failed; replacing the session", {
+                          driver,
+                          cause,
+                        }).pipe(Effect.as(false)),
+                      ),
+                    );
+                    if (rewound) {
+                      const now = yield* DateTime.now;
+                      return {
+                        providerThread: {
+                          ...rollbackInput.providerThread,
+                          nativeConversationHeadRef: null,
+                          status: "idle" as const,
+                          updatedAt: now,
+                        },
+                        providerTurns: [],
+                        messages: [],
+                        runtimeRequests: [],
+                      };
+                    }
+                  }
                   itemIdentityVersion = 2;
                   prepareTerminalEnvironment(
                     yield* readMcpContext(rollbackInput.providerThread.appThreadId),

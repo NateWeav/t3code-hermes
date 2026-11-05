@@ -14,6 +14,26 @@ export function assertClaudeIdleResumeOutput(
   result: OrchestratorV2ScenarioResult,
   transcript: ProviderReplayTranscript,
 ) {
+  assertIdleResumeConversation(result, transcript);
+  const projection = projectionFor(result, transcript.scenario);
+  // The resumed process's ledger starts at zero, so the first turn is not counted again.
+  assert.deepEqual(
+    projection.providerTurns.map((turn) => [
+      turn.turnTokenUsage?.outputTokens,
+      turn.turnTokenUsage?.otherUsage,
+    ]),
+    [
+      [7, { inputTokens: 0, outputTokens: 0 }],
+      [7, { inputTokens: 0, outputTokens: 0 }],
+    ],
+  );
+}
+
+/** Both turns answer, the second after the idle release ended the first agent process. */
+export function assertIdleResumeConversation(
+  result: OrchestratorV2ScenarioResult,
+  transcript: ProviderReplayTranscript,
+) {
   assertBaseProjection({
     result,
     transcript,
@@ -32,15 +52,4 @@ export function assertClaudeIdleResumeOutput(
     "idle resume first turn complete",
     "idle resume second turn complete",
   ]);
-  // The resumed process's ledger starts at zero, so the first turn is not counted again.
-  assert.deepEqual(
-    projection.providerTurns.map((turn) => [
-      turn.turnTokenUsage?.outputTokens,
-      turn.turnTokenUsage?.otherUsage,
-    ]),
-    [
-      [7, { inputTokens: 0, outputTokens: 0 }],
-      [7, { inputTokens: 0, outputTokens: 0 }],
-    ],
-  );
 }

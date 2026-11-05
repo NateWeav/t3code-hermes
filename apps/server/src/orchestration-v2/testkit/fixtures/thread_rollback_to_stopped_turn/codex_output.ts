@@ -19,6 +19,22 @@ export function assertThreadRollbackToStoppedTurnOutput(
   result: OrchestratorV2ScenarioResult,
   transcript: ProviderReplayTranscript,
 ) {
+  assertRollbackToStoppedTurnConversation(result, transcript);
+  const revert = transcript.entries.find(
+    (entry) =>
+      entry.type === "expect_outbound" &&
+      typeof entry.frame === "object" &&
+      entry.frame !== null &&
+      Reflect.get(entry.frame, "method") === "thread/revert",
+  );
+  assert.isDefined(revert, "rollback must revert the Codex thread");
+}
+
+/** The stopped turn keeps its checkpoint and stays in the conversation the agent recalls. */
+export function assertRollbackToStoppedTurnConversation(
+  result: OrchestratorV2ScenarioResult,
+  transcript: ProviderReplayTranscript,
+) {
   assertBaseProjection({
     result,
     transcript,
@@ -36,15 +52,6 @@ export function assertThreadRollbackToStoppedTurnOutput(
   assert.equal(stoppedCheckpoint?.status, "ready");
   assert.equal(stoppedCheckpoint?.runId, stoppedRun?.id);
   assert.equal(stoppedRun?.checkpointId, stoppedCheckpoint?.id);
-
-  const revert = transcript.entries.find(
-    (entry) =>
-      entry.type === "expect_outbound" &&
-      typeof entry.frame === "object" &&
-      entry.frame !== null &&
-      Reflect.get(entry.frame, "method") === "thread/revert",
-  );
-  assert.isDefined(revert, "rollback must revert the Codex thread");
 
   assertVisibleUserMessagesInclude(projection, [
     THREAD_ROLLBACK_FIRST_PROMPT,

@@ -579,6 +579,85 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 
+  it.effect(
+    "writes a delegated child's answer into its thread when it finishes after the turn",
+    () =>
+      Effect.gen(function* () {
+        const toolCallId = "toolu_delegate_after_turn";
+        const goal = "Reply with exactly: Hello";
+        const child = {
+          goal,
+          subagent_id: "sa-0-after",
+          child_session_id: "20261105_231056_after",
+          task_index: 0,
+          task_count: 1,
+          depth: 0,
+          delegation_id: "deleg_after",
+        };
+        const progress = (hermesDelegation: Record<string, unknown>) =>
+          ({
+            sessionUpdate: "tool_call_update",
+            toolCallId,
+            status: "in_progress",
+            rawOutput: { hermesDelegation: { ...child, ...hermesDelegation } },
+          }) as const;
+        const dispatched = { status: "dispatched", mode: "background", count: 1, goals: [goal] };
+        const { events } = yield* runMockTurn({
+          name: "delegate-after-turn",
+          mockEnvironment: {},
+          promptUpdates: [
+            {
+              sessionUpdate: "tool_call",
+              toolCallId,
+              title: `delegate_task: 1 tasks: ${goal}`,
+              kind: "execute",
+              rawInput: { action: "spawn", tasks: [{ goal }] },
+              content: [
+                {
+                  type: "content",
+                  content: { type: "text", text: `Delegating 1 tasks\n\n1. ${goal}` },
+                },
+              ],
+            },
+            progress({ event: "subagent.start", text: goal }),
+            {
+              sessionUpdate: "tool_call_update",
+              toolCallId,
+              kind: "execute",
+              status: "completed",
+              rawOutput: dispatched,
+              content: [
+                { type: "content", content: { type: "text", text: JSON.stringify(dispatched) } },
+              ],
+            },
+            {
+              sessionUpdate: "agent_message_chunk",
+              content: { type: "text", text: "It is running in the background." },
+            },
+          ],
+          // The child ends after the parent's prompt settled, then the gateway hands its result back.
+          idleUpdates: [
+            progress({ event: "subagent.complete", status: "completed", summary: "Hello" }),
+            { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Hello" } },
+          ],
+          continuationRequests: { offer: () => Effect.void },
+          runContinuation: true,
+        });
+        const subagent = events.findLast((event) => event.type === "subagent.updated");
+        if (subagent?.type !== "subagent.updated") throw new Error("no subagent was projected");
+        assert.equal(subagent.subagent.status, "completed");
+        assert.equal(subagent.subagent.result, "Hello");
+        const childReplies = events.flatMap((event) =>
+          event.type === "message.updated" &&
+          event.message.threadId === subagent.subagent.childThreadId &&
+          event.message.role === "assistant"
+            ? [event.message.text]
+            : [],
+        );
+        assert.deepEqual(childReplies, ["Hello"]);
+      }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+
   it.effect("holds on a notifying background command the agent marks until it sees it end", () =>
     Effect.gen(function* () {
       let matched: ReadonlyArray<string> = [];

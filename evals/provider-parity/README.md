@@ -34,7 +34,7 @@ custom_providers:
     api_mode: anthropic_messages
 ```
 
-Put `CLIPROXYAPI_API_KEY=...` in `~/.hermes-bench/.env` (mode 600). Keep the provider name: committed fixtures pin the model id `custom:cliproxyapi-claude:claude-haiku-5-5`. The recorder refuses `~/.hermes` and its profiles.
+Put `CLIPROXYAPI_API_KEY=...` in `~/.hermes-bench/.env` (mode 600). Keep the provider name: committed fixtures pin the model id `custom:cliproxyapi-claude:claude-haiku-5-5`. The recorder refuses `~/.hermes` and its profiles. A new home builds its own Python environment on first launch, which can outlast a recorder run; if Hermes then reports that no dependency environment is committed, run `HERMES_HOME=<home> hermes pm repair` once.
 
 ## Run it
 
@@ -67,6 +67,6 @@ Rules that keep the number honest:
 - A Hermes-only assertion scores half; say why in the PR.
 - Changing a classification in `scenarios.ts` needs a reason in the entry.
 
-Scenarios marked `providerBound` (`message_steering`, `turn_interrupt_mid_tool`, `turn_interrupt_restart`, `subagent_v2`, `subagent_v2_nested`, `web_search`) have only reference assertions that check their own provider's identity, wire frames or item shapes. Hermes reaches half credit there with its own assertion, and full credit once the scenario gets a provider-neutral assertion that every provider's fixture passes.
+Scenarios marked `providerBound` (`message_steering`, `turn_interrupt_mid_tool`, `turn_interrupt_restart`, `subagent`, `subagent_v2`, `subagent_v2_nested`, `web_search`) have only reference assertions that check their own provider's identity, wire frames or item shapes. Hermes reaches half credit there with its own assertion, and full credit once the scenario gets a provider-neutral assertion that every provider's fixture passes.
 
 `run.test.ts` tests the grader and runs in CI.

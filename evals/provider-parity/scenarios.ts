@@ -153,6 +153,7 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
     name: "subagent",
     facet: "subagents",
     hermes: applicable,
+    providerBound: true,
     exercises: ["subagents.supportsSubagents", "subagents.emitsSubagentLifecycle"],
   },
   { name: "subagent_continue", facet: "subagents", hermes: applicable },
@@ -168,7 +169,9 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
   {
     name: "claude_nested_subagent_model",
     facet: "subagents",
-    hermes: twin("The prompt drives Claude's Agent tool with a per-subagent model."),
+    hermes: twin(
+      "The prompt drives Claude's Agent tool with a per-subagent model. Hermes's delegate_task cannot pick one: `model` is a reserved task parameter, so children run on delegation.model or the parent's model.",
+    ),
   },
 
   // Background work that outlives the turn

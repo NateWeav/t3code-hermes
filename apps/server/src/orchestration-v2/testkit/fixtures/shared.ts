@@ -369,6 +369,12 @@ export const PI_MODEL_SELECTION = {
   model: "openrouter/deepseek/deepseek-v4-flash",
 } satisfies ModelSelection;
 
+// The provider-parity benchmark profile's model (evals/provider-parity).
+export const HERMES_MODEL_SELECTION = {
+  instanceId: ProviderInstanceId.make("hermes"),
+  model: "custom:cliproxyapi-claude:claude-haiku-5-5",
+} satisfies ModelSelection;
+
 export const ACP_REGISTRY_MODEL_SELECTION = {
   instanceId: ProviderInstanceId.make("acpRegistry"),
   model: "default",

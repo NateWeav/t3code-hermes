@@ -23,10 +23,9 @@ const decodeHermesSettings = Schema.decodeSync(HermesSettings);
 const encodeJsonString = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 
 /**
- * A stand-in for `hermes` that answers `--version` and speaks just enough ACP
- * on `acp` to complete the probe handshake: `initialize`, `authenticate`,
- * `session/new`, and then the `available_commands_update` notification Hermes
- * schedules right after the session response (see `acp_adapter/server.py`).
+ * A stand-in for `hermes` that speaks just enough ACP to finish the probe handshake, including the
+ * `available_commands_update` Hermes sends after `session/new`. Any other command hangs, as
+ * `hermes --version` does while Hermes runs its synchronous update check.
  */
 const writeFakeHermesAcpBinary = Effect.fn("writeFakeHermesAcpBinary")(function* (options: {
   readonly prefix: string;
@@ -48,13 +47,10 @@ const writeFakeHermesAcpBinary = Effect.fn("writeFakeHermesAcpBinary")(function*
   const script = `#!/usr/bin/env node
 const models = ${encodeJsonString(options.availableModels)};
 const commands = ${encodeJsonString(options.availableCommands ?? null)};
-if (process.argv[2] !== "acp") {
-  process.stdout.write("hermes 0.20.0\\n");
-  process.exit(0);
-}
+if (process.argv[2] !== "acp") setInterval(() => {}, 60_000);
 const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
 let buffer = "";
-process.stdin.on("data", (chunk) => {
+if (process.argv[2] === "acp") process.stdin.on("data", (chunk) => {
   buffer += chunk;
   let newline;
   while ((newline = buffer.indexOf("\\n")) >= 0) {
@@ -67,7 +63,11 @@ process.stdin.on("data", (chunk) => {
       send({
         jsonrpc: "2.0",
         id: request.id,
-        result: { protocolVersion: 1, agentCapabilities: { loadSession: true } },
+        result: {
+          protocolVersion: 1,
+          agentCapabilities: { loadSession: true },
+          agentInfo: { name: "hermes-agent", version: "0.22.6" },
+        },
       });
     } else if (request.method === "authenticate") {
       send({ jsonrpc: "2.0", id: request.id, result: {} });
@@ -144,18 +144,18 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))(
         expect(snapshot.enabled).toBe(true);
         expect(snapshot.installed).toBe(false);
         expect(snapshot.status).toBe("error");
-        expect(snapshot.message).toMatch(/not installed|not on PATH|Failed to execute/);
+        expect(snapshot.message).toContain("not installed");
       }),
     );
 
-    it.effect("keeps CLI stderr out of the snapshot when --version exits non-zero", () =>
+    it.effect("reports ACP startup failure without leaking CLI stderr when Hermes exits", () =>
       Effect.gen(function* () {
         const secretStderr = "broken hermes install: secret-token-value";
         const snapshot = yield* Effect.scoped(
           Effect.gen(function* () {
             const fs = yield* FileSystem.FileSystem;
             const path = yield* Path.Path;
-            const dir = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-hermes-version-" });
+            const dir = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-hermes-broken-" });
             const hermesPath = path.join(dir, "hermes");
             yield* fs.writeFileString(
               hermesPath,
@@ -171,35 +171,9 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))(
 
         expect(snapshot.installed).toBe(true);
         expect(snapshot.status).toBe("error");
-        expect(snapshot.message).toBe("Hermes CLI is installed but failed to run.");
-        expect(snapshot.message).not.toContain(secretStderr);
-      }),
-    );
-
-    it.effect("falls back to the placeholder model when ACP discovery is unavailable", () =>
-      Effect.gen(function* () {
-        const snapshot = yield* Effect.scoped(
-          Effect.gen(function* () {
-            const fs = yield* FileSystem.FileSystem;
-            const path = yield* Path.Path;
-            const dir = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-hermes-success-" });
-            const hermesPath = path.join(dir, "hermes");
-            yield* fs.writeFileString(
-              hermesPath,
-              ["#!/bin/sh", 'printf "hermes 0.0.99\\n"', "exit 0", ""].join("\n"),
-            );
-            yield* fs.chmod(hermesPath, 0o755);
-
-            return yield* checkHermesProviderStatus(
-              decodeHermesSettings({ enabled: true, binaryPath: hermesPath }),
-            );
-          }),
-        );
-
-        expect(snapshot.status).toBe("error");
-        expect(snapshot.installed).toBe(true);
         expect(snapshot.models.map((model) => model.slug)).toEqual(["hermes-4"]);
         expect(snapshot.message).toContain("ACP startup failed");
+        expect(snapshot.message).not.toContain(secretStderr);
       }),
     );
   },
@@ -227,6 +201,7 @@ it.live("reports authenticated with derived upstreams once ACP returns models", 
     );
 
     expect(snapshot.status).toBe("ready");
+    expect(snapshot.version).toBe("0.22.6");
     expect(snapshot.reportsContextWindow).toBe(true);
     expect(snapshot.auth.status).toBe("authenticated");
     // Derived from model slug prefixes, never from ~/.hermes/.env.
@@ -353,7 +328,6 @@ const makeColdHermesSpawner = Effect.fn("makeColdHermesSpawner")(function* (stag
   const decode = Schema.decodeUnknownEffect(
     Schema.fromJsonString(Schema.Struct({ id: Schema.Number, method: Schema.String })),
   );
-  let versionProbe = true;
   let gatewayRunning = false;
   const send = (message: unknown) =>
     Queue.offer(output, encoder.encode(encodeJsonString(message) + "\n"));
@@ -411,22 +385,9 @@ const makeColdHermesSpawner = Effect.fn("makeColdHermesSpawner")(function* (stag
     getInputFd: () => Sink.drain,
     getOutputFd: () => Stream.empty,
   });
-  const spawner = ChildProcessSpawner.make(() => {
-    if (!versionProbe) {
-      return Effect.acquireRelease(Effect.succeed(child), (handle) =>
-        handle.kill().pipe(Effect.orDie),
-      );
-    }
-    versionProbe = false;
-    return Effect.succeed(
-      ChildProcessSpawner.makeHandle({
-        ...child,
-        exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
-        isRunning: Effect.succeed(false),
-        stdout: Stream.make(encoder.encode("hermes 0.20.0\n")),
-      }),
-    );
-  });
+  const spawner = ChildProcessSpawner.make(() =>
+    Effect.acquireRelease(Effect.succeed(child), (handle) => handle.kill().pipe(Effect.orDie)),
+  );
   return {
     reached,
     release,
@@ -463,6 +424,8 @@ it.effect.each(["initialize", "session/new"])(
       yield* Deferred.succeed(fake.release, undefined);
       const snapshot = yield* Fiber.join(checking);
       expect(snapshot.status).toBe("ready");
+      // This fake's `initialize` names no `agentInfo`; an unknown version must not cost readiness.
+      expect(snapshot.version).toBeNull();
       expect(snapshot.models.map((model) => model.slug)).toContain("openai/gpt-5");
       expect(fake.isGatewayRunning()).toBe(true);
       expect(yield* fake.child.isRunning).toBe(false);

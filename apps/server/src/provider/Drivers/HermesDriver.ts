@@ -49,8 +49,8 @@ import {
 const decodeHermesSettings = Schema.decodeSync(HermesSettings);
 
 const DRIVER_KIND = ProviderDriverKind.make("hermes");
-// Hermes is not on npm; its GitHub release titles carry the semver that
-// `hermes --version` reports.
+// Hermes is not on npm; its GitHub release titles carry the semver that ACP
+// `initialize` reports as `agentInfo.version`.
 const HERMES_RELEASE_REPOSITORY = "NousResearch/hermes-agent";
 // `hermes update` is offered only for git checkouts (Nix, Docker, apt and pip installs are
 // refused). `--yes` answers its prompts, and the instance's environment selects the `HERMES_HOME`

@@ -576,8 +576,7 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
       // account (a custom model provider such as a CLIProxyAPI hub) Codex has no
       // usage to report and rejects the request.
       input.skipNativeUsage || !accountResponse.account
-        ? // @effect-diagnostics-next-line effectSucceedWithVoid:off - This optional result requires undefined, not the wider void type.
-          Effect.succeed(undefined)
+        ? Effect.undefined
         : withCodexDiscoveryDeadline(
             client.request("account/rateLimits/read", null),
             deadlineMs,

@@ -8,6 +8,8 @@ export const HERMES = "hermes";
 export const REFERENCES = ["claudeAgent", "codex"] as const;
 /** Latency is compared with Claude: the benchmark runs both on the same model. */
 export const LATENCY_REFERENCE = "claudeAgent";
+/** "On par with Claude Code": parity on every scored scenario Claude has a fixture for. */
+const CLAUDE = "claudeAgent";
 
 export interface InventoryVariant {
   readonly driver: string;
@@ -386,6 +388,7 @@ export interface Scorecard {
   readonly createdAt: string;
   readonly headline: { readonly parity: number | null; readonly facets: ReadonlyArray<string> };
   readonly facets: ReadonlyArray<FacetScore>;
+  readonly claudeParity: { readonly passed: number; readonly covered: number };
   readonly scenarios: ReadonlyArray<ScenarioScore>;
   readonly capabilities: {
     readonly behind: ReadonlyArray<CapabilityGap>;
@@ -447,6 +450,10 @@ export function buildScorecard(input: {
     ...(reliability === null ? [] : [{ name: "reliability", score: reliability }]),
   ];
   const headline = mean(headlineParts.map((part) => part.score));
+  const claudeCovered = scenarios.filter(
+    (score) =>
+      score.points !== null && score.references.some((reference) => reference.driver === CLAUDE),
+  );
 
   const declared = flattenCapabilities(input.inventory.capabilities[HERMES]);
   const unbacked = input.manifest.flatMap((scenario) => {
@@ -484,6 +491,10 @@ export function buildScorecard(input: {
       facets: headlineParts.map((part) => part.name),
     },
     facets,
+    claudeParity: {
+      passed: claudeCovered.filter((score) => score.status === "parity").length,
+      covered: claudeCovered.length,
+    },
     scenarios,
     capabilities: { ...diffCapabilities(input.inventory.capabilities), unbacked },
     latency,
@@ -563,6 +574,8 @@ export function renderSummary(card: Scorecard, baseline?: Scorecard): string {
   lines.push(`# Hermes provider parity`, "");
   lines.push(
     `**Parity score: ${fmt(card.headline.parity)} / 100**${delta(card.headline.parity, baseline?.headline.parity)}`,
+    "",
+    `**Claude Code coverage: ${card.claudeParity.passed} / ${card.claudeParity.covered}**${delta(card.claudeParity.passed, baseline?.claudeParity?.passed)} scored scenarios with a Claude fixture are at parity.`,
     "",
     `Mean of ${card.headline.facets.length} facets: ${card.headline.facets.join(", ")}. ${card.createdAt}`,
     "",

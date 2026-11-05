@@ -26,7 +26,6 @@ import { AsyncResult, Atom } from "effect/reactivity";
 import { RefreshCwIcon } from "lucide-react";
 import { useContext, useState } from "react";
 
-import { primarySessionStateAtom } from "../../environments/primary/sessionState";
 import { cn } from "../../lib/utils";
 import { type EnvironmentPresentation, useEnvironments } from "../../state/environments";
 import { serverEnvironment } from "../../state/server";
@@ -108,10 +107,7 @@ export function HindsightAgentMemorySettings() {
     Atom.make((get): ReadonlyArray<Machine> =>
       connected.map((environment) => {
         const { environmentId } = environment;
-        const isPrimary = environment.entry.target._tag === "PrimaryConnectionTarget";
-        const sessionResult = isPrimary
-          ? get(primarySessionStateAtom)
-          : get(environmentSession.sessionStateAtom(environmentId));
+        const sessionResult = get(environmentSession.sessionStateAtom(environmentId));
         const access = {
           session: Option.getOrNull(AsyncResult.value(sessionResult)),
           isPending: sessionResult.waiting,

@@ -948,6 +948,7 @@ export function resolveThreadStatusRing(input: {
   isUnread: boolean;
 }): ThreadStatusRing | null {
   switch (input.status) {
+    case "preparing":
     case "working":
       return {
         kind: "working",

@@ -332,6 +332,10 @@ describe("resolveThreadStatusRing", () => {
       dashed: true,
       motion: "travel",
     });
+    expect(resolveThreadStatusRing({ status: "preparing", isUnread: false })).toMatchObject({
+      kind: "working",
+      motion: "travel",
+    });
     expect(resolveThreadStatusRing({ status: "waiting", isUnread: false })).toMatchObject({
       kind: "waiting",
       motion: "none",

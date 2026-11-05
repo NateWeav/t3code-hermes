@@ -12,7 +12,6 @@ import {
   type PaperclipStatus,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -50,12 +49,13 @@ import {
 /** A side panel waiting longer than this on a LAN service is a service that is not answering. */
 const REQUEST_TIMEOUT = Duration.seconds(10);
 
-type FailureReason = Exclude<PaperclipAvailability, "ready" | "notConfigured">;
-
-class PaperclipRequestError extends Data.TaggedError("PaperclipRequestError")<{
-  readonly reason: FailureReason;
-  readonly detail: string;
-}> {}
+class PaperclipRequestError extends Schema.TaggedError<PaperclipRequestError>()(
+  "PaperclipRequestError",
+  {
+    reason: Schema.Literals(["offline", "unauthorized", "incompatible", "requestFailed"]),
+    detail: Schema.String,
+  },
+) {}
 
 export interface PaperclipConnection {
   readonly apiRoot: string;

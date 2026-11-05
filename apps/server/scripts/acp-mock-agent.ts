@@ -29,6 +29,10 @@ const hermesDelegationDelayMs = Math.max(
   0,
   Number(process.env.T3_ACP_HERMES_DELEGATION_DELAY_MS) || 0,
 );
+const hermesDelegationExitOnCancel = process.env.T3_ACP_HERMES_DELEGATION_EXIT_ON_CANCEL === "1";
+const hermesDelegationHang = process.env.T3_ACP_HERMES_DELEGATION_HANG === "1";
+const hermesDelegationHangAfterDispatch =
+  process.env.T3_ACP_HERMES_DELEGATION_HANG_AFTER_DISPATCH === "1";
 // GitHub Copilot CLI advertises URL-shaped session mode ids.
 const copilotModesProfile = process.env.T3_ACP_COPILOT_MODES === "1";
 const copilotModeId = (name: string) =>
@@ -846,7 +850,7 @@ const program = Effect.gen(function* () {
     Effect.gen(function* () {
       const cancelledSessionId = String(sessionId ?? "mock-session-1");
       cancelledSessions.add(cancelledSessionId);
-      if (process.env.T3_ACP_HERMES_DELEGATION_EXIT_ON_CANCEL === "1") {
+      if (hermesDelegationExitOnCancel) {
         return yield* Effect.sync(() => process.exit(19));
       }
       if (completeFirstPromptOnCancel) {
@@ -1417,7 +1421,7 @@ const program = Effect.gen(function* () {
             if (hermesDelegationDelayMs > 0) yield* Effect.sleep(hermesDelegationDelayMs);
           }
         }
-        if (process.env.T3_ACP_HERMES_DELEGATION_HANG === "1") return yield* Effect.never;
+        if (hermesDelegationHang) return yield* Effect.never;
         yield* send({
           ...scenario.complete,
           toolCallId,
@@ -1425,10 +1429,7 @@ const program = Effect.gen(function* () {
         });
         if (scenario.name === "dispatched") {
           pendingHermesDelegation = toolCallId;
-          if (
-            promptCount === 1 &&
-            process.env.T3_ACP_HERMES_DELEGATION_HANG_AFTER_DISPATCH === "1"
-          ) {
+          if (promptCount === 1 && hermesDelegationHangAfterDispatch) {
             return yield* Effect.never;
           }
         }

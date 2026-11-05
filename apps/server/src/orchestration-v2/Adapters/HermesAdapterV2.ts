@@ -37,8 +37,10 @@ import {
   hermesPromptFailure,
   isHermesGatewayTurnLoss,
   makeHermesAcpRuntime,
+  makeHermesEditApprovalCards,
   normalizeHermesT3McpToolCall,
   normalizeHermesTerminalResult,
+  normalizeHermesWebSearchQuery,
   preserveHermesAgentActivityTitle,
   resolveHermesAcpBaseModelId,
   resolveHermesSessionModeId,
@@ -74,6 +76,11 @@ export const HermesProviderCapabilitiesV2 = {
     ...AcpProviderCapabilitiesV2.subagents,
     supportsSubagents: true,
     emitsSubagentLifecycle: true,
+  },
+  streaming: {
+    ...AcpProviderCapabilitiesV2.streaming,
+    // The gateway projects only `tool.start` and `tool.complete`; a command's output arrives whole.
+    streamsToolOutput: false,
   },
   tools: {
     ...AcpProviderCapabilitiesV2.tools,
@@ -132,6 +139,7 @@ export function makeHermesAcpAdapterFlavor(
     HermesReasoningLevel | null
   >();
   const sentFastModes = new WeakMap<AcpSessionRuntime.AcpSessionRuntime["Service"], boolean>();
+  const editApprovalCards = makeHermesEditApprovalCards();
 
   const spawnRuntime = (input: AcpAdapterV2RuntimeInput) => {
     const { runtimePolicy, processEnvironment, ...runtimeInput } = input;
@@ -161,6 +169,8 @@ export function makeHermesAcpAdapterFlavor(
     enablePostSettleContinuation: true,
     resolveModelId: (selection) => resolveHermesAcpBaseModelId(selection.model),
     approvalOptions: hermesApprovalOptions,
+    onPermissionRequest: editApprovalCards.onPermissionRequest,
+    ignoreSessionUpdate: editApprovalCards.ignoreSessionUpdate,
     promptFailure: hermesPromptFailure,
     restartRuntimeAfterPromptFailure: isHermesGatewayTurnLoss,
     makeRuntime: (input) =>
@@ -240,8 +250,12 @@ export function makeHermesAcpAdapterFlavor(
       return model;
     }),
     normalizeToolCall: (toolCall) =>
-      preserveHermesAgentActivityTitle(
-        normalizeHermesTerminalResult(normalizeHermesT3McpToolCall(toolCall)),
+      editApprovalCards.normalizeToolCall(
+        preserveHermesAgentActivityTitle(
+          normalizeHermesWebSearchQuery(
+            normalizeHermesTerminalResult(normalizeHermesT3McpToolCall(toolCall)),
+          ),
+        ),
       ),
     extractSubagentUpdates: makeHermesSubagentExtractor(),
     extractAwaitableBackgroundTasks: extractHermesAwaitableBackgroundTasks,

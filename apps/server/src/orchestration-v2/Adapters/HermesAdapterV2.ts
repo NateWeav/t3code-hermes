@@ -35,6 +35,7 @@ import {
   discardLostHermesTurnsOnPrompt,
   extractHermesAwaitableBackgroundTasks,
   hermesPromptFailure,
+  hideHermesStopNotices,
   isHermesGatewayTurnLoss,
   makeHermesAcpRuntime,
   normalizeHermesT3McpToolCall,
@@ -165,7 +166,7 @@ export function makeHermesAcpAdapterFlavor(
     restartRuntimeAfterPromptFailure: isHermesGatewayTurnLoss,
     makeRuntime: (input) =>
       (options.makeRuntime ?? spawnRuntime)(input).pipe(
-        Effect.map(discardLostHermesTurnsOnPrompt),
+        Effect.map((runtime) => hideHermesStopNotices(discardLostHermesTurnsOnPrompt(runtime))),
         Effect.tap((runtime) =>
           Effect.sync(() => runtimeModes.set(runtime, input.runtimePolicy.runtimeMode)),
         ),

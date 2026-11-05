@@ -103,14 +103,17 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
     hermes: applicable,
     exercises: ["turns.supportsInterrupt"],
   },
+  // Not provider-bound: this and the restart below share an assertion on the stopped command row,
+  // which every provider's fixture passes.
   {
     name: "turn_interrupt_mid_tool",
     facet: "control",
     hermes: applicable,
-    providerBound: true,
     exercises: ["turns.supportsInterrupt"],
   },
-  { name: "turn_interrupt_restart", facet: "control", hermes: applicable, providerBound: true },
+  { name: "turn_interrupt_restart", facet: "control", hermes: applicable },
+  // Hermes steers by restart, like Grok; Claude and Codex steer the running turn. Hermes's `/steer`
+  // lands only after a tool batch and reports no delivery, so T3 cannot steer through it.
   {
     name: "message_steering",
     facet: "control",

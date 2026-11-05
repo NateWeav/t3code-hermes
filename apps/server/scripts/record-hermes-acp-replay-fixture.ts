@@ -442,16 +442,13 @@ const recordScenario = Effect.fn("recordHermesScenario")(function* (fixtureName:
   const scenario = {
     name: `${fixtureName}/hermes-record`,
     commands: materialized.commands,
-    // Gated fixtures pace replay with gates on the test clock. Live, Hermes and wall time pace
-    // themselves, so a fixture that gates records its dispatches only and waits for Hermes to idle.
-    steps: materialized.steps.some(
-      (step) =>
-        step.type === "release_replay_gate" || step.type === "release_replay_gate_after_waiting",
-    )
-      ? materialized.steps.filter((step) => step.type === "dispatch")
-      : materialized.steps.map((step) =>
-          step.type === "finish_held_run" ? { ...step, type: "await_run_status" as const } : step,
-        ),
+    // Replay gates and held runs pace replay on the test clock; live, Hermes and wall time pace
+    // themselves. The clock steps stay: they order background dispatches as replay does.
+    steps: materialized.steps.flatMap((step) =>
+      step.type === "release_replay_gate" || step.type === "release_replay_gate_after_waiting"
+        ? []
+        : [step.type === "finish_held_run" ? { ...step, type: "await_run_status" as const } : step],
+    ),
     projectionThreadIds: materialized.projectionThreadIds,
     runtimePolicyOverride: { ...settingsVariant.runtimePolicyOverride, cwd: realWorkspace },
   };

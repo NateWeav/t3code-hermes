@@ -30,7 +30,7 @@ export interface ParityScenario {
   readonly exercises?: ReadonlyArray<string>;
   /**
    * Every reference assertion checks its own provider's identity, wire frames or item shapes, so no
-   * Hermes run can pass one. Full credit needs a provider-neutral assertion every provider passes.
+   * Hermes run can pass one. Full credit needs those checks moved to the reference's assertProviderDetails.
    */
   readonly providerBound?: true;
 }
@@ -52,7 +52,13 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
     exercises: ["turns.emitsTurnCompleted", "streaming.streamsAssistantText"],
   },
   { name: "multi_turn", facet: "turns", hermes: applicable },
-  { name: "multi_turn_restart", facet: "turns", hermes: applicable },
+  {
+    name: "multi_turn_restart",
+    facet: "turns",
+    hermes: na(
+      "The restart is the Claude recorder's per-turn SDK query mode; for any other provider the input is multi_turn.",
+    ),
+  },
   { name: "claude_idle_resume", facet: "turns", hermes: applicable },
   {
     name: "claude_result_is_error",

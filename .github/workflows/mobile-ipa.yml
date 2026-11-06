@@ -9,6 +9,9 @@ name: Mobile IPA
 #
 # Uses a standard GitHub-hosted Apple Silicon runner so builds do not wait
 # for a laptop to come online. Standard hosted runners are free for public repos.
+# It needs Xcode 27.1 or newer: the iPhone Duo's vertical-bar layout
+# (T3LayoutMetricsView.swift) compiles only against the iOS 27.1 SDK, and
+# macos-26 images stop at Xcode 26.6. 27.1 matches eas.json's build image.
 #
 # release.yml calls this after publishing each nightly and stable release,
 # because releases it publishes with GITHUB_TOKEN never fire the `release`
@@ -44,13 +47,14 @@ concurrency:
 jobs:
   ipa:
     name: Build unsigned IPA
-    runs-on: macos-26
+    runs-on: xcode-27
     timeout-minutes: 90
     outputs:
       tag: ${{ env.TAG }}
       bundle_id: ${{ steps.package.outputs.bundle_id }}
       app_name: ${{ steps.package.outputs.app_name }}
     env:
+      DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
       APP_VARIANT: production
       EXPO_NO_GIT_STATUS: "1"
       NODE_OPTIONS: --max-old-space-size=8192

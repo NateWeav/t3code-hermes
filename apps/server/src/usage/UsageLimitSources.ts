@@ -3,6 +3,7 @@ import {
   UsageLimitSourceError,
   type UsageLimitSourceConsumeResetCreditInput,
   type ProviderConsumeResetCreditResult,
+  type ProviderDriverKind,
   type ServerSettings,
   UsageLimitSourceConfig,
   settingsSecretLiteral,
@@ -34,6 +35,11 @@ export class UsageLimitSources extends Context.Service<
     readonly current: Effect.Effect<ReadonlyArray<UsageLimitSourceSnapshot>>;
     readonly streamChanges: Stream.Stream<ReadonlyArray<UsageLimitSourceSnapshot>>;
     readonly refresh: Effect.Effect<void>;
+    /** When a hub pooling `driver`'s accounts can next serve `model`, or null when no hub can tell. */
+    readonly limitResetAt: (input: {
+      readonly driver: ProviderDriverKind;
+      readonly model: string;
+    }) => Effect.Effect<string | null>;
     readonly consumeResetCredit: (
       input: UsageLimitSourceConsumeResetCreditInput,
     ) => Effect.Effect<ProviderConsumeResetCreditResult, UsageLimitSourceError>;
@@ -140,6 +146,41 @@ export const make = Effect.gen(function* () {
     yield* publish(snapshots);
   }).pipe(refreshLock.withPermits(1), Effect.ignoreCause({ log: true }));
 
+  const limitResetAt = Effect.fn("UsageLimitSources.limitResetAt")(
+    function* (input: { readonly driver: ProviderDriverKind; readonly model: string }) {
+      const provider =
+        input.driver === "codex" ? "codex" : input.driver === "claudeAgent" ? "claude" : null;
+      if (provider === null) return null;
+      const settings = yield* settingsService.getSettings.pipe(
+        Effect.orElseSucceed((): ServerSettings | null => null),
+      );
+      const rejected = yield* Ref.get(rejectedRef);
+      const configs = Object.entries(settings?.usageLimitSources ?? {}).flatMap(([id, config]) =>
+        config.enabled &&
+        config.managementKey.length > 0 &&
+        !Equal.equals(rejected.get(id as UsageLimitSourceId)?.config, config)
+          ? [config]
+          : [],
+      );
+      const resets = yield* Effect.forEach(
+        configs,
+        (config) =>
+          api
+            .modelResetAt(config, { provider, model: input.model })
+            .pipe(Effect.orElseSucceed(() => null)),
+        { concurrency: "unbounded" },
+      );
+      return resets.reduce<string | null>(
+        (earliest, reset) =>
+          reset !== null && (earliest === null || reset < earliest) ? reset : earliest,
+        null,
+      );
+    },
+    // The failed turn's terminal waits on this read.
+    Effect.timeout("5 seconds"),
+    Effect.orElseSucceed(() => null),
+  );
+
   // Shares the refresh lock so a stale in-flight read cannot overwrite a redemption.
   const consumeResetCredit = Effect.fn("UsageLimitSources.consumeResetCredit")(function* (
     input: UsageLimitSourceConsumeResetCreditInput,
@@ -200,6 +241,7 @@ export const make = Effect.gen(function* () {
   return {
     current: Ref.get(stateRef),
     consumeResetCredit,
+    limitResetAt,
     refresh,
     get streamChanges() {
       return Stream.unwrap(

@@ -159,10 +159,23 @@ export function deriveThreadActivityRun(projection: ThreadStructure): ThreadRunS
 }
 
 /**
- * Provider-native subagent threads never get app runs: their work is a runless
- * root turn whose status follows the subagent.
+ * Work that never gets an app run: a provider-native subagent's runless root turn, or a mirrored
+ * Hermes run, which works until it waits between turns or ends.
  */
 export function deriveRunlessWorkStartedAt(projection: ThreadStructure): string | null {
+  const hermesRun = projection.thread.hermesRun;
+  if (hermesRun?.live === true && hermesRun.idle !== true) {
+    // A gateway notice wakes the run as a new prompt, so time the latest response, or the earliest
+    // loaded item when history starts mid-response. Older pages append, so compare ordinals.
+    let prompt: ThreadStructure["turnItems"][number] | undefined;
+    let earliest: ThreadStructure["turnItems"][number] | undefined;
+    for (const item of projection.turnItems) {
+      if (item.runId !== null) continue;
+      if (item.type === "user_message" && item.ordinal > (prompt?.ordinal ?? -1)) prompt = item;
+      if (item.ordinal < (earliest?.ordinal ?? Infinity)) earliest = item;
+    }
+    return DateTime.formatIso((prompt ?? earliest)?.startedAt ?? projection.thread.createdAt);
+  }
   const status = deriveProviderSubagentStatus(projection);
   return status !== null && isOrchestrationV2WorkActive(status.status) ? status.startedAt : null;
 }

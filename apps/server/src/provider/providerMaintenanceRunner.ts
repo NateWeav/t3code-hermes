@@ -26,6 +26,8 @@ import { HttpClient } from "effect/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import * as NodeUtil from "node:util";
 
+import * as HermesPatchService from "../hermes/HermesPatchService.ts";
+import { HERMES_UPDATE_LOCK_KEY } from "../hermes/hermesPatches.ts";
 import * as ModelManifest from "./ModelManifest.ts";
 import { resolveProviderCompatibility } from "./providerCompatibility.ts";
 import * as ProviderRegistry from "./ProviderRegistry.ts";
@@ -310,6 +312,7 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const httpClient = yield* HttpClient.HttpClient;
   const latestVersions = yield* ProviderLatestVersions.ProviderLatestVersions;
+  const hermesPatches = yield* HermesPatchService.HermesPatchService;
   // Update fibers outlive the RPC that started them but not the server. A
   // dropped websocket interrupts its handler; that must not kill `hermes update`
   // halfway through or leave the provider stuck on "Updating".
@@ -333,6 +336,39 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
         reason: "An update is already running for this provider.",
       }),
   });
+  /** Lifts the T3 patches off, updates, and puts them back. Runs under the Hermes update lock. */
+  const runHermesUpdate = (update: ProviderMaintenanceCommandAction) =>
+    hermesPatches
+      .updateInstallHoldingLock({ executable: update.executable, env: update.env ?? process.env })
+      .pipe(
+        Effect.map((result): ProviderMaintenanceCommandResult => {
+          const listed = (label: string, ids: ReadonlyArray<string>) =>
+            ids.length > 0 ? [`${label}: ${ids.join(", ")}`] : [];
+          const patches = [
+            ...listed("Patches reapplied", result.reapplied),
+            ...listed("Patches awaiting a T3 Code update", result.awaitingPatchUpdate),
+            ...listed("Patches not reapplied", result.notReapplied),
+          ].join("\n");
+          return {
+            stdout: patches,
+            stderr: result.failureOutput ?? "",
+            exitCode: result.updateFailed ? 1 : 0,
+            timedOut: false,
+            stdoutTruncated: false,
+            stderrTruncated: false,
+          };
+        }),
+        Effect.catch((error) =>
+          Effect.succeed<ProviderMaintenanceCommandResult>({
+            stdout: "",
+            stderr: error.detail,
+            exitCode: 1,
+            timedOut: false,
+            stdoutTruncated: false,
+            stderrTruncated: false,
+          }),
+        ),
+      );
 
   const verifyFromRefresh = (
     refresh: Effect.Effect<ReadonlyArray<ServerProvider>>,
@@ -547,7 +583,12 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
             }
 
             yield* setRunningMessage(`Running ${describeCommand(command)}`);
-            const result = yield* runMaintenanceCommand(command, setRunningMessage);
+            // `hermes update` on its own parks the T3 patches in a git stash and leaves them off
+            // when restoring them conflicts, so Hermes updates go through the Patches path.
+            const result =
+              command.lockKey === HERMES_UPDATE_LOCK_KEY
+                ? yield* runHermesUpdate(command)
+                : yield* runMaintenanceCommand(command, setRunningMessage);
             const finishedAt = yield* nowIso;
             if (result.timedOut || result.exitCode !== 0) {
               yield* Effect.logWarning("Provider update command failed", {

@@ -7,17 +7,16 @@ import {
 } from "@t3tools/contracts";
 import type * as EffectAcpSchema from "effect-acp/compat";
 import { causeErrorTag } from "@t3tools/shared/observability";
+import * as Cause from "effect/Cause";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
-import * as Result from "effect/Result";
 import { HttpClient } from "effect/http";
-import { ChildProcess, ChildProcessSpawner } from "effect/process";
+import { ChildProcessSpawner } from "effect/process";
 import { createModelCapabilities } from "@t3tools/shared/model";
-import { resolveSpawnCommand } from "@t3tools/shared/shell";
 
 import {
   buildServerProvider,
@@ -25,7 +24,6 @@ import {
   isCommandMissingCause,
   parseGenericCliVersion,
   providerModelsFromSettings,
-  spawnAndCollect,
   type ServerProviderDraft,
 } from "@t3tools/provider-core/server/snapshotProbe";
 import {
@@ -71,10 +69,11 @@ const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [],
 });
 
-const VERSION_PROBE_TIMEOUT_MS = 10_000;
 /**
  * Whole-probe budget for spawn, `initialize`, `session/new`, and model listing. A cold Hermes can
  * spend ~50s on SQLite maintenance during `initialize` and then start its gateway in `session/new`.
+ * The ACP handshake is the whole health check: `hermes --version` runs Hermes's synchronous update
+ * check (git plus GitHub, 20s per git call), so it is no measure of whether Hermes can run.
  */
 const HERMES_ACP_MODEL_DISCOVERY_TIMEOUT_MS = 120_000;
 
@@ -242,6 +241,7 @@ function formatUpstreamLabel(upstreams: ReadonlyArray<string>): string {
 }
 
 interface HermesAcpDiscovery {
+  readonly version: string | null;
   readonly models: ReadonlyArray<ServerProviderModel>;
   readonly slashCommands: ReadonlyArray<ServerProviderSlashCommand>;
   readonly upstreams: ReadonlyArray<string>;
@@ -282,6 +282,7 @@ const discoverHermesModelsViaAcp = Effect.fn("HermesProvider.discoverHermesModel
       () => HERMES_BUILT_IN_SLASH_COMMANDS,
     );
     return {
+      version: parseGenericCliVersion(started.initializeResult.agentInfo?.version ?? ""),
       models: buildHermesDiscoveredModelsFromSessionModelState(started.sessionSetupResult.models),
       slashCommands: withCompactCommand(slashCommands),
       upstreams: deriveConfiguredUpstreams(started.sessionSetupResult.models),
@@ -289,23 +290,6 @@ const discoverHermesModelsViaAcp = Effect.fn("HermesProvider.discoverHermesModel
   },
   Effect.scoped,
 );
-
-const runHermesVersionCommand = Effect.fn("HermesProvider.runHermesVersionCommand")(function* (
-  hermesSettings: HermesSettings,
-  environment: NodeJS.ProcessEnv = process.env,
-) {
-  const command = hermesSettings.binaryPath || "hermes";
-  const spawnCommand = yield* resolveSpawnCommand(command, ["--version"], {
-    env: environment,
-  });
-  return yield* spawnAndCollect(
-    command,
-    ChildProcess.make(spawnCommand.command, spawnCommand.args, {
-      env: environment,
-      shell: spawnCommand.shell,
-    }),
-  );
-});
 
 export const checkHermesProviderStatus = Effect.fn("checkHermesProviderStatus")(function* (
   hermesSettings: HermesSettings,
@@ -347,75 +331,6 @@ export const checkHermesProviderStatus = Effect.fn("checkHermesProviderStatus")(
     });
   }
 
-  const versionResult = yield* runHermesVersionCommand(hermesSettings, environment).pipe(
-    Effect.timeoutOption(VERSION_PROBE_TIMEOUT_MS),
-    Effect.result,
-  );
-
-  if (Result.isFailure(versionResult)) {
-    const error = versionResult.failure;
-    yield* Effect.logWarning("Hermes CLI health check failed.", {
-      errorTag: error._tag,
-    });
-    return buildServerProvider({
-      presentation: HERMES_PRESENTATION,
-      enabled: hermesSettings.enabled,
-      checkedAt,
-      models: fallbackModels,
-      slashCommands: HERMES_SLASH_COMMANDS,
-      probe: {
-        installed: !isCommandMissingCause(error),
-        version: null,
-        status: "error",
-        auth: { status: "unknown" },
-        message: isCommandMissingCause(error)
-          ? "Hermes CLI (`hermes`) is not installed or not on PATH."
-          : "Failed to execute Hermes CLI health check.",
-      },
-    });
-  }
-
-  if (Option.isNone(versionResult.success)) {
-    return buildServerProvider({
-      presentation: HERMES_PRESENTATION,
-      enabled: hermesSettings.enabled,
-      checkedAt,
-      models: fallbackModels,
-      slashCommands: HERMES_SLASH_COMMANDS,
-      probe: {
-        installed: true,
-        version: null,
-        status: "error",
-        auth: { status: "unknown" },
-        message: "Hermes CLI is installed but timed out while running `hermes --version`.",
-      },
-    });
-  }
-
-  const versionOutput = versionResult.success.value;
-  const version = parseGenericCliVersion(`${versionOutput.stdout}\n${versionOutput.stderr}`);
-  if (versionOutput.code !== 0) {
-    yield* Effect.logWarning("Hermes CLI version probe exited with a non-zero status.", {
-      exitCode: versionOutput.code,
-      stdoutLength: versionOutput.stdout.length,
-      stderrLength: versionOutput.stderr.length,
-    });
-    return buildServerProvider({
-      presentation: HERMES_PRESENTATION,
-      enabled: hermesSettings.enabled,
-      checkedAt,
-      models: fallbackModels,
-      slashCommands: HERMES_SLASH_COMMANDS,
-      probe: {
-        installed: true,
-        version,
-        status: "error",
-        auth: { status: "unknown" },
-        message: "Hermes CLI is installed but failed to run.",
-      },
-    });
-  }
-
   const discoveryStage = yield* Ref.make("process startup");
   const discoveryExit = yield* discoverHermesModelsViaAcp(
     hermesSettings,
@@ -424,6 +339,10 @@ export const checkHermesProviderStatus = Effect.fn("checkHermesProviderStatus")(
     (method) => Ref.set(discoveryStage, method),
   ).pipe(Effect.timeoutOption(HERMES_ACP_MODEL_DISCOVERY_TIMEOUT_MS), Effect.exit);
   if (Exit.isFailure(discoveryExit)) {
+    const missing = Option.exists(
+      Cause.findErrorOption(discoveryExit.cause),
+      (error) => error._tag === "AcpSpawnError" && isCommandMissingCause(error.cause),
+    );
     yield* Effect.logWarning("Hermes ACP model discovery failed", {
       errorTag: causeErrorTag(discoveryExit.cause),
     });
@@ -434,11 +353,13 @@ export const checkHermesProviderStatus = Effect.fn("checkHermesProviderStatus")(
       models: fallbackModels,
       slashCommands: HERMES_SLASH_COMMANDS,
       probe: {
-        installed: true,
-        version,
+        installed: !missing,
+        version: null,
         status: "error",
         auth: { status: "unknown" },
-        message: "Hermes CLI is installed but ACP startup failed. Check server logs for details.",
+        message: missing
+          ? "Hermes CLI (`hermes`) is not installed or not on PATH."
+          : "Hermes CLI is installed but ACP startup failed. Check server logs for details.",
       },
     });
   }
@@ -455,7 +376,7 @@ export const checkHermesProviderStatus = Effect.fn("checkHermesProviderStatus")(
       slashCommands: HERMES_SLASH_COMMANDS,
       probe: {
         installed: true,
-        version,
+        version: null,
         status: "warning",
         auth: { status: "unknown" },
         message: `Hermes CLI is installed but ACP model discovery did not finish within ${HERMES_ACP_MODEL_DISCOVERY_TIMEOUT_MS / 1000}s during ${stage}; Hermes may still be starting up.`,
@@ -490,7 +411,7 @@ export const checkHermesProviderStatus = Effect.fn("checkHermesProviderStatus")(
     slashCommands: discovery.slashCommands,
     probe: {
       installed: true,
-      version,
+      version: discovery.version,
       status: "ready",
       auth,
       ...(discoveredModels.length === 0

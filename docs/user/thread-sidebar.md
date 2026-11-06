@@ -274,7 +274,9 @@ Queued messages stay saved while the limit blocks the thread. They run after
 the continuation finishes. If the queue was held by a restart, resume it then.
 
 When the provider reports a reset time, choose **Resume at reset** to schedule a
-continuation. You can cancel it from the thread. Enable **Resume after
+continuation. You can cancel it from the thread. A
+[connected CLIProxyAPI hub](./usage.md#connect-a-cliproxyapi-hub) supplies the
+reset time when the provider leaves it out. Enable **Resume after
 usage limits** in **Settings → Threads** to schedule limit stops by default.
 The environment must be running when the reset arrives; it resumes overdue
 continuations after a restart. Stopping the thread, sending a new message,

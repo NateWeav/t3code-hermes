@@ -1,11 +1,28 @@
-import type { EnvironmentId, UnifiedSettings } from "@t3tools/contracts";
+import {
+  AuthProvidersManageScope,
+  type EnvironmentId,
+  sessionGrantsScope,
+} from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
+import { isAtomCommandInterrupted } from "@t3tools/client-runtime/state/runtime";
+import { supportsSharedSettingsSync } from "@t3tools/client-runtime/state/shared-settings";
+import {
+  listUsageLimitSources,
+  planUsageLimitSourceAdd,
+  planUsageLimitSourceRemoval,
+  type UsageLimitSourceTarget,
+  type UsageLimitSourceWrite,
+} from "@t3tools/client-runtime/state/usage-limit-sources";
+import { AsyncResult } from "effect/reactivity";
 import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 
-import { useUpdateEnvironmentSettings } from "../../hooks/useSettings";
+import { environmentIdsKey } from "../../state/environmentAtomList";
+import { useEnvironments } from "../../state/environments";
 import { serverEnvironment } from "../../state/server";
+import { environmentSessionStatesAtom } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { toastManager } from "../ui/toast";
 import {
   AlertDialog,
   AlertDialogClose,
@@ -21,20 +38,67 @@ import { AddUsageLimitSourceDialog } from "./AddUsageLimitSourceDialog";
 import { searchableSetting } from "./settingsSearch";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
 
+/** Connected environments whose hubs this connection may change. */
+function useUsageLimitSourceTargets(): ReadonlyArray<UsageLimitSourceTarget<EnvironmentId>> {
+  const { environments } = useEnvironments();
+  const candidates = environments.filter(
+    (environment) =>
+      supportsSharedSettingsSync(environment) &&
+      environment.serverConfig?.environment.capabilities.usageLimitSources === true,
+  );
+  const sessions = useAtomValue(
+    environmentSessionStatesAtom(environmentIdsKey(candidates.map((entry) => entry.environmentId))),
+  );
+  return candidates.flatMap((environment, index) => {
+    const result = sessions[index];
+    const session =
+      result === undefined || result._tag === "Failure"
+        ? null
+        : AsyncResult.getOrElse(result, () => null);
+    return session !== null && sessionGrantsScope(session, AuthProvidersManageScope)
+      ? [
+          {
+            environmentId: environment.environmentId,
+            label: environment.label,
+            sources: environment.serverConfig?.settings.usageLimitSources ?? {},
+          },
+        ]
+      : [];
+  });
+}
+
 export function UsageProviderSettings({
   environmentId,
-  environmentLabel,
-  sources,
   cursorKeychainUsageEnabled,
   readOnly,
 }: {
   readonly environmentId: EnvironmentId;
-  readonly environmentLabel: string;
-  readonly sources: UnifiedSettings["usageLimitSources"];
   readonly cursorKeychainUsageEnabled: boolean;
   readonly readOnly: boolean;
 }) {
-  const updateSettings = useUpdateEnvironmentSettings(environmentId);
+  const targets = useUsageLimitSourceTargets();
+  const hubs = listUsageLimitSources(targets);
+  const persistHubs = useAtomCommand(serverEnvironment.updateSettings, {
+    label: "hub settings update",
+    reportFailure: false,
+  });
+  const writeHubs = async (writes: ReadonlyArray<UsageLimitSourceWrite<EnvironmentId>>) => {
+    const outcomes = await Promise.all(
+      writes.map(async ({ environmentId: target, patch }) => ({
+        label: targets.find((entry) => entry.environmentId === target)?.label ?? target,
+        result: await persistHubs({ environmentId: target, input: { patch } }),
+      })),
+    );
+    const failed = outcomes.filter(
+      ({ result }) => result._tag === "Failure" && !isAtomCommandInterrupted(result),
+    );
+    if (failed.length === 0) return;
+    toastManager.add({
+      type: "error",
+      title: failed.length === outcomes.length ? "Hub not saved" : "Hub saved on some environments",
+      description: `Could not save on ${failed.map(({ label }) => label).join(", ")}. Try again once they reconnect.`,
+    });
+  };
   const updateCursorSettings = useAtomCommand(serverEnvironment.updateSettings, {
     label: "update Cursor account usage",
   });
@@ -45,7 +109,7 @@ export function UsageProviderSettings({
     .platform;
   const [adding, setAdding] = useState(false);
   const [updatingCursor, setUpdatingCursor] = useState(false);
-  const entries = Object.entries(sources);
+  const hubsReadOnly = targets.length === 0;
 
   const setCursorUsageEnabled = async (enabled: boolean) => {
     setUpdatingCursor(true);
@@ -64,7 +128,7 @@ export function UsageProviderSettings({
       <SettingsSection
         {...searchableSetting("usage-providers")}
         headerAction={
-          !readOnly ? (
+          !hubsReadOnly ? (
             <Button size="xs" variant="outline" onClick={() => setAdding(true)}>
               <PlusIcon className="size-3" aria-hidden />
               Add hub
@@ -87,41 +151,38 @@ export function UsageProviderSettings({
             }
           />
         ) : null}
-        {entries.length === 0 ? (
+        {hubs.length === 0 ? (
           <SettingsRow title="No hubs configured." />
         ) : (
-          entries.map(([id, source]) => {
-            const label = source.label?.trim() || source.url;
-            return (
-              <SettingsRow
-                key={id}
-                title={label}
-                description={
-                  <span className="break-all">
-                    CLI Proxy{source.enabled ? "" : " · Disabled"}
-                    {label !== source.url ? ` · ${source.url}` : ""}
-                  </span>
-                }
-                control={
-                  !readOnly ? (
-                    <RemoveUsageProviderButton
-                      label={label}
-                      onConfirm={() => updateSettings({ usageLimitSources: { [id]: null } })}
-                    />
-                  ) : null
-                }
-              />
-            );
-          })
+          hubs.map((hub) => (
+            <SettingsRow
+              key={hub.url}
+              title={hub.label}
+              description={
+                <span className="break-all">
+                  CLI Proxy{hub.enabled ? "" : " · Disabled"}
+                  {hub.label !== hub.url ? ` · ${hub.url}` : ""}
+                  {hub.missingFrom.length > 0
+                    ? ` · Not saved on ${hub.missingFrom.map(({ label }) => label).join(", ")}. Add it again with its key.`
+                    : ""}
+                </span>
+              }
+              control={
+                <RemoveUsageProviderButton
+                  label={hub.label}
+                  onConfirm={() => void writeHubs(planUsageLimitSourceRemoval(targets, hub.url))}
+                />
+              }
+            />
+          ))
         )}
       </SettingsSection>
-      {adding && !readOnly ? (
+      {adding && !hubsReadOnly ? (
         <AddUsageLimitSourceDialog
           open
           onOpenChange={setAdding}
           environmentId={environmentId}
-          environmentLabel={environmentLabel}
-          sources={sources}
+          onAdd={(input) => void writeHubs(planUsageLimitSourceAdd(targets, input))}
         />
       ) : null}
     </>
@@ -146,9 +207,9 @@ function RemoveUsageProviderButton({
           <AlertDialogHeader>
             <AlertDialogTitle>Remove {label}?</AlertDialogTitle>
             <AlertDialogDescription>
-              The hub's management key is deleted from this server. Its accounts leave the Limits
-              view; the hub itself is untouched. Add it again with the URL and key to bring them
-              back.
+              The hub's management key is deleted from every environment you manage. Its accounts
+              leave the Limits view and limited threads stop getting its reset times; the hub itself
+              is untouched. Add it again with the URL and key to bring them back.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

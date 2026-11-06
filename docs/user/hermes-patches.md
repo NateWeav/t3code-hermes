@@ -34,7 +34,8 @@ started with `hermes gateway run` in a terminal does not run as a service, so re
 When a patch is waiting on a newer Hermes, the page offers **Update Hermes**. It removes T3 Code's
 applied patches, updates Hermes, then puts back each one using the version that fits the new
 Hermes. Afterwards the page says what was reapplied and what is now waiting for a T3 Code update. If
-the update fails, the patches you had are put back.
+the update fails, the patches you had are put back. Updating Hermes from its provider card in
+Settings does the same, then restarts a gateway that runs as a service.
 
 It refuses to run while the checkout has uncommitted edits of your own, because updating would park
 them in a git stash where they are easy to lose track of. Commit or discard them first. It leaves a
@@ -46,5 +47,7 @@ its gateway while updating, before the patches are back, so restart it once more
 
 - Patches need Hermes installed from a git checkout, the same kind of install that can update
   itself. Package-manager and container installs show why the page has nothing to do.
-- Updating Hermes yourself keeps applied patches. If an update leaves a patch no longer fitting,
-  the page shows it as **Doesn't apply** rather than failing the update.
+- Running `hermes update` yourself parks applied patches in a git stash and puts them back. When
+  that restore conflicts, Hermes leaves them in the stash and the page shows them as not applied;
+  apply them again here. If an update leaves a patch no longer fitting, the page shows it as
+  **Doesn't apply** rather than failing the update.

@@ -40,6 +40,27 @@ const AuthFile = Schema.Struct({
   ),
 });
 const AuthFiles = Schema.Struct({ files: Schema.Array(AuthFile) });
+// Decoded apart from AuthFiles so an unexpected cooldown shape cannot hide accounts from Limits.
+const CooldownFile = Schema.Struct({
+  provider: Schema.String,
+  disabled: Schema.optional(Schema.Boolean),
+  unavailable: Schema.optional(Schema.Boolean),
+  next_retry_after: Schema.optional(Schema.String),
+  // Older hubs omit this and the hub sends null when it cannot tell.
+  cooldowns: Schema.optional(
+    Schema.NullOr(
+      Schema.Array(
+        Schema.Struct({
+          scope: Schema.String,
+          model_key: Schema.optional(Schema.String),
+          retry_at: Schema.String,
+        }),
+      ),
+    ),
+  ),
+});
+type CooldownFile = typeof CooldownFile.Type;
+const CooldownFiles = Schema.Struct({ files: Schema.Array(CooldownFile) });
 const ApiResponse = Schema.Struct({ status_code: Schema.Number, body: Schema.String });
 const CodexWindow = Schema.Struct({
   used_percent: Schema.Number,
@@ -102,6 +123,7 @@ const CreditList = Schema.Struct({
 });
 
 const decodeAuthFiles = Schema.decodeUnknownEffect(AuthFiles);
+const decodeCooldownFiles = Schema.decodeUnknownEffect(CooldownFiles);
 const encodeJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 const decodeApiResponse = Schema.decodeUnknownEffect(ApiResponse);
 const decodeCreditList = Schema.decodeUnknownEffect(Schema.fromJsonString(CreditList));
@@ -189,6 +211,49 @@ function managementRefusal(status: number, error: string | undefined) {
   return new UsageLimitSourceError({
     detail: `The hub refused the management request (HTTP ${status}).`,
   });
+}
+
+// The hub keys cooldowns without thinking suffixes such as "(high)"; Claude adds "[1m]",
+// and Anthropic ids may carry a release date.
+const hubModelKey = (model: string) =>
+  model
+    .trim()
+    .replace(/\s*[([][^()[\]]*[)\]]$/u, "")
+    .replace(/-\d{8}$/u, "")
+    .toLowerCase();
+
+/**
+ * When the hub can next route `model` to one of `provider`'s accounts: the
+ * earliest end of the cooldowns blocking each account. Null when an account
+ * looks usable now, because then the hub's timers do not explain the limit.
+ */
+function hubModelResetAt(
+  files: ReadonlyArray<CooldownFile>,
+  input: { readonly provider: string; readonly model: string; readonly now: number },
+): string | null {
+  const model = hubModelKey(input.model);
+  let earliest = Infinity;
+  for (const file of files) {
+    if (file.disabled || file.provider !== input.provider) continue;
+    const timers =
+      file.cooldowns == null
+        ? file.unavailable && file.next_retry_after !== undefined
+          ? [file.next_retry_after]
+          : []
+        : file.cooldowns.flatMap((cooldown) =>
+            cooldown.scope === "credential" || hubModelKey(cooldown.model_key ?? "") === model
+              ? [cooldown.retry_at]
+              : [],
+          );
+    const blockedUntil = Math.max(-Infinity, ...timers.map(Date.parse).filter(Number.isFinite));
+    if (blockedUntil > input.now) earliest = Math.min(earliest, blockedUntil);
+    // An unavailable account without a timer cannot serve the model, nor say when it will.
+    else if (!file.unavailable) return null;
+  }
+  // Rounding up keeps a resume from landing in the timer's final fraction of a second.
+  return Number.isFinite(earliest)
+    ? DateTime.formatIso(DateTime.makeUnsafe(Math.ceil(earliest / 1000) * 1000))
+    : null;
 }
 
 const CODEX_BASE = "https://chatgpt.com/backend-api/wham";
@@ -456,6 +521,14 @@ export const makeCliproxyApi = Effect.gen(function* () {
     );
   });
 
+  const modelResetAt = Effect.fn("CliproxyApi.modelResetAt")(function* (
+    config: UsageLimitSourceConfig,
+    input: { readonly provider: string; readonly model: string },
+  ) {
+    const { files } = yield* decodeCooldownFiles(yield* management(config, "auth-files"));
+    return hubModelResetAt(files, { ...input, now: DateTime.toEpochMillis(yield* DateTime.now) });
+  });
+
   const consume = Effect.fn("CliproxyApi.consume")(function* (
     hub: CliproxyHub,
     accountId: string,
@@ -510,5 +583,5 @@ export const makeCliproxyApi = Effect.gen(function* () {
       ),
     );
   });
-  return { readAccounts, consume };
+  return { readAccounts, modelResetAt, consume };
 });

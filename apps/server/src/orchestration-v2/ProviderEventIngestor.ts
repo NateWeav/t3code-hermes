@@ -4,10 +4,12 @@ import {
   OrchestrationV2DomainEvent,
   OrchestrationV2StoredEvent,
   type OrchestrationV2PlanArtifact,
+  type OrchestrationV2ProviderFailure,
   type OrchestrationV2Run,
   type OrchestrationV2Subagent,
   type OrchestrationV2ThreadProjection,
   type ModelSelection,
+  type ProviderDriverKind,
   ProviderInstanceId,
   ProviderSessionId,
   ProviderThreadId,
@@ -21,6 +23,7 @@ import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlError from "effect/sql/SqlError";
 
@@ -31,6 +34,7 @@ import {
   ProviderTurnAnalytics,
   type ProviderTurnAnalyticsContext,
 } from "../telemetry/ProviderUsageAnalytics.ts";
+import * as UsageLimitSources from "../usage/UsageLimitSources.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import * as EventSink from "./EventSink.ts";
@@ -255,7 +259,26 @@ export const layer: Layer.Layer<
     const analytics = yield* ProviderTurnAnalytics;
     const agentScope = yield* AgentScope;
     const instances = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
+    const hubs = yield* Effect.serviceOption(UsageLimitSources.UsageLimitSources);
     const scope = yield* Effect.scope;
+
+    // Gateways such as CLIProxyAPI refuse without a reset time, but the hub knows its accounts' cooldowns.
+    const withHubResetAt = Effect.fn("ProviderEventIngestor.withHubResetAt")(function* (
+      threadId: ThreadId,
+      driver: ProviderDriverKind,
+      failure: OrchestrationV2ProviderFailure,
+    ) {
+      if (failure.class !== "usage_limit" || failure.resetAt != null || Option.isNone(hubs)) {
+        return failure;
+      }
+      const thread = yield* projections.getThread(threadId).pipe(Effect.option);
+      if (Option.isNone(thread)) return failure;
+      const resetAt = yield* hubs.value.limitResetAt({
+        driver,
+        model: thread.value.modelSelection.model,
+      });
+      return resetAt === null ? failure : { ...failure, resetAt };
+    });
     const completedTurnAnalytics = new Set<string>();
 
     const makeDomainEvent =
@@ -632,7 +655,7 @@ export const layer: Layer.Layer<
               const occurredAt = yield* DateTime.now;
               const failure = (yield* agentScope.oomKilled(input.threadId))
                 ? { ...input.event.failure, message: "Killed: out of memory.", code: "oom_kill" }
-                : input.event.failure;
+                : yield* withHubResetAt(input.threadId, input.event.driver, input.event.failure);
               return [
                 ...dismissed,
                 yield* makeDomainEvent(input, {

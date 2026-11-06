@@ -1,7 +1,6 @@
-import type { EnvironmentId, SecretReference, UnifiedSettings } from "@t3tools/contracts";
+import type { EnvironmentId, SecretReference } from "@t3tools/contracts";
 import { useState } from "react";
 
-import { useUpdateEnvironmentSettings } from "../../hooks/useSettings";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -13,7 +12,6 @@ import {
   DialogTitle,
 } from "../ui/dialog";
 import { Input } from "../ui/input";
-import { sourceIdFromUrl } from "./AddUsageLimitSourceDialog.logic";
 import { SecretSourceInput, useSecretSources } from "./SecretSourceInput";
 import { Label } from "../ui/label";
 
@@ -22,16 +20,18 @@ export function AddUsageLimitSourceDialog({
   open,
   onOpenChange,
   environmentId,
-  environmentLabel,
-  sources,
+  onAdd,
 }: {
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
+  /** Secret providers are listed from this environment. */
   readonly environmentId: EnvironmentId;
-  readonly environmentLabel: string;
-  readonly sources: UnifiedSettings["usageLimitSources"];
+  readonly onAdd: (input: {
+    url: string;
+    managementKey: string | SecretReference;
+    label: string;
+  }) => void;
 }) {
-  const updateSettings = useUpdateEnvironmentSettings(environmentId);
   const [label, setLabel] = useState("");
   const [url, setUrl] = useState("");
   const secretSources = useSecretSources(environmentId);
@@ -50,18 +50,7 @@ export function AddUsageLimitSourceDialog({
 
   const save = () => {
     if (!canSave) return;
-    const id = sourceIdFromUrl(trimmedUrl, sources);
-    updateSettings({
-      usageLimitSources: {
-        [id]: {
-          kind: "cliproxy",
-          ...(label.trim() ? { label: label.trim() } : {}),
-          url: trimmedUrl,
-          managementKey,
-          enabled: true,
-        },
-      },
-    });
+    onAdd({ url: trimmedUrl, managementKey, label });
     reset();
     onOpenChange(false);
   };
@@ -78,8 +67,9 @@ export function AddUsageLimitSourceDialog({
         <DialogHeader>
           <DialogTitle>Add a CLIProxyAPI hub</DialogTitle>
           <DialogDescription>
-            Show the quota of every account the hub pools, next to the providers on{" "}
-            {environmentLabel}. The key stays on that server.
+            Show the quota of every account the hub pools, and resume limited threads when its
+            accounts come back. The hub is added to every connected environment you manage, and the
+            key stays on their servers.
           </DialogDescription>
         </DialogHeader>
         <DialogPanel>

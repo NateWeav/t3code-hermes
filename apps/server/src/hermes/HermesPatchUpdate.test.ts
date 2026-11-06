@@ -224,6 +224,31 @@ describe("HermesPatchService.updateHermes", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("updates for a provider update holding the lock, and puts the patches back", () =>
+    Effect.gen(function* () {
+      const hermes = yield* makeHermes;
+      const patch = hermes.patch([hermes.newerVersion, hermes.olderVersion]);
+      yield* Effect.gen(function* () {
+        const service = yield* HermesPatchService;
+        yield* service.apply({ patchId: patch.id });
+
+        // As ProviderMaintenanceRunner calls it: inside the Hermes update lock.
+        const result = yield* providerUpdateLock(HERMES_UPDATE_LOCK_KEY).withPermits(1)(
+          service.updateInstallHoldingLock({ executable: hermes.binaryPath, env: process.env }),
+        );
+        assert.isFalse(result.updateFailed);
+        assert.deepStrictEqual(result.reapplied, [patch.id]);
+        assert.strictEqual(hermes.head(), hermes.newer);
+        assert.strictEqual(hermes.read(), "backend = resolve()\nremote_cwd = configured()\n");
+        assert.strictEqual(
+          NodeFS.readFileSync(hermes.log, "utf8").trim(),
+          "update --yes --keep-stash --no-gateway-restart",
+        );
+        assert.strictEqual(git(hermes.root, "stash", "list"), "");
+      }).pipe(withService(hermes.binaryPath, [patch]));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("updates past a patch whose change is already committed", () =>
     Effect.gen(function* () {
       const hermes = yield* makeHermes;

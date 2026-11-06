@@ -498,6 +498,25 @@ patches. The change is in `hermes acp` only. Run the patch's
 `tests/acp_adapter/test_gateway_model_picker_reuse.py` in a scratch checkout, as for
 `acp-delegation-progress`.
 
+## `acp-context-length-reuse`
+
+**Needed by:** a fast thread start on a custom model endpoint whose profile sets no
+`model.context_length`. Hermes resolves the model's context window on every agent build: a new
+session, its first turn, and the gateway's own lookups. On a custom endpoint each one probes it
+(`/models`, the local-server checks, Ollama `/api/show`). An endpoint that publishes no window
+answers the same way every time, and one that is slow to answer holds each new thread for the
+probes' 3 to 5 s timeouts, often twice. With the patch, the gateway remembers the window per
+provider, endpoint and model once every probe of a resolution got an answer. A resolution where a
+probe failed (no connection, a timeout, a 5xx or 429) is not remembered, so the next one asks again.
+`model.context_length` and per-model `custom_providers` windows still win. A window Hermes persists
+(after a context overflow, or from a probe that found one) replaces the remembered one. A server
+restarted with a different window shows after the gateway restarts. No wire change; T3 Code needs
+nothing for it.
+
+Verified against hermes-agent `90d6b98fd86d` (`main`, 2026-11-06), alone and after the other
+patches. Run the patch's `tests/gateway/test_context_probe_memo_gateway.py` in a scratch checkout,
+as for `acp-delegation-progress`.
+
 ## Retired
 
 **`acp-background-reports`** and **`acp-durable-completion-receipts`** hooked Hermes's in-process

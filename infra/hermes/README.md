@@ -262,7 +262,9 @@ from the profile. Editors without form elicitation get the stock toolset. `agent
 the `clarify` tool call itself, since the question already shows as its own card.
 
 Verified against hermes-agent `44ec783afd` (`main`, 2026-11-06), alone and after the other
-patches. Restart the Hermes gateway after applying it: the gateway decides the session's tools.
+patches. Its `90d6b98fd8` version (`main`, 2026-11-06) is the same change on top of
+`acp-editor-delegation`, which edits the same `session.create` call, and applies only after it.
+Restart the Hermes gateway after applying it: the gateway decides the session's tools.
 Run the patch's `tests/acp_adapter/test_gateway_editor_clarify_toolset.py` in a scratch checkout,
 as for `acp-delegation-progress`.
 

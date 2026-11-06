@@ -36,6 +36,8 @@ custom_providers:
 
 Put `CLIPROXYAPI_API_KEY=...` in `~/.hermes-bench/.env` (mode 600). Keep the provider name: committed fixtures pin the model id `custom:cliproxyapi-claude:claude-haiku-5-5`. The recorder refuses `~/.hermes` and its profiles.
 
+Hermes merges a machine-wide managed scope (`/etc/hermes/config.yaml`) over every home, and its keys win. The recorder and the stack suite point `HERMES_MANAGED_DIR` at an empty directory, so the benchmark home's config decides. A benchmark gateway that was already running keeps the scope it started with until it exits.
+
 ## Run it
 
 From `evals/`:

@@ -35,6 +35,7 @@ import {
   discardLostHermesTurnsOnPrompt,
   extractHermesAwaitableBackgroundTasks,
   hermesPromptFailure,
+  hermesSteering,
   hideHermesStopNotices,
   isHermesGatewayTurnLoss,
   makeHermesAcpRuntime,
@@ -246,6 +247,8 @@ export function makeHermesAcpAdapterFlavor(
       ),
     extractSubagentUpdates: makeHermesSubagentExtractor(),
     extractAwaitableBackgroundTasks: extractHermesAwaitableBackgroundTasks,
+    // Patched Hermes steers the running turn; stock Hermes steers by restarting it.
+    steering: hermesSteering,
     ...(options.assertComplete === undefined ? {} : { assertComplete: options.assertComplete }),
   };
 }

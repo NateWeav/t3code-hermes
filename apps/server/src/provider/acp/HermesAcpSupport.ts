@@ -13,6 +13,7 @@ import {
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
@@ -625,3 +626,43 @@ export function discardLostHermesTurnsOnPrompt(
       ),
   };
 }
+
+const HERMES_STEER_METHOD = "_hermes/steer";
+const decodeHermesSteerCapability = Schema.decodeUnknownOption(
+  Schema.Struct({ hermes: Schema.Struct({ steer: Schema.Literal(true) }) }),
+);
+const decodeHermesSteerResult = Schema.decodeUnknownOption(
+  Schema.Struct({ steered: Schema.Boolean }),
+);
+
+/**
+ * `hermes acp` with the `acp-active-steering` patch steers the running turn through
+ * `_hermes/steer`: Hermes answers whether that turn took the text, and a turn reads every steer
+ * it took before it ends, so there is no delivery report to wait for.
+ */
+export const hermesSteering = {
+  supported: (
+    initializeResult: AcpSessionRuntime.AcpSessionRuntimeStartResult["initializeResult"],
+  ) => Option.isSome(decodeHermesSteerCapability(initializeResult.agentCapabilities?._meta)),
+  send: (
+    runtime: AcpSessionRuntime.AcpSessionRuntime["Service"],
+    sessionId: string,
+    text: string,
+  ) =>
+    runtime.request(HERMES_STEER_METHOD, { sessionId, text }).pipe(
+      Effect.flatMap((result) =>
+        Option.match(decodeHermesSteerResult(result), {
+          onSome: ({ steered }) => Effect.succeed(steered ? {} : null),
+          onNone: () =>
+            Effect.fail(
+              new EffectAcpErrors.AcpRequestError({
+                code: -32603,
+                errorMessage: "Hermes did not say whether it took the steering message.",
+                method: HERMES_STEER_METHOD,
+                data: result,
+              }),
+            ),
+        }),
+      ),
+    ),
+};

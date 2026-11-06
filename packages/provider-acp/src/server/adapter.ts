@@ -421,16 +421,22 @@ export interface AcpAdapterV2Flavor {
   readonly subagentsIdleOnTurnCompletion?: boolean;
   readonly supportsCompaction?: boolean;
   /**
-   * Native steering: `send` queues a message into the running turn and returns the
-   * agent's id for it, which `injectedSteerId` reads from the update that delivers it.
+   * Native steering: `send` queues a message into the running turn. It answers with the
+   * agent's `id` for it when the agent reports reading it (`injectedSteerId` reads that id from
+   * the update that delivers it), with no id when the agent reads every steer it queued before
+   * its turn ends, or `null` when the agent refused it because the turn is ending.
    */
   readonly steering?: {
+    /** Whether this agent steers natively; absent, the flavor's capabilities decide. */
+    readonly supported?: (
+      initializeResult: AcpSessionRuntime.AcpSessionRuntimeStartResult["initializeResult"],
+    ) => boolean;
     readonly send: (
       runtime: AcpSessionRuntime.AcpSessionRuntime["Service"],
       sessionId: string,
       text: string,
-    ) => Effect.Effect<string, EffectAcpErrors.AcpError>;
-    readonly injectedSteerId: (
+    ) => Effect.Effect<{ readonly id?: string } | null, EffectAcpErrors.AcpError>;
+    readonly injectedSteerId?: (
       notification: EffectAcpSchema.SessionNotification,
     ) => string | undefined;
   };
@@ -796,6 +802,7 @@ function negotiatedCapabilities(
   started: AcpSessionRuntime.AcpSessionRuntimeStartResult,
   modelOptionArrivesLate: boolean,
   forksFromTurn: boolean,
+  steersNatively: boolean,
 ): OrchestrationV2ProviderCapabilities {
   const agent = started.initializeResult.agentCapabilities ?? {};
   const session = agent.sessionCapabilities;
@@ -818,6 +825,15 @@ function negotiatedCapabilities(
       canForkThread: canFork,
       canForkFromTurn: canFork && forksFromTurn,
     },
+    turns: steersNatively
+      ? {
+          ...base.turns,
+          supportsActiveSteering: true,
+          activeSteeringInterruptsTools: false,
+          // Native steers carry text only, so a message with images restarts the turn.
+          activeSteeringAcceptsAttachments: false,
+        }
+      : base.turns,
     tools: {
       ...base.tools,
       supportsMcpTools: true,
@@ -6324,7 +6340,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                   context.nativePromptId ??= nativePromptId;
                 }
               }
-              const injectedSteerId = flavor.steering?.injectedSteerId(rawNotification);
+              const injectedSteerId = flavor.steering?.injectedSteerId?.(rawNotification);
               if (injectedSteerId !== undefined) {
                 yield* Deferred.succeed(steerInjection(injectedSteerId), undefined);
               }
@@ -7185,11 +7201,15 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
         yield* Ref.set(activeSessionId, started.sessionId);
         yield* setActiveSessionSetup(started);
         rememberTerminalEnvironment(started.sessionId, yield* readMcpContext(input.threadId));
+        // Undefined: the flavor's capabilities decide.
+        const steersNatively = flavor.steering?.supported?.(started.initializeResult);
+        const steering = steersNatively === false ? undefined : flavor.steering;
         const capabilities = negotiatedCapabilities(
           flavor.capabilities,
           started,
           flavor.modelOptionArrivesLate === true,
           flavor.forkFromTurn?.supported(started.initializeResult) === true,
+          steersNatively === true,
         );
         const canLoadSession = started.initializeResult.agentCapabilities?.loadSession === true;
         const canResumeSession =
@@ -8748,7 +8768,6 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               }),
           steerTurn: Effect.fn("AcpAdapterV2.steerTurn")(
             function* (turnInput) {
-              const steering = flavor.steering;
               // The agent takes text only, so a steer with attachments waits for the next turn.
               if (steering === undefined || turnInput.message.attachments.length > 0) {
                 return yield* new ProviderAdapter.ProviderAdapterSteerRunUnsupportedError({
@@ -8774,24 +8793,34 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                   Effect.timeoutOption(startHold.bound),
                 );
               }
-              const steerId = yield* steering.send(
+              const queued = yield* steering.send(
                 runtime,
                 context.nativeThreadId,
                 turnInput.message.text,
               );
-              const injected = steerInjection(steerId);
+              // No id: the agent reads every steer it queued before its turn ends.
+              if (queued !== null && queued.id === undefined) return;
+              const injected = queued?.id === undefined ? undefined : steerInjection(queued.id);
               // The agent reads a steer at its next step. One that lands after the last
-              // step is dropped, and the turn settles right after; the orchestrator then
-              // sends it as a follow-up. The bound keeps Stop from queueing behind a tool.
+              // step is dropped or refused, and the turn settles right after; the orchestrator
+              // then sends it as a follow-up. The bound keeps Stop from queueing behind a tool.
               const outcome = yield* Effect.raceFirst(
-                Deferred.await(injected).pipe(Effect.as("injected" as const)),
+                injected === undefined
+                  ? Effect.never
+                  : Deferred.await(injected).pipe(Effect.as("injected" as const)),
                 Deferred.await(context.promptWireSettled).pipe(Effect.as("settled" as const)),
               ).pipe(Effect.timeoutOption(STEER_DELIVERY_BOUND));
-              steerInjections.delete(steerId);
-              if (Option.contains(outcome, "settled") && !(yield* Deferred.isDone(injected))) {
+              if (queued?.id !== undefined) steerInjections.delete(queued.id);
+              if (
+                injected === undefined ||
+                (Option.contains(outcome, "settled") && !(yield* Deferred.isDone(injected)))
+              ) {
                 return yield* new ProviderAdapter.ProviderAdapterProtocolError({
                   driver,
-                  detail: `Provider turn ${turnInput.providerTurnId} ended before it read the steering message.`,
+                  detail:
+                    injected === undefined
+                      ? `Provider turn ${turnInput.providerTurnId} refused the steering message as it ended.`
+                      : `Provider turn ${turnInput.providerTurnId} ended before it read the steering message.`,
                 });
               }
             },

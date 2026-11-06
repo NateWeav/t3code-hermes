@@ -130,7 +130,7 @@ const kiroSteering = {
     runtime.request(KIRO_STEER_METHOD, { sessionId, message: text }).pipe(
       Effect.flatMap((result) =>
         Option.match(decodeKiroSteerResult(result), {
-          onSome: (decoded) => Effect.succeed(decoded.messageId),
+          onSome: (decoded) => Effect.succeed({ id: decoded.messageId }),
           onNone: () =>
             Effect.fail(
               new EffectAcpErrors.AcpRequestError({

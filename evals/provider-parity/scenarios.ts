@@ -177,9 +177,12 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
   {
     name: "claude_nested_subagent_model",
     facet: "subagents",
-    hermes: twin(
-      "The prompt drives Claude's Agent tool, and the scenario is a subagent nested in a subagent that inherits its owner's model. With the subagent-model patch delegate_task takes a per-task model (the lifecycle twin shows it), but Hermes's default delegation.max_spawn_depth is 1, and both the delegation patch and T3 drop grandchild frames, so no twin can show the nesting.",
-    ),
+    hermes: {
+      kind: "twin",
+      reason:
+        "The prompt drives Claude's Agent tool. The Hermes twin names the outer task's model with delegate_task's per-task model (the subagent-model patch), and the outer subagent launches its own (the subagents-in-the-turn patch).",
+      twin: "hermes_nested_subagent_model",
+    },
   },
 
   // Background work that outlives the turn

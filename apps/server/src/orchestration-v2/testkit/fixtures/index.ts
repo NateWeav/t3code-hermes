@@ -91,6 +91,8 @@ import { assertGrokSubagentLineageOutput } from "./grok_subagent_lineage/output.
 import { hermesBackgroundSubagentAfterRootInput } from "./hermes_background_subagent_after_root/input.ts";
 import { hermesBackgroundSubagentLifecycleInput } from "./hermes_background_subagent_lifecycle/input.ts";
 import { assertHermesBackgroundSubagentLifecycleDetails } from "./hermes_background_subagent_lifecycle/output.ts";
+import { hermesNestedSubagentModelInput } from "./hermes_nested_subagent_model/input.ts";
+import { assertHermesNestedSubagentModelDetails } from "./hermes_nested_subagent_model/output.ts";
 import { hermesBackgroundTaskAfterRootInput } from "./hermes_background_task_after_root/input.ts";
 import { hermesBackgroundTaskInterruptInput } from "./hermes_background_task_interrupt/input.ts";
 import { hermesBackgroundTaskWakeInput } from "./hermes_background_task_wake/input.ts";
@@ -770,6 +772,24 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         runContinuationWorker: true,
         assertOutput: assertBackgroundSubagentLifecycleOutput,
         assertProviderDetails: assertHermesBackgroundSubagentLifecycleDetails,
+      },
+    ],
+  },
+  {
+    name: "hermes_nested_subagent_model",
+    buildInput: hermesNestedSubagentModelInput,
+    providers: [
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./hermes_nested_subagent_model/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        // A gateway follow-up turn would surface as a second run and fail the one-run contract.
+        runContinuationWorker: true,
+        assertOutput: assertNestedSubagentModelOutput,
+        assertProviderDetails: assertHermesNestedSubagentModelDetails,
       },
     ],
   },

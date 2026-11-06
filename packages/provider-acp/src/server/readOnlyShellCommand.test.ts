@@ -1,0 +1,130 @@
+import { assert, describe, it } from "@effect/vitest";
+
+import { isReadOnlyShellCommand } from "./readOnlyShellCommand.ts";
+
+describe("isReadOnlyShellCommand", () => {
+  it.each([
+    "cat package.json",
+    "cat 'my file.txt' \"other file\"",
+    "ls -la src",
+    "ls *.json",
+    "head -n 20 README.md",
+    "tail -5 log.txt",
+    "grep -rn 'foo|bar' src",
+    'grep -n "a\\|b" file.ts',
+    "rg -n --glob '*.ts' needle",
+    "wc -l package.json tsconfig.json",
+    "find . -name '*.ts' -type f",
+    "pwd",
+    "stat package.json",
+    "file package.json",
+    "tree -L 2 -I node_modules",
+    "git status --short",
+    "git log --oneline -10",
+    "git diff HEAD~1 -- src",
+    "git show HEAD:package.json",
+    "git rev-parse --show-toplevel",
+    "git ls-files",
+    "git --no-pager log -3",
+    "cat package.json | grep name | wc -l",
+    "ls && cat package.json",
+    "cat package.json && echo '---' && cat tsconfig.json",
+    "ls || pwd",
+    "cat a.txt; cat b.txt",
+    "cat a.txt\ncat b.txt",
+    "cat ~/notes.txt",
+    "  cat package.json  ",
+  ])("allows %j", (command) => {
+    assert.isTrue(isReadOnlyShellCommand(command));
+  });
+
+  it.each([
+    // Writes and redirections
+    "cat x > y",
+    "cat x >> y",
+    "cat x 2>/dev/null",
+    "cat < x",
+    "cat x | tee y",
+    "echo x > y",
+    "cat x &> y",
+    // Command and process substitution, expansions, heredocs
+    "grep a $(rm x)",
+    "grep a `rm x`",
+    'grep "$(rm x)" file',
+    "cat <(rm x)",
+    "cat $HOME/x",
+    "cat ${x:=y}",
+    "cat <<EOF\nx\nEOF",
+    "ls {-delete,x}",
+    // Background, subshells, groups, negation, comments
+    "cat x &",
+    "(rm x)",
+    "{ cat x; }",
+    "! cat x",
+    "cat x # comment",
+    // Chains and pipes with a command that is not allowed
+    "ls; rm -rf x",
+    "ls && rm -rf x",
+    "ls || rm -rf x",
+    "ls\nrm -rf x",
+    "cat x | sh",
+    "cat x |& grep y",
+    "cat x | xargs rm",
+    // Empty stages and syntax
+    "",
+    "   ",
+    "| cat x",
+    "cat x |",
+    "cat x &&",
+    "cat x;;",
+    "cat 'unterminated",
+    'cat "unterminated',
+    "cat x \\",
+    // Program names
+    "rm -rf x",
+    "FOO=1 cat x",
+    "/bin/rm x",
+    "c* x",
+    "sh -c 'cat x'",
+    "command cat x",
+    // find
+    "find . -delete",
+    "find . -name x -exec rm {} \\;",
+    "find . -execdir rm {} +",
+    "find . -ok rm {} \\;",
+    "find . -okdir rm {} \\;",
+    "find . -fprint out.txt",
+    "find . -fprintf out.txt %p",
+    "find . -fls out.txt",
+    "find . -de'lete'",
+    "find . -name *.ts",
+    // git
+    "git log --output=f",
+    "git diff --output f",
+    "git show --outp=f",
+    "git diff -o f",
+    "git -c core.pager=sh log",
+    "git -C .. status",
+    "git commit -m x",
+    "git push",
+    "git checkout -- .",
+    "git stash",
+    "git diff *",
+    // Other programs with options that write or run commands
+    "rg --pre sh needle",
+    "rg --pre=sh needle",
+    "rg --hostname-bin=sh needle",
+    "rg needle *",
+    "tree -o out.txt",
+    "tree -aR -H .",
+    "file -C -m magic",
+    "file --compile -m magic",
+    "file *",
+    // Characters outside printable ASCII
+    "cat x\rrm -rf y",
+    "cat x\u0000",
+    "cat caf\u00e9.txt",
+  ])("refuses %j", (command) => {
+    assert.isFalse(isReadOnlyShellCommand(command));
+  });
+});

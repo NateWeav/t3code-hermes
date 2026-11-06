@@ -4,6 +4,8 @@ import type * as EffectAcpSchema from "effect-acp/compat";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
+import { isReadOnlyShellCommand } from "./readOnlyShellCommand.ts";
+
 export interface AcpRuntimePolicy {
   readonly runtimeMode: RuntimeMode;
   readonly cwd: string | null;
@@ -71,6 +73,7 @@ function acpCanonicalPathForContainment(path: string): string | undefined {
 interface AcpPolicyOperation {
   readonly kind: string | null | undefined;
   readonly locations: ReadonlyArray<{ readonly path: string }> | null | undefined;
+  readonly command?: string | undefined;
 }
 
 function acpPolicyRequiresApproval(runtimePolicy: AcpRuntimePolicy): boolean {
@@ -155,7 +158,11 @@ function acpOperationDisposition(
   const sandboxPolicy = unknownRecord(runtimePolicy.sandboxPolicy);
   switch (sandboxPolicy?.type) {
     case "readOnly":
-      return "deny";
+      return toolKind === "execute" &&
+        operation.command !== undefined &&
+        isReadOnlyShellCommand(operation.command)
+        ? "allow"
+        : "deny";
     case "workspaceWrite":
       if (isAcpMutationKind(toolKind)) {
         return acpWorkspaceWriteAllowsMutation(
@@ -189,13 +196,16 @@ function isAcpMutationKind(toolKind: string): boolean {
   return toolKind === "edit" || toolKind === "delete" || toolKind === "move";
 }
 
+/** `command` is the exact text an execute request runs, from a flavor whose requests carry it. */
 export function acpPermissionDisposition(
   runtimePolicy: AcpRuntimePolicy,
   request: EffectAcpSchema.RequestPermissionRequest,
+  command?: string,
 ): AcpPermissionDisposition {
   return acpOperationDisposition(runtimePolicy, {
     kind: request.toolCall.kind,
     locations: request.toolCall.locations,
+    command,
   });
 }
 

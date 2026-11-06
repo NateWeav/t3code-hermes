@@ -62,7 +62,8 @@ export interface ProviderEventRoutingState {
   readonly ownedThreadIds: ReadonlySet<ThreadId>;
   // After root settlement, new children belong to the live run unless their coordinator still holds this run open.
   readonly rootTurnEnded: boolean;
-  readonly workflowMemberParents: ReadonlyMap<ThreadId, ThreadId>;
+  /** Late children a row this run owns announced, by the parent thread they must open under. */
+  readonly enrolledChildParents: ReadonlyMap<ThreadId, ThreadId>;
   readonly ownedProviderThreadIds: ReadonlySet<ProviderThreadId>;
   readonly ownedProviderTurns: ReadonlyMap<ProviderTurnId, ProviderThreadId>;
   readonly inheritedBackgroundTurnItems: ReadonlyMap<TurnItemId, OrchestrationV2Run["id"]>;
@@ -338,7 +339,7 @@ export function makeProviderEventRoutingState(input: {
   return {
     ownedThreadIds: new Set([input.identity.threadId, ...(input.relatedThreadIds ?? [])]),
     rootTurnEnded: false,
-    workflowMemberParents: new Map(),
+    enrolledChildParents: new Map(),
     ownedProviderThreadIds: new Set([
       input.identity.providerThreadId,
       ...(input.relatedProviderThreadIds ?? []),
@@ -389,7 +390,7 @@ export function routeProviderEvent(
         event.appThread.lineage.parentThreadId !== null &&
         ownsThread(event.appThread.lineage.parentThreadId) &&
         (!state.rootTurnEnded ||
-          state.workflowMemberParents.get(event.appThread.id) ===
+          state.enrolledChildParents.get(event.appThread.id) ===
             event.appThread.lineage.parentThreadId);
       if (!isOwnedSubagent) {
         return [false, state];
@@ -465,6 +466,20 @@ export function routeProviderEvent(
               ownedThreadIds: new Set([...state.ownedThreadIds, coordinator.childThreadId]),
             }
           : state;
+      // A native subagent another one launched (no run of its own, inside a child thread this run
+      // owns) announces its thread before creating it, so it opens even after the root turn ended.
+      if (
+        coordinator.origin === "provider_native" &&
+        coordinator.runId === null &&
+        coordinator.childThreadId !== null &&
+        ownsChildThread(coordinator.threadId) &&
+        isOrchestrationV2WorkActive(coordinator.status) &&
+        !state.enrolledChildParents.has(coordinator.childThreadId)
+      ) {
+        const enrolledChildParents = new Map(state.enrolledChildParents);
+        enrolledChildParents.set(coordinator.childThreadId, coordinator.threadId);
+        return [true, { ...adopted, enrolledChildParents }];
+      }
       if (
         !ownsRun(coordinator.runId) ||
         coordinator.workflow === undefined ||
@@ -472,13 +487,13 @@ export function routeProviderEvent(
       ) {
         return [belongs, adopted];
       }
-      const workflowMemberParents = new Map(state.workflowMemberParents);
+      const enrolledChildParents = new Map(state.enrolledChildParents);
       for (const member of coordinator.workflow.agents) {
         if (member.childThreadId !== undefined) {
-          workflowMemberParents.set(member.childThreadId, coordinator.childThreadId);
+          enrolledChildParents.set(member.childThreadId, coordinator.childThreadId);
         }
       }
-      return [true, { ...adopted, workflowMemberParents }];
+      return [true, { ...adopted, enrolledChildParents }];
     }
     case "message.updated":
       return [ownsRun(event.message.runId) || ownsChildThread(event.message.threadId), state];

@@ -1,0 +1,318 @@
+diff --git a/acp_adapter/gateway_server.py b/acp_adapter/gateway_server.py
+index b1d85bdbd9..62b8b34aa4 100644
+--- a/acp_adapter/gateway_server.py
++++ b/acp_adapter/gateway_server.py
+@@ -1383,6 +1383,19 @@ class GatewayACPAgent(GatewayReplyMixin, acp.Agent):
+             logger.info("ACP clarify viewer detached or control expired", exc_info=True)
+             return False
+ 
++    def _permission_meta(self, session_id, prompt):
++        """``_meta.hermes.subagent`` for a delegated child's approval: its ``subagent_id``, and the
++        ``delegate_task`` call whose ``hermesDelegation`` updates report it, when this viewer saw that call."""
++        subagent_id = prompt.get("subagent_id")
++        if not isinstance(subagent_id, str):
++            return {}
++        subagent = {"subagentId": subagent_id}
++        delegations = getattr(self, "_delegations", None)  # acp-delegation-progress
++        owner = delegations.owners.get((session_id, subagent_id)) if delegations is not None else None
++        if owner is not None:
++            subagent["toolCallId"] = owner[1]
++        return {"hermes": {"subagent": subagent}}
++
+     async def _answer_permission(self, session_id, prompt):
+         from acp.schema import AllowedOutcome
+         from acp_adapter.permissions import (
+@@ -1399,7 +1412,7 @@ class GatewayACPAgent(GatewayReplyMixin, acp.Agent):
+             else:
+                 tool_call = _build_permission_tool_call(prompt.get('command', ''), prompt.get('description', ''))
+             response = await self._conn.request_permission(session_id=self._editor_id(session_id),
+-                tool_call=tool_call, options=options)
++                tool_call=tool_call, options=options, **self._permission_meta(session_id, prompt))
+             await self._close_card(self._editor_id(session_id), tool_call, options, response)
+             # Transport loss/cancel is not a denial: the canonical waiter belongs
+             # to the execution and may still be answered by another viewer.
+diff --git a/agent/delegation_context.py b/agent/delegation_context.py
+index 6e94f8d3a9..e9f36d777a 100644
+--- a/agent/delegation_context.py
++++ b/agent/delegation_context.py
+@@ -13,6 +13,8 @@ from contextvars import ContextVar, Token
+ from typing import Iterator, Mapping, MutableMapping, overload
+ 
+ _DELEGATED_CHILD_CONTEXT: ContextVar[bool] = ContextVar("hermes_delegated_child_context", default=False)
++# The registered ``subagent_id`` of the child running here: an approval it raises names it to viewers.
++_DELEGATED_SUBAGENT_ID: ContextVar[str | None] = ContextVar("hermes_delegated_subagent_id", default=None)
+ # Any in-process execution that is NOT the dispatcher-owned worker (cron jobs). Kept separate
+ # so delegate_task-specific behaviour (subprocess env scrubbing, its error strings) is unchanged.
+ _NON_DISPATCHER_OWNED_CONTEXT: ContextVar[bool] = ContextVar("hermes_non_dispatcher_owned_context", default=False)
+@@ -26,20 +28,27 @@ KANBAN_ENV_KEYS: tuple[str, ...] = (
+ 
+ 
+ @contextmanager
+-def delegated_child_context(session_id: str | None = None) -> Iterator[None]:
++def delegated_child_context(session_id: str | None = None, subagent_id: str | None = None) -> Iterator[None]:
+     """Mark child execution and isolate its task-local session identity. Even a context
+     entered without an id must restore the parent's session ContextVar (child
+     construction calls ``set_current_session_id``)."""
+     token = _DELEGATED_CHILD_CONTEXT.set(True)
++    subagent_token = _DELEGATED_SUBAGENT_ID.set(subagent_id)
+     try:
+         from gateway.session_context import scoped_current_session_id  # lazy: it calls is_delegated_child_context()
+ 
+         with scoped_current_session_id(session_id):
+             yield
+     finally:
++        _DELEGATED_SUBAGENT_ID.reset(subagent_token)
+         _DELEGATED_CHILD_CONTEXT.reset(token)
+ 
+ 
++def delegated_subagent_id() -> str | None:
++    """The registered ``subagent_id`` of the delegate_task child this code runs for, if any."""
++    return _DELEGATED_SUBAGENT_ID.get()
++
++
+ def is_delegated_child_context() -> bool:
+     """Return True while code is running for a delegate_task child."""
+     return bool(_DELEGATED_CHILD_CONTEXT.get())
+diff --git a/gateway/session_pending_controls.py b/gateway/session_pending_controls.py
+index 4ff9879080..2387e1428c 100644
+--- a/gateway/session_pending_controls.py
++++ b/gateway/session_pending_controls.py
+@@ -32,6 +32,8 @@ class PendingControls:
+             if 'edit' in data:
+                 prompt['edit'] = deepcopy(data['edit'])
+                 prompt['choices'] = ['once', 'deny']
++            if isinstance(data.get('subagent_id'), str):
++                prompt['subagent_id'] = data['subagent_id']
+             if timeout_s is not None:
+                 prompt['timeout_s'] = timeout_s
+             self.pending[prompt_id] = (route, prompt)
+diff --git a/tests/acp_adapter/test_gateway_subagent_approvals.py b/tests/acp_adapter/test_gateway_subagent_approvals.py
+new file mode 100644
+index 0000000000..d3028225db
+--- /dev/null
++++ b/tests/acp_adapter/test_gateway_subagent_approvals.py
+@@ -0,0 +1,193 @@
++"""A foreground subagent's approval reaches the editor through its parent's ACP session, naming the subagent.
++
++Real gateway daemon, real ``hermes acp`` stdio process (``acp_adapter.entry``, the ``GatewayACPAgent`` viewer),
++real parent and child ``AIAgent``s against a loopback model. The editor asks for foreground delegation
++(``clientCapabilities._meta.hermes.delegation``), so a child runs while the parent's turn is open and asks on
++the parent's approval route. A background child that asks after that turn ended still has no one to ask, and
++fails closed.
++"""
++import asyncio
++from http.server import BaseHTTPRequestHandler
++import json
++import re
++import shlex
++import threading
++
++import pytest
++
++from tests.acp_adapter.test_gateway_sessions import editor
++from tests.waiting import async_wait_until
++
++
++def _text(content):
++    if isinstance(content, list):
++        return "".join(part.get("text", "") for part in content if isinstance(part, dict))
++    return content or ""
++
++
++class ScriptedModel(BaseHTTPRequestHandler):
++    """Agents told apart by the ``LEVEL<n>_TASK`` goal in their first user message (none: the root).
++
++    Down to ``server.target``, each agent delegates one level down; the deepest runs ``server.command`` with
++    ``terminal`` and answers ``Written.``. Each launcher passes its child's answer up."""
++
++    def log_message(self, *args):
++        pass
++
++    def do_GET(self):
++        self.send_response(200)
++        self.send_header("Content-Type", "application/json")
++        self.end_headers()
++        self.wfile.write(json.dumps({"data": [{"id": "local-wire-stub", "object": "model"}]}).encode())
++
++    def do_POST(self):
++        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
++        messages = body.get("messages") or []
++        offered = {t["function"]["name"] for t in body.get("tools") or []}
++        asked = " ".join(_text(m.get("content")) for m in messages if m.get("role") == "user")
++        results = [_text(m.get("content")) for m in messages if m.get("role") == "tool"]
++        level = max((int(n) for n in re.findall(r"LEVEL(\d)_TASK", asked)), default=0)
++        if offered:
++            self.server.calls.append({"level": level, "results": results})
++        call = None
++        if not offered:
++            reply = "ok"
++        elif results:
++            reply = "Written." if level == self.server.target or "Written." in results[-1] else "Failed."
++        elif level < self.server.target:
++            call = ("delegate_task", {"tasks": [{"goal": f"LEVEL{level + 1}_TASK: do the work"}],
++                                      **({"background": True} if level == 0 and self.server.background else {})})
++        else:
++            if self.server.background:  # a background child asks only once the turn that launched it ended
++                self.server.turn_ended.wait(60)
++            call = ("terminal", {"command": self.server.command})
++        message = {"role": "assistant", "content": reply} if call is None else {
++            "role": "assistant", "content": None, "tool_calls": [{
++                "index": 0, "id": f"call-{level}-{len(self.server.calls)}", "type": "function",
++                "function": {"name": call[0], "arguments": json.dumps(call[1])}}]}
++        finish = "stop" if call is None else "tool_calls"
++        try:
++            self.send_response(200)
++            self.send_header("Content-Type", "text/event-stream" if body.get("stream") else "application/json")
++            self.end_headers()
++            base = {"id": "local", "model": "local-wire-stub", "created": 1}
++            if body.get("stream"):
++                for delta, end in [(message, None), ({}, finish)]:
++                    chunk = {**base, "object": "chat.completion.chunk",
++                             "choices": [{"index": 0, "delta": delta, "finish_reason": end}]}
++                    self.wfile.write(("data: " + json.dumps(chunk) + "\n\n").encode())
++                self.wfile.write(b"data: [DONE]\n\n")
++            else:
++                self.wfile.write(json.dumps({**base, "object": "chat.completion", "choices": [
++                    {"index": 0, "message": message, "finish_reason": finish}]}).encode())
++            self.wfile.flush()
++        except OSError:
++            pass
++
++
++@pytest.fixture
++def scripted(model_peer, tmp_path):
++    model_peer.RequestHandlerClass = ScriptedModel
++    model_peer.calls, model_peer.target, model_peer.background = [], 1, False
++    model_peer.turn_ended = threading.Event()
++    target = tmp_path / "owned-removal"
++    target.mkdir()
++    (target / "owned.txt").write_text("disposable")
++    model_peer.removal = target
++    model_peer.command = "rm -r -- " + shlex.quote(str(target))
++    yield model_peer
++    model_peer.turn_ended.set()
++
++
++async def _session(acp, tmp_path):
++    capabilities = {"_meta": {"hermes": {"delegation": {"foreground": True, "maxSpawnDepth": 3}}}}
++    assert "result" in await acp.rpc("initialize", protocolVersion=1, clientCapabilities=capabilities)
++    created = await acp.rpc("session/new", cwd=str(tmp_path), mcpServers=[])
++    assert "result" in created, created
++    return created["result"]["sessionId"]
++
++
++async def _answer(acp, frame, option_id):
++    acp.process.stdin.write(json.dumps({"jsonrpc": "2.0", "id": frame["id"], "result": {
++        "outcome": {"outcome": "selected", "optionId": option_id}}}).encode() + b"\n")
++    await acp.process.stdin.drain()
++
++
++def _permission(acp):
++    return next((f for f in acp.frames if f.get("method") == "session/request_permission"), None)
++
++
++def _delegations(acp):
++    """The ``hermesDelegation`` snapshots ``acp-delegation-progress`` put on the parent's call, in order."""
++    return [f["params"]["update"]["rawOutput"]["hermesDelegation"] for f in acp.frames
++            if f.get("method") == "session/update"
++            and isinstance((f["params"]["update"].get("rawOutput") or {}).get("hermesDelegation"), dict)]
++
++
++def _owned(acp, subagent_id):
++    """The ``delegate_task`` call whose ``hermesDelegation`` updates report *subagent_id*."""
++    return next((f["params"]["update"]["toolCallId"] for f in acp.frames if f.get("method") == "session/update"
++                 and ((f["params"]["update"].get("rawOutput") or {}).get("hermesDelegation") or {}).get("subagent_id")
++                 == subagent_id), None)
++
++
++@pytest.mark.platforms("linux")
++@pytest.mark.asyncio
++@pytest.mark.parametrize("depth", [1, 2], ids=["child", "grandchild"])
++async def test_a_foreground_subagent_asks_the_editor_and_names_itself(daemon, tmp_path, scripted, depth):
++    scripted.target = depth
++    async with editor(daemon, tmp_path) as acp:
++        sid = await _session(acp, tmp_path)
++        turn = asyncio.create_task(acp.rpc("session/prompt", sessionId=sid,
++                                           prompt=[{"type": "text", "text": "Please do the work"}]))
++        permission = await async_wait_until(lambda: _permission(acp), 60, what="the subagent's permission request")
++        assert scripted.removal.exists()
++        # The deepest subagent ran the command; a grandchild reports on its top-level ancestor's call.
++        asking = {d["subagent_id"] for d in _delegations(acp) if d["depth"] == depth - 1}
++        assert len(asking) == 1
++        subagent_id = asking.pop()
++        assert permission["params"]["_meta"] == {"hermes": {"subagent": {
++            "subagentId": subagent_id, "toolCallId": _owned(acp, subagent_id)}}}
++        assert _owned(acp, subagent_id) is not None
++        assert permission["params"]["toolCall"]["rawInput"]["command"] == scripted.command
++        await _answer(acp, permission, "allow_once")
++        reply = await asyncio.wait_for(turn, 60)
++        assert reply.get("result", {}).get("stopReason") == "end_turn", reply
++    assert not scripted.removal.exists()
++    assert "Written." in _at(scripted, 0)[-1]["results"][-1]
++
++
++@pytest.mark.platforms("linux")
++@pytest.mark.asyncio
++async def test_the_parent_asks_without_naming_a_subagent(daemon, tmp_path, scripted):
++    scripted.target = 0
++    async with editor(daemon, tmp_path) as acp:
++        sid = await _session(acp, tmp_path)
++        turn = asyncio.create_task(acp.rpc("session/prompt", sessionId=sid,
++                                           prompt=[{"type": "text", "text": "Please do the work"}]))
++        permission = await async_wait_until(lambda: _permission(acp), 60, what="the parent's permission request")
++        assert "_meta" not in permission["params"]
++        await _answer(acp, permission, "allow_once")
++        reply = await asyncio.wait_for(turn, 60)
++        assert reply.get("result", {}).get("stopReason") == "end_turn", reply
++    assert not scripted.removal.exists()
++
++
++@pytest.mark.platforms("linux")
++@pytest.mark.asyncio
++async def test_a_background_subagent_that_asks_after_the_turn_fails_closed(daemon, tmp_path, scripted):
++    scripted.background = True
++    async with editor(daemon, tmp_path) as acp:
++        sid = await _session(acp, tmp_path)
++        reply = await asyncio.wait_for(acp.rpc("session/prompt", sessionId=sid,
++                                               prompt=[{"type": "text", "text": "Please do the work"}]), 60)
++        assert reply.get("result", {}).get("stopReason") == "end_turn", reply
++        scripted.turn_ended.set()
++        await async_wait_until(lambda: [c for c in _at(scripted, 1) if c["results"]], 60,
++                               what="the subagent's command result")
++    assert _permission(acp) is None
++    assert scripted.removal.exists()
++
++
++def _at(scripted, level):
++    return [call for call in scripted.calls if call["level"] == level]
+diff --git a/tools/approval_gateway_wait.py b/tools/approval_gateway_wait.py
+index 398ee417e2..f83ea308b9 100644
+--- a/tools/approval_gateway_wait.py
++++ b/tools/approval_gateway_wait.py
+@@ -151,8 +151,12 @@ def _await_gateway_decision(session_key: str, notify_cb, approval_data: dict, *,
+     the leader's ``session``/``always``/``deny``/timeout; a ``once`` covers only
+     the leader, so the followers fall through to ONE fresh prompt they coalesce on."""
+     from tools import approval as _approval
++    from agent.delegation_context import delegated_subagent_id
+     from agent.terminal_approval_batch import approval_published, preparing_terminal_approval, register_prepared_approval
+ 
++    # A delegated child asks on its parent's route; viewers show which child is asking.
++    if (subagent_id := delegated_subagent_id()) is not None:
++        approval_data = {**approval_data, "subagent_id": subagent_id}
+     primary_key = approval_data.get("pattern_key", "")
+     if surface == "gateway":
+         surface = _ctx.gateway_approval_surface()
+diff --git a/tools/delegate_tool_child_run.py b/tools/delegate_tool_child_run.py
+index 0b905a1e53..e39e128faf 100644
+--- a/tools/delegate_tool_child_run.py
++++ b/tools/delegate_tool_child_run.py
+@@ -940,7 +940,8 @@ class _ChildRun:
+             from agent.delegation_context import delegated_child_context
+             from tools.delegate_tool_routes import child_profile_scope
+             # A profile-routed child converses as that profile (config, secrets, skills, terminal policy).
+-            with child_profile_scope(child), delegated_child_context(str(getattr(child, "session_id", "") or "")):
++            with child_profile_scope(child), delegated_child_context(
++                    str(getattr(child, "session_id", "") or ""), self.subagent_id):
+                 return child.run_conversation(
+                     user_message=user_message, task_id=self.child_task_id, stream_callback=self.relay_text,
+                     **history_kwargs,

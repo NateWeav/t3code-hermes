@@ -203,6 +203,11 @@ gateway after applying the patch. The patch's `tests/acp_adapter/test_gateway_su
 drives a real gateway daemon and `hermes acp` process, covering a child, a grandchild, the parent's
 own approval, and a background child. Run it in a scratch checkout, as for `acp-delegation-progress`.
 
+The patch is listed last. Its `ca4360692055` version applies alone and after the patches made
+before `acp-subagent-model-continue`. Its `90d6b98fd8` version (`main`, 2026-11-06) is the same
+change on top of every other patch, including `acp-subagent-model-continue`, which changes the same
+child run, and applies only after them.
+
 ## `acp-fast-mode`
 
 **Needed by:** the Fast Mode toggle for Hermes models. Stock Hermes applies `/fast` only in its CLI,

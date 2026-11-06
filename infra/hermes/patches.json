@@ -77,18 +77,6 @@
       ]
     },
     {
-      "id": "acp-subagent-approvals",
-      "title": "Subagent approvals",
-      "neededFor": "Approvals that show under the subagent that asked, as Codex's do. Without it, a subagent's approval reaches you as if its parent had asked.",
-      "versions": [
-        {
-          "hermesCommit": "ca4360692055bdb4df3a695c164646e528891da8",
-          "hermesCommitDate": "2026-11-06T04:01:15Z",
-          "file": "acp-subagent-approvals/ca4360692055.patch"
-        }
-      ]
-    },
-    {
       "id": "acp-background-reports",
       "title": "Background process reports",
       "neededFor": "Monitoring status while Hermes's background processes run, and waking the agent when they finish. Without it, a background command reads as finished the moment it starts, and the agent never hears that it is done.",
@@ -179,6 +167,23 @@
           "hermesCommit": "5b32cfc230078417fc523e12b9aabbc9b59f684b",
           "hermesCommitDate": "2026-10-26T03:55:41Z",
           "file": "acp-launch-yolo-resume/5b32cfc23007.patch"
+        }
+      ]
+    },
+    {
+      "id": "acp-subagent-approvals",
+      "title": "Subagent approvals",
+      "neededFor": "Approvals that show under the subagent that asked, as Codex's do. Without it, a subagent's approval reaches you as if its parent had asked.",
+      "versions": [
+        {
+          "hermesCommit": "90d6b98fd86d20981ee06ddd5b7d93e4320f26a4",
+          "hermesCommitDate": "2026-11-06T07:12:42Z",
+          "file": "acp-subagent-approvals/90d6b98fd86d.patch"
+        },
+        {
+          "hermesCommit": "ca4360692055bdb4df3a695c164646e528891da8",
+          "hermesCommitDate": "2026-11-06T04:01:15Z",
+          "file": "acp-subagent-approvals/ca4360692055.patch"
         }
       ]
     }

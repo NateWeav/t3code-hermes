@@ -6022,6 +6022,14 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           details?: AcpSubagentDetails,
         ) {
           yield* mutateCarryoverSubagentStatus(subagent, status, resultOverride, details);
+          // As in a live turn: a child that streamed nothing gets its final answer in its thread.
+          if (
+            acpSubagentStatusIsTerminal(status) &&
+            subagent.assistantText.length === 0 &&
+            subagent.task.result !== null
+          ) {
+            yield* emitSubagentAssistant(subagent, subagent.task.result);
+          }
           const now = subagent.task.updatedAt;
           const nativeTaskId = subagent.task.nativeTaskRef?.nativeId ?? subagent.task.id;
           const nativeItemRef = {

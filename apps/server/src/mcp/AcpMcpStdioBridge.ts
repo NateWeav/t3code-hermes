@@ -34,7 +34,7 @@ const MCP_PROTOCOL_VERSION = "2025-06-18";
 export const MCP_CALL_LIMIT_HEADER = "t3-mcp-call-limit-ms";
 // T3 answers a call with one JSON body, and Node's fetch drops a response whose headers take
 // 300 s. Hermes, the main ACP client, also ends MCP calls at 300 s.
-const ACP_MCP_CALL_LIMIT_MS = 300_000;
+export const ACP_MCP_CALL_LIMIT_MS = 300_000;
 
 export interface AcpMcpStdioBridgeOptions {
   readonly endpoint: string;

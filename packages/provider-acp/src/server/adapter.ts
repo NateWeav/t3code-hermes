@@ -314,6 +314,8 @@ export interface AcpAdapterV2Flavor {
     EffectAcpSchema.InitializeRequest["clientCapabilities"]
   >["_meta"];
   readonly mcpOverHttp?: boolean;
+  /** Sent with T3's HTTP MCP server after its `Authorization`. */
+  readonly mcpHttpHeaders?: ReadonlyArray<{ readonly name: string; readonly value: string }>;
   readonly normalizeSessionUpdate?: (
     notification: EffectAcpSchema.SessionNotification,
   ) => EffectAcpSchema.SessionNotification;
@@ -906,7 +908,7 @@ interface AcpMcpContext {
 function acpMcpContext(
   session: McpProviderSession.McpProviderSessionConfig | undefined,
   self: SelfInvocation,
-  mcpOverHttp: boolean | undefined,
+  flavor: Pick<AcpAdapterV2Flavor, "mcpOverHttp" | "mcpHttpHeaders">,
 ): AcpMcpContext {
   if (session === undefined) {
     return { servers: [], acpServers: [], httpServers: [] };
@@ -927,13 +929,16 @@ function acpMcpContext(
     ],
     acpServers: [{ type: "acp", name: "t3-code", serverId: "t3-code" }],
     httpServers:
-      mcpOverHttp === true
+      flavor.mcpOverHttp === true
         ? [
             {
               type: "http",
               name: "t3-code",
               url: session.endpoint,
-              headers: [{ name: "Authorization", value: session.authorizationHeader }],
+              headers: [
+                { name: "Authorization", value: session.authorizationHeader },
+                ...(flavor.mcpHttpHeaders ?? []),
+              ],
             },
           ]
         : [],
@@ -1840,10 +1845,10 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
   const { flavor, selfInvocation: self } = options;
   const readMcpContext = (threadId: ThreadId | null) =>
     threadId === null
-      ? Effect.succeed(acpMcpContext(undefined, self, flavor.mcpOverHttp))
+      ? Effect.succeed(acpMcpContext(undefined, self, flavor))
       : mcpSessions
           .read(threadId)
-          .pipe(Effect.map((session) => acpMcpContext(session, self, flavor.mcpOverHttp)));
+          .pipe(Effect.map((session) => acpMcpContext(session, self, flavor)));
   const driver = flavor.driver;
   const continuationRequests = options.continuationRequests;
   const postSettleContinuationEnabled =

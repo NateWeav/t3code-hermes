@@ -374,6 +374,35 @@ and applies only after it.
 The change is in `hermes acp` only, so new `hermes acp` processes pick it up; restarting the gateway
 is not required. Run the patch's `tests/acp_adapter/test_gateway_unprompted_turn.py` in a scratch
 checkout, as for `acp-delegation-progress`.
+## `acp-command-approval`
+
+**Needed by:** approval before each shell command in Supervised and Auto-accept edits threads, as
+Claude Code asks before each Bash command. Stock Hermes asks an ACP editor before file edits and
+before commands it flags as dangerous, but runs every other `terminal` command unasked, so a model
+that writes a file with `printf … > file` skips the approval T3 Code's policy requires.
+
+T3 Code advertises `clientCapabilities._meta.command_approval`, and the patched viewer records it
+in the session's editor policy when `session/new` creates the session. That session's own turns
+then ask before every `terminal` command and `execute_code` script whenever its mode is Default or
+Accept Edits. Don't Ask runs them unasked, as it does its edits. Each command reaches T3 Code as a
+command approval that its policy answers. "Allow for session" covers that one command, and no
+grant is written to `config.yaml`. The guardian LLM of `approvals.mode: smart` never answers in the
+editor's place. Delegated subagents and side tasks cannot ask, so they keep Hermes's own rule.
+
+The gateway sends an edit's diff only on its approval request, so under Accept Edits or Don't Ask
+(Auto-accept edits and Full access in T3 Code) a write that runs unasked showed no diff. The
+patched viewer puts the change its arguments make on the write's card, as Hermes's in-process
+server did, and says so in `agentCapabilities._meta.command_approval`. T3 Code sets the session's
+mode from its approval policy only when Hermes says so; with stock Hermes it leaves the session in
+Default, and its policy answers each edit.
+
+Only sessions created after the patch is applied ask before commands; an existing thread keeps
+Hermes's own rule. Verified against hermes-agent `ca43606920` (`main`, 2026-11-06), alone and
+after the other patches. Its `90d6b98fd8` version (`main`, 2026-11-06) is the same change on top of
+`acp-editor-delegation`, `acp-editor-clarify`, `acp-terminal-output` and `acp-active-steering`, and
+applies only after them. Restart the Hermes gateway after applying it: the gate runs there. Run the
+patch's `tests/acp_adapter/test_gateway_command_approval.py` in a scratch checkout, as for
+`acp-delegation-progress`.
 
 ## Retired
 

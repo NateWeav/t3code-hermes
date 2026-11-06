@@ -361,13 +361,11 @@ function nestedUpdates(
   const update =
     progress.event === "subagent.complete"
       ? resultUpdate(toolCallId, child, index, progress)
-      : childUpdate(
-          toolCallId,
-          child,
-          index,
-          progress.event === "subagent.spawn_requested" ? "pending" : "running",
-          { model: text(progress.model), role: resultRole(progress) },
-        );
+      : // Its first report opens its thread, whose turn is working from then on.
+        childUpdate(toolCallId, child, index, "running", {
+          model: text(progress.model),
+          role: resultRole(progress),
+        });
   return [{ ...update, nativeTaskId, parentNativeTaskId }];
 }
 

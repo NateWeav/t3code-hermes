@@ -126,6 +126,13 @@ export function hermesSpawnEnvironment(
   };
 }
 
+/**
+ * With the `acp-editor-delegation` patch, the model waits for its subagents inside the turn unless
+ * it backgrounds them, and subagents can launch subagents up to three levels deep, as Claude's and
+ * Codex's can. Stock Hermes ignores it: delegations detach, and children cannot delegate.
+ */
+const HERMES_DELEGATION_META = { hermes: { delegation: { foreground: true, maxSpawnDepth: 3 } } };
+
 /** The services the Hermes flavor writes reasoning config with. */
 interface HermesFlavorServices {
   readonly fileSystem: FileSystem.FileSystem;
@@ -198,6 +205,7 @@ export function makeHermesAcpAdapterFlavor(
     driver: HERMES_PROVIDER,
     runtimeHarness: "Hermes",
     capabilities: HermesProviderCapabilitiesV2,
+    clientCapabilitiesMeta: HERMES_DELEGATION_META,
     // Hermes takes image blocks whatever its handshake advertises.
     supportsImagePrompts: true,
     supportsCompaction: true,

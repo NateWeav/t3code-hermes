@@ -269,6 +269,8 @@ lines. Turns run by a managed worker
 (bypass sessions, or `gateway.managed_workers`) do not stream yet.
 
 Verified against hermes-agent `53a6ced422` (`main`, 2026-11-06), alone and after the other patches.
+Its `90d6b98fd8` version (`main`, 2026-11-06) is the same change on top of `acp-editor-delegation`
+and `acp-editor-clarify`, and applies only after them.
 Restart the Hermes gateway and the T3 Code server after applying it: the gateway runs the terminal
 tool. The patch's `tests/acp_adapter/test_gateway_terminal_output.py` runs a real command through
 the terminal tool, the gateway turn's progress callback and `GatewayACPAgent`; run it in a scratch

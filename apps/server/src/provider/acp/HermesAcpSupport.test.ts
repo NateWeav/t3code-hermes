@@ -66,6 +66,7 @@ describe("hermesApprovalPosture", () => {
   it("asks whenever T3's policy asks, as Claude's permission mode does", () => {
     const granular = { granular: { rules: true, sandbox_approval: true } };
     expect(hermesApprovalPosture({ runtimeMode: "full-access" })).toBe("dontAsk");
+    expect(hermesApprovalPosture({ runtimeMode: "auto" })).toBe("dontAsk");
     expect(hermesApprovalPosture({ runtimeMode: "auto-accept-edits" })).toBe("acceptEdits");
     expect(hermesApprovalPosture({ runtimeMode: "approval-required" })).toBe("ask");
     expect(

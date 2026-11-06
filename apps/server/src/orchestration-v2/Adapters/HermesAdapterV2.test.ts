@@ -333,9 +333,9 @@ describe("HermesAdapterV2 flavor", () => {
     assert.isFalse(HermesProviderCapabilitiesV2.turns.supportsActiveSteering);
   });
 
-  it("turns on Hermes YOLO only when T3's policy never asks, so subagents follow it", () => {
+  it("turns on Hermes YOLO only for full access that never asks, so subagents follow it", () => {
     assert.equal(hermesSpawnEnvironment({}, { runtimeMode: "full-access" }).HERMES_YOLO_MODE, "1");
-    for (const mode of ["approval-required", "auto-accept-edits"] as const) {
+    for (const mode of ["approval-required", "auto-accept-edits", "auto"] as const) {
       assert.isUndefined(hermesSpawnEnvironment({}, { runtimeMode: mode }).HERMES_YOLO_MODE);
     }
     assert.isUndefined(

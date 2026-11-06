@@ -45,6 +45,8 @@ export function hermesApprovalPosture(
   // T3 can refuse a write the read-only sandbox forbids only if Hermes asks first.
   if (unknownRecord(policy.sandboxPolicy)?.type === "readOnly") return "ask";
   switch (policy.runtimeMode) {
+    // T3 allows every ACP request under Auto, so Hermes asking would only add round trips.
+    case "auto":
     case "full-access":
       return "dontAsk";
     case "auto-accept-edits":

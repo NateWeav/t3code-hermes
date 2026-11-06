@@ -105,9 +105,9 @@ export interface HermesAdapterV2Options {
 }
 
 /**
- * A policy that never asks also has to reach Hermes subagents, which deny dangerous commands
- * unless YOLO is on. A reopened session follows this flag only with the `acp-launch-yolo-resume`
- * patch; stock Hermes reads it at creation.
+ * Full access also has to reach Hermes subagents, which deny dangerous commands unless YOLO is on,
+ * unless an approval policy still asks. A reopened session follows this flag only with the
+ * `acp-launch-yolo-resume` patch; stock Hermes reads it at creation.
  */
 export function hermesSpawnEnvironment(
   environment: NodeJS.ProcessEnv,
@@ -120,7 +120,10 @@ export function hermesSpawnEnvironment(
   return {
     ...environment,
     ...processEnvironment,
-    ...(hermesApprovalPosture(runtimePolicy) === "dontAsk" ? { HERMES_YOLO_MODE: "1" } : {}),
+    ...(runtimePolicy.runtimeMode === "full-access" &&
+    hermesApprovalPosture(runtimePolicy) === "dontAsk"
+      ? { HERMES_YOLO_MODE: "1" }
+      : {}),
   };
 }
 

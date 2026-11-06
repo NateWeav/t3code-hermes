@@ -549,6 +549,11 @@ export interface AcpAdapterV2Flavor {
   readonly isProviderWakeNotification?: (
     notification: EffectAcpSchema.SessionNotification,
   ) => boolean;
+  /**
+   * An update of a turn the agent runs on its own while a prompt is open (Hermes runs a wake queued
+   * ahead of the prompt inside its request). It goes to a continuation run, not the prompt's.
+   */
+  readonly isUnpromptedTurnUpdate?: (notification: EffectAcpSchema.SessionNotification) => boolean;
   readonly deferFinalizeForBackgroundWork?: boolean;
   readonly assertComplete?: Effect.Effect<void, EffectAcpErrors.AcpError>;
   /** Interrupt the local prompt fiber before `session/cancel` (Grok wedged prompts). */
@@ -652,6 +657,8 @@ export interface AcpAdapterV2SubagentUpdate {
   readonly role?: string | null;
   readonly usage?: OrchestrationV2SubagentUsage | null;
   readonly suppressNormalTool?: boolean;
+  /** A background child's end the agent is handed in a turn of its own, which names it. */
+  readonly wakesAgent?: boolean;
 }
 
 export interface AcpAdapterV2Options {
@@ -2304,22 +2311,57 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
         const noWakeReports = {
           reports: new Map<string, BackgroundWorkReport>(),
           offered: new Set<string>(),
+          // Reports whose own wake is still to come: a user turn starting first leaves them.
+          owed: new Set<string>(),
         };
         const wakeReports = yield* Ref.make<{
           readonly reports: ReadonlyMap<string, BackgroundWorkReport>;
           readonly offered: ReadonlySet<string>;
+          readonly owed: ReadonlySet<string>;
         }>(noWakeReports);
         const recordWakeReport = Effect.fnUntraced(function* (
           key: string,
           report: BackgroundWorkReport,
+          options: { readonly owed?: boolean } = {},
         ) {
           const context = yield* Ref.get(activeTurn);
-          if (context !== null && !context.promptSettled && !context.finalized) return;
-          yield* Ref.update(wakeReports, ({ reports, offered }) => ({
+          if (
+            options.owed !== true &&
+            context !== null &&
+            !context.promptSettled &&
+            !context.finalized
+          ) {
+            return;
+          }
+          yield* Ref.update(wakeReports, ({ reports, offered, owed }) => ({
             reports: new Map(reports).set(key, report),
             offered,
+            owed: options.owed === true ? new Set(owed).add(key) : owed,
           }));
         });
+        const recordSubagentWake = (
+          subagent: ActiveAcpSubagent,
+          status: AcpAdapterV2SubagentUpdate["status"],
+          options: { readonly owed?: boolean } = {},
+        ) => {
+          const outcome =
+            status === "completed" || status === "failed"
+              ? status
+              : status === "interrupted" || status === "cancelled"
+                ? "cancelled"
+                : undefined;
+          if (outcome === undefined) return Effect.void;
+          return recordWakeReport(
+            String(subagent.task.id),
+            {
+              kind: "subagent",
+              label: subagent.task.title ?? subagent.task.prompt,
+              outcome,
+              childThreadId: subagent.childThreadId,
+            },
+            options,
+          );
+        };
         const continuationRequested = yield* Ref.make(false);
         const continuationGeneration = yield* Ref.make(0);
         const continuationPermit = yield* Semaphore.make(1);
@@ -3479,6 +3521,10 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           ) {
             return;
           }
+          const endsRunningChild =
+            updateIsTerminal &&
+            existing !== undefined &&
+            acpSubagentStatusBlocksTurnSettlement(existing.task.status);
           if (
             existing !== undefined &&
             existing.task.status === update.status &&
@@ -3697,6 +3743,9 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               completedAt: subagent.task.completedAt,
             },
           });
+          if (endsRunningChild && update.wakesAgent === true) {
+            yield* recordSubagentWake(subagent, taskStatus, { owed: true });
+          }
           yield* emitProviderEvent({ type: "subagent.updated", driver, subagent: subagent.task });
           yield* emitProviderEvent({
             type: "turn_item.updated",
@@ -4925,13 +4974,17 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               );
               // A command wake names no process, and Hermes batches completions that land together
               // into one turn: it may follow the end of any tracked one, and only a lone one can be
-              // named. A subagent's end wakes the agent on its own turn and ends no command.
+              // named. A subagent's end, buffered or owed from a turn it ended in, ends no command.
+              const pendingWake = yield* Ref.get(wakeReports);
               const subagentWake =
                 wokenBy === "subagent" ||
-                (yield* Ref.get(wakeBuffer)).some((frame) => subagentEndFrames.has(frame));
+                (yield* Ref.get(wakeBuffer)).some((frame) => subagentEndFrames.has(frame)) ||
+                [...pendingWake.reports].some(
+                  ([key, report]) => report.kind === "subagent" && !pendingWake.offered.has(key),
+                );
               const woken = subagentWake ? [] : [...awaitableBackgroundTasks];
               if (woken.length > 0) releaseAwaitableBackgroundTasks();
-              const reports = yield* Ref.modify(wakeReports, ({ reports: recorded }) => {
+              const reports = yield* Ref.modify(wakeReports, ({ reports: recorded, owed }) => {
                 const [only] = woken;
                 const reports =
                   woken.length === 1 && only !== undefined
@@ -4941,7 +4994,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                         outcome: "unknown",
                       })
                     : recorded;
-                return [reports, { reports, offered: new Set(reports.keys()) }];
+                return [reports, { reports, offered: new Set(reports.keys()), owed }];
               });
               return Option.some({ route, generation, reports, released: woken.length > 0 });
             }),
@@ -5747,6 +5800,15 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           // The activeSessionId yield may let idle/prompt settlement finalize this context.
           if (context.finalized) return;
           if (
+            postSettleContinuationEnabled &&
+            !acpIsProviderContinuationMessage(context.input.message) &&
+            flavor.isUnpromptedTurnUpdate?.(notification) === true
+          ) {
+            yield* Ref.update(wakeBuffer, (current) => [...current, notification]);
+            yield* offerContinuationRun(notification.sessionId);
+            return;
+          }
+          if (
             context.promptSettled &&
             !acpIsProviderContinuationMessage(context.input.message) &&
             flavor.isProviderWakeNotification?.(notification) === true
@@ -6531,13 +6593,6 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
         const recordCarryoverSubagentWake = Effect.fnUntraced(function* (
           update: AcpAdapterV2SubagentUpdate,
         ) {
-          const outcome =
-            update.status === "completed" || update.status === "failed"
-              ? update.status
-              : update.status === "interrupted" || update.status === "cancelled"
-                ? "cancelled"
-                : undefined;
-          if (outcome === undefined) return;
           const match = (yield* Ref.get(carryoverSubagents))?.subagents.find(
             (subagent) =>
               (subagent.task.nativeTaskRef?.nativeId ?? String(subagent.task.id)) ===
@@ -6547,12 +6602,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           if (match === undefined || !acpSubagentStatusBlocksTurnSettlement(match.task.status)) {
             return;
           }
-          yield* recordWakeReport(String(match.task.id), {
-            kind: "subagent",
-            label: match.task.title ?? match.task.prompt,
-            outcome,
-            childThreadId: match.childThreadId,
-          });
+          yield* recordSubagentWake(match, update.status, { owed: update.wakesAgent === true });
         });
 
         /** A nested subagent can launch after its root turn settled, while its launcher carries over. */
@@ -8626,7 +8676,11 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                 });
                 if (!isContinuationTurn && !isAppOwnedWakeTurn && !preserveBufferedContinuation) {
                   yield* Ref.set(wakeBuffer, []);
-                  yield* Ref.set(wakeReports, noWakeReports);
+                  yield* Ref.update(wakeReports, ({ reports, owed }) => ({
+                    reports: new Map([...reports].filter(([key]) => owed.has(key))),
+                    offered: noWakeReports.offered,
+                    owed,
+                  }));
                 }
                 if (preserveBufferedContinuation) return wasRequested;
                 yield* Ref.update(continuationGeneration, (value) => value + 1);
@@ -8787,9 +8841,10 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             // Retain projected terminals during wake drain so monotonic guards reject replayed spawns.
             if (isContinuationTurn) {
               yield* Ref.set(continuationRequested, false);
-              yield* Ref.update(wakeReports, ({ reports, offered }) => ({
+              yield* Ref.update(wakeReports, ({ reports, offered, owed }) => ({
                 reports: new Map([...reports].filter(([key]) => !offered.has(key))),
                 offered: noWakeReports.offered,
+                owed: new Set([...owed].filter((key) => !offered.has(key))),
               }));
               const takeWakeBuffer = Ref.modify(wakeBuffer, (current) => {
                 const next: Array<EffectAcpSchema.SessionNotification> = [];

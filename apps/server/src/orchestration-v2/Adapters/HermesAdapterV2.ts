@@ -41,6 +41,7 @@ import {
   hermesSteering,
   hideHermesStopNotices,
   isHermesGatewayTurnLoss,
+  isHermesUnpromptedTurnUpdate,
   makeHermesAcpRuntime,
   makeHermesClarifyCallFilter,
   makeHermesEditApprovalCards,
@@ -229,6 +230,7 @@ export function makeHermesAcpAdapterFlavor(
     // projects it to ACP viewers as session updates, with no `session/prompt` open. Without this
     // those frames were dropped, so the agent woke and worked while its thread showed nothing.
     enablePostSettleContinuation: true,
+    isUnpromptedTurnUpdate: isHermesUnpromptedTurnUpdate,
     resolveModelId: (selection) => resolveHermesAcpBaseModelId(selection.model),
     approvalOptions: hermesApprovalOptions,
     onPermissionRequest: editApprovalCards.onPermissionRequest,

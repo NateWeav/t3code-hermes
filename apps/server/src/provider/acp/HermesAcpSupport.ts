@@ -609,6 +609,19 @@ function hermesPromptErrorDetails(cause: unknown): string | undefined {
 }
 
 /**
+ * An update of a gateway turn this editor did not submit, such as a wake run ahead of a queued
+ * prompt. The `acp-unprompted-turns` patch stamps it; an unpatched Hermes never does.
+ */
+export function isHermesUnpromptedTurnUpdate(
+  notification: EffectAcpSchema.SessionNotification,
+): boolean {
+  const hermes = notification._meta?.["hermes"];
+  return (
+    typeof hermes === "object" && hermes !== null && Reflect.get(hermes, "unprompted") === true
+  );
+}
+
+/**
  * The gateway restarted or dropped the connection under a turn: Hermes fences that turn as
  * `unknown` and will not say how it ended. The attached `hermes acp` only re-reads the fence
  * after it has queued the next prompt behind it, so that process is replaced first.

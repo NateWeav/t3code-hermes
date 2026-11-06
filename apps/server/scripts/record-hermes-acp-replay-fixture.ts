@@ -45,6 +45,7 @@ import {
   materializeFixtureInput,
   TOOL_CALL_READ_ONLY_WORKSPACE_ROOT,
 } from "../src/orchestration-v2/testkit/fixtures/shared.ts";
+import * as CommandOutputRecorder from "../src/orchestration-v2/testkit/CommandOutputRecorder.ts";
 import { runOrchestratorV2Scenario } from "../src/orchestration-v2/testkit/OrchestratorScenario.ts";
 import * as ProviderReplayHarness from "../src/orchestration-v2/testkit/ProviderReplayHarness.ts";
 import { makeHermesAcpRuntime } from "../src/provider/acp/HermesAcpSupport.ts";
@@ -110,7 +111,8 @@ function resolveBenchHermesHome(): string {
 /**
  * Drops the agent harness's own model routing so the benchmark home's config decides. An empty
  * managed scope keeps a machine-wide `/etc/hermes/config.yaml` overlay out too: it layers over
- * every home, and can pin providers or a delegation model the benchmark home lacks.
+ * every home, and can pin providers, a compression provider, or a delegation model the benchmark
+ * home lacks.
  */
 function benchEnvironment(hermesHome: string): NodeJS.ProcessEnv {
   const noManagedScope = NodePath.join(hermesHome, "no-managed-scope");
@@ -457,7 +459,16 @@ const recordScenario = Effect.fn("recordHermesScenario")(function* (fixtureName:
   const path = yield* Path.Path;
   const hermesHome = resolveBenchHermesHome();
   const environment = benchEnvironment(hermesHome);
-  const fixtureInput = fixture.buildInput();
+  // Hermes ignores Codex's approval policy override; Supervised is the Hermes mode that asks.
+  const borrowedApprovalPolicy = ownVariant
+    ? undefined
+    : settingsVariant.runtimePolicyOverride?.approvalPolicy;
+  const fixtureInput = {
+    ...fixture.buildInput(),
+    ...(borrowedApprovalPolicy !== undefined && borrowedApprovalPolicy !== "never"
+      ? { runtimeMode: "approval-required" as const }
+      : {}),
+  };
   const workspace = yield* checkpointWorkspace(fixtureName, fixtureInput.workspaceFiles);
   const realWorkspace = yield* fs.realPath(workspace);
   // The files these prompts read, as the Claude recorder seeds them.
@@ -488,16 +499,28 @@ const recordScenario = Effect.fn("recordHermesScenario")(function* (fixtureName:
     driver: HERMES_PROVIDER,
     modelSelection,
   }).pipe(Effect.provide(IdAllocator.layer), provideDeterministicTestRuntime);
+  const isGate = (step: (typeof materialized.steps)[number]) =>
+    step.type === "release_replay_gate" || step.type === "release_replay_gate_after_waiting";
   const scenario = {
     name: `${fixtureName}/hermes-record`,
     commands: materialized.commands,
-    // Gates and held-run receipts pace replay on the test clock. Live, Hermes and wall time pace
-    // themselves, so they become plain waits, and the recorder waits for Hermes to idle.
-    steps: materialized.steps.flatMap((step) =>
-      step.type === "release_replay_gate" || step.type === "release_replay_gate_after_waiting"
-        ? []
-        : [step.type === "finish_held_run" ? { ...step, type: "await_run_status" as const } : step],
-    ),
+    // Gates pace replay on the test clock; live, Hermes and wall time pace themselves. A borrowed
+    // reference input's waits follow that reference's frames, so it keeps only its dispatches and the
+    // clock steps that order them, and waits for Hermes to idle. A Hermes input drops only its gates.
+    steps:
+      ownVariant === undefined && materialized.steps.some(isGate)
+        ? materialized.steps.filter(
+            (step) => step.type === "dispatch" || step.type === "advance_clock",
+          )
+        : materialized.steps.flatMap((step) =>
+            isGate(step)
+              ? []
+              : [
+                  step.type === "finish_held_run"
+                    ? { ...step, type: "await_run_status" as const }
+                    : step,
+                ],
+          ),
     projectionThreadIds: materialized.projectionThreadIds,
     runtimePolicyOverride: { ...settingsVariant.runtimePolicyOverride, cwd: realWorkspace },
   };
@@ -518,16 +541,12 @@ const recordScenario = Effect.fn("recordHermesScenario")(function* (fixtureName:
         // As in production, so turns the gateway runs on its own (background wakes) reach the thread.
         continuationRequests: yield* ProviderContinuationRequests.ProviderContinuationRequests,
         // Production's runtime factory, with the protocol logger teeing raw lines.
-        makeRuntime: ({ runtimePolicy, processEnvironment, ...input }) =>
+        makeRuntime: ({ runtimePolicy, processEnvironment: _processEnvironment, ...input }) =>
           makeHermesAcpRuntime({
             ...input,
             protocolLogging: tee.attachRuntime(),
             hermesSettings: settings,
-            environment: hermesSpawnEnvironment(
-              environment,
-              runtimePolicy.runtimeMode,
-              processEnvironment,
-            ),
+            environment: hermesSpawnEnvironment(environment, runtimePolicy.runtimeMode),
             childProcessSpawner,
           }),
       });
@@ -602,7 +621,15 @@ const recordScenario = Effect.fn("recordHermesScenario")(function* (fixtureName:
     Effect.asVoid,
     Effect.provideService(Clock.Clock, wallClock),
   );
-  const exit = yield* runOrchestratorV2Scenario(scenario, { afterSteps: waitForHermesIdle }).pipe(
+  const exit = yield* Effect.gen(function* () {
+    const result = yield* runOrchestratorV2Scenario(scenario, {
+      afterSteps: waitForHermesIdle,
+      waitDeadlineMs: 5 * 60_000,
+    });
+    // Live command output bypasses the domain events the assertions otherwise read, as in replay.
+    const commandOutput = yield* CommandOutputRecorder.CommandOutputRecorder;
+    return { ...result, commandOutput: yield* commandOutput.snapshot };
+  }).pipe(
     Effect.provide(
       ProviderReplayHarness.layerWithRegistry(
         scenario,

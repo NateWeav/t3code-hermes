@@ -4,18 +4,22 @@ import * as EffectAcpErrors from "effect-acp/errors";
 
 import {
   hermesApprovalOptions,
+  readHermesCompressReply,
   applyHermesAcpModelSelection,
   buildHermesAcpSpawnInput,
   HERMES_BUILT_IN_SLASH_COMMANDS,
+  makeHermesEditApprovalCards,
   resolveHermesAcpBaseModelId,
   normalizeHermesT3McpToolCall,
   normalizeHermesTerminalResult,
+  normalizeHermesWebSearchQuery,
   preserveHermesAgentActivityTitle,
   resolveHermesSessionModeId,
 } from "./HermesAcpSupport.ts";
 import {
   extractMcpToolCallIdentity,
   parseSessionUpdateEvent,
+  type AcpToolCallState,
 } from "@t3tools/provider-acp/server/runtimeModel";
 
 describe("resolveHermesAcpBaseModelId", () => {
@@ -367,6 +371,13 @@ describe("normalizeHermesTerminalResult", () => {
     expect(normalized.data.rawOutput).toEqual({ exitCode: 1 });
   });
 
+  it("drops a running call's echo of its command, which is not output", () => {
+    const running = { ...completedTerminal("$ git status"), status: "inProgress" as const };
+    const normalized = normalizeHermesTerminalResult(running);
+    expect(normalized.data.content).toBeUndefined();
+    expect(normalized.command).toBe("git status");
+  });
+
   it("leaves failure text, in-flight calls, and other tools untouched", () => {
     const failure = completedTerminal("terminal failed: command timed out", "failed");
     expect(normalizeHermesTerminalResult(failure)).toBe(failure);
@@ -379,6 +390,106 @@ describe("normalizeHermesTerminalResult", () => {
 
     const edit = { ...completedTerminal("terminal result\n- **output:** x"), kind: "edit" };
     expect(normalizeHermesTerminalResult(edit)).toBe(edit);
+  });
+});
+
+describe("normalizeHermesWebSearchQuery", () => {
+  const search = (text: string, kind = "fetch") => ({
+    toolCallId: "toolu_1",
+    kind,
+    status: "pending" as const,
+    data: { content: [{ type: "content" as const, content: { type: "text" as const, text } }] },
+  });
+
+  it("reads the whole query from Hermes's start text", () => {
+    expect(
+      normalizeHermesWebSearchQuery(search("Searching the web for: FIFA World Cup ticket pricing"))
+        .data.rawInput,
+    ).toEqual({ query: "FIFA World Cup ticket pricing" });
+  });
+
+  it("leaves results, other fetches and tools that name their input alone", () => {
+    for (const toolCall of [
+      search("Web results: 5"),
+      search("Searching the web for: x", "read"),
+      { ...search("Searching the web for: x"), data: { rawInput: { query: "y" } } },
+    ]) {
+      expect(normalizeHermesWebSearchQuery(toolCall)).toBe(toolCall);
+    }
+  });
+});
+
+describe("makeHermesEditApprovalCards", () => {
+  const diff = {
+    type: "diff" as const,
+    path: "/repo/notes.txt",
+    oldText: null,
+    newText: "approved text",
+  };
+  const approval = {
+    sessionId: "sess-1",
+    options: [{ kind: "allow_once" as const, name: "Allow once", optionId: "allow_once" }],
+    toolCall: {
+      toolCallId: "edit-approval-1",
+      kind: "edit" as const,
+      content: [diff],
+      rawInput: { tool: "write_file", arguments: { path: "notes.txt", content: "approved text" } },
+    },
+  };
+  const write = (toolCallId: string, status: "completed" | "failed", text: string) => ({
+    toolCallId,
+    kind: "edit",
+    status,
+    data: {
+      locations: [{ path: "notes.txt" }],
+      content: [{ type: "content" as const, content: { type: "text" as const, text } }],
+    },
+  });
+
+  it("shows the approved diff on the write, once, and keeps a denied write's reason", () => {
+    const cards = makeHermesEditApprovalCards();
+    const normalize = (toolCall: AcpToolCallState) => cards.normalizeToolCall(toolCall, "sess-1");
+    cards.onPermissionRequest(approval);
+    const done = normalize(write("toolu_1", "completed", "✅ write_file completed"));
+    expect(done.data.content).toEqual([diff]);
+    expect(normalize(done).data.content).toEqual([diff]);
+
+    const unasked = write("toolu_2", "completed", "✅ write_file completed");
+    expect(normalize(unasked)).toBe(unasked);
+
+    cards.onPermissionRequest(approval);
+    const denied = write("toolu_3", "failed", "Edit approval denied by ACP client");
+    expect(normalize(denied)).toBe(denied);
+    expect(normalize(unasked)).toBe(unasked);
+  });
+
+  it("keeps each session's diff for the same path", () => {
+    const cards = makeHermesEditApprovalCards();
+    const otherDiff = { ...diff, newText: "other session's text" };
+    cards.onPermissionRequest(approval);
+    cards.onPermissionRequest({
+      ...approval,
+      sessionId: "sess-2",
+      toolCall: { ...approval.toolCall, content: [otherDiff] },
+    });
+    const done = write("toolu_1", "completed", "✅ write_file completed");
+    expect(cards.normalizeToolCall(done, "sess-1").data.content).toEqual([diff]);
+    expect(cards.normalizeToolCall(done, "sess-2").data.content).toEqual([otherDiff]);
+  });
+
+  it("drops only the status update that closes a permission card", () => {
+    const { ignoreSessionUpdate } = makeHermesEditApprovalCards();
+    const update = (toolCallId: string) => ({
+      sessionId: "sess-1",
+      update: {
+        sessionUpdate: "tool_call_update" as const,
+        toolCallId,
+        status: "completed" as const,
+      },
+    });
+    expect(ignoreSessionUpdate(update("edit-approval-1"))).toBe(true);
+    expect(ignoreSessionUpdate(update("perm-check-12"))).toBe(true);
+    expect(ignoreSessionUpdate(update("toolu_1"))).toBe(false);
   });
 });
 
@@ -406,6 +517,28 @@ describe("preserveHermesAgentActivityTitle", () => {
   it("leaves other tools on their shared summary", () => {
     const toolCall = parsed("read_file: src/app.ts", "read");
     expect(preserveHermesAgentActivityTitle(toolCall)).toBe(toolCall);
+  });
+});
+
+describe("readHermesCompressReply", () => {
+  it("counts only a compression that removed messages, with its token estimate", () => {
+    expect(
+      [
+        "Compressed: 31 → 6 messages\nApprox request size: ~24,310 → ~3,904 tokens",
+        "Compressed with fallback: 31 → 9 messages\nApprox request size: ~24,310 → ~6,120 tokens\nSummary generation failed; Hermes used limited fallback context and removed 22 message(s).",
+        "Context compressed.",
+        "No changes from compression: 2 messages\nApprox request size: ~11,452 tokens (unchanged)\n",
+        "Compression refused (summary would grow the conversation): 8 messages preserved",
+        "Compression aborted: 8 messages preserved\nSummary generation failed; no messages were removed.",
+      ].map(readHermesCompressReply),
+    ).toEqual([
+      { compacted: true, beforeTokenCount: 24310, afterTokenCount: 3904 },
+      { compacted: true, beforeTokenCount: 24310, afterTokenCount: 6120 },
+      { compacted: true },
+      { compacted: false },
+      { compacted: false },
+      { compacted: false },
+    ]);
   });
 });
 

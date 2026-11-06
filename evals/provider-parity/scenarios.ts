@@ -36,13 +36,18 @@ export interface ParityScenario {
 }
 
 const applicable = { kind: "applicable" } as const;
-const twin = (reason: string): Applicability => ({ kind: "twin", reason });
+const twin = (reason: string, twinName?: string): Applicability => ({
+  kind: "twin",
+  reason,
+  ...(twinName === undefined ? {} : { twin: twinName }),
+});
 const na = (reason: string): Applicability => ({ kind: "na", reason });
 
 const CLAUDE_AGENT_TOOLS = "The prompt drives Claude's Agent/TaskStop/SendMessage tools.";
 const CLAUDE_BASH_BACKGROUND =
   "The prompt drives Claude's Bash run_in_background; the Hermes twin starts the command with terminal (background, notify).";
-const CLAUDE_COMPACT = "The prompt sends Claude's /compact; Hermes compacts with /compress.";
+const CLAUDE_COMPACT =
+  "The prompt sends Claude's /compact; Hermes compacts with /compress, and its peer turn and wake are a notify background job's own turn.";
 
 export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
   // Turn loop
@@ -80,8 +85,14 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
     hermes: applicable,
     exercises: ["streaming.streamsToolOutput", "tools.emitsToolOutput"],
   },
-  { name: "web_search", facet: "tools", hermes: applicable, providerBound: true },
-  { name: "claude_local_bash_task", facet: "tools", hermes: applicable },
+  { name: "web_search", facet: "tools", hermes: applicable },
+  {
+    name: "claude_local_bash_task",
+    facet: "tools",
+    hermes: na(
+      "Covers Claude SDK local_bash task frames not becoming subagents; the assertion pins Claude's recorded command and replies.",
+    ),
+  },
   {
     name: "claude_mcp_tool_presentation",
     facet: "tools",
@@ -100,7 +111,7 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
   {
     name: "tool_call_denied_write",
     facet: "approvals",
-    hermes: twin("The prompt names Claude's Write tool."),
+    hermes: twin("The prompt names Claude's Write tool.", "hermes_tool_call_denied_write"),
   },
 
   // Interrupt, steer, queue
@@ -110,20 +121,22 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
     hermes: applicable,
     exercises: ["turns.supportsInterrupt"],
   },
+  // Not provider-bound: this and the restart below share an assertion on the stopped command row,
+  // which every provider's fixture passes.
   {
     name: "turn_interrupt_mid_tool",
     facet: "control",
     hermes: applicable,
-    providerBound: true,
     exercises: ["turns.supportsInterrupt"],
   },
-  { name: "turn_interrupt_restart", facet: "control", hermes: applicable, providerBound: true },
+  { name: "turn_interrupt_restart", facet: "control", hermes: applicable },
+  // Not provider-bound: Claude, Codex and Hermes share the active-steering assertion; the provider
+  // identity and Hermes's `_hermes/steer` wire are each variant's assertProviderDetails.
   {
     name: "message_steering",
     facet: "control",
     hermes: applicable,
-    providerBound: true,
-    exercises: ["turns.supportsSteeringByInterruptRestart"],
+    exercises: ["turns.supportsActiveSteering"],
   },
   {
     name: "queued_turn",
@@ -139,13 +152,17 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
     facet: "planning",
     hermes: twin(
       "The prompt names Codex's update_plan tool; Hermes tracks todos with its todo tool.",
+      "hermes_todo_list",
     ),
     exercises: ["planning.emitsTodoList"],
   },
   {
     name: "plan_questions",
     facet: "planning",
-    hermes: twin("The prompt names Codex's request_user_input tool; Hermes asks with clarify."),
+    hermes: twin(
+      "The prompt names Codex's request_user_input tool; Hermes asks with clarify, which its ACP sessions offer once the acp-editor-clarify patch is applied.",
+      "hermes_plan_questions",
+    ),
     exercises: ["planning.supportsStructuredQuestions"],
   },
   {
@@ -159,8 +176,8 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
   {
     name: "subagent",
     facet: "subagents",
+    // Not provider-bound: Claude's and Codex's prompts, ids and provider threads are in their details.
     hermes: applicable,
-    providerBound: true,
     exercises: ["subagents.supportsSubagents", "subagents.emitsSubagentLifecycle"],
   },
   { name: "subagent_continue", facet: "subagents", hermes: applicable },
@@ -171,7 +188,8 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
     hermes: applicable,
     exercises: ["approvals.approvalsCanOriginateFromSubagents"],
   },
-  { name: "subagent_v2_nested", facet: "subagents", hermes: applicable, providerBound: true },
+  // Not provider-bound: Codex's agent-path titles and provider threads are in its details.
+  { name: "subagent_v2_nested", facet: "subagents", hermes: applicable },
   { name: "subagent_v2_nested_approval", facet: "subagents", hermes: applicable },
   {
     name: "claude_nested_subagent_model",
@@ -249,8 +267,16 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
   },
 
   // Context: compaction and resume
-  { name: "claude_compact_after_resume_wake", facet: "context", hermes: twin(CLAUDE_COMPACT) },
-  { name: "claude_compact_after_peer_turn", facet: "context", hermes: twin(CLAUDE_COMPACT) },
+  {
+    name: "claude_compact_after_resume_wake",
+    facet: "context",
+    hermes: twin(CLAUDE_COMPACT, "hermes_compact_after_resume_wake"),
+  },
+  {
+    name: "claude_compact_after_peer_turn",
+    facet: "context",
+    hermes: twin(CLAUDE_COMPACT, "hermes_compact_after_peer_turn"),
+  },
   {
     name: "claude_compact_after_peer_turn_no_echo",
     facet: "context",

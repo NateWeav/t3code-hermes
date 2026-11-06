@@ -158,8 +158,8 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
   {
     name: "subagent",
     facet: "subagents",
+    // Not provider-bound: Claude's and Codex's prompts, ids and provider threads are in their details.
     hermes: applicable,
-    providerBound: true,
     exercises: ["subagents.supportsSubagents", "subagents.emitsSubagentLifecycle"],
   },
   { name: "subagent_continue", facet: "subagents", hermes: applicable },
@@ -170,7 +170,8 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
     hermes: applicable,
     exercises: ["approvals.approvalsCanOriginateFromSubagents"],
   },
-  { name: "subagent_v2_nested", facet: "subagents", hermes: applicable, providerBound: true },
+  // Not provider-bound: Codex's agent-path titles and provider threads are in its details.
+  { name: "subagent_v2_nested", facet: "subagents", hermes: applicable },
   { name: "subagent_v2_nested_approval", facet: "subagents", hermes: applicable },
   {
     name: "claude_nested_subagent_model",

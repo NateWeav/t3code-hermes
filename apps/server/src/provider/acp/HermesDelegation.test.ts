@@ -275,7 +275,7 @@ describe("Hermes delegate_task ACP boundary", () => {
       expect.objectContaining({
         nativeTaskId: "tc-fixture-batch:subagent:sa-1",
         parentNativeTaskId: "tc-fixture-batch:task:0",
-        status: "pending",
+        status: "running",
         title: "Goal of sa-1",
         prompt: "Goal of sa-1",
         model: "claude-haiku-5-5",

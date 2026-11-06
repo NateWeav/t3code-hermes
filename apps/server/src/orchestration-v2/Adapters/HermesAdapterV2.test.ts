@@ -1485,6 +1485,53 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
       );
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
+
+  it.effect("keeps a running command listed when a background subagent wakes Hermes", () =>
+    Effect.gen(function* () {
+      const dispatched = delegationFixture.cases.find((item) => item.name === "dispatched")!;
+      const offers = yield* Queue.unbounded<ProviderContinuationRequest>();
+      const { events } = yield* runMockTurn({
+        name: "background-wake-subagent",
+        mockEnvironment: {},
+        promptUpdates: [
+          ...hermesBackgroundStart({ toolCallId: "tc-tests", processId: TESTS_PROC, notify: true }),
+          { ...dispatched.start, rawInput: dispatched.args } as EffectAcpSchema.SessionUpdate,
+          { ...dispatched.complete, rawOutput: dispatched.result } as EffectAcpSchema.SessionUpdate,
+        ],
+        idleUpdates: [
+          {
+            sessionUpdate: "tool_call_update",
+            toolCallId: dispatched.start.toolCallId,
+            status: "in_progress",
+            rawOutput: {
+              hermesDelegation: {
+                event: "subagent.complete",
+                subagent_id: "sa-0-test1234",
+                delegation_id: "deleg_test1234",
+                task_index: 0,
+                status: "completed",
+                summary: "Parser reviewed.",
+              },
+            },
+          },
+          {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "The review is in." },
+          },
+        ],
+        continuationRequests: {
+          offer: (request) => Queue.offer(offers, request).pipe(Effect.asVoid),
+        },
+        runContinuation: true,
+      });
+      assert.notDeepInclude((yield* Queue.take(offers)).notification ?? {}, {
+        source: { kind: "command" },
+      });
+      assert.deepEqual(providerThreadRosters(events).at(-1), [
+        { taskId: TESTS_PROC, kind: "command", description: "pnpm test" },
+      ]);
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
 });
 
 const TESTS_PROC = "proc_aaaa11112222";

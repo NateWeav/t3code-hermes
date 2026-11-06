@@ -58,6 +58,7 @@ import {
   resolveHermesAcpBaseModelId,
   resolveHermesSessionModeId,
 } from "../../provider/acp/HermesAcpSupport.ts";
+import { ACP_MCP_CALL_LIMIT_MS, MCP_CALL_LIMIT_HEADER } from "../../mcp/AcpMcpStdioBridge.ts";
 import { makeHermesDelegation } from "../../provider/acp/HermesDelegation.ts";
 import * as HermesSpareRuntime from "../../provider/acp/HermesSpareRuntime.ts";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
@@ -241,6 +242,10 @@ export function makeHermesAcpAdapterFlavor(
       terminal_output: true,
       command_approval: true,
     },
+    // With the `acp-http-mcp` patch Hermes takes T3's MCP server over HTTP, sparing a bridge process
+    // per session open and per first turn. Its HTTP client, like the bridge, ends a call at 300 s.
+    mcpOverHttp: true,
+    mcpHttpHeaders: [{ name: MCP_CALL_LIMIT_HEADER, value: String(ACP_MCP_CALL_LIMIT_MS) }],
     supportsCompaction: true,
     compactionCommand: "/compress",
     // The gateway's `/undo N` (`session.mutate rewind`) drops the session's last N user turns. It

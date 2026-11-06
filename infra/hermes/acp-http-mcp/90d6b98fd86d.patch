@@ -1,0 +1,95 @@
+diff --git a/acp_adapter/gateway_server.py b/acp_adapter/gateway_server.py
+index 62b8b34aa4..8636ec008a 100644
+--- a/acp_adapter/gateway_server.py
++++ b/acp_adapter/gateway_server.py
+@@ -11,5 +11,5 @@ import uuid
+ import acp
+ from acp.schema import (
+-    AgentCapabilities, Implementation, InitializeResponse, LoadSessionResponse,
++    AgentCapabilities, Implementation, InitializeResponse, LoadSessionResponse, McpCapabilities,
+     NewSessionResponse, PromptCapabilities, PromptResponse, ResumeSessionResponse,
+     SessionCapabilities, SessionForkCapabilities, SessionListCapabilities, SessionResumeCapabilities,
+@@ -194,4 +194,7 @@ class GatewayACPAgent(GatewayReplyMixin, acp.Agent):
+             agent_info=Implementation(name="hermes-agent", version=__version__),
+             agent_capabilities=AgentCapabilities(load_session=True,
++                # The owner binds an editor's HTTP and SSE servers as it does stdio ones
++                # (``gateway/session_local_mcp.py``), with no process to start for each session.
++                mcp_capabilities=McpCapabilities(http=True, sse=True),
+                 prompt_capabilities=PromptCapabilities(image=True),
+                 session_capabilities=SessionCapabilities(fork=SessionForkCapabilities(), list=SessionListCapabilities(),
+diff --git a/tests/acp_adapter/test_gateway_editor_http_mcp.py b/tests/acp_adapter/test_gateway_editor_http_mcp.py
+new file mode 100644
+index 0000000000..ec11171c62
+--- /dev/null
++++ b/tests/acp_adapter/test_gateway_editor_http_mcp.py
+@@ -0,0 +1,70 @@
++"""An editor's HTTP MCP server over ``hermes acp`` and an ordinary gateway: advertised in ``initialize``,
++bound by the owner as a stdio one is, and reached by the model, with no process started for it."""
++from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
++import json
++import threading
++
++import pytest
++
++from tests.acp_adapter.test_gateway_editor_mcp import MCPModelPeer, prompt
++from tests.acp_adapter.test_gateway_sessions import editor
++
++
++class HttpMCPPeer(BaseHTTPRequestHandler):
++    """Streamable HTTP MCP answering each request with one JSON body: an ``echo`` tool."""
++
++    def log_message(self, *args):
++        pass
++
++    def do_POST(self):
++        self.server.authorizations.append(self.headers.get('Authorization'))
++        request = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
++        if 'id' not in request:
++            self.send_response(202)
++            self.end_headers()
++            return
++        result = {
++            'initialize': {'protocolVersion': request.get('params', {}).get('protocolVersion'),
++                           'capabilities': {'tools': {}}, 'serverInfo': {'name': 'http-peer', 'version': '1'}},
++            'tools/list': {'tools': [{'name': 'echo', 'description': 'owned echo',
++                                      'inputSchema': {'type': 'object', 'properties': {}}}]},
++            'tools/call': {'content': [{'type': 'text', 'text': 'OWNED_RESULT_HTTP'}]},
++        }.get(request['method'], {})
++        body = json.dumps({'jsonrpc': '2.0', 'id': request['id'], 'result': result}).encode()
++        self.send_response(200)
++        self.send_header('Content-Type', 'application/json')
++        self.send_header('Content-Length', str(len(body)))
++        self.end_headers()
++        self.wfile.write(body)
++
++    def do_GET(self):
++        # No server-initiated stream.
++        self.send_response(405)
++        self.end_headers()
++
++    def do_DELETE(self):
++        self.send_response(200)
++        self.end_headers()
++
++
++@pytest.mark.platforms("linux")
++@pytest.mark.asyncio
++async def test_editor_http_mcp_server_reaches_the_model(daemon, tmp_path, model_peer):
++    model_peer.RequestHandlerClass = MCPModelPeer
++    server = ThreadingHTTPServer(('127.0.0.1', 0), HttpMCPPeer)
++    server.authorizations = []
++    threading.Thread(target=server.serve_forever, daemon=True).start()
++    try:
++        async with editor(daemon, tmp_path) as acp:
++            init = await acp.rpc('initialize', protocolVersion=1, clientCapabilities={})
++            assert init['result']['agentCapabilities']['mcpCapabilities'] == {'http': True, 'sse': True}
++            created = await acp.rpc('session/new', cwd=str(tmp_path), mcpServers=[{
++                'type': 'http', 'name': 'http-peer', 'url': f'http://127.0.0.1:{server.server_port}/mcp',
++                'headers': [{'name': 'Authorization', 'value': 'Bearer borrowed-http-token'}]}])
++            assert 'result' in created, created
++            assert 'result' in await prompt(acp, created['result']['sessionId'])
++            assert 'OWNED_RESULT_HTTP' in json.dumps(acp.frames)
++        assert server.authorizations and set(server.authorizations) == {'Bearer borrowed-http-token'}
++    finally:
++        server.shutdown()
++        server.server_close()

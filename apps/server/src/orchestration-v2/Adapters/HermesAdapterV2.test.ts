@@ -3,6 +3,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import {
   CheckpointId,
+  EnvironmentId,
   HermesSettings,
   MessageId,
   NodeId,
@@ -474,6 +475,51 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
       const terminal = events.find((event) => event.type === "turn.terminal");
       assert.equal(terminal?.type === "turn.terminal" ? terminal.status : undefined, "completed");
     }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+
+  it.effect(
+    "gives Hermes T3's MCP server over HTTP, with the call limit, once it advertises HTTP",
+    () =>
+      Effect.gen(function* () {
+        const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
+        const endpoint = "http://127.0.0.1:43123/mcp";
+        const sessionMcpServers = Effect.fn("sessionMcpServers")(function* (
+          name: string,
+          mockEnvironment: Record<string, string>,
+        ) {
+          yield* mcpSessions.set({
+            environmentId: EnvironmentId.make("environment-hermes-v2-mcp"),
+            threadId: ThreadId.make(`hermes-v2-${name}`),
+            providerSessionId: `mcp-session-${name}`,
+            providerInstanceId: instanceId,
+            endpoint,
+            authorizationHeader: "Bearer thread-token",
+            browserToolsAvailable: false,
+          });
+          const { requests } = yield* runMockTurn({ name, mockEnvironment });
+          const created = requests.find((request) => request.method === "session/new")?.params;
+          return typeof created === "object" && created !== null
+            ? Reflect.get(created, "mcpServers")
+            : undefined;
+        });
+
+        assert.deepEqual(yield* sessionMcpServers("mcp-http", { T3_ACP_MCP_HTTP: "1" }), [
+          {
+            type: "http",
+            name: "t3-code",
+            url: endpoint,
+            headers: [
+              { name: "Authorization", value: "Bearer thread-token" },
+              { name: "t3-mcp-call-limit-ms", value: "300000" },
+            ],
+          },
+        ]);
+        // A Hermes that does not advertise HTTP keeps the stdio bridge.
+        const [bridge] = (yield* sessionMcpServers("mcp-stdio", {})) as ReadonlyArray<{
+          readonly args?: ReadonlyArray<string>;
+        }>;
+        assert.include(bridge?.args ?? [], "acp-mcp-bridge");
+      }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 
   it.effect("leaves Hermes's fast mode alone when the toggle was never touched", () =>

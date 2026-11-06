@@ -480,7 +480,7 @@ export function AppearanceSettingsPanel() {
         </AdvancedSettings>
         <SettingsRow
           {...searchableSetting("status-rings")}
-          description="Outline active threads in the sidebar with their status: marching while working, breathing while waiting on you, pulsing on failure. Your system's reduce-motion setting keeps the outlines but holds them still."
+          description="Outline active threads in the sidebar by status: marching while working, breathing while waiting on you, pulsing on failure. With reduced motion, the outlines stay but hold still."
           resetAction={
             settings.sidebarStatusRings !== DEFAULT_UNIFIED_SETTINGS.sidebarStatusRings ? (
               <SettingResetButton
@@ -505,7 +505,7 @@ export function AppearanceSettingsPanel() {
         />
         <SettingsRow
           {...searchableSetting("tab-status-dots")}
-          description="Mark the browser tab with a colored dot instead of a count while threads wait in the background: green when a turn finishes, amber when one needs you, red when one fails. Amber and red blink a few times when they arrive, unless your system reduces motion."
+          description="Show a colored dot on the browser tab instead of a count while threads wait: green when a turn finishes, amber when one needs you, red when one fails. Amber and red blink unless motion is reduced."
           resetAction={
             settings.tabStatusDots !== DEFAULT_UNIFIED_SETTINGS.tabStatusDots ? (
               <SettingResetButton

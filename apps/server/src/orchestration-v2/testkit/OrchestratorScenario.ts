@@ -77,6 +77,8 @@ export type OrchestratorV2ScenarioStep =
       readonly itemType: OrchestrationV2TurnItem["type"];
       /** Wait until the item also has this status. */
       readonly itemStatus?: OrchestrationV2TurnItem["status"];
+      /** Wait until the run has this many such items; defaults to one. */
+      readonly itemCount?: number;
       /** Look in the threads of the run's provider subagents instead of the run itself. */
       readonly inSubagentThreads?: boolean;
     }
@@ -454,6 +456,7 @@ export function runOrchestratorV2Scenario(
         runId: OrchestrationV2Run["id"],
         itemType: OrchestrationV2TurnItem["type"],
         itemStatus: OrchestrationV2TurnItem["status"] | undefined,
+        itemCount: number,
         inSubagentThreads: boolean,
         attemptsRemaining = SCENARIO_WAIT_ATTEMPTS,
         deadlineAt = scenarioWaitDeadline(options.waitDeadlineMs),
@@ -466,15 +469,19 @@ export function runOrchestratorV2Scenario(
           const projection = yield* orchestrator.getThreadProjection(threadId);
           const matches = (item: OrchestrationV2TurnItem) =>
             item.type === itemType && (itemStatus === undefined || item.status === itemStatus);
+          let found = 0;
           if (!inSubagentThreads) {
-            if (projection.turnItems.some((item) => item.runId === runId && matches(item))) return;
+            found = projection.turnItems.filter(
+              (item) => item.runId === runId && matches(item),
+            ).length;
           } else {
             for (const subagent of projection.subagents) {
               if (subagent.runId !== runId || subagent.childThreadId === null) continue;
               const child = yield* orchestrator.getThreadProjection(subagent.childThreadId);
-              if (child.turnItems.some(matches)) return;
+              found += child.turnItems.filter(matches).length;
             }
           }
+          if (found >= itemCount) return;
           if (scenarioWaitExhausted(attemptsRemaining, deadlineAt)) {
             return yield* new OrchestratorV2ScenarioStepError({
               scenario: scenario.name,
@@ -487,6 +494,7 @@ export function runOrchestratorV2Scenario(
             runId,
             itemType,
             itemStatus,
+            itemCount,
             inSubagentThreads,
             attemptsRemaining - 1,
             deadlineAt,
@@ -682,6 +690,7 @@ export function runOrchestratorV2Scenario(
               step.runId,
               step.itemType,
               step.itemStatus,
+              step.itemCount ?? 1,
               step.inSubagentThreads === true,
             );
             break;

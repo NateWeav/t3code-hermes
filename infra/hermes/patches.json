@@ -38,6 +38,11 @@
       "neededFor": "Live progress for subagents Hermes delegates to. Without it, background subagents show as idle once dispatched.",
       "versions": [
         {
+          "hermesCommit": "27cbcb122ff47a1d6878cf3c390b24395f98ee14",
+          "hermesCommitDate": "2026-11-04T16:58:03Z",
+          "file": "acp-delegation-progress/27cbcb122ff4.patch"
+        },
+        {
           "hermesCommit": "5b32cfc230078417fc523e12b9aabbc9b59f684b",
           "hermesCommitDate": "2026-10-26T03:55:41Z",
           "file": "acp-delegation-progress/5b32cfc23007.patch"
@@ -56,6 +61,18 @@
           "hermesCommit": "517b5e10febd619ce30bb22580e29b160266eb43",
           "hermesCommitDate": "2026-10-08T17:49:31Z",
           "file": "acp-delegation-progress/517b5e10febd.patch"
+        }
+      ]
+    },
+    {
+      "id": "acp-editor-delegation",
+      "title": "Subagents in the turn",
+      "neededFor": "Subagents that answer inside the turn and can launch their own, as Claude's do. Without it, Hermes runs every subagent in the background, so its answer arrives in a later turn, and a subagent cannot launch another.",
+      "versions": [
+        {
+          "hermesCommit": "ca4360692055bdb4df3a695c164646e528891da8",
+          "hermesCommitDate": "2026-11-06T04:01:15Z",
+          "file": "acp-editor-delegation/ca4360692055.patch"
         }
       ]
     },

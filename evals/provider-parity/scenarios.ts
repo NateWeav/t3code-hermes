@@ -36,17 +36,18 @@ export interface ParityScenario {
 }
 
 const applicable = { kind: "applicable" } as const;
-const twin = (reason: string, name?: string): Applicability => ({
+const twin = (reason: string, twinName?: string): Applicability => ({
   kind: "twin",
   reason,
-  ...(name === undefined ? {} : { twin: name }),
+  ...(twinName === undefined ? {} : { twin: twinName }),
 });
 const na = (reason: string): Applicability => ({ kind: "na", reason });
 
 const CLAUDE_AGENT_TOOLS = "The prompt drives Claude's Agent/TaskStop/SendMessage tools.";
 const CLAUDE_BASH_BACKGROUND =
   "The prompt drives Claude's Bash run_in_background, and the reference assertion pins Claude's task ids and Bash descriptions, so the Hermes twin mirrors it with Hermes's own.";
-const CLAUDE_COMPACT = "The prompt sends Claude's /compact; Hermes compacts with /compress.";
+const CLAUDE_COMPACT =
+  "The prompt sends Claude's /compact; Hermes compacts with /compress. Claude's assertOutput still pins its recorded token counts, usage and wake or peer turn, which a twin needs moved to assertProviderDetails.";
 
 export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
   // Turn loop
@@ -152,13 +153,16 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
     facet: "planning",
     hermes: twin(
       "The prompt names Codex's update_plan tool; Hermes tracks todos with its todo tool.",
+      "hermes_todo_list",
     ),
     exercises: ["planning.emitsTodoList"],
   },
   {
     name: "plan_questions",
     facet: "planning",
-    hermes: twin("The prompt names Codex's request_user_input tool; Hermes asks with clarify."),
+    hermes: twin(
+      "The prompt names Codex's request_user_input tool; Hermes asks with clarify, which stock Hermes leaves out of ACP sessions.",
+    ),
     exercises: ["planning.supportsStructuredQuestions"],
   },
   {

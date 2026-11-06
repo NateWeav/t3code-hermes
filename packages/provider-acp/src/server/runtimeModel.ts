@@ -231,6 +231,58 @@ export type AcpPlanUpdate =
   | { readonly nativePlanId: string; readonly kind: "unknown"; readonly contentType: string }
   | { readonly nativePlanId: string; readonly kind: "removed" };
 
+const PROPOSED_PLAN_OPEN = "<proposed_plan>";
+const PROPOSED_PLAN_CLOSE = "</proposed_plan>";
+const PROPOSED_PLAN_OPEN_LINE = /(?:^|\n)[ \t]*<proposed_plan>/u;
+
+/** `text` without a trailing proper prefix of `tag`, which may still become the tag. */
+function withoutPartialTag(text: string, tag: string, atLineStart: boolean): string {
+  const lineStart = atLineStart ? text.lastIndexOf("\n") + 1 : 0;
+  for (let length = Math.min(tag.length - 1, text.length - lineStart); length > 0; length -= 1) {
+    const tail = text.slice(text.length - length);
+    if (!tag.startsWith(tail)) continue;
+    const head = text.slice(0, text.length - length);
+    if (!atLineStart || head.slice(lineStart).trim().length === 0) return head;
+  }
+  return text;
+}
+
+/**
+ * Splits a reply into the text around its first `<proposed_plan>` block (Codex's plan
+ * convention, opening tag at a line start) and the block's Markdown. While streaming, a
+ * trailing partial tag is held back; `final` releases it and closes an unterminated block.
+ */
+export function splitProposedPlanBlock(
+  text: string,
+  final: boolean,
+): {
+  readonly reply: string;
+  readonly plan?: { readonly markdown: string; readonly closed: boolean };
+} {
+  const match = PROPOSED_PLAN_OPEN_LINE.exec(text);
+  if (match === null) {
+    return { reply: final ? text : withoutPartialTag(text, PROPOSED_PLAN_OPEN, true) };
+  }
+  const before = text.slice(0, match.index).trimEnd();
+  const bodyStart = match.index + match[0].length;
+  const close = text.indexOf(PROPOSED_PLAN_CLOSE, bodyStart);
+  if (close === -1) {
+    const body = text.slice(bodyStart);
+    return {
+      reply: before,
+      plan: {
+        markdown: (final ? body : withoutPartialTag(body, PROPOSED_PLAN_CLOSE, false)).trim(),
+        closed: final,
+      },
+    };
+  }
+  const after = text.slice(close + PROPOSED_PLAN_CLOSE.length).trim();
+  return {
+    reply: before.length > 0 && after.length > 0 ? `${before}\n\n${after}` : before || after,
+    plan: { markdown: text.slice(bodyStart, close).trim(), closed: true },
+  };
+}
+
 export interface AcpPermissionRequest {
   readonly kind: string | "unknown";
   readonly detail?: string;

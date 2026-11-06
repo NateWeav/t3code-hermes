@@ -51,7 +51,7 @@ export function materializeReplayTranscriptRuntimeInstructions(
       ) {
         const prompt: ReadonlyArray<unknown> = frame.params.prompt;
         const firstPart = prompt[0];
-        // The adapter sends a native slash command (`/undo 1`) without runtime instructions.
+        // The adapter sends a native slash command without runtime instructions.
         if (
           typeof firstPart === "object" &&
           firstPart !== null &&

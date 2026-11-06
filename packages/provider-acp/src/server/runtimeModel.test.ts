@@ -16,6 +16,7 @@ import {
   sessionModelStateFromInitialize,
   sessionUpdateCountsAsLoadReplayActivity,
   sessionUpdateIsReplay,
+  splitProposedPlanBlock,
   syntheticLoadSessionResponseFromInitialize,
   toolCallProgressLength,
   withTrackedPermissionToolCall,
@@ -1151,6 +1152,52 @@ describe("AcpRuntimeModel", () => {
         payload: { nativePlanId: "plan-future", kind: "unknown", contentType: "diagram" },
       },
     ]);
+  });
+
+  it("splits a <proposed_plan> block out of streamed and final reply text", () => {
+    const cases: ReadonlyArray<
+      readonly [string, boolean, ReturnType<typeof splitProposedPlanBlock>]
+    > = [
+      [
+        "Checked the repo.\n\n<proposed_plan>\n# Plan\n- step",
+        false,
+        {
+          reply: "Checked the repo.",
+          plan: { markdown: "# Plan\n- step", closed: false },
+        },
+      ],
+      [
+        "Intro\n<proposed_plan>\n# Plan\n</proposed_plan>\n\nShip it?",
+        false,
+        {
+          reply: "Intro\n\nShip it?",
+          plan: { markdown: "# Plan", closed: true },
+        },
+      ],
+      [
+        "<proposed_plan>\n# Plan\n</propos",
+        false,
+        {
+          reply: "",
+          plan: { markdown: "# Plan", closed: false },
+        },
+      ],
+      ["<proposed_plan>\n# Plan", true, { reply: "", plan: { markdown: "# Plan", closed: true } }],
+      // A partial opening tag is held back only while streaming, and only at a line start.
+      ["Intro\n<propo", false, { reply: "Intro\n" }],
+      ["Intro\n<propo", true, { reply: "Intro\n<propo" }],
+      ["Use a < b", false, { reply: "Use a < b" }],
+      [
+        "Wrap it in a <proposed_plan> block.",
+        true,
+        {
+          reply: "Wrap it in a <proposed_plan> block.",
+        },
+      ],
+    ];
+    for (const [text, final, expected] of cases) {
+      expect(splitProposedPlanBlock(text, final)).toEqual(expected);
+    }
   });
 
   it("turns future ACP content and session updates into explicit placeholders", () => {

@@ -243,7 +243,7 @@ export function makeHermesEditApprovalCards() {
       if (toolCall.kind !== "edit" || !HERMES_PERMISSION_CARD_ID.test(toolCall.toolCallId)) return;
       const diffs = (toolCall.content ?? []).filter((entry) => entry.type === "diff");
       const diff = diffs.length === 1 ? diffs[0]! : undefined;
-      if (diff?.type !== "diff") return;
+      if (diff?.type !== "diff" || !("path" in diff)) return;
       // `locations` carry the path as the model wrote it; the diff carries it resolved.
       const requestedPath = unknownRecord(unknownRecord(toolCall.rawInput)?.arguments)?.path;
       for (const path of new Set([diff.path, requestedPath])) {

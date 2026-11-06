@@ -109,7 +109,6 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
   {
     name: "tool_call_denied_write",
     facet: "approvals",
-    // The reference checks Claude's prompt and wire labels, so the twin has its own assertion.
     hermes: twin("The prompt names Claude's Write tool.", "hermes_tool_call_denied_write"),
   },
 

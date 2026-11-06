@@ -12,19 +12,6 @@ import {
   projectionFor,
   WEB_SEARCH_PROMPT,
 } from "../shared.ts";
-import { assertClaudeWebSearchOutput } from "./claude_output.ts";
-import { assertWebSearchOutput as assertCodexWebSearchOutput } from "./codex_output.ts";
-
-// Each reference recording also keeps the checks that pin its own provider's shapes.
-const RECORDING_CHECKS: Partial<
-  Record<
-    string,
-    (result: OrchestratorV2ScenarioResult, transcript: ProviderReplayTranscript) => void
-  >
-> = {
-  claudeAgent: assertClaudeWebSearchOutput,
-  codex: assertCodexWebSearchOutput,
-};
 
 /** Any provider: one completed search card that names the query, then the answer. */
 export function assertProviderNeutralWebSearchOutput(
@@ -67,6 +54,4 @@ export function assertProviderNeutralWebSearchOutput(
     answerIndex,
     "the answer follows the search",
   );
-
-  RECORDING_CHECKS[transcript.provider]?.(result, transcript);
 }

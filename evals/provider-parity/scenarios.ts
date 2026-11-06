@@ -85,8 +85,14 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
     hermes: applicable,
     exercises: ["streaming.streamsToolOutput", "tools.emitsToolOutput"],
   },
-  { name: "web_search", facet: "tools", hermes: applicable, providerBound: true },
-  { name: "claude_local_bash_task", facet: "tools", hermes: applicable },
+  { name: "web_search", facet: "tools", hermes: applicable },
+  {
+    name: "claude_local_bash_task",
+    facet: "tools",
+    hermes: na(
+      "Covers Claude SDK local_bash task frames not becoming subagents; the assertion pins Claude's recorded command and replies.",
+    ),
+  },
   {
     name: "claude_mcp_tool_presentation",
     facet: "tools",
@@ -105,7 +111,7 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
   {
     name: "tool_call_denied_write",
     facet: "approvals",
-    hermes: twin("The prompt names Claude's Write tool."),
+    hermes: twin("The prompt names Claude's Write tool.", "hermes_tool_call_denied_write"),
   },
 
   // Interrupt, steer, queue

@@ -408,6 +408,8 @@ export interface AcpAdapterV2Flavor {
         ) => EffectAcpSchema.RequestPermissionResponse | undefined;
       }
     | undefined;
+  /** Sees every permission request first, for flavors that carry its details onto other cards. */
+  readonly onPermissionRequest?: (request: EffectAcpSchema.RequestPermissionRequest) => void;
   /** Grok Auto asks only about classifier refusals; T3 policy must not auto-approve them. */
   readonly permissionDisposition?: (
     policy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
@@ -6714,6 +6716,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           }
           yield* targetRuntime.handleRequestPermission((nativeParams, requestContext) =>
             Effect.gen(function* () {
+              flavor.onPermissionRequest?.(nativeParams);
               const trackedTurn = yield* Ref.get(activeTurn);
               const params =
                 trackedTurn !== null && nativeParams.sessionId === (yield* Ref.get(activeSessionId))

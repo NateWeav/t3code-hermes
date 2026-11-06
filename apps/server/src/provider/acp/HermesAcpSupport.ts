@@ -27,6 +27,7 @@ import type {
   AcpToolCallState,
 } from "@t3tools/provider-acp/server/runtimeModel";
 import * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
+import { unknownRecord } from "@t3tools/provider-acp/server/clientPolicy";
 
 const HERMES_DRIVER_KIND = ProviderDriverKind.make("hermes");
 /** Hermes authenticates from `~/.hermes/.env`; the method id is a formality. */
@@ -191,6 +192,88 @@ export function normalizeHermesTerminalResult(toolCall: AcpToolCallState): AcpTo
         ...(exitCode !== undefined ? { exitCode } : {}),
       },
     },
+  };
+}
+
+const HERMES_WEB_SEARCH_START = "Searching the web for: ";
+
+/**
+ * Hermes sends `web_search` without `rawInput`, so its card had no query. The start text carries
+ * the whole query (the title cuts it at 80 characters); later updates keep it as `rawInput`.
+ */
+export function normalizeHermesWebSearchQuery(toolCall: AcpToolCallState): AcpToolCallState {
+  const content = toolCall.data.content;
+  if (toolCall.kind !== "fetch" || toolCall.data.rawInput !== undefined) return toolCall;
+  if (!Array.isArray(content) || content.length !== 1) return toolCall;
+  const entry = content[0] as EffectAcpSchema.ToolCallContent;
+  if (entry.type !== "content" || entry.content.type !== "text") return toolCall;
+  const text = entry.content.text;
+  if (!text.startsWith(HERMES_WEB_SEARCH_START)) return toolCall;
+  const query = text.slice(HERMES_WEB_SEARCH_START.length).trim();
+  return query.length === 0
+    ? toolCall
+    : { ...toolCall, data: { ...toolCall.data, rawInput: { query } } };
+}
+
+/** Hermes's permission cards; no tool call shares these ids. */
+const HERMES_PERMISSION_CARD_ID = /^(?:edit-approval|perm-check)-\d+$/;
+const HERMES_EDIT_DIFFS_KEPT = 64;
+
+/**
+ * Hermes's gateway sends an edit's diff only on its approval request (`edit-approval-N`); the
+ * write's own card reads "Preparing write…" and then "✅ write_file completed…". This carries the
+ * approved diff onto that card, and drops the status update closing the approval card, which T3
+ * already shows as the resolved approval.
+ */
+export function makeHermesEditApprovalCards() {
+  const pendingByPath = new Map<string, EffectAcpSchema.ToolCallContent>();
+  const byToolCallId = new Map<string, EffectAcpSchema.ToolCallContent>();
+  const keep = (
+    map: Map<string, EffectAcpSchema.ToolCallContent>,
+    key: string,
+    diff: EffectAcpSchema.ToolCallContent,
+  ) => {
+    map.delete(key);
+    map.set(key, diff);
+    if (map.size > HERMES_EDIT_DIFFS_KEPT) map.delete(map.keys().next().value!);
+  };
+  return {
+    onPermissionRequest: (request: EffectAcpSchema.RequestPermissionRequest) => {
+      const toolCall = request.toolCall;
+      if (toolCall.kind !== "edit" || !HERMES_PERMISSION_CARD_ID.test(toolCall.toolCallId)) return;
+      const diffs = (toolCall.content ?? []).filter((entry) => entry.type === "diff");
+      const diff = diffs.length === 1 ? diffs[0]! : undefined;
+      if (diff?.type !== "diff" || !("path" in diff)) return;
+      // `locations` carry the path as the model wrote it; the diff carries it resolved.
+      const requestedPath = unknownRecord(unknownRecord(toolCall.rawInput)?.arguments)?.path;
+      for (const path of new Set([diff.path, requestedPath])) {
+        if (typeof path === "string" && path.length > 0) keep(pendingByPath, path, diff);
+      }
+    },
+    normalizeToolCall: (toolCall: AcpToolCallState): AcpToolCallState => {
+      if (toolCall.kind !== "edit") return toolCall;
+      let diff = byToolCallId.get(toolCall.toolCallId);
+      if (diff === undefined && (toolCall.status === "completed" || toolCall.status === "failed")) {
+        const locations = toolCall.data.locations;
+        const path =
+          Array.isArray(locations) && locations.length === 1
+            ? unknownRecord(locations[0])?.path
+            : undefined;
+        diff = typeof path === "string" ? pendingByPath.get(path) : undefined;
+        if (diff === undefined) return toolCall;
+        for (const [key, pending] of pendingByPath) {
+          if (pending === diff) pendingByPath.delete(key);
+        }
+        keep(byToolCallId, toolCall.toolCallId, diff);
+      }
+      // A denied or failed write keeps Hermes's reason; it wrote nothing.
+      return diff === undefined || toolCall.status !== "completed"
+        ? toolCall
+        : { ...toolCall, data: { ...toolCall.data, content: [diff] } };
+    },
+    ignoreSessionUpdate: (notification: EffectAcpSchema.SessionNotification) =>
+      notification.update.sessionUpdate === "tool_call_update" &&
+      HERMES_PERMISSION_CARD_ID.test(notification.update.toolCallId),
   };
 }
 

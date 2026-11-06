@@ -4,6 +4,7 @@ import * as EffectAcpErrors from "effect-acp/errors";
 
 import {
   hermesApprovalOptions,
+  readHermesCompressReply,
   hermesApprovalPosture,
   hermesFollowsApprovalPosture,
   applyHermesAcpModelSelection,
@@ -20,6 +21,7 @@ import {
 import {
   extractMcpToolCallIdentity,
   parseSessionUpdateEvent,
+  type AcpToolCallState,
 } from "@t3tools/provider-acp/server/runtimeModel";
 
 describe("resolveHermesAcpBaseModelId", () => {
@@ -404,6 +406,13 @@ describe("normalizeHermesTerminalResult", () => {
     expect(normalized.data.rawOutput).toEqual({ exitCode: 1 });
   });
 
+  it("drops a running call's echo of its command, which is not output", () => {
+    const running = { ...completedTerminal("$ git status"), status: "inProgress" as const };
+    const normalized = normalizeHermesTerminalResult(running);
+    expect(normalized.data.content).toBeUndefined();
+    expect(normalized.command).toBe("git status");
+  });
+
   it("leaves failure text, in-flight calls, and other tools untouched", () => {
     const failure = completedTerminal("terminal failed: command timed out", "failed");
     expect(normalizeHermesTerminalResult(failure)).toBe(failure);
@@ -474,18 +483,33 @@ describe("makeHermesEditApprovalCards", () => {
 
   it("shows the approved diff on the write, once, and keeps a denied write's reason", () => {
     const cards = makeHermesEditApprovalCards();
+    const normalize = (toolCall: AcpToolCallState) => cards.normalizeToolCall(toolCall, "sess-1");
     cards.onPermissionRequest(approval);
-    const done = cards.normalizeToolCall(write("toolu_1", "completed", "✅ write_file completed"));
+    const done = normalize(write("toolu_1", "completed", "✅ write_file completed"));
     expect(done.data.content).toEqual([diff]);
-    expect(cards.normalizeToolCall(done).data.content).toEqual([diff]);
+    expect(normalize(done).data.content).toEqual([diff]);
 
     const unasked = write("toolu_2", "completed", "✅ write_file completed");
-    expect(cards.normalizeToolCall(unasked)).toBe(unasked);
+    expect(normalize(unasked)).toBe(unasked);
 
     cards.onPermissionRequest(approval);
     const denied = write("toolu_3", "failed", "Edit approval denied by ACP client");
-    expect(cards.normalizeToolCall(denied)).toBe(denied);
-    expect(cards.normalizeToolCall(unasked)).toBe(unasked);
+    expect(normalize(denied)).toBe(denied);
+    expect(normalize(unasked)).toBe(unasked);
+  });
+
+  it("keeps each session's diff for the same path", () => {
+    const cards = makeHermesEditApprovalCards();
+    const otherDiff = { ...diff, newText: "other session's text" };
+    cards.onPermissionRequest(approval);
+    cards.onPermissionRequest({
+      ...approval,
+      sessionId: "sess-2",
+      toolCall: { ...approval.toolCall, content: [otherDiff] },
+    });
+    const done = write("toolu_1", "completed", "✅ write_file completed");
+    expect(cards.normalizeToolCall(done, "sess-1").data.content).toEqual([diff]);
+    expect(cards.normalizeToolCall(done, "sess-2").data.content).toEqual([otherDiff]);
   });
 
   it("keeps the diff an unasked write showed when it started, after an approved one", () => {
@@ -498,17 +522,17 @@ describe("makeHermesEditApprovalCards", () => {
       data: { locations: [{ path: "notes.txt" }], content: [startedDiff] },
     });
     const unasked = started("toolu_4");
-    expect(cards.normalizeToolCall(unasked)).toBe(unasked);
+    expect(cards.normalizeToolCall(unasked, "sess-1")).toBe(unasked);
     expect(
-      cards.normalizeToolCall(write("toolu_4", "completed", "✅ write_file completed")).data
-        .content,
+      cards.normalizeToolCall(write("toolu_4", "completed", "✅ write_file completed"), "sess-1")
+        .data.content,
     ).toEqual([startedDiff]);
 
-    cards.normalizeToolCall(started("toolu_5"));
+    cards.normalizeToolCall(started("toolu_5"), "sess-1");
     cards.onPermissionRequest(approval);
     expect(
-      cards.normalizeToolCall(write("toolu_5", "completed", "✅ write_file completed")).data
-        .content,
+      cards.normalizeToolCall(write("toolu_5", "completed", "✅ write_file completed"), "sess-1")
+        .data.content,
     ).toEqual([diff]);
   });
 
@@ -552,6 +576,28 @@ describe("preserveHermesAgentActivityTitle", () => {
   it("leaves other tools on their shared summary", () => {
     const toolCall = parsed("read_file: src/app.ts", "read");
     expect(preserveHermesAgentActivityTitle(toolCall)).toBe(toolCall);
+  });
+});
+
+describe("readHermesCompressReply", () => {
+  it("counts only a compression that removed messages, with its token estimate", () => {
+    expect(
+      [
+        "Compressed: 31 → 6 messages\nApprox request size: ~24,310 → ~3,904 tokens",
+        "Compressed with fallback: 31 → 9 messages\nApprox request size: ~24,310 → ~6,120 tokens\nSummary generation failed; Hermes used limited fallback context and removed 22 message(s).",
+        "Context compressed.",
+        "No changes from compression: 2 messages\nApprox request size: ~11,452 tokens (unchanged)\n",
+        "Compression refused (summary would grow the conversation): 8 messages preserved",
+        "Compression aborted: 8 messages preserved\nSummary generation failed; no messages were removed.",
+      ].map(readHermesCompressReply),
+    ).toEqual([
+      { compacted: true, beforeTokenCount: 24310, afterTokenCount: 3904 },
+      { compacted: true, beforeTokenCount: 24310, afterTokenCount: 6120 },
+      { compacted: true },
+      { compacted: false },
+      { compacted: false },
+      { compacted: false },
+    ]);
   });
 });
 

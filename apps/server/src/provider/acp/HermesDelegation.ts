@@ -22,9 +22,12 @@ export interface HermesSubagentUpdate {
     | "interrupted"
     | "cancelled";
   readonly childSessionId: null;
+  readonly parentNativeTaskId?: string;
   readonly result: string | null;
   readonly role: string | null;
   readonly usage: OrchestrationV2SubagentUsage | null;
+  /** Ends a background child, whose result the gateway hands the agent in a turn of its own. */
+  readonly wakesAgent?: boolean;
 }
 
 type Child = {
@@ -273,6 +276,12 @@ function resultUpdate(
 /** Launches remembered at once; a call's children outlive its own updates. */
 const REMEMBERED_LAUNCHES = 256;
 
+/** One call's subagent tree: Hermes ids to native task ids, and nested rows not yet ended. */
+type Lineage = {
+  readonly ids: Map<string, string>;
+  readonly open: Map<string, string>;
+};
+
 /**
  * Subagent updates for a Hermes delegation call, or undefined when it isn't one; an empty array
  * claims the call without moving a child. Stock Hermes names children only in the start, so they're
@@ -280,21 +289,97 @@ const REMEMBERED_LAUNCHES = 256;
  */
 export function makeHermesSubagentExtractor() {
   const launches = new Map<string, ReadonlyArray<Child>>();
+  const dispatched = new Set<string>();
+  const lineages = new Map<string, Lineage>();
+  const remember = <V>(map: Map<string, V>, key: string, value: V): V => {
+    map.set(key, value);
+    if (map.size > REMEMBERED_LAUNCHES) {
+      const oldest = map.keys().next().value!;
+      map.delete(oldest);
+      dispatched.delete(oldest);
+    }
+    return value;
+  };
   return (tool: AcpToolCallState): ReadonlyArray<HermesSubagentUpdate> | undefined => {
     let children = launches.get(tool.toolCallId);
     if (children === undefined && isHermesDelegation(tool)) {
-      children = startChildren(tool);
-      launches.set(tool.toolCallId, children);
-      if (launches.size > REMEMBERED_LAUNCHES) launches.delete(launches.keys().next().value!);
+      children = remember(launches, tool.toolCallId, startChildren(tool));
     }
     if (children === undefined && !isHermesDelegationProgress(tool)) return undefined;
-    return delegationUpdates(tool, children ?? []);
+    const lineage =
+      lineages.get(tool.toolCallId) ??
+      remember(lineages, tool.toolCallId, { ids: new Map(), open: new Map() });
+    return settleDescendants(lineage, delegationUpdates(tool, children ?? [], dispatched, lineage));
   };
+}
+
+function isTerminal(status: HermesSubagentUpdate["status"]): boolean {
+  return status !== "pending" && status !== "running";
+}
+
+/** A nested row whose launcher ended without reporting it ends too, so it cannot hold the turn. */
+function settleDescendants(
+  lineage: Lineage,
+  updates: ReadonlyArray<HermesSubagentUpdate>,
+): ReadonlyArray<HermesSubagentUpdate> {
+  for (const update of updates) {
+    if (update.parentNativeTaskId === undefined) continue;
+    if (isTerminal(update.status)) lineage.open.delete(update.nativeTaskId);
+    else lineage.open.set(update.nativeTaskId, update.parentNativeTaskId);
+  }
+  const ended = new Set(
+    updates.flatMap((update) => (isTerminal(update.status) ? [update.nativeTaskId] : [])),
+  );
+  const descends = (nativeTaskId: string) => {
+    let parent = lineage.open.get(nativeTaskId);
+    for (let hops = 0; parent !== undefined && hops <= lineage.open.size; hops++) {
+      if (ended.has(parent)) return true;
+      parent = lineage.open.get(parent);
+    }
+    return false;
+  };
+  const orphans = [...lineage.open].filter(([nativeTaskId]) => descends(nativeTaskId));
+  for (const [nativeTaskId] of orphans) lineage.open.delete(nativeTaskId);
+  return [
+    ...updates,
+    ...orphans.map(([nativeTaskId, parentNativeTaskId]) => ({
+      ...childUpdate("", undefined, 0, "interrupted"),
+      nativeTaskId,
+      parentNativeTaskId,
+    })),
+  ];
+}
+
+/** A grandchild (or deeper) frame, opened under the subagent Hermes names as its parent. */
+function nestedUpdates(
+  toolCallId: string,
+  lineage: Lineage,
+  progress: Record<string, unknown>,
+): ReadonlyArray<HermesSubagentUpdate> {
+  const subagentId = text(progress.subagent_id);
+  const parentNativeTaskId = lineage.ids.get(text(progress.parent_id) ?? "");
+  if (subagentId === undefined || parentNativeTaskId === undefined) return [];
+  const nativeTaskId = `${toolCallId}:subagent:${subagentId}`;
+  lineage.ids.set(subagentId, nativeTaskId);
+  const index = count(progress.task_index) ?? 0;
+  const goal = text(progress.goal);
+  const child = goal === undefined ? undefined : { index, title: goal };
+  const update =
+    progress.event === "subagent.complete"
+      ? resultUpdate(toolCallId, child, index, progress)
+      : // Its first report opens its thread, whose turn is working from then on.
+        childUpdate(toolCallId, child, index, "running", {
+          model: text(progress.model),
+          role: resultRole(progress),
+        });
+  return [{ ...update, nativeTaskId, parentNativeTaskId }];
 }
 
 function delegationUpdates(
   tool: AcpToolCallState,
   children: ReadonlyArray<Child>,
+  dispatched: Set<string>,
+  lineage: Lineage,
 ): ReadonlyArray<HermesSubagentUpdate> {
   const output = record(tool.data.rawOutput);
   const progress = record(output.hermesDelegation);
@@ -306,13 +391,14 @@ function delegationUpdates(
     const content = contentText(tool);
     // Stock clips fallback JSON at 5,000 characters. The dispatch header
     // precedes the potentially long goals; clipping is not a child failure.
-    const dispatched =
+    const backgrounded =
       output.status === "dispatched" ||
       record(content).status === "dispatched" ||
       /^\{\s*"status"\s*:\s*"dispatched"\s*,\s*"mode"\s*:\s*"background"/.test(content);
-    if (dispatched) {
+    if (backgrounded) {
       // The patch (which also fills rawInput) reports each child's end later.
       const live = tool.data.rawInput !== undefined;
+      if (live) dispatched.add(id);
       return children.map((child) =>
         childUpdate(
           id,
@@ -360,19 +446,17 @@ function delegationUpdates(
   }
 
   if (typeof progress.event === "string") {
+    // Thinking ticks are spinner frames, not progress.
+    if (progress.event === "subagent.thinking") return [];
+    // Grandchildren report through the same call with a depth and their parent's id.
+    if ((count(progress.depth) ?? 0) !== 0) return nestedUpdates(id, lineage, progress);
     const index = count(progress.task_index);
-    // Grandchildren report through the same call with a depth; only direct
-    // children are rows. Thinking ticks are spinner frames, not progress.
-    if (
-      index === undefined ||
-      !Number.isInteger(index) ||
-      (count(progress.depth) ?? 0) !== 0 ||
-      progress.event === "subagent.thinking"
-    ) {
-      return [];
-    }
+    if (index === undefined || !Number.isInteger(index)) return [];
+    const subagentId = text(progress.subagent_id);
+    if (subagentId !== undefined) lineage.ids.set(subagentId, `${id}:task:${index}`);
     if (progress.event === "subagent.complete") {
-      return [resultUpdate(id, childAt(index), index, progress)];
+      const update = resultUpdate(id, childAt(index), index, progress);
+      return [dispatched.has(id) ? { ...update, wakesAgent: true } : update];
     }
     return [
       childUpdate(

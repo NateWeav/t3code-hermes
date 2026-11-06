@@ -2204,6 +2204,8 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           readonly providerThreadId: ProviderThreadId;
         } | null>(null);
         const wakeBuffer = yield* Ref.make<Array<EffectAcpSchema.SessionNotification>>([]);
+        // Buffered frames reporting a subagent's end: the wake they precede is that subagent's.
+        const subagentEndFrames = new WeakSet<EffectAcpSchema.SessionNotification>();
         const noWakeReports = {
           reports: new Map<string, BackgroundWorkReport>(),
           offered: new Set<string>(),
@@ -3634,7 +3636,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             if (child.pending.length < 256) child.pending.push(notification);
             if (subagent !== undefined) {
               const root = yield* Ref.get(activeSessionId);
-              if (root !== null) yield* offerContinuationRun(root);
+              if (root !== null) yield* offerContinuationRun(root, "subagent");
             }
             return;
           }
@@ -3686,7 +3688,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                 yield* publishNativeChildStatus(owner, owner.status);
               } else if (acpSubagentStatusIsTerminal(owner.subagent.task.status)) {
                 if (context !== null) yield* syncNativeChildren(context);
-                else if (root !== null) yield* offerContinuationRun(root);
+                else if (root !== null) yield* offerContinuationRun(root, "subagent");
               }
             }
             return true;
@@ -4593,7 +4595,10 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             });
           });
 
-        const offerContinuationRun = Effect.fnUntraced(function* (_sessionId: string) {
+        const offerContinuationRun = Effect.fnUntraced(function* (
+          _sessionId: string,
+          wokenBy?: "subagent",
+        ) {
           if (continuationRequests === undefined) {
             return false;
           }
@@ -4609,10 +4614,14 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                 continuationGeneration,
                 (value) => value + 1,
               );
-              // The wake names no process: it may follow the end of any tracked one, and only a
-              // lone one can be named.
-              const woken = [...awaitableBackgroundTasks];
-              releaseAwaitableBackgroundTasks();
+              // A command wake names no process, and Hermes batches completions that land together
+              // into one turn: it may follow the end of any tracked one, and only a lone one can be
+              // named. A subagent's end wakes the agent on its own turn and ends no command.
+              const subagentWake =
+                wokenBy === "subagent" ||
+                (yield* Ref.get(wakeBuffer)).some((frame) => subagentEndFrames.has(frame));
+              const woken = subagentWake ? [] : [...awaitableBackgroundTasks];
+              if (woken.length > 0) releaseAwaitableBackgroundTasks();
               const reports = yield* Ref.modify(wakeReports, ({ reports: recorded }) => {
                 const [only] = woken;
                 const reports =
@@ -5178,6 +5187,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               carryover.projectsLateTerminals;
             const projectCarryover = rootTerminalCanStillProject;
             let carryoverTerminalized = false;
+            let subagentEnded = false;
             if (
               acpFlavorExtractsSubagents(flavor) &&
               (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update")
@@ -5189,6 +5199,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                   if (!acpSubagentStatusIsTerminal(subagentUpdate.status)) {
                     continue;
                   }
+                  subagentEnded = true;
                   if (
                     yield* updateCarryoverSubagentStatus(
                       subagentUpdate.nativeTaskId,
@@ -5219,6 +5230,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               flavor.extractSubagentEndNotice !== undefined
             ) {
               const notice = flavor.extractSubagentEndNotice(update.content.text);
+              subagentEnded ||= notice !== undefined;
               if (
                 notice !== undefined &&
                 (yield* updateCarryoverSubagentStatus(
@@ -5233,8 +5245,12 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                 carryoverTerminalized = true;
               }
             }
+            if (subagentEnded) subagentEndFrames.add(notification);
             const continuationOffered = bufferOutcome.offerContinuation
-              ? yield* offerContinuationRun(notification.sessionId)
+              ? yield* offerContinuationRun(
+                  notification.sessionId,
+                  subagentEnded ? "subagent" : undefined,
+                )
               : false;
             const wakeOutcome = { ...bufferOutcome, continuationOffered };
             if (carryoverTerminalized && !wakeOutcome.buffered) {
@@ -8082,7 +8098,6 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             const isContinuationTurn =
               (postSettleContinuationEnabled || followsAgentWorkState) &&
               acpIsProviderContinuationMessage(turnInput.message);
-            if (isContinuationTurn) releaseAwaitableBackgroundTasks();
             const isAppOwnedWakeTurn = acpIsAppOwnedWakeTurn(turnInput.message);
             if (!isAppOwnedWakeTurn) {
               yield* Ref.set(midTurnUnreportedCompletedTaskIds, new Set());

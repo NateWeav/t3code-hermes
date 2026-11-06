@@ -2,11 +2,14 @@ import { assert } from "@effect/vitest";
 import type { OrchestrationV2ThreadProjection, ProviderReplayTranscript } from "@t3tools/contracts";
 
 import type { OrchestratorV2ScenarioResult } from "../../OrchestratorScenario.ts";
+import { HERMES_BACKGROUND_TASK_WAKE_PROMPT } from "../hermes_background_task_wake/input.ts";
 import {
   assertBaseProjection,
   assertSemanticProjectionIntegrity,
   assertUserMessagesInclude,
   backgroundNotifications,
+  firstBackgroundRosterTask,
+  forScenario,
   projectionFor,
 } from "../shared.ts";
 import {
@@ -14,8 +17,10 @@ import {
   CLAUDE_BACKGROUND_TASK_WAKE_PROMPT,
 } from "./input.ts";
 
-const BACKGROUND_TASK_ID = "bdqirlcyw";
-const WAKE_SUMMARY = 'Background command "Background sleep test" completed (exit code 0)';
+const PROMPTS = {
+  claude_background_task_wake: CLAUDE_BACKGROUND_TASK_WAKE_PROMPT,
+  hermes_background_task_wake: HERMES_BACKGROUND_TASK_WAKE_PROMPT,
+};
 
 function runAssistantTexts(
   projection: OrchestrationV2ThreadProjection,
@@ -26,7 +31,7 @@ function runAssistantTexts(
   );
 }
 
-export function assertClaudeBackgroundTaskWakeOutput(
+export function assertBackgroundTaskWakeOutput(
   result: OrchestratorV2ScenarioResult,
   transcript: ProviderReplayTranscript,
 ) {
@@ -39,7 +44,7 @@ export function assertClaudeBackgroundTaskWakeOutput(
   const projection = projectionFor(result, transcript.scenario);
   assertSemanticProjectionIntegrity(projection);
   assertUserMessagesInclude(projection, [
-    CLAUDE_BACKGROUND_TASK_WAKE_PROMPT,
+    forScenario(transcript, PROMPTS),
     CLAUDE_BACKGROUND_TASK_WAKE_FOLLOW_UP_PROMPT,
   ]);
 
@@ -53,31 +58,43 @@ export function assertClaudeBackgroundTaskWakeOutput(
     return `${message?.createdBy}:${message?.creationSource}`;
   });
   assert.deepEqual(creators, ["user:web", "agent:provider", "user:web"]);
-  const wakeMessage = projection.messages.find((message) => message.id === wakeRun?.userMessageId);
-  assert.equal(wakeMessage?.text, WAKE_SUMMARY);
 
-  const rosterIndex = result.domainEvents.findIndex(
-    (event) =>
-      event.type === "provider-thread.updated" &&
-      event.payload.pendingBackgroundTasks?.some((task) => task.taskId === BACKGROUND_TASK_ID),
-  );
+  const { task: rosterTask, index: rosterIndex } = firstBackgroundRosterTask(result);
   const clearedIndex = result.domainEvents.findIndex(
     (event, index) =>
       index > rosterIndex &&
       event.type === "provider-thread.updated" &&
       (event.payload.pendingBackgroundTasks?.length ?? 0) === 0,
   );
-  assert.isAtLeast(rosterIndex, 0, "the running background task must reach the roster");
   assert.isAbove(clearedIndex, rosterIndex, "the completed task must leave the roster");
   assert.deepEqual(projection.providerThreads[0]?.pendingBackgroundTasks ?? [], []);
 
-  const rosterTask = result.domainEvents
-    .flatMap((event) =>
-      event.type === "provider-thread.updated" ? (event.payload.pendingBackgroundTasks ?? []) : [],
-    )
-    .find((task) => task.taskId === BACKGROUND_TASK_ID);
-  assert.deepEqual(rosterTask, {
-    taskId: BACKGROUND_TASK_ID,
+  assert.equal(rosterTask.kind, "command");
+  assert.isNotEmpty(rosterTask.description);
+  // The outcome is the provider's to report: Hermes's wake carries no exit status.
+  assert.deepEqual(
+    backgroundNotifications(projection).map(({ summary, source }) => ({ summary, source })),
+    [{ summary: `Command "${rosterTask.description}" finished`, source: { kind: "command" } }],
+  );
+
+  assert.lengthOf(projection.subagents, 0);
+  assert.isFalse(projection.nodes.some((node) => node.kind === "subagent"));
+}
+
+export function assertClaudeBackgroundTaskWakeDetails(
+  result: OrchestratorV2ScenarioResult,
+  transcript: ProviderReplayTranscript,
+) {
+  const projection = projectionFor(result, transcript.scenario);
+  const wakeMessage = projection.messages.find(
+    (message) => message.id === projection.runs[1]?.userMessageId,
+  );
+  assert.equal(
+    wakeMessage?.text,
+    'Background command "Background sleep test" completed (exit code 0)',
+  );
+  assert.deepEqual(firstBackgroundRosterTask(result).task, {
+    taskId: "bdqirlcyw",
     description: "Background sleep test",
     kind: "command",
   });
@@ -88,7 +105,4 @@ export function assertClaudeBackgroundTaskWakeOutput(
       source: { kind: "command" },
     },
   ]);
-
-  assert.lengthOf(projection.subagents, 0);
-  assert.isFalse(projection.nodes.some((node) => node.kind === "subagent"));
 }

@@ -4034,6 +4034,8 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             const status = toolStatus(tool.status);
             if (status === "pending" || status === "running") return true;
           }
+          // Elsewhere a quiet wake turn ends while children work; they carry over to the next run.
+          if (flavor.deferFinalizeForBackgroundWork !== true) return false;
           for (const subagent of context.subagents.values()) {
             if (acpSubagentStatusBlocksTurnSettlement(subagent.task.status)) {
               return true;
@@ -5459,6 +5461,10 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                   if (!acpSubagentStatusIsTerminal(subagentUpdate.status)) {
                     continue;
                   }
+                  // Flavors with end notices name the child from the notice instead.
+                  if (flavor.extractSubagentEndNotice === undefined) {
+                    yield* recordCarryoverSubagentWake(subagentUpdate);
+                  }
                   if (
                     yield* updateCarryoverSubagentStatus(
                       subagentUpdate.nativeTaskId,
@@ -6455,6 +6461,34 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             null,
             update,
           );
+        });
+
+        // A background child that ends after its root settled is what wakes the agent next.
+        const recordCarryoverSubagentWake = Effect.fnUntraced(function* (
+          update: AcpAdapterV2SubagentUpdate,
+        ) {
+          const outcome =
+            update.status === "completed" || update.status === "failed"
+              ? update.status
+              : update.status === "interrupted" || update.status === "cancelled"
+                ? "cancelled"
+                : undefined;
+          if (outcome === undefined) return;
+          const match = (yield* Ref.get(carryoverSubagents))?.subagents.find(
+            (subagent) =>
+              (subagent.task.nativeTaskRef?.nativeId ?? String(subagent.task.id)) ===
+                update.nativeTaskId ||
+              (update.childSessionId !== null && subagent.childSessionId === update.childSessionId),
+          );
+          if (match === undefined || !acpSubagentStatusBlocksTurnSettlement(match.task.status)) {
+            return;
+          }
+          yield* recordWakeReport(String(match.task.id), {
+            kind: "subagent",
+            label: match.task.title ?? match.task.prompt,
+            outcome,
+            childThreadId: match.childThreadId,
+          });
         });
 
         const finishSubagentFromNotice = Effect.fnUntraced(function* (notice: {

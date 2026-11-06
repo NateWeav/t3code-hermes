@@ -37,7 +37,7 @@ it.live("loads the CLI with its cache settings only when the command needs it", 
           {
             env: {
               XDG_CACHE_HOME: `${root}/cache`,
-              T3CODE_HOME: `${root}/home`,
+              T3HERMES_HOME: `${root}/home`,
               NODE_COMPILE_CACHE: undefined,
               NODE_DISABLE_COMPILE_CACHE: undefined,
               APPIMAGE: "",
@@ -61,22 +61,22 @@ it.live("loads the CLI with its cache settings only when the command needs it", 
     expect(normal.stderr.replaceAll("\\", "/")).toContain(
       `CACHE=${root}/cache/t3code/compile-cache`.replaceAll("\\", "/"),
     );
-    const launcher = yield* run({ T3CODE_HOME: "" }, ["__service-launcher"]);
+    const launcher = yield* run({ T3HERMES_HOME: "" }, ["__service-launcher"]);
     expect(launcher.exitCode).toBe(1);
-    expect(launcher.stderr).toContain("[service-launcher] T3CODE_HOME is required");
+    expect(launcher.stderr).toContain("[service-launcher] T3HERMES_HOME is required");
     expect(launcher.stderr).not.toMatch(/LOADED_CLI_MAIN|CACHE=/);
-    const launcherHelp = yield* run({ T3CODE_HOME: "" }, ["__service-launcher", "--help"]);
+    const launcherHelp = yield* run({ T3HERMES_HOME: "" }, ["__service-launcher", "--help"]);
     expect(launcherHelp.exitCode).toBe(0);
     expect(launcherHelp.stderr).toContain("LOADED_CLI_MAIN");
-    expect(launcherHelp.stdout).toContain("t3 __service-launcher [flags]");
-    const launcherFlags = yield* run({ T3CODE_HOME: "" }, [
+    expect(launcherHelp.stdout).toContain("t3-hermes __service-launcher [flags]");
+    const launcherFlags = yield* run({ T3HERMES_HOME: "" }, [
       "__service-launcher",
       "--log-level",
       "debug",
     ]);
     expect(launcherFlags.exitCode).toBe(1);
     expect(launcherFlags.stderr).toContain("LOADED_CLI_MAIN");
-    expect(launcherFlags.stderr).toContain("[service-launcher] T3CODE_HOME is required");
+    expect(launcherFlags.stderr).toContain("[service-launcher] T3HERMES_HOME is required");
     const appImage = yield* run({ APPIMAGE: `${root}/T3Code.AppImage` });
     expect(appImage.exitCode).toBe(0);
     expect(appImage.stderr).toContain("CACHE=disabled");

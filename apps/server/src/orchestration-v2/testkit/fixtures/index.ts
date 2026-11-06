@@ -164,11 +164,13 @@ import { openCode2ToolCallInput } from "./opencode2_tool_call/input.ts";
 import { assertOpenCode2ToolCallOutput } from "./opencode2_tool_call/output.ts";
 import { assertOpenCodeSubagentOutput } from "./opencode_subagent/output.ts";
 import {
-  assertCodexPlanQuestionsOutput,
+  assertCodexPlanQuestionsDetails,
   assertPlanQuestionsOutput,
+  assertSchemaFlexibilityQuestionId,
 } from "./plan_questions/codex_output.ts";
 import { assertOpenCodePlanQuestionsOutput } from "./plan_questions/opencode_output.ts";
 import { planQuestionsInput } from "./plan_questions/input.ts";
+import { hermesPlanQuestionsInput } from "./hermes_plan_questions/input.ts";
 import { hermesTodoListInput } from "./hermes_todo_list/input.ts";
 import { hermesCompressNoopInput } from "./hermes_compress_noop/input.ts";
 import { assertHermesCompressNoopOutput } from "./hermes_compress_noop/output.ts";
@@ -946,6 +948,7 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         modelSelection: ACP_REGISTRY_MODEL_SELECTION,
         runtimePolicyOverride: READ_ONLY_NEVER_POLICY,
         assertOutput: assertPlanQuestionsOutput,
+        assertProviderDetails: assertSchemaFlexibilityQuestionId,
       },
     ],
   },
@@ -2008,7 +2011,8 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         transcriptFile: new URL("./plan_questions/codex_transcript.ndjson", import.meta.url),
         modelSelection: CODEX_MODEL_SELECTION,
         runtimePolicyOverride: READ_ONLY_NEVER_POLICY,
-        assertOutput: assertCodexPlanQuestionsOutput,
+        assertOutput: assertPlanQuestionsOutput,
+        assertProviderDetails: assertCodexPlanQuestionsDetails,
       },
       {
         driver: ProviderDriverKind.make("grok"),
@@ -2016,6 +2020,7 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         modelSelection: GROK_MODEL_SELECTION,
         runtimePolicyOverride: READ_ONLY_NEVER_POLICY,
         assertOutput: assertPlanQuestionsOutput,
+        assertProviderDetails: assertSchemaFlexibilityQuestionId,
       },
       {
         driver: ProviderDriverKind.make("opencode"),
@@ -2023,6 +2028,22 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         modelSelection: OPENCODE_MODEL_SELECTION,
         runtimePolicyOverride: READ_ONLY_NEVER_POLICY,
         assertOutput: assertOpenCodePlanQuestionsOutput,
+      },
+    ],
+  },
+  {
+    name: "hermes_plan_questions",
+    buildInput: hermesPlanQuestionsInput,
+    providers: [
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./hermes_plan_questions/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runtimePolicyOverride: READ_ONLY_NEVER_POLICY,
+        assertOutput: assertPlanQuestionsOutput,
       },
     ],
   },

@@ -234,6 +234,30 @@ export function normalizeHermesWebSearchQuery(toolCall: AcpToolCallState): AcpTo
     : { ...toolCall, data: { ...toolCall.data, rawInput: { query } } };
 }
 
+/**
+ * What Hermes's `redact_approval_display` writes in place of what runs: masked secrets (`***`,
+ * `abc...wxyz`, `[REDACTED PRIVATE KEY]`, a guillemet-quoted `redacted` sentinel) and escapes of
+ * hidden characters (`\r`, `\x1b`, a `\u` escape, a bracketed run count).
+ */
+const HERMES_DISPLAY_REWRITE = /[^\x20-\x7e\t\n]|\\[rxuU]|\*\*\*|\.\.\.|redacted/i;
+
+/**
+ * The command a Hermes command approval runs, when its request shows all of it. `rawInput` holds
+ * Hermes's display copy, which can differ from what runs, and a description other than
+ * `acp-command-approval`'s "shell command" names a risk Hermes found itself.
+ */
+export function hermesPermissionCommand(
+  request: EffectAcpSchema.RequestPermissionRequest,
+): string | undefined {
+  const rawInput = unknownRecord(request.toolCall.rawInput);
+  const command = rawInput?.command;
+  return rawInput?.description === "shell command" &&
+    typeof command === "string" &&
+    !HERMES_DISPLAY_REWRITE.test(command)
+    ? command
+    : undefined;
+}
+
 /** Hermes's permission cards; no tool call shares these ids. */
 const HERMES_PERMISSION_CARD_ID = /^(?:edit-approval|perm-check)-\d+$/;
 const HERMES_EDIT_DIFFS_KEPT = 64;

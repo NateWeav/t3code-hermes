@@ -26,6 +26,7 @@ import {
 } from "../../hermes/hermesFastMode.ts";
 import { applyHermesReasoningSelection } from "../../hermes/hermesReasoningOptions.ts";
 import type { HermesReasoningLevel } from "../../hermes/hermesReasoning.ts";
+import { acpPermissionDisposition } from "@t3tools/provider-acp/server/clientPolicy";
 import { makeAcpNativeLoggerFactory } from "@t3tools/provider-acp/server/nativeLogging";
 import type * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 import {
@@ -37,6 +38,7 @@ import {
   hermesApprovalPosture,
   type HermesApprovalPosture,
   hermesFollowsApprovalPosture,
+  hermesPermissionCommand,
   hermesPromptFailure,
   isHermesGatewayTurnLoss,
   makeHermesAcpRuntime,
@@ -180,6 +182,9 @@ export function makeHermesAcpAdapterFlavor(
     resolveModelId: (selection) => resolveHermesAcpBaseModelId(selection.model),
     approvalOptions: hermesApprovalOptions,
     onPermissionRequest: editApprovalCards.onPermissionRequest,
+    // A read-only sandbox lets through a command that only reads, as Codex's sandbox does.
+    permissionDisposition: (policy, request) =>
+      acpPermissionDisposition(policy, request, hermesPermissionCommand(request)),
     ignoreSessionUpdate: editApprovalCards.ignoreSessionUpdate,
     promptFailure: hermesPromptFailure,
     restartRuntimeAfterPromptFailure: isHermesGatewayTurnLoss,

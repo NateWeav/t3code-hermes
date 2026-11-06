@@ -348,6 +348,36 @@ describe("HermesAdapterV2 flavor", () => {
     assert.deepEqual(flavor.clientCapabilitiesMeta, { command_approval: true });
   });
 
+  it("runs a read-only command under a read-only sandbox only when Hermes shows all of it", () => {
+    const readOnly = ProviderAdapterV2RuntimePolicy.make({
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      cwd: process.cwd(),
+      approvalPolicy: "never",
+      sandboxPolicy: { type: "readOnly" },
+    });
+    const disposition = (command: string, description = "shell command") =>
+      flavor.permissionDisposition?.(readOnly, {
+        sessionId: "s",
+        options: [],
+        toolCall: {
+          toolCallId: "perm-check-1",
+          kind: "execute",
+          rawInput: { command, description },
+        },
+      });
+    assert.equal(disposition("cat package.json"), "allow");
+    assert.equal(disposition("cat package.json > copy.json"), "deny");
+    // A risk Hermes found itself keeps the policy's answer.
+    assert.equal(disposition("cat ~/.ssh/id_rsa", "access to SSH keys"), "deny");
+    // Hermes masks secrets and escapes hidden characters in the copy it shows, so it may not be what runs.
+    assert.equal(disposition("grep -r x . --token=***"), "deny");
+    assert.equal(disposition("grep x Authorization: sk-abc...wxyz"), "deny");
+    assert.equal(disposition("cat x [REDACTED PRIVATE KEY]"), "deny");
+    assert.equal(disposition("cat x\\rrm -rf y"), "deny");
+    assert.equal(disposition("cat \u00abredacted-secret\u00bb"), "deny");
+  });
+
   it("keeps a skill row's name on the turn item title", () => {
     const event = parseSessionUpdateEvent({
       sessionId: "s",

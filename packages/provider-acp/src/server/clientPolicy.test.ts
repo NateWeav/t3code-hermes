@@ -122,6 +122,25 @@ describe("acpPermissionDisposition", () => {
     }
   });
 
+  it("allows a command that only reads under a read-only sandbox that never asks", () => {
+    const readOnly: AcpRuntimePolicy = {
+      runtimeMode: "full-access",
+      cwd,
+      approvalPolicy: "never",
+      sandboxPolicy: { type: "readOnly" },
+    };
+    const execute = permissionRequest("execute");
+    assert.equal(acpPermissionDisposition(readOnly, execute, "cat package.json"), "allow");
+    assert.equal(acpPermissionDisposition(readOnly, execute, "cat x > y"), "deny");
+    assert.equal(acpPermissionDisposition(readOnly, execute), "deny");
+    assert.equal(acpPermissionDisposition(readOnly, permissionRequest("edit"), "ls"), "deny");
+    assert.equal(acpPermissionDisposition(policy, execute, "cat package.json"), "deny");
+    assert.equal(
+      acpPermissionDisposition({ ...readOnly, approvalPolicy: "on-request" }, execute, "ls"),
+      "ask",
+    );
+  });
+
   it.effect("denies mutations through workspace symlinks that escape the writable roots", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

@@ -429,6 +429,8 @@ const settings = Schema.decodeSync(HermesSettings)({
   enabled: true,
   binaryPath: process.env.T3_HERMES_BIN ?? "hermes",
 });
+const recordingHome = process.env.HOME ?? "";
+const recordingUser = process.env.USER ?? "";
 
 const recordScenario = Effect.fn("recordHermesScenario")(function* (fixtureName: string) {
   const fixture = ORCHESTRATOR_REPLAY_FIXTURES.find((candidate) => candidate.name === fixtureName);
@@ -626,9 +628,9 @@ const recordScenario = Effect.fn("recordHermesScenario")(function* (fixtureName:
       ...normalizeEntries({
         entries,
         workspace: realWorkspace,
-        home: process.env.HOME ?? "",
+        home: recordingHome,
         hermesHome,
-        user: process.env.USER ?? "",
+        user: recordingUser,
         runtimeInstructions: buildRuntimeInstructions({
           harness: "Hermes",
           model: modelSelection.model,

@@ -101,11 +101,13 @@ import {
   assertHermesBackgroundTaskWakeDetails,
   assertHermesRosterListsBackgroundProcess,
 } from "./hermes_background_task_wake/output.ts";
-import { assertClaudeMessageSteeringOutput } from "./message_steering/claude_output.ts";
-import { assertMessageSteeringOutput } from "./message_steering/codex_output.ts";
+import { assertClaudeMessageSteeringDetails } from "./message_steering/claude_output.ts";
+import { assertCodexMessageSteeringDetails } from "./message_steering/codex_output.ts";
 import { assertCursorMessageSteeringOutput } from "./message_steering/cursor_output.ts";
 import { assertGrokMessageSteeringOutput } from "./message_steering/grok_output.ts";
+import { assertHermesMessageSteeringDetails } from "./message_steering/hermes_output.ts";
 import { messageSteeringInput } from "./message_steering/input.ts";
+import { assertMessageSteeringOutput } from "./message_steering/output.ts";
 import { assertPiMessageSteeringOutput } from "./message_steering/pi_output.ts";
 import { MUSE_PERMISSION_DECLINED_FILE, musePermissionInput } from "./muse_permission/input.ts";
 import { assertMusePermissionOutput } from "./muse_permission/output.ts";
@@ -2083,12 +2085,14 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         transcriptFile: new URL("./message_steering/codex_transcript.ndjson", import.meta.url),
         modelSelection: CODEX_MODEL_SELECTION,
         assertOutput: assertMessageSteeringOutput,
+        assertProviderDetails: assertCodexMessageSteeringDetails,
       },
       {
         driver: ProviderDriverKind.make("claudeAgent"),
         transcriptFile: new URL("./message_steering/claude_transcript.ndjson", import.meta.url),
         modelSelection: CLAUDE_MODEL_SELECTION,
-        assertOutput: assertClaudeMessageSteeringOutput,
+        assertOutput: assertMessageSteeringOutput,
+        assertProviderDetails: assertClaudeMessageSteeringDetails,
       },
       {
         driver: ProviderDriverKind.make("cursor"),
@@ -2124,7 +2128,8 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         driver: ProviderDriverKind.make("hermes"),
         transcriptFile: new URL("./message_steering/hermes_transcript.ndjson", import.meta.url),
         modelSelection: HERMES_MODEL_SELECTION,
-        assertOutput: assertGrokMessageSteeringOutput,
+        assertOutput: assertMessageSteeringOutput,
+        assertProviderDetails: assertHermesMessageSteeringDetails,
       },
     ],
   },

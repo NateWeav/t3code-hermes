@@ -130,14 +130,13 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
     exercises: ["turns.supportsInterrupt"],
   },
   { name: "turn_interrupt_restart", facet: "control", hermes: applicable },
-  // Hermes steers by restart, like Grok; Claude and Codex steer the running turn. Hermes's `/steer`
-  // lands only after a tool batch and reports no delivery, so T3 cannot steer through it.
+  // Not provider-bound: Claude, Codex and Hermes share the active-steering assertion; the provider
+  // identity and Hermes's `_hermes/steer` wire are each variant's assertProviderDetails.
   {
     name: "message_steering",
     facet: "control",
     hermes: applicable,
-    providerBound: true,
-    exercises: ["turns.supportsSteeringByInterruptRestart"],
+    exercises: ["turns.supportsActiveSteering"],
   },
   {
     name: "queued_turn",

@@ -203,6 +203,18 @@
           "file": "acp-terminal-output/53a6ced42221.patch"
         }
       ]
+    },
+    {
+      "id": "acp-active-steering",
+      "title": "Steering a running turn",
+      "neededFor": "A message you send while Hermes is working reaching the running turn, as it does for Claude and Codex. Without it, T3 stops the turn and starts it again with your message.",
+      "versions": [
+        {
+          "hermesCommit": "ca4360692055bdb4df3a695c164646e528891da8",
+          "hermesCommitDate": "2026-11-06T04:01:15Z",
+          "file": "acp-active-steering/ca4360692055.patch"
+        }
+      ]
     }
   ]
 }

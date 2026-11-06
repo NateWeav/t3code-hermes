@@ -134,12 +134,12 @@ const HERMES_EXIT_CODE_FIELD = /^- \*\*exit_code:\*\* (-?\d+)$/;
 /**
  * Hermes's `terminal` tool sends a markdown summary instead of `rawOutput`, so client previews
  * would read "terminal result". Move the output into `rawOutput.stdout` and drop the summary; other
- * text passes through.
+ * text passes through. A running call's only content is Hermes's `$ <command>` echo of its input,
+ * which would read as output; it is dropped too.
  */
 export function normalizeHermesTerminalResult(toolCall: AcpToolCallState): AcpToolCallState {
   if (
     toolCall.kind !== "execute" ||
-    (toolCall.status !== "completed" && toolCall.status !== "failed") ||
     toolCall.data.rawOutput !== undefined ||
     !Array.isArray(toolCall.data.content) ||
     toolCall.data.content.length !== 1
@@ -149,6 +149,11 @@ export function normalizeHermesTerminalResult(toolCall: AcpToolCallState): AcpTo
   const entry = toolCall.data.content[0] as EffectAcpSchema.ToolCallContent;
   if (entry.type !== "content" || entry.content.type !== "text") {
     return toolCall;
+  }
+  if (toolCall.status !== "completed" && toolCall.status !== "failed") {
+    if (!entry.content.text.startsWith("$ ")) return toolCall;
+    const { content: _echo, ...data } = toolCall.data;
+    return { ...toolCall, data };
   }
   const [heading = "", ...lines] = entry.content.text.split("\n");
   if (!HERMES_TERMINAL_RESULT_HEADINGS.has(heading.trim())) {

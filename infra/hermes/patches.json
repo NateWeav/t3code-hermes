@@ -152,6 +152,18 @@
           "file": "acp-launch-yolo-resume/5b32cfc23007.patch"
         }
       ]
+    },
+    {
+      "id": "acp-terminal-output",
+      "title": "Live command output",
+      "neededFor": "Seeing a Hermes shell command's output while it runs. Without it, a command's card stays empty until the command finishes.",
+      "versions": [
+        {
+          "hermesCommit": "53a6ced422214d07255302a5b900c313af3b677a",
+          "hermesCommitDate": "2026-11-06T03:28:41Z",
+          "file": "acp-terminal-output/53a6ced42221.patch"
+        }
+      ]
     }
   ]
 }

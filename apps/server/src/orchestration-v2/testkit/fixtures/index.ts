@@ -1994,6 +1994,16 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         modelSelection: CLAUDE_MODEL_SELECTION,
         assertOutput: assertCommandOutputStreamingOutput,
       },
+      {
+        // Recorded with the `acp-terminal-output` Hermes patch applied.
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./command_output_streaming/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        assertOutput: assertCommandOutputStreamingOutput,
+      },
     ],
   },
   {

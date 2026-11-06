@@ -8,15 +8,18 @@ import {
   applyHermesAcpModelSelection,
   buildHermesAcpSpawnInput,
   HERMES_BUILT_IN_SLASH_COMMANDS,
+  makeHermesEditApprovalCards,
   resolveHermesAcpBaseModelId,
   normalizeHermesT3McpToolCall,
   normalizeHermesTerminalResult,
+  normalizeHermesWebSearchQuery,
   preserveHermesAgentActivityTitle,
   resolveHermesSessionModeId,
 } from "./HermesAcpSupport.ts";
 import {
   extractMcpToolCallIdentity,
   parseSessionUpdateEvent,
+  type AcpToolCallState,
 } from "@t3tools/provider-acp/server/runtimeModel";
 
 describe("resolveHermesAcpBaseModelId", () => {
@@ -380,6 +383,106 @@ describe("normalizeHermesTerminalResult", () => {
 
     const edit = { ...completedTerminal("terminal result\n- **output:** x"), kind: "edit" };
     expect(normalizeHermesTerminalResult(edit)).toBe(edit);
+  });
+});
+
+describe("normalizeHermesWebSearchQuery", () => {
+  const search = (text: string, kind = "fetch") => ({
+    toolCallId: "toolu_1",
+    kind,
+    status: "pending" as const,
+    data: { content: [{ type: "content" as const, content: { type: "text" as const, text } }] },
+  });
+
+  it("reads the whole query from Hermes's start text", () => {
+    expect(
+      normalizeHermesWebSearchQuery(search("Searching the web for: FIFA World Cup ticket pricing"))
+        .data.rawInput,
+    ).toEqual({ query: "FIFA World Cup ticket pricing" });
+  });
+
+  it("leaves results, other fetches and tools that name their input alone", () => {
+    for (const toolCall of [
+      search("Web results: 5"),
+      search("Searching the web for: x", "read"),
+      { ...search("Searching the web for: x"), data: { rawInput: { query: "y" } } },
+    ]) {
+      expect(normalizeHermesWebSearchQuery(toolCall)).toBe(toolCall);
+    }
+  });
+});
+
+describe("makeHermesEditApprovalCards", () => {
+  const diff = {
+    type: "diff" as const,
+    path: "/repo/notes.txt",
+    oldText: null,
+    newText: "approved text",
+  };
+  const approval = {
+    sessionId: "sess-1",
+    options: [{ kind: "allow_once" as const, name: "Allow once", optionId: "allow_once" }],
+    toolCall: {
+      toolCallId: "edit-approval-1",
+      kind: "edit" as const,
+      content: [diff],
+      rawInput: { tool: "write_file", arguments: { path: "notes.txt", content: "approved text" } },
+    },
+  };
+  const write = (toolCallId: string, status: "completed" | "failed", text: string) => ({
+    toolCallId,
+    kind: "edit",
+    status,
+    data: {
+      locations: [{ path: "notes.txt" }],
+      content: [{ type: "content" as const, content: { type: "text" as const, text } }],
+    },
+  });
+
+  it("shows the approved diff on the write, once, and keeps a denied write's reason", () => {
+    const cards = makeHermesEditApprovalCards();
+    const normalize = (toolCall: AcpToolCallState) => cards.normalizeToolCall(toolCall, "sess-1");
+    cards.onPermissionRequest(approval);
+    const done = normalize(write("toolu_1", "completed", "✅ write_file completed"));
+    expect(done.data.content).toEqual([diff]);
+    expect(normalize(done).data.content).toEqual([diff]);
+
+    const unasked = write("toolu_2", "completed", "✅ write_file completed");
+    expect(normalize(unasked)).toBe(unasked);
+
+    cards.onPermissionRequest(approval);
+    const denied = write("toolu_3", "failed", "Edit approval denied by ACP client");
+    expect(normalize(denied)).toBe(denied);
+    expect(normalize(unasked)).toBe(unasked);
+  });
+
+  it("keeps each session's diff for the same path", () => {
+    const cards = makeHermesEditApprovalCards();
+    const otherDiff = { ...diff, newText: "other session's text" };
+    cards.onPermissionRequest(approval);
+    cards.onPermissionRequest({
+      ...approval,
+      sessionId: "sess-2",
+      toolCall: { ...approval.toolCall, content: [otherDiff] },
+    });
+    const done = write("toolu_1", "completed", "✅ write_file completed");
+    expect(cards.normalizeToolCall(done, "sess-1").data.content).toEqual([diff]);
+    expect(cards.normalizeToolCall(done, "sess-2").data.content).toEqual([otherDiff]);
+  });
+
+  it("drops only the status update that closes a permission card", () => {
+    const { ignoreSessionUpdate } = makeHermesEditApprovalCards();
+    const update = (toolCallId: string) => ({
+      sessionId: "sess-1",
+      update: {
+        sessionUpdate: "tool_call_update" as const,
+        toolCallId,
+        status: "completed" as const,
+      },
+    });
+    expect(ignoreSessionUpdate(update("edit-approval-1"))).toBe(true);
+    expect(ignoreSessionUpdate(update("perm-check-12"))).toBe(true);
+    expect(ignoreSessionUpdate(update("toolu_1"))).toBe(false);
   });
 });
 

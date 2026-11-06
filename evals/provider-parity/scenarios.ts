@@ -44,7 +44,8 @@ const twin = (reason: string, twinName?: string): Applicability => ({
 const na = (reason: string): Applicability => ({ kind: "na", reason });
 
 const CLAUDE_AGENT_TOOLS = "The prompt drives Claude's Agent/TaskStop/SendMessage tools.";
-const CLAUDE_BASH_BACKGROUND = "The prompt drives Claude's Bash run_in_background.";
+const CLAUDE_BASH_BACKGROUND =
+  "The prompt drives Claude's Bash run_in_background, and the reference assertion pins Claude's task ids and Bash descriptions, so the Hermes twin mirrors it with Hermes's own.";
 const CLAUDE_COMPACT =
   "The prompt sends Claude's /compact; Hermes compacts with /compress. Claude's assertOutput still pins its recorded token counts, usage and wake or peer turn, which a twin needs moved to assertProviderDetails.";
 
@@ -84,8 +85,14 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
     hermes: applicable,
     exercises: ["streaming.streamsToolOutput", "tools.emitsToolOutput"],
   },
-  { name: "web_search", facet: "tools", hermes: applicable, providerBound: true },
-  { name: "claude_local_bash_task", facet: "tools", hermes: applicable },
+  { name: "web_search", facet: "tools", hermes: applicable },
+  {
+    name: "claude_local_bash_task",
+    facet: "tools",
+    hermes: na(
+      "Covers Claude SDK local_bash task frames not becoming subagents; the assertion pins Claude's recorded command and replies.",
+    ),
+  },
   {
     name: "claude_mcp_tool_presentation",
     facet: "tools",
@@ -104,7 +111,7 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
   {
     name: "tool_call_denied_write",
     facet: "approvals",
-    hermes: twin("The prompt names Claude's Write tool."),
+    hermes: twin("The prompt names Claude's Write tool.", "hermes_tool_call_denied_write"),
   },
 
   // Interrupt, steer, queue
@@ -114,14 +121,17 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
     hermes: applicable,
     exercises: ["turns.supportsInterrupt"],
   },
+  // Not provider-bound: this and the restart below share an assertion on the stopped command row,
+  // which every provider's fixture passes.
   {
     name: "turn_interrupt_mid_tool",
     facet: "control",
     hermes: applicable,
-    providerBound: true,
     exercises: ["turns.supportsInterrupt"],
   },
-  { name: "turn_interrupt_restart", facet: "control", hermes: applicable, providerBound: true },
+  { name: "turn_interrupt_restart", facet: "control", hermes: applicable },
+  // Hermes steers by restart, like Grok; Claude and Codex steer the running turn. Hermes's `/steer`
+  // lands only after a tool batch and reports no delivery, so T3 cannot steer through it.
   {
     name: "message_steering",
     facet: "control",
@@ -167,6 +177,7 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
     name: "subagent",
     facet: "subagents",
     hermes: applicable,
+    providerBound: true,
     exercises: ["subagents.supportsSubagents", "subagents.emitsSubagentLifecycle"],
   },
   { name: "subagent_continue", facet: "subagents", hermes: applicable },
@@ -182,24 +193,34 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
   {
     name: "claude_nested_subagent_model",
     facet: "subagents",
-    hermes: twin("The prompt drives Claude's Agent tool with a per-subagent model."),
+    hermes: twin(
+      "The prompt drives Claude's Agent tool with a per-subagent model. Hermes's delegate_task cannot pick one: `model` is a reserved task parameter, so children run on delegation.model or the parent's model.",
+    ),
   },
 
   // Background work that outlives the turn
   {
     name: "claude_background_task_after_root",
     facet: "background",
-    hermes: twin(CLAUDE_BASH_BACKGROUND),
+    hermes: {
+      kind: "twin",
+      reason: CLAUDE_BASH_BACKGROUND,
+      twin: "hermes_background_task_after_root",
+    },
   },
   {
     name: "claude_background_task_wake",
     facet: "background",
-    hermes: twin(CLAUDE_BASH_BACKGROUND),
+    hermes: { kind: "twin", reason: CLAUDE_BASH_BACKGROUND, twin: "hermes_background_task_wake" },
   },
   {
     name: "claude_background_task_interrupt",
     facet: "background",
-    hermes: twin(CLAUDE_BASH_BACKGROUND),
+    hermes: {
+      kind: "twin",
+      reason: CLAUDE_BASH_BACKGROUND,
+      twin: "hermes_background_task_interrupt",
+    },
   },
   {
     name: "claude_background_subagent_after_root",

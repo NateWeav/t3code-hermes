@@ -182,6 +182,27 @@ is applied and the gateway restarts get them. The patch's
 editor, each depth case, and a stop during a foreground call. Run it in a scratch checkout, as for
 `acp-delegation-progress`.
 
+## `acp-subagent-approvals`
+
+**Needed by:** approvals that show under the subagent that asked, as Codex's do. A subagent that
+runs while its parent's turn is open (a foreground call from `acp-editor-delegation`, or any call
+under `delegation.gateway_mode: inline`) already asks on its parent's approval route, so stock
+`hermes acp` sends its dangerous-command or edit approval as an ordinary `session/request_permission`
+that names no subagent. T3 Code then shows it as the parent's own.
+
+The patch stamps the asking child's `subagent_id` on the gateway's approval prompt, and the viewer
+sends it as `_meta.hermes.subagent` on the permission request: `subagentId`, plus `toolCallId`, the
+`delegate_task` call whose `hermesDelegation` updates report that subagent, when the viewer saw it
+start (it needs `acp-delegation-progress`). A nested subagent is named the same way and reports on
+its top-level ancestor's call. T3 Code hangs the approval off that subagent's row in the parent's
+thread.
+
+A background subagent that asks after its parent's turn ended has no one to ask, as before: Hermes
+denies the edit, or holds the command pending and the subagent never runs it. Restart the Hermes
+gateway after applying the patch. The patch's `tests/acp_adapter/test_gateway_subagent_approvals.py`
+drives a real gateway daemon and `hermes acp` process, covering a child, a grandchild, the parent's
+own approval, and a background child. Run it in a scratch checkout, as for `acp-delegation-progress`.
+
 ## `acp-fast-mode`
 
 **Needed by:** the Fast Mode toggle for Hermes models. Stock Hermes applies `/fast` only in its CLI,

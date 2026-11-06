@@ -17,6 +17,14 @@ turn, unless it chooses to run them in the background. Its subagents can also la
 to three levels deep. Stopping the turn stops subagents it is waiting for. The patch applies to
 conversations started after it is applied and the Hermes gateway restarts.
 
+## Approvals from subagents
+
+A subagent the agent is waiting for asks for approval the same way the agent does, and you answer
+it in the agent's thread. With the **Subagent approvals** patch, the request shows under the
+subagent that asked. Without it, it looks like the agent's own. A subagent running in the
+background has no one to ask once the agent's turn ends, so Hermes does not run what needed
+approval.
+
 ## Things to know
 
 - The setting turns off Hermes's `delegation` toolset in your Hermes `config.yaml`. That file is

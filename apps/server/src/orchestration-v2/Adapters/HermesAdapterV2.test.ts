@@ -145,6 +145,11 @@ function turnInput(input: {
  * Runs one turn against the mock ACP agent behind a stand-in `hermes` binary,
  * so the real spawn path (`hermes acp`, environment) is exercised.
  */
+/** A permission request the scripted prompt raises; the turn answers it with Allow once. */
+type MockPermission = {
+  readonly permission: Omit<EffectAcpSchema.RequestPermissionRequest, "sessionId">;
+};
+
 const runMockTurn = (input: {
   readonly name: string;
   readonly mockEnvironment: Record<string, string>;
@@ -156,7 +161,7 @@ const runMockTurn = (input: {
    * Session updates the prompt delivers instead of the mock's own reply, for
    * Hermes's ACP v1 shapes (`tool_call`) the v2 mock cannot send.
    */
-  readonly promptUpdates?: ReadonlyArray<EffectAcpSchema.SessionUpdate>;
+  readonly promptUpdates?: ReadonlyArray<EffectAcpSchema.SessionUpdate | MockPermission>;
   /**
    * Session updates delivered after the first turn ends, with no prompt open: what the Hermes
    * gateway projects when it runs a turn of its own for a finished background job.
@@ -201,6 +206,7 @@ const runMockTurn = (input: {
     let sessionIdSeen: string | undefined;
     type Runtime = AcpSessionRuntime.AcpSessionRuntime["Service"];
     let deliver: Parameters<Runtime["handleSessionUpdate"]>[0] | undefined;
+    let permit: Parameters<Runtime["handleRequestPermission"]>[0] | undefined;
     const adapter = yield* makeHermesAdapterV2({
       instanceId,
       settings,
@@ -221,12 +227,29 @@ const runMockTurn = (input: {
                     Effect.sync(() => {
                       deliver = handler;
                     }).pipe(Effect.andThen(runtime.handleSessionUpdate(handler))),
+                  handleRequestPermission: (handler) =>
+                    Effect.sync(() => {
+                      permit = handler;
+                    }).pipe(Effect.andThen(runtime.handleRequestPermission(handler))),
                   prompt: () =>
                     Effect.gen(function* () {
                       const { sessionId } = yield* runtime.start();
                       sessionIdSeen = sessionId;
-                      for (const update of promptUpdates.shift() ?? [])
-                        yield* deliver!({ sessionId, update });
+                      for (const [index, update] of (promptUpdates.shift() ?? []).entries()) {
+                        if (!("permission" in update)) {
+                          yield* deliver!({ sessionId, update });
+                          continue;
+                        }
+                        const requestId = `mock-permission-${index}`;
+                        yield* permit!(
+                          { sessionId, ...update.permission },
+                          { requestId, method: "session/request_permission" },
+                        );
+                        // The transport acknowledges each response it writes; this harness writes none.
+                        if (runtimeInput.onOutgoingResponse !== undefined) {
+                          yield* runtimeInput.onOutgoingResponse(requestId);
+                        }
+                      }
                       return { stopReason: "end_turn" as const };
                     }),
                 })),
@@ -267,6 +290,13 @@ const runMockTurn = (input: {
       }),
     );
     const untilTerminal = session.events.pipe(
+      Stream.tap((event) =>
+        event.type === "runtime_request.updated" && event.runtimeRequest.status === "pending"
+          ? session
+              .respondToRuntimeRequest({ requestId: event.runtimeRequest.id, decision: "accept" })
+              .pipe(Effect.orDie, Effect.forkScoped)
+          : Effect.void,
+      ),
       Stream.takeUntil((event) => event.type === "turn.terminal"),
       Stream.runCollect,
     );
@@ -558,6 +588,81 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 
+  // Hermes asks on the parent's session for a subagent running inside the parent's turn, and names it.
+  it.effect.each([
+    { asker: "child", subagentId: "sa-0" },
+    { asker: "grandchild", subagentId: "sa-0-0" },
+  ] as const)("hangs a $asker's approval off its subagent row in the parent's thread", (row) =>
+    Effect.gen(function* () {
+      const batch = delegationFixture.cases.find((item) => item.name === "batch")!;
+      const toolCallId = batch.start.toolCallId;
+      const progress = (hermesDelegation: Record<string, unknown>) =>
+        ({
+          sessionUpdate: "tool_call_update",
+          toolCallId,
+          status: "in_progress",
+          rawOutput: { hermesDelegation },
+        }) as const;
+      const child = { task_index: 0, depth: 0, subagent_id: "sa-0" };
+      const grandchild = {
+        task_index: 0,
+        depth: 1,
+        subagent_id: "sa-0-0",
+        parent_id: "sa-0",
+        goal: "Run rm -rf build",
+      };
+      const { threadId, events } = yield* runMockTurn({
+        name: `subagent-approval-${row.asker}`,
+        mockEnvironment: {},
+        promptUpdates: [
+          { ...batch.start, rawInput: batch.args } as EffectAcpSchema.SessionUpdate,
+          progress({ ...child, event: "subagent.start" }),
+          progress({ ...grandchild, event: "subagent.spawn_requested" }),
+          {
+            permission: {
+              toolCall: {
+                toolCallId: "perm-check-1",
+                title: "recursive delete: rm -rf build",
+                kind: "execute",
+                status: "pending",
+                rawInput: { command: "rm -rf build", description: "recursive delete" },
+              },
+              options: [
+                { optionId: "allow_once", name: "Allow once", kind: "allow_once" },
+                { optionId: "deny", name: "Deny", kind: "reject_once" },
+              ],
+              _meta: { hermes: { subagent: { subagentId: row.subagentId, toolCallId } } },
+            },
+          },
+          progress({
+            ...grandchild,
+            event: "subagent.complete",
+            status: "completed",
+            summary: "ok",
+          }),
+          progress({ ...child, event: "subagent.complete", status: "completed", summary: "ok" }),
+          { ...batch.complete, rawOutput: batch.result } as EffectAcpSchema.SessionUpdate,
+        ],
+      });
+      const launched = events.find(
+        (event) => event.type === "subagent.updated" && event.subagent.title === "Inspect routing",
+      );
+      if (launched?.type !== "subagent.updated") throw new Error("no top-level subagent");
+      const approval = events.findLast(
+        (event) => event.type === "node.updated" && event.node.kind === "approval_request",
+      );
+      if (approval?.type !== "node.updated") throw new Error("no approval node");
+      assert.equal(approval.node.threadId, threadId);
+      assert.equal(approval.node.parentNodeId, launched.subagent.id);
+      const items = events.flatMap((event) =>
+        event.type === "turn_item.updated" && event.turnItem.type === "approval_request"
+          ? [event.turnItem.threadId]
+          : [],
+      );
+      assert.deepEqual([...new Set(items)], [threadId]);
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+
   it.effect("shows Hermes's T3 tool calls as T3's, with the ids its summary dropped", () =>
     Effect.gen(function* () {
       // Hermes's gateway reports the call under a per-session server name, starts it with no
@@ -785,6 +890,7 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
           rawOutput: { hermesDelegation },
         }) as const;
       const dispatched = { status: "dispatched", mode: "background", count: 1, goals: [goal] };
+      const offers = yield* Queue.unbounded<ProviderContinuationRequest>();
       const { events } = yield* runMockTurn({
         name: "delegate-nested-after-turn",
         mockEnvironment: {},
@@ -829,7 +935,9 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
           progress({ ...child, event: "subagent.complete", status: "completed", summary: "Hello" }),
           { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Hello" } },
         ],
-        continuationRequests: { offer: () => Effect.void },
+        continuationRequests: {
+          offer: (request) => Queue.offer(offers, request).pipe(Effect.asVoid),
+        },
         runContinuation: true,
       });
       const latest = new Map<string, OrchestrationV2Subagent>();
@@ -870,6 +978,12 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
       );
       assert.isAbove(firstNested, 0);
       assert.isAbove(followUp, firstNested);
+      // The grandchild's end goes back to the child; only the child's end wakes the agent.
+      assert.deepEqual((yield* Queue.take(offers)).notification, {
+        source: { kind: "subagent", childThreadId: parent.childThreadId! },
+        outcome: "completed",
+        summary: `Subagent "${goal}" finished`,
+      });
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 

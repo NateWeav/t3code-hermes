@@ -4,6 +4,7 @@
  * merged tool state; repeated or late updates for finished children drop.
  */
 import type { OrchestrationV2SubagentUsage } from "@t3tools/contracts";
+import type * as EffectAcpSchema from "effect-acp/compat";
 
 import type { AcpToolCallState } from "@t3tools/provider-acp/server/runtimeModel";
 
@@ -286,24 +287,41 @@ function remember<V>(map: Map<string, V>, key: string, value: V): V {
   return value;
 }
 
-/**
- * Subagent updates for a Hermes delegation call, or undefined when it isn't one; an empty array
- * claims the call without moving a child. Stock Hermes names children only in the start, so they're
- * remembered by call id.
- */
-export function makeHermesSubagentExtractor() {
+export function makeHermesDelegation() {
   const launches = new Map<string, ReadonlyArray<Child>>();
   const lineages = new Map<string, Lineage>();
-  return (tool: AcpToolCallState): ReadonlyArray<HermesSubagentUpdate> | undefined => {
-    let children = launches.get(tool.toolCallId);
-    if (children === undefined && isHermesDelegation(tool)) {
-      children = remember(launches, tool.toolCallId, startChildren(tool));
-    }
-    if (children === undefined && !isHermesDelegationProgress(tool)) return undefined;
-    const lineage =
-      lineages.get(tool.toolCallId) ??
-      remember(lineages, tool.toolCallId, { ids: new Map(), open: new Map() });
-    return settleDescendants(lineage, delegationUpdates(tool, children ?? [], lineage));
+  return {
+    /**
+     * Subagent updates for a Hermes delegation call, or undefined when it isn't one; an empty array
+     * claims the call without moving a child. Stock Hermes names children only in the start, so
+     * they're remembered by call id.
+     */
+    extractSubagentUpdates: (
+      tool: AcpToolCallState,
+    ): ReadonlyArray<HermesSubagentUpdate> | undefined => {
+      let children = launches.get(tool.toolCallId);
+      if (children === undefined && isHermesDelegation(tool)) {
+        children = remember(launches, tool.toolCallId, startChildren(tool));
+      }
+      if (children === undefined && !isHermesDelegationProgress(tool)) return undefined;
+      const lineage =
+        lineages.get(tool.toolCallId) ??
+        remember(lineages, tool.toolCallId, { ids: new Map(), open: new Map() });
+      return settleDescendants(lineage, delegationUpdates(tool, children ?? [], lineage));
+    },
+    /**
+     * The subagent a patched Hermes (`acp-subagent-approvals`) names on a permission request it
+     * raised, by native task id: the `delegate_task` call that reports it and its Hermes id.
+     */
+    permissionSubagentNativeTaskId: (
+      request: EffectAcpSchema.RequestPermissionRequest,
+    ): string | undefined => {
+      const subagent = record(record(record(request._meta).hermes).subagent);
+      const toolCallId = text(subagent.toolCallId);
+      const subagentId = text(subagent.subagentId);
+      if (toolCallId === undefined || subagentId === undefined) return undefined;
+      return lineages.get(toolCallId)?.ids.get(subagentId);
+    },
   };
 }
 

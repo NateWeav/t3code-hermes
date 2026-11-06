@@ -43,7 +43,7 @@ import {
   resolveHermesAcpBaseModelId,
   resolveHermesSessionModeId,
 } from "../../provider/acp/HermesAcpSupport.ts";
-import { makeHermesSubagentExtractor } from "../../provider/acp/HermesDelegation.ts";
+import { makeHermesDelegation } from "../../provider/acp/HermesDelegation.ts";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
@@ -74,6 +74,10 @@ export const HermesProviderCapabilitiesV2 = {
     ...AcpProviderCapabilitiesV2.subagents,
     supportsSubagents: true,
     emitsSubagentLifecycle: true,
+  },
+  approvals: {
+    ...AcpProviderCapabilitiesV2.approvals,
+    approvalsCanOriginateFromSubagents: true,
   },
   tools: {
     ...AcpProviderCapabilitiesV2.tools,
@@ -251,7 +255,7 @@ export function makeHermesAcpAdapterFlavor(
       preserveHermesAgentActivityTitle(
         normalizeHermesTerminalResult(normalizeHermesT3McpToolCall(toolCall)),
       ),
-    extractSubagentUpdates: makeHermesSubagentExtractor(),
+    ...makeHermesDelegation(),
     extractAwaitableBackgroundTasks: extractHermesAwaitableBackgroundTasks,
     ...(options.assertComplete === undefined ? {} : { assertComplete: options.assertComplete }),
   };

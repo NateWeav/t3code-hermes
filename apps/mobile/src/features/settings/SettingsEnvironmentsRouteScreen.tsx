@@ -10,8 +10,6 @@ import { Platform, RefreshControl, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { SettingsScreen } from "./components/SettingsScreen";
-import { AndroidAnchoredMenu } from "../../components/ui/AndroidAnchoredMenu";
-import { AndroidHeaderIconButton } from "../../components/ui/AndroidScreenHeader";
 import { CloudEnvironmentRows } from "../connection/CloudEnvironmentRows";
 import { LocalEnvironmentList } from "../connection/LocalEnvironmentList";
 import { PullRequestRoutingSettings } from "../connection/PullRequestRoutingSettings";
@@ -96,30 +94,14 @@ export function SettingsEnvironmentsRouteScreen() {
   return (
     <SettingsScreen
       title="Environments"
-      trailing={
-        Platform.OS === "android" && relaySession ? (
-          <AndroidAnchoredMenu
-            title="Environment options"
-            actions={[
-              {
-                id: "refresh",
-                title: "Refresh cloud environments",
-                attributes: { disabled: isRefreshingCloud },
-              },
-            ]}
-            onPressAction={({ nativeEvent }) => {
-              if (nativeEvent.event === "refresh") void refreshCloudEnvironments();
-            }}
-          >
-            {(open) => (
-              <AndroidHeaderIconButton
-                accessibilityLabel="Environment options"
-                icon="ellipsis"
-                onPress={open}
-              />
-            )}
-          </AndroidAnchoredMenu>
-        ) : undefined
+      refresh={
+        relaySession
+          ? {
+              accessibilityLabel: "Refresh cloud environments",
+              disabled: isRefreshingCloud,
+              onPress: () => void refreshCloudEnvironments(),
+            }
+          : undefined
       }
       actions={[
         {

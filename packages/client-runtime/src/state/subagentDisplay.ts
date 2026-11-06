@@ -1,4 +1,5 @@
 import type {
+  ModelSelection,
   OrchestrationV2TurnItemStatus,
   OrchestrationV2ThreadShell,
   OrchestrationProjectShell,
@@ -51,6 +52,7 @@ export function formatSubagentDisplayTitle(title: string): string {
 
 export function resolveSubagentMetadata(input: {
   readonly model: string | null;
+  readonly modelSelection?: Pick<ModelSelection, "model"> | undefined;
   readonly provider?: Pick<ServerProvider, "driver" | "models"> | null | undefined;
   readonly parentThread?:
     | Pick<OrchestrationV2ThreadShell, "projectId" | "worktreePath">
@@ -66,7 +68,7 @@ export function resolveSubagentMetadata(input: {
     | null
     | undefined;
 }) {
-  const model = input.model?.trim();
+  const model = input.model?.trim() || input.modelSelection?.model.trim();
   const slug = input.provider
     ? resolveSelectableModel(input.provider.driver, model, input.provider.models)
     : model;
@@ -109,7 +111,7 @@ export function resolveSubagentMetadata(input: {
         ]
       : []),
   ];
-  return { modelLabel, workspace };
+  return { modelLabel, modelSlug: slug ?? model ?? null, workspace };
 }
 
 /** "12.4K tokens" once a provider reports a subagent's token count. */

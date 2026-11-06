@@ -82,8 +82,8 @@ import Migration0075 from "./Migrations/075_SubagentDeliveryState.ts";
 import Migration0076 from "./Migrations/076_ProjectionProjectsPinArchive.ts";
 import Migration0077 from "./Migrations/077_RepairBooleanSettledOverride.ts";
 import Migration0078 from "./Migrations/078_DropOrchestrationEventCorrelationIndex.ts";
-
 import Migration0079 from "./Migrations/079_DelegatedRecoveryIndexes.ts";
+import Migration0080 from "./Migrations/080_ScheduledTaskThreadMode.ts";
 
 const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
@@ -166,6 +166,7 @@ const migrationEntries = [
   [77, "RepairBooleanSettledOverride", Migration0077],
   [78, "DropOrchestrationEventCorrelationIndex", Migration0078],
   [79, "DelegatedRecoveryIndexes", Migration0079],
+  [80, "ScheduledTaskThreadMode", Migration0080],
   // Fork: never add fork migrations here. Any id this fork takes is one upstream
   // will assign later, and the migrator would skip upstream's migration at it
   // (see reconcileForkMigrations and docs/internals/legacy-orchestration-migration.md).

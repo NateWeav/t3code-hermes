@@ -1,7 +1,10 @@
 import { ProviderDriverKind } from "@t3tools/contracts";
 
 import { claudeBackgroundSubagentAfterRootInput } from "./claude_background_subagent_after_root/input.ts";
-import { assertClaudeBackgroundSubagentAfterRootOutput } from "./claude_background_subagent_after_root/output.ts";
+import {
+  assertBackgroundSubagentAfterRootOutput,
+  assertClaudeBackgroundSubagentAfterRootDetails,
+} from "./claude_background_subagent_after_root/output.ts";
 import { claudeBackgroundTaskAfterRootInput } from "./claude_background_task_after_root/input.ts";
 import {
   assertBackgroundTaskAfterRootOutput,
@@ -79,6 +82,7 @@ import { grokPromptErrorInput } from "./grok_prompt_error/input.ts";
 import { assertGrokPromptErrorOutput } from "./grok_prompt_error/output.ts";
 import { grokSubagentLineageInput } from "./grok_subagent_lineage/input.ts";
 import { assertGrokSubagentLineageOutput } from "./grok_subagent_lineage/output.ts";
+import { hermesBackgroundSubagentAfterRootInput } from "./hermes_background_subagent_after_root/input.ts";
 import { hermesBackgroundTaskAfterRootInput } from "./hermes_background_task_after_root/input.ts";
 import { hermesBackgroundTaskInterruptInput } from "./hermes_background_task_interrupt/input.ts";
 import { hermesBackgroundTaskWakeInput } from "./hermes_background_task_wake/input.ts";
@@ -287,7 +291,8 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         ),
         modelSelection: CLAUDE_MODEL_SELECTION,
         runContinuationWorker: true,
-        assertOutput: assertClaudeBackgroundSubagentAfterRootOutput,
+        assertOutput: assertBackgroundSubagentAfterRootOutput,
+        assertProviderDetails: assertClaudeBackgroundSubagentAfterRootDetails,
       },
     ],
   },
@@ -720,6 +725,22 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         modelSelection: { ...GROK_MODEL_SELECTION, model: "grok-4.7-build-fast" },
         runContinuationWorker: true,
         assertOutput: assertGrokBackgroundBashFastWakeOutput,
+      },
+    ],
+  },
+  {
+    name: "hermes_background_subagent_after_root",
+    buildInput: hermesBackgroundSubagentAfterRootInput,
+    providers: [
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./hermes_background_subagent_after_root/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runContinuationWorker: true,
+        assertOutput: assertBackgroundSubagentAfterRootOutput,
       },
     ],
   },

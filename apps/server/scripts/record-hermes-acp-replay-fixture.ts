@@ -5,6 +5,7 @@
  *   node scripts/record-hermes-acp-replay-fixture.ts --hermes-home ~/.hermes-bench --scenario simple
  */
 import * as NodeChildProcess from "node:child_process";
+import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
@@ -106,8 +107,14 @@ function resolveBenchHermesHome(): string {
   return home;
 }
 
-/** Drops the agent harness's own model routing so the benchmark home's config decides. */
+/**
+ * Drops the agent harness's own model routing so the benchmark home's config decides. An empty
+ * managed scope keeps a machine-wide `/etc/hermes/config.yaml` overlay out too: it layers over
+ * every home, and can pin providers or a delegation model the benchmark home lacks.
+ */
 function benchEnvironment(hermesHome: string): NodeJS.ProcessEnv {
+  const noManagedScope = NodePath.join(hermesHome, "no-managed-scope");
+  NodeFS.mkdirSync(noManagedScope, { recursive: true });
   return {
     ...Object.fromEntries(
       Object.entries(process.env).filter(
@@ -116,6 +123,7 @@ function benchEnvironment(hermesHome: string): NodeJS.ProcessEnv {
       ),
     ),
     HERMES_HOME: hermesHome,
+    HERMES_MANAGED_DIR: noManagedScope,
   };
 }
 

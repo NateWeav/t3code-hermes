@@ -6244,16 +6244,17 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             driver,
             node,
           });
+          // The approval card exists before the thread shows its request pending.
+          yield* emitProviderEvent({
+            type: "turn_item.updated",
+            driver,
+            turnItem,
+          });
           yield* emitProviderEvent({
             type: "runtime_request.updated",
             driver,
             threadId: context.input.threadId,
             runtimeRequest,
-          });
-          yield* emitProviderEvent({
-            type: "turn_item.updated",
-            driver,
-            turnItem,
           });
           return {
             context,

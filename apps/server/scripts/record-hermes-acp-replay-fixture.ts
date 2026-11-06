@@ -5,6 +5,7 @@
  *   node scripts/record-hermes-acp-replay-fixture.ts --hermes-home ~/.hermes-bench --scenario simple
  */
 import * as NodeChildProcess from "node:child_process";
+import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
@@ -106,8 +107,14 @@ function resolveBenchHermesHome(): string {
   return home;
 }
 
-/** Drops the agent harness's own model routing so the benchmark home's config decides. */
+/**
+ * Drops the agent harness's own model routing so the benchmark home's config decides. An empty
+ * managed scope keeps a machine-wide `/etc/hermes/config.yaml` overlay out too: it layers over
+ * every home, and a compression provider it pins that the benchmark home lacks aborts `/compress`.
+ */
 function benchEnvironment(hermesHome: string): NodeJS.ProcessEnv {
+  const noManagedScope = NodePath.join(hermesHome, "no-managed-scope");
+  NodeFS.mkdirSync(noManagedScope, { recursive: true });
   return {
     ...Object.fromEntries(
       Object.entries(process.env).filter(
@@ -116,6 +123,7 @@ function benchEnvironment(hermesHome: string): NodeJS.ProcessEnv {
       ),
     ),
     HERMES_HOME: hermesHome,
+    HERMES_MANAGED_DIR: noManagedScope,
   };
 }
 
@@ -449,7 +457,16 @@ const recordScenario = Effect.fn("recordHermesScenario")(function* (fixtureName:
   const path = yield* Path.Path;
   const hermesHome = resolveBenchHermesHome();
   const environment = benchEnvironment(hermesHome);
-  const fixtureInput = fixture.buildInput();
+  // Hermes ignores Codex's approval policy override; Supervised is the Hermes mode that asks.
+  const borrowedApprovalPolicy = ownVariant
+    ? undefined
+    : settingsVariant.runtimePolicyOverride?.approvalPolicy;
+  const fixtureInput = {
+    ...fixture.buildInput(),
+    ...(borrowedApprovalPolicy !== undefined && borrowedApprovalPolicy !== "never"
+      ? { runtimeMode: "approval-required" as const }
+      : {}),
+  };
   const workspace = yield* checkpointWorkspace(fixtureName, fixtureInput.workspaceFiles);
   const realWorkspace = yield* fs.realPath(workspace);
   // The files these prompts read, as the Claude recorder seeds them.

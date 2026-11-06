@@ -133,7 +133,11 @@ The patch keeps the existing human-readable content while exposing `rawInput` ar
 `rawOutput.hermesDelegation` on the parent call. The gateway stamps each top-level child's events
 with its `delegate_task` call id (`parent_tool_call_id`), so children are never matched by goals,
 task indices, or order: overlapping delegations can have identical goals, and unknown or conflicting
-ownership is dropped. Background children keep reporting after the turn that spawned them ends.
+ownership is dropped. A nested child (only in a profile that raises `delegation.max_spawn_depth`
+above its default of 1) reports through the same call, naming the `parent_id` that spawned it, and
+is forwarded only when the call already owns that parent; T3 Code shows it in its parent's thread.
+Versions before `27cbcb122ff4` drop nested children. Background children keep reporting after the
+turn that spawned them ends.
 Registry-forced stalls and worker crashes report a terminal event per child, with the same secret
 redaction as other live child progress, so detached work cannot stay falsely active. A parent result
 with `status: "dispatched"` only acknowledges launch; child lifecycle events settle each subagent.

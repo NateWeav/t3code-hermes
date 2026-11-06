@@ -1,0 +1,502 @@
+diff --git a/agent/context_default_record.py b/agent/context_default_record.py
+index 902e237adc..9ad730c6cd 100644
+--- a/agent/context_default_record.py
++++ b/agent/context_default_record.py
+@@ -34,6 +34,12 @@ def mark_context_defaulted() -> None:
+         flag[0] = True
+ 
+ 
++def context_defaulted() -> bool:
++    """Has the resolution running in this context defaulted so far?"""
++    flag = _DEFAULTED.get()
++    return bool(flag and flag[0])
++
++
+ def records_context_defaults(resolve: Callable[..., int]) -> Callable[..., int]:
+     """Wrap the resolver: remember a defaulted answer for its (model, base_url), forget it otherwise."""
+     signature = inspect.signature(resolve)
+diff --git a/agent/model_metadata.py b/agent/model_metadata.py
+index 2fbc80f685..b1b4df597f 100644
+--- a/agent/model_metadata.py
++++ b/agent/model_metadata.py
+@@ -18,6 +18,7 @@ from urllib.parse import urlparse
+ import hermes_yaml as yaml
+ 
+ from agent import model_metadata_http
++from agent import model_metadata_probe_memo as probe_memo
+ from agent.model_metadata_cache import _write_context_cache, locked_context_cache
+ from agent.context_default_record import mark_context_defaulted, records_context_defaults
+ from agent.model_metadata_llamacpp import llamacpp_context
+@@ -130,6 +131,7 @@ def _endpoint_blackholed(base_url: str) -> bool:
+     if (time.monotonic() - seen) >= _ENDPOINT_BLACKHOLE_TTL_SECONDS:
+         del _endpoint_blackhole_cache[key]
+         return False
++    probe_memo.note_probe_failure()
+     return True
+ 
+ 
+@@ -734,6 +736,8 @@ def detect_local_server_type(base_url: str, api_key: str = "") -> Optional[str]:
+     lmstudio_url = _lmstudio_server_root(normalized)
+     cached = _endpoint_probe_path_cache.get(server_url)
+     if cached is not None and (time.monotonic() - cached[1]) < (_ENDPOINT_PROBE_TTL_SECONDS if cached[0] is not None else _ENDPOINT_PROBE_FAILURE_TTL_SECONDS):
++        if cached[0] is None:
++            probe_memo.note_cached_negative(("server_type", server_url))
+         return cached[0]
+     # Blackholed host: skip the waterfall. Deliberately NOT written to the
+     # hour-long verdict cache, which would pin "undetected" after it comes back.
+@@ -752,8 +756,10 @@ def detect_local_server_type(base_url: str, api_key: str = "") -> Optional[str]:
+         ("vllm", (f"{server_url}/version",), lambda r: "version" in r.json()),
+     )
+     result: Optional[str] = None
++    failed = [False]
+     try:
+-        with httpx.Client(timeout=2.0, headers=_auth_headers(api_key), verify=model_metadata_http.resolve_verify(base_url)) as client:
++        with httpx.Client(timeout=2.0, headers=_auth_headers(api_key), verify=model_metadata_http.resolve_verify(base_url),
++                          event_hooks={"response": [probe_memo.response_hook(failed)]}) as client:
+             for name, urls, check in waterfall:
+                 try:
+                     for url in urls:
+@@ -764,14 +770,16 @@ def detect_local_server_type(base_url: str, api_key: str = "") -> Optional[str]:
+                         result = name
+                         break
+                 except Exception as exc:
++                    failed[0] |= probe_memo.note_probe_failure(exc)
+                     # A connect timeout condemns the host: skip the remaining legs.
+                     if _is_connect_timeout(exc):
+                         _note_endpoint_blackholed(server_url)
+                         raise
+-    except Exception:
+-        pass
++    except Exception as exc:
++        failed[0] |= probe_memo.note_probe_failure(exc)
+     # Negative verdict in memory only (never on disk — failures are often transient).
+     _endpoint_probe_path_cache[server_url] = (result, time.monotonic())
++    probe_memo.record_negative(("server_type", server_url), result is None and failed[0])
+     if result is not None:
+         _local_probe_disk_put("server_type", server_url, result)
+     return result
+@@ -1033,6 +1041,8 @@ def fetch_endpoint_model_metadata(base_url: str, api_key: str = "", force_refres
+     if not force_refresh:
+         cached = _endpoint_model_metadata_cache.get(memo_key)
+         if cached is not None and (time.time() - _endpoint_model_metadata_cache_time.get(memo_key, 0)) < _ENDPOINT_MODEL_CACHE_TTL:
++            if not cached:
++                probe_memo.note_cached_negative(("models", memo_key))
+             return cached
+         memo = _endpoint_disk_cache_get(normalized) if not local else None
+         if memo is not None:
+@@ -1045,12 +1055,13 @@ def fetch_endpoint_model_metadata(base_url: str, api_key: str = "", force_refres
+     headers = _auth_headers(api_key)
+     verify = model_metadata_http.resolve_verify(normalized)
+     last_error: Optional[Exception] = None
++    failed = False
+     if local:
+         try:
+             if detect_local_server_type(normalized, api_key=api_key) == "lm-studio":
+                 return _remember_endpoint_models(memo_key, _lmstudio_native_models(normalized, headers))
+         except Exception as exc:
+-            last_error = exc
++            last_error, failed = exc, probe_memo.note_probe_failure(exc)
+             _note_if_connect_timeout(exc, normalized)
+     for candidate in candidates:
+         # A connect timeout condemns the host, not the path.
+@@ -1073,12 +1084,14 @@ def fetch_endpoint_model_metadata(base_url: str, api_key: str = "", force_refres
+                     _apply_llamacpp_props(cache, request_candidate, headers, verify)
+             if cache and not local:
+                 _endpoint_disk_cache_put(normalized, cache)
++            probe_memo.record_negative(("models", memo_key), False)
+             return _remember_endpoint_models(memo_key, cache)
+         except Exception as exc:
+-            last_error = exc
++            last_error, failed = exc, probe_memo.note_probe_failure(exc) or failed
+             _note_if_connect_timeout(exc, normalized)
+     if last_error:
+         logger.debug("Failed to fetch model metadata from %s/models: %s", normalized, last_error)
++    probe_memo.record_negative(("models", memo_key), failed)
+     return _remember_endpoint_models(memo_key, {})
+ 
+ 
+@@ -1137,6 +1150,7 @@ def save_context_length(model: str, base_url: str, length: int, *, source: str =
+     if length <= 0:
+         logger.warning("Refusing to cache non-positive context length %s -> %s tokens", f"{model}@{base_url}", length)
+         return
++    probe_memo.forget(base_url)
+     key = _context_cache_key(model, base_url)
+     document = _load_context_cache_document()
+     cache = document.get("context_lengths") or {}
+@@ -1195,6 +1209,7 @@ def _invalidate_cached_context_length(model: str, base_url: str) -> None:
+     In-process caches are dropped unconditionally; only the file update takes the cache lock.
+     """
+     from agent.model_metadata_cache import drop_context_cache_rows
++    probe_memo.forget(base_url)
+     key = _context_cache_key(model, base_url)
+     # Also drop the in-memory TTL probe entries, or the next resolution inside the TTL window reuses the stale value.
+     bare, stripped = _strip_provider_prefix(model), (base_url or "").rstrip("/")
+@@ -1410,10 +1425,12 @@ def _ollama_show(server_url: str, api_key: str, bare_model: str, timeout: float
+     """Ollama ``/api/show`` JSON for ``bare_model``, or None on any failure (``note_blackhole``: connect timeouts condemn the host)."""
+     import httpx
+     try:
+-        with httpx.Client(timeout=timeout, headers=_auth_headers(api_key), verify=model_metadata_http.resolve_verify(server_url)) as client:
++        with httpx.Client(timeout=timeout, headers=_auth_headers(api_key), verify=model_metadata_http.resolve_verify(server_url),
++                          event_hooks={"response": [probe_memo.response_hook()]}) as client:
+             resp = client.post(f"{server_url}/api/show", json={"name": bare_model})
+             return resp.json() if resp.status_code == 200 else None
+     except Exception as exc:
++        probe_memo.note_probe_failure(exc)
+         if note_blackhole:
+             _note_if_connect_timeout(exc, server_url)
+         return None
+@@ -1595,7 +1612,8 @@ def _query_local_context_length_uncached(model: str, base_url: str, api_key: str
+         return None
+     try:
+         server_type = detect_local_server_type(base_url, api_key=api_key)
+-    except Exception:
++    except Exception as exc:
++        probe_memo.note_probe_failure(exc)
+         server_type = None
+     def _ollama_ctx(client) -> Optional[int]:
+         # Ollama: num_ctx (runtime window) before the GGUF training max, or conversations
+@@ -1618,9 +1636,11 @@ def _query_local_context_length_uncached(model: str, base_url: str, api_key: str
+     }.get(server_type)
+     probes = ([typed] if typed else []) + [_model_detail_ctx, lambda client: _openai_models_list_context(client, server_url, model)]
+     try:
+-        with httpx.Client(timeout=3.0, headers=_auth_headers(api_key), verify=model_metadata_http.resolve_verify(base_url)) as client:
++        with httpx.Client(timeout=3.0, headers=_auth_headers(api_key), verify=model_metadata_http.resolve_verify(base_url),
++                          event_hooks={"response": [probe_memo.response_hook()]}) as client:
+             return next((ctx for ctx in (probe(client) for probe in probes) if ctx is not None), None)
+     except Exception as exc:
++        probe_memo.note_probe_failure(exc)
+         _note_if_connect_timeout(exc, server_url)
+     return None
+ 
+@@ -2048,6 +2068,18 @@ def _resolve_bedrock_context_length(model: str, base_url: str) -> Optional[int]:
+     return get_bedrock_context_length(model, probe=False)  # static table / default: answers this call only
+ 
+ 
++def _probes_custom_endpoint(base_url: str, provider: str) -> bool:
++    """Step 2's route: a truly custom endpoint. Known providers and native Codex skip its /models probe."""
++    return _is_custom_endpoint(base_url) and not _is_known_provider_base_url(base_url) and (provider or "").strip().lower() != "openai-codex"
++
++
++def _resolve_probed_custom_endpoint(model: str, base_url: str, api_key: str, provider: str) -> int:
++    """Steps 1-3 for a custom endpoint that is neither a Codex route nor Bedrock."""
++    cached = get_cached_context_length(model, base_url) if not _skip_persistent_context_cache(base_url, provider) else None
++    validated = _validate_cached_context_length(model, base_url, cached, api_key=api_key) if cached is not None else None
++    return validated if validated is not None else _resolve_custom_endpoint_context_length(model, base_url, api_key, provider)
++
++
+ def _resolve_custom_endpoint_context_length(model: str, base_url: str, api_key: str, provider: str) -> int:
+     """Steps 2-3 for a truly custom endpoint: /models, local probes, Ollama /api/show, catalog, default."""
+     context_length = _resolve_endpoint_context_length(model, base_url, api_key=api_key)
+@@ -2266,6 +2298,14 @@ def get_model_context_length(
+     # (HERMES_CODEX_BASE_URL, model.base_url, custom api_mode: codex_responses) the URL looks
+     # generic while the window is still the Codex OAuth one (#116191).
+     codex_route = _is_codex_route(provider, base_url, custom_providers)
++    # A custom endpoint is probed live on every resolution (steps 1-3); remember the answer for the
++    # process once every probe was answered (agent.model_metadata_probe_memo).
++    custom_endpoint, provider_key = _probes_custom_endpoint(base_url, provider), (provider or "").strip().lower()
++    if custom_endpoint and not codex_route and not is_bedrock_context and provider_key != "novita":
++        from hermes_constants import hermes_home_key
++        return probe_memo.remember(
++            (hermes_home_key(), provider_key, model, *_endpoint_memo_key(_normalize_base_url(base_url), api_key)),
++            lambda: _resolve_probed_custom_endpoint(model, base_url, api_key, provider))
+     # 1. Persistent cache (LM Studio / Codex routes excluded — see _skip_persistent_context_cache).
+     cached = get_cached_context_length(model, base_url) if base_url and not is_bedrock_context and not codex_route and not _skip_persistent_context_cache(base_url, provider) else None
+     validated = _validate_cached_context_length(model, base_url, cached, api_key=api_key) if cached is not None else None
+@@ -2285,7 +2325,7 @@ def get_model_context_length(
+     # 2. Live /models for truly custom endpoints. Known providers skip this: their /models may
+     # report a provider-imposed limit (e.g. 128k) rather than the window. The native
+     # openai-codex provider skips it too even on a proxy URL — step 5 runs its live catalog probe.
+-    if _is_custom_endpoint(base_url) and not _is_known_provider_base_url(base_url) and (provider or "").strip().lower() != "openai-codex":
++    if custom_endpoint:
+         resolve = _resolve_custom_codex_route_context_length if codex_route else _resolve_custom_endpoint_context_length
+         return resolve(model, base_url, api_key, provider)
+     # 4. Anthropic /v1/models API (only for regular API keys, not OAuth)
+diff --git a/agent/model_metadata_probe_memo.py b/agent/model_metadata_probe_memo.py
+new file mode 100644
+index 0000000000..af3fbfbf8c
+--- /dev/null
++++ b/agent/model_metadata_probe_memo.py
+@@ -0,0 +1,116 @@
++"""Process-lifetime memo of context windows resolved by probing a custom endpoint.
++
++Without ``model.context_length``, every agent build asks a custom endpoint for its window
++(``/models``, the local-server waterfall, Ollama ``/api/show``). An endpoint that publishes none
++gets the same catalog or default answer on every build, and one that stalls holds each build for the
++probes' timeouts. A resolution whose probes all got an answer is remembered for the process. One
++where any probe failed (transport error, timeout, 5xx, 429) is not, so the next build asks again.
++Persisting a window (an overflow step-down, a probe that found one) forgets that endpoint's entries.
++"""
++from __future__ import annotations
++
++import contextvars
++import threading
++from contextlib import contextmanager
++from typing import Callable, Iterator
++
++from agent.context_default_record import context_defaulted, mark_context_defaulted
++
++# Set while a probe runs under ``watch()``; failure sites flip it.
++_FAILED: contextvars.ContextVar[list | None] = contextvars.ContextVar("context_probe_failed", default=None)
++_REMEMBERED: dict[tuple, tuple[int, bool]] = {}  # key -> (window, resolved to a default)
++_LOCKS: dict[tuple, threading.Lock] = {}
++_GUARD = threading.Lock()
++# Keys of short-lived negative caches (no /models catalog, no server type) written after a failed probe:
++# a later hit on one is that same failure, not an answer.
++_FAILED_NEGATIVES: set[tuple] = set()
++_MAX_ENTRIES = 512
++
++
++def is_probe_failure(exc: BaseException) -> bool:
++    """A probe that got no answer. A 4xx (404, 401) is the endpoint answering."""
++    import httpx
++
++    from agent.deadline import DeadlineExpired
++    if isinstance(exc, httpx.HTTPStatusError):
++        return exc.response.status_code >= 500 or exc.response.status_code == 429
++    return isinstance(exc, (httpx.TransportError, DeadlineExpired))
++
++
++def note_probe_failure(exc: BaseException | None = None) -> bool:
++    """Count ``exc`` (or, with none, the caller's own verdict) against the running resolution."""
++    if exc is not None and not is_probe_failure(exc):
++        return False
++    flag = _FAILED.get()
++    if flag is not None:
++        flag[0] = True
++    return True
++
++
++def response_hook(failed: list | None = None) -> Callable:
++    """httpx response hook for probes that read a status instead of raising on it."""
++    def hook(response) -> None:
++        if (response.status_code >= 500 or response.status_code == 429) and note_probe_failure() and failed is not None:
++            failed[0] = True
++    return hook
++
++
++@contextmanager
++def watch() -> Iterator[list]:
++    """Collect failures of the probes run inside; they also count for any enclosing ``watch``."""
++    outer, flag = _FAILED.get(), [False]
++    token = _FAILED.set(flag)
++    try:
++        yield flag
++    finally:
++        _FAILED.reset(token)
++        if flag[0] and outer is not None:
++            outer[0] = True
++
++
++def record_negative(key: tuple, failed: bool) -> None:
++    with _GUARD:
++        if not failed:
++            _FAILED_NEGATIVES.discard(key)
++            return
++        if len(_FAILED_NEGATIVES) >= _MAX_ENTRIES:
++            _FAILED_NEGATIVES.clear()
++        _FAILED_NEGATIVES.add(key)
++
++
++def note_cached_negative(key: tuple) -> None:
++    if key in _FAILED_NEGATIVES:
++        note_probe_failure()
++
++
++def remember(key: tuple, resolve: Callable[[], int]) -> int:
++    """``resolve()`` once per key for the process, unless a probe in it failed.
++
++    Concurrent first lookups of one key wait for the one in flight instead of probing again.
++    """
++    hit = _REMEMBERED.get(key)
++    if hit is None:
++        with _GUARD:
++            lock = _LOCKS.setdefault(key, threading.Lock())
++        with lock:
++            hit = _REMEMBERED.get(key)
++            if hit is None:
++                with watch() as failed:
++                    window = resolve()
++                if not failed[0]:
++                    with _GUARD:
++                        if len(_REMEMBERED) >= _MAX_ENTRIES:
++                            _REMEMBERED.clear()
++                        _REMEMBERED[key] = (window, context_defaulted())
++                return window
++    if hit[1]:
++        mark_context_defaulted()
++    return hit[0]
++
++
++def forget(base_url: str) -> None:
++    """Drop every remembered window for ``base_url`` (keys end with the normalized URL's memo key)."""
++    url = (base_url or "").strip().rstrip("/")
++    with _GUARD:
++        for key in [k for k in _REMEMBERED if k[-2].rstrip("/") == url]:
++            del _REMEMBERED[key]
+diff --git a/tests/agent/test_context_fallback_label.py b/tests/agent/test_context_fallback_label.py
+index 2a66db9286..c38ee66e80 100644
+--- a/tests/agent/test_context_fallback_label.py
++++ b/tests/agent/test_context_fallback_label.py
+@@ -38,11 +38,17 @@ def _resolve_and_mark(model=UNKNOWN, provider="bedrock", base_url=RUNTIME_URL, c
+     return ctx, context_window_marker(ctx, config_context_length, model=model, provider=provider, base_url=base_url)
+ 
+ 
++def _endpoint_down(*_a, **_k):
++    from agent.model_metadata_probe_memo import note_probe_failure
++    note_probe_failure()  # a probe of a down endpoint fails, so its default is not remembered
++    return None
++
++
+ @pytest.fixture
+ def _quiet_custom_endpoint(monkeypatch):
+-    """A custom endpoint whose live probes report nothing (tests opt in to a /models answer)."""
++    """A custom endpoint that is down: its live probes fail (tests opt in to a /models answer)."""
+     for name in ("_resolve_endpoint_context_length", "_probe_local_context_length", "_query_ollama_api_show"):
+-        monkeypatch.setattr(f"agent.model_metadata.{name}", lambda *a, **k: None)
++        monkeypatch.setattr(f"agent.model_metadata.{name}", _endpoint_down)
+     return monkeypatch
+ 
+ 
+diff --git a/tests/conftest.py b/tests/conftest.py
+index 6ab56d4fce..249ed0ffcb 100644
+--- a/tests/conftest.py
++++ b/tests/conftest.py
+@@ -1562,6 +1562,19 @@ def _moa_caches_isolated():
+     moa._runtime_cache.clear()
+ 
+ 
++@pytest.fixture(autouse=True)
++def _context_probe_memo_isolated():
++    """``agent.model_metadata_probe_memo`` remembers probed context windows for the process; tests
++    reuse model ids and endpoint URLs with different fakes, so each starts with none remembered."""
++    from agent import model_metadata_probe_memo as memo
++
++    memo._REMEMBERED.clear()
++    memo._FAILED_NEGATIVES.clear()
++    yield
++    memo._REMEMBERED.clear()
++    memo._FAILED_NEGATIVES.clear()
++
++
+ # ── Real-home tripwire (universal read/write guard) ──────────────────────────
+ # The hermetic sandbox redirects get_hermes_home(), but TWO escape classes
+ # remain: (a) code hardcoding Path.home()/".hermes" (the exact restatement
+diff --git a/tests/gateway/test_context_probe_memo_gateway.py b/tests/gateway/test_context_probe_memo_gateway.py
+new file mode 100644
+index 0000000000..91c0d512dc
+--- /dev/null
++++ b/tests/gateway/test_context_probe_memo_gateway.py
+@@ -0,0 +1,113 @@
++"""The gateway resolves a custom endpoint's context window once per process, not once per agent build.
++
++Every session.create, warm-up and turn resolves the window through ``_resolve_gateway_model_context``.
++Without ``model.context_length``, each resolution probed the endpoint again (``/models``, the local
++server waterfall, Ollama ``/api/show``), and an endpoint that stalls held each new session for the
++probes' timeouts. These tests run that resolver against a real HTTP endpoint that publishes no window.
++"""
++from __future__ import annotations
++
++import json
++import threading
++from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
++
++import pytest
++
++import gateway.run as gateway_run
++
++MODEL = "mystery-model"  # in no catalog: the window is the generic default, labelled as one
++
++
++class _Endpoint:
++    """OpenAI-compatible server that lists the model but publishes no context length."""
++
++    def __init__(self):
++        self.requests: list[str] = []
++        self.status = 200
++        endpoint = self
++
++        class Handler(BaseHTTPRequestHandler):
++            def _answer(self):
++                endpoint.requests.append(f"{self.command} {self.path}")
++                length = int(self.headers.get("Content-Length") or 0)
++                if length:
++                    self.rfile.read(length)
++                if endpoint.status != 200:
++                    code, body = endpoint.status, b"{}"
++                elif self.command == "GET" and self.path == "/v1/models":
++                    code, body = 200, json.dumps({"object": "list", "data": [{"id": MODEL, "object": "model"}]}).encode()
++                else:
++                    code, body = 404, b'{"error":"not found"}'
++                self.send_response(code)
++                self.send_header("Content-Type", "application/json")
++                self.send_header("Content-Length", str(len(body)))
++                self.end_headers()
++                self.wfile.write(body)
++
++            do_GET = do_POST = _answer
++
++            def log_message(self, *_args):
++                pass
++
++        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
++        self.url = f"http://127.0.0.1:{self.server.server_address[1]}/v1"
++        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
++
++    def take(self) -> list[str]:
++        taken, self.requests[:] = list(self.requests), []
++        return taken
++
++
++@pytest.fixture
++def endpoint(monkeypatch):
++    server = _Endpoint()
++    server.thread.start()
++    config = {"model": {"default": MODEL, "provider": "custom", "base_url": server.url}}
++    monkeypatch.setattr(gateway_run, "_load_gateway_config", lambda: config)
++    monkeypatch.setattr(gateway_run, "_resolve_runtime_agent_kwargs",
++                        lambda: {"provider": "custom", "base_url": server.url, "api_key": "sk-test"})
++    server.config = config
++    try:
++        yield server
++    finally:
++        server.server.shutdown()
++        server.server.server_close()
++
++
++def _resolve():
++    resolved = gateway_run._resolve_gateway_model_context()
++    return resolved.context_length, resolved.context_source
++
++
++def test_a_new_session_reuses_the_window_the_last_one_probed(endpoint):
++    from agent.model_metadata import DEFAULT_FALLBACK_CONTEXT
++
++    assert _resolve() == (DEFAULT_FALLBACK_CONTEXT, "default")
++    assert endpoint.take()  # the first resolution asks the endpoint
++    assert _resolve() == (DEFAULT_FALLBACK_CONTEXT, "default")  # still labelled as a default
++    assert endpoint.take() == []
++
++
++def test_a_failed_probe_is_not_remembered(endpoint):
++    endpoint.status = 503
++    _resolve()
++    assert endpoint.take()
++    endpoint.status = 200
++    _resolve()
++    assert endpoint.take()  # asked again: the last answer came from a failure
++
++
++def test_a_configured_context_length_still_wins(endpoint):
++    _resolve()
++    endpoint.take()
++    endpoint.config["model"]["context_length"] = 64_000
++    assert _resolve() == (64_000, "config")
++    assert endpoint.take() == []
++
++
++def test_a_persisted_window_replaces_the_remembered_one(endpoint):
++    from agent.model_metadata import DEFAULT_FALLBACK_CONTEXT, save_context_length
++
++    assert _resolve()[0] == DEFAULT_FALLBACK_CONTEXT
++    save_context_length(MODEL, endpoint.url, 100_000)  # e.g. an overflow error taught a smaller window
++    assert _resolve() == (100_000, "detected")

@@ -152,6 +152,18 @@
           "file": "acp-launch-yolo-resume/5b32cfc23007.patch"
         }
       ]
+    },
+    {
+      "id": "acp-command-approval",
+      "title": "Command approvals",
+      "neededFor": "Approval before each shell command in Supervised and Auto-accept edits threads, as Claude Code asks before each Bash command. Without it, Hermes asks only before file edits and commands it flags as dangerous, and a file edit Hermes runs without asking shows no diff.",
+      "versions": [
+        {
+          "hermesCommit": "ca4360692055bdb4df3a695c164646e528891da8",
+          "hermesCommitDate": "2026-11-06T04:01:15Z",
+          "file": "acp-command-approval/ca4360692055.patch"
+        }
+      ]
     }
   ]
 }

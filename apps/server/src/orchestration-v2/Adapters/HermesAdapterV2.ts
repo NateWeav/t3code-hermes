@@ -7,7 +7,6 @@ import {
   HermesSettings,
   ProviderDriverKind,
   type OrchestrationV2ProviderCapabilities,
-  type RuntimeMode,
 } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { resolveSelfInvocation, type SelfInvocation } from "@t3tools/shared/nodeRuntime";
@@ -20,6 +19,7 @@ import * as Semaphore from "effect/Semaphore";
 import { ChildProcessSpawner } from "effect/process";
 
 import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
+import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import {
   HERMES_FAST_MODE_CONFIG_ID,
   resolveHermesFastModeSelection,
@@ -34,6 +34,8 @@ import {
   hermesApprovalOptions,
   discardLostHermesTurnsOnPrompt,
   extractHermesAwaitableBackgroundTasks,
+  hermesApprovalPosture,
+  type HermesApprovalPosture,
   hermesPromptFailure,
   isHermesGatewayTurnLoss,
   makeHermesAcpRuntime,
@@ -103,19 +105,22 @@ export interface HermesAdapterV2Options {
 }
 
 /**
- * Full access also has to reach Hermes subagents, which deny dangerous
- * commands unless YOLO is on. A reopened session follows this flag only with
- * the `acp-launch-yolo-resume` patch; stock Hermes reads it at creation.
+ * A policy that never asks also has to reach Hermes subagents, which deny dangerous commands
+ * unless YOLO is on. A reopened session follows this flag only with the `acp-launch-yolo-resume`
+ * patch; stock Hermes reads it at creation.
  */
 export function hermesSpawnEnvironment(
   environment: NodeJS.ProcessEnv,
-  runtimeMode: RuntimeMode,
+  runtimePolicy: Pick<
+    ProviderAdapter.ProviderAdapterV2RuntimePolicy,
+    "runtimeMode" | "approvalPolicy" | "sandboxPolicy"
+  >,
   processEnvironment?: NodeJS.ProcessEnv,
 ): NodeJS.ProcessEnv {
   return {
     ...environment,
     ...processEnvironment,
-    ...(runtimeMode === "full-access" ? { HERMES_YOLO_MODE: "1" } : {}),
+    ...(hermesApprovalPosture(runtimePolicy) === "dontAsk" ? { HERMES_YOLO_MODE: "1" } : {}),
   };
 }
 
@@ -131,9 +136,12 @@ export function makeHermesAcpAdapterFlavor(
   // Hermes reads reasoning effort from one `config.yaml` per profile, so
   // concurrent sessions serialize the write and the rebuild that reads it.
   const reasoningConfigPermit = Semaphore.makeUnsafe(1);
-  // Per live process: the runtime mode it launched with (a mode change reopens
+  // Per live process: how much it asks under the policy it launched with (a mode change reopens
   // the session) and the reasoning level its agent was last built with.
-  const runtimeModes = new WeakMap<AcpSessionRuntime.AcpSessionRuntime["Service"], RuntimeMode>();
+  const postures = new WeakMap<
+    AcpSessionRuntime.AcpSessionRuntime["Service"],
+    HermesApprovalPosture
+  >();
   const builtReasoningLevels = new WeakMap<
     AcpSessionRuntime.AcpSessionRuntime["Service"],
     HermesReasoningLevel | null
@@ -146,11 +154,7 @@ export function makeHermesAcpAdapterFlavor(
     return makeHermesAcpRuntime({
       ...runtimeInput,
       hermesSettings: options.settings,
-      environment: hermesSpawnEnvironment(
-        options.environment,
-        runtimePolicy.runtimeMode,
-        processEnvironment,
-      ),
+      environment: hermesSpawnEnvironment(options.environment, runtimePolicy, processEnvironment),
       childProcessSpawner: options.childProcessSpawner,
     });
   };
@@ -161,6 +165,8 @@ export function makeHermesAcpAdapterFlavor(
     capabilities: HermesProviderCapabilitiesV2,
     // Hermes takes image blocks whatever its handshake advertises.
     supportsImagePrompts: true,
+    // With `acp-command-approval`, a session that asks before edits asks before every shell command.
+    clientCapabilitiesMeta: { command_approval: true },
     supportsCompaction: true,
     compactionCommand: "/compress",
     // The Hermes gateway runs a turn of its own when a background job finishes (`notify: true`) and
@@ -177,24 +183,28 @@ export function makeHermesAcpAdapterFlavor(
       (options.makeRuntime ?? spawnRuntime)(input).pipe(
         Effect.map(discardLostHermesTurnsOnPrompt),
         Effect.tap((runtime) =>
-          Effect.sync(() => runtimeModes.set(runtime, input.runtimePolicy.runtimeMode)),
+          Effect.sync(() => postures.set(runtime, hermesApprovalPosture(input.runtimePolicy))),
         ),
       ),
     /**
      * Hermes builds its agent from `config.yaml`, so the level is written first and an unchanged
-     * model is re-sent when only the level moved. Edit-approval modes are best-effort since T3's
-     * permission policy enforces approvals. Fast mode is re-pinned per turn.
+     * model is re-sent when only the level moved. The session's mode follows T3's policy; T3's
+     * permission policy still answers every request. Fast mode is re-pinned per turn.
      */
     applyModelSelection: Effect.fn("HermesAdapterV2.applyModelSelection")(function* ({
       runtime,
       startResult,
       modelSelection,
     }) {
-      const runtimeMode = runtimeModes.get(runtime);
+      const posture = postures.get(runtime);
       const modeId =
-        runtimeMode === undefined
+        posture === undefined
           ? undefined
-          : resolveHermesSessionModeId({ runtimeMode, modeState: yield* runtime.getModeState });
+          : resolveHermesSessionModeId({
+              posture,
+              configOptions: yield* runtime.getConfigOptions,
+              modeState: yield* runtime.getModeState,
+            });
       if (modeId !== undefined) {
         yield* runtime
           .setMode(modeId)

@@ -7,7 +7,6 @@ import {
   type ProviderApprovalOption,
   type OrchestrationV2ProviderFailure,
   ProviderDriverKind,
-  type RuntimeMode,
   type ServerProviderSlashCommand,
 } from "@t3tools/contracts";
 import * as SecureRandom from "effect/crypto/SecureRandom";
@@ -22,10 +21,12 @@ import { AgentScope } from "@t3tools/shared/AgentScope";
 import { normalizeModelSlug } from "@t3tools/shared/model";
 import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
 
-import type {
-  AcpSessionModeState,
-  AcpToolCallState,
+import {
+  collectSessionConfigOptionValues,
+  type AcpSessionModeState,
+  type AcpToolCallState,
 } from "@t3tools/provider-acp/server/runtimeModel";
+import type { ProviderAdapterV2RuntimePolicy } from "@t3tools/provider-core/server/ProviderAdapter";
 import * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 import { unknownRecord } from "@t3tools/provider-acp/server/clientPolicy";
 
@@ -34,29 +35,34 @@ const HERMES_DRIVER_KIND = ProviderDriverKind.make("hermes");
 const HERMES_AUTH_METHOD_ID = "hermes";
 export const HERMES_FALLBACK_MODEL_ID = "hermes-4";
 
+/** How much Hermes asks before it acts, as Claude's permission mode follows T3's policy. */
+export type HermesApprovalPosture = "ask" | "acceptEdits" | "dontAsk";
+
+export function hermesApprovalPosture(
+  policy: Pick<ProviderAdapterV2RuntimePolicy, "runtimeMode" | "approvalPolicy" | "sandboxPolicy">,
+): HermesApprovalPosture {
+  if (policy.approvalPolicy !== undefined && policy.approvalPolicy !== "never") return "ask";
+  // T3 can refuse a write the read-only sandbox forbids only if Hermes asks first.
+  if (unknownRecord(policy.sandboxPolicy)?.type === "readOnly") return "ask";
+  switch (policy.runtimeMode) {
+    case "full-access":
+      return "dontAsk";
+    case "auto-accept-edits":
+      return "acceptEdits";
+    default:
+      return "ask";
+  }
+}
+
 /**
- * Mode ids Hermes derives from its edit-approval policy (`default`, `accept_edits`, `dont_ask`).
- * Matching is by id, name, then substring, so builds that rename a policy still resolve. Order is
- * preference: `dont_ask` auto-allows every edit, while `accept_edits` still asks outside the
- * workspace.
+ * Hermes's ACP modes (`acp_adapter/modes.py`): `modes` ids, and the values of the
+ * `edit_approval_policy` config option that `setMode` writes when Hermes advertises it.
  */
-const HERMES_AUTONOMOUS_MODE_ALIASES = [
-  "dont_ask",
-  "don't ask",
-  "auto",
-  "autonomous",
-  "auto approve",
-  "yolo",
-  "full access",
-  "accept edits",
-  "bypass",
-];
-const HERMES_ACCEPT_EDITS_MODE_ALIASES = [
-  "accept_edits",
-  "accept edits",
-  ...HERMES_AUTONOMOUS_MODE_ALIASES,
-];
-const HERMES_APPROVAL_MODE_ALIASES = ["ask", "approve", "manual", "confirm", "default"];
+const HERMES_MODES = {
+  ask: { modeId: "default", policy: "ask" },
+  acceptEdits: { modeId: "accept_edits", policy: "workspace_session" },
+  dontAsk: { modeId: "dont_ask", policy: "session" },
+} as const satisfies Record<HermesApprovalPosture, { modeId: string; policy: string }>;
 
 /**
  * Slash commands the Hermes ACP adapter handles, mirroring `_ADVERTISED_COMMANDS` in
@@ -219,14 +225,22 @@ export function normalizeHermesWebSearchQuery(toolCall: AcpToolCallState): AcpTo
 const HERMES_PERMISSION_CARD_ID = /^(?:edit-approval|perm-check)-\d+$/;
 const HERMES_EDIT_DIFFS_KEPT = 64;
 
+function soleDiff(
+  content: ReadonlyArray<EffectAcpSchema.ToolCallContent> | null | undefined,
+): Extract<EffectAcpSchema.ToolCallContent, { type: "diff" }> | undefined {
+  const diffs = (content ?? []).filter((entry) => entry.type === "diff");
+  const diff = diffs.length === 1 ? diffs[0] : undefined;
+  return diff?.type === "diff" && "path" in diff ? diff : undefined;
+}
+
 /**
- * Hermes's gateway sends an edit's diff only on its approval request (`edit-approval-N`); the
- * write's own card reads "Preparing write…" and then "✅ write_file completed…". This carries the
- * approved diff onto that card, and drops the status update closing the approval card, which T3
- * already shows as the resolved approval.
+ * Hermes sends an edit's diff on its approval request (`edit-approval-N`), or on an unasked edit's
+ * start (`acp-command-approval`); the write's completion replaces it with a status line. This keeps
+ * the diff on the card, the approved one first, and drops the update closing the approval card.
  */
 export function makeHermesEditApprovalCards() {
   const pendingByPath = new Map<string, EffectAcpSchema.ToolCallContent>();
+  const startedByToolCallId = new Map<string, EffectAcpSchema.ToolCallContent>();
   const byToolCallId = new Map<string, EffectAcpSchema.ToolCallContent>();
   const keep = (
     map: Map<string, EffectAcpSchema.ToolCallContent>,
@@ -241,9 +255,8 @@ export function makeHermesEditApprovalCards() {
     onPermissionRequest: (request: EffectAcpSchema.RequestPermissionRequest) => {
       const toolCall = request.toolCall;
       if (toolCall.kind !== "edit" || !HERMES_PERMISSION_CARD_ID.test(toolCall.toolCallId)) return;
-      const diffs = (toolCall.content ?? []).filter((entry) => entry.type === "diff");
-      const diff = diffs.length === 1 ? diffs[0]! : undefined;
-      if (diff?.type !== "diff" || !("path" in diff)) return;
+      const diff = soleDiff(toolCall.content);
+      if (diff === undefined) return;
       // `locations` carry the path as the model wrote it; the diff carries it resolved.
       const requestedPath = unknownRecord(unknownRecord(toolCall.rawInput)?.arguments)?.path;
       for (const path of new Set([diff.path, requestedPath])) {
@@ -252,18 +265,28 @@ export function makeHermesEditApprovalCards() {
     },
     normalizeToolCall: (toolCall: AcpToolCallState): AcpToolCallState => {
       if (toolCall.kind !== "edit") return toolCall;
+      const settled = toolCall.status === "completed" || toolCall.status === "failed";
+      if (!settled) {
+        const started = soleDiff(
+          toolCall.data.content as ReadonlyArray<EffectAcpSchema.ToolCallContent> | undefined,
+        );
+        if (started !== undefined) keep(startedByToolCallId, toolCall.toolCallId, started);
+      }
       let diff = byToolCallId.get(toolCall.toolCallId);
-      if (diff === undefined && (toolCall.status === "completed" || toolCall.status === "failed")) {
+      if (diff === undefined && settled) {
         const locations = toolCall.data.locations;
         const path =
           Array.isArray(locations) && locations.length === 1
             ? unknownRecord(locations[0])?.path
             : undefined;
-        diff = typeof path === "string" ? pendingByPath.get(path) : undefined;
+        diff =
+          (typeof path === "string" ? pendingByPath.get(path) : undefined) ??
+          startedByToolCallId.get(toolCall.toolCallId);
         if (diff === undefined) return toolCall;
         for (const [key, pending] of pendingByPath) {
           if (pending === diff) pendingByPath.delete(key);
         }
+        startedByToolCallId.delete(toolCall.toolCallId);
         keep(byToolCallId, toolCall.toolCallId, diff);
       }
       // A denied or failed write keeps Hermes's reason; it wrote nothing.
@@ -474,52 +497,32 @@ export function applyHermesAcpModelSelection<E>(input: {
     .pipe(Effect.mapError(input.mapError), Effect.as(targetModelId));
 }
 
-function findModeIdByAliases(
-  modes: ReadonlyArray<AcpSessionModeState["availableModes"][number]>,
-  aliases: ReadonlyArray<string>,
-): string | undefined {
-  const searchText = (mode: (typeof modes)[number]) =>
-    [mode.id, mode.name, mode.description]
-      .filter((value): value is string => typeof value === "string" && value.length > 0)
-      .join(" ")
-      .toLowerCase();
-
-  for (const alias of aliases) {
-    const exact = modes.find(
-      (mode) => mode.id.toLowerCase() === alias || mode.name.toLowerCase() === alias,
-    );
-    if (exact) return exact.id;
-  }
-  for (const alias of aliases) {
-    const partial = modes.find((mode) => searchText(mode).includes(alias));
-    if (partial) return partial.id;
-  }
-  return undefined;
-}
-
 /**
- * Pick the Hermes session mode that matches the thread's runtime mode.
- * Returns `undefined` when the agent advertises no modes, or when the mode
- * it already runs is the best match — callers then skip `session/set_mode`.
+ * The value to pass `setMode` for a posture, or `undefined` when Hermes already runs it or does
+ * not offer it. Hermes advertises both `modes` and an `edit_approval_policy` option, and `setMode`
+ * writes the option, whose values are not the `modes` ids.
  */
 export function resolveHermesSessionModeId(input: {
-  readonly runtimeMode: RuntimeMode;
+  readonly posture: HermesApprovalPosture;
+  readonly configOptions: ReadonlyArray<EffectAcpSchema.SessionConfigOption>;
   readonly modeState: AcpSessionModeState | undefined;
 }): string | undefined {
-  const modeState = input.modeState;
-  if (!modeState || modeState.availableModes.length === 0) {
-    return undefined;
+  const mode = HERMES_MODES[input.posture];
+  const option = input.configOptions.find(
+    (candidate) => candidate.category === "mode" && candidate.type === "select",
+  );
+  if (option !== undefined) {
+    return option.currentValue !== mode.policy &&
+      collectSessionConfigOptionValues(option).includes(mode.policy)
+      ? mode.policy
+      : undefined;
   }
-  const aliases =
-    input.runtimeMode === "approval-required"
-      ? HERMES_APPROVAL_MODE_ALIASES
-      : input.runtimeMode === "auto-accept-edits"
-        ? HERMES_ACCEPT_EDITS_MODE_ALIASES
-        : HERMES_AUTONOMOUS_MODE_ALIASES;
-  const requestedModeId = findModeIdByAliases(modeState.availableModes, aliases);
-  return requestedModeId === undefined || requestedModeId === modeState.currentModeId
-    ? undefined
-    : requestedModeId;
+  const modeState = input.modeState;
+  return modeState !== undefined &&
+    modeState.currentModeId !== mode.modeId &&
+    modeState.availableModes.some((candidate) => candidate.id === mode.modeId)
+    ? mode.modeId
+    : undefined;
 }
 
 /**

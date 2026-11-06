@@ -76,6 +76,8 @@ const T3_CODE_ACP_PLAN_MODE_INSTRUCTIONS = `## T3 Code interaction mode: Plan
 
 Investigate with read-only actions and do not edit files or otherwise execute the implementation. Resolve discoverable facts before asking questions. When the requirements are decision complete, return a concrete implementation plan and do not start implementing it. Treat this mode as active until T3 Code supplies a different interaction-mode instruction.`;
 
+const T3_CODE_ACP_PROPOSED_PLAN_BLOCK_INSTRUCTIONS = `Present the final plan in a \`<proposed_plan>\` block: the opening tag on its own line, the plan in Markdown, then \`</proposed_plan>\` on its own line. T3 Code shows the block as the plan the user can implement, so keep questions and commentary outside it.`;
+
 export interface T3AcpInstructionState {
   readonly interactionMode: ProviderInteractionMode;
   readonly hasT3Mcp: boolean;
@@ -84,6 +86,8 @@ export interface T3AcpInstructionState {
   readonly hasDeviceTools: boolean;
   /** The adapter implements `t3_background_wait`. */
   readonly backgroundWait: boolean;
+  /** The adapter reads Plan mode's plan from a `<proposed_plan>` block in the reply. */
+  readonly proposedPlanBlock?: boolean;
 }
 
 /** ACP lacks system/developer fields; inject context on first prompt and tool/mode changes. */
@@ -99,13 +103,16 @@ export function t3AcpPromptWithInstructions(input: {
     input.previousState.hasT3Mcp === input.state.hasT3Mcp &&
     input.previousState.browserTools === input.state.browserTools &&
     input.previousState.hasDeviceTools === input.state.hasDeviceTools &&
-    input.previousState.backgroundWait === input.state.backgroundWait
+    input.previousState.backgroundWait === input.state.backgroundWait &&
+    input.previousState.proposedPlanBlock === input.state.proposedPlanBlock
   ) {
     return input.prompt;
   }
   const instructions = [
     input.state.interactionMode === "plan"
-      ? T3_CODE_ACP_PLAN_MODE_INSTRUCTIONS
+      ? input.state.proposedPlanBlock === true
+        ? `${T3_CODE_ACP_PLAN_MODE_INSTRUCTIONS}\n\n${T3_CODE_ACP_PROPOSED_PLAN_BLOCK_INSTRUCTIONS}`
+        : T3_CODE_ACP_PLAN_MODE_INSTRUCTIONS
       : T3_CODE_ACP_DEFAULT_MODE_INSTRUCTIONS,
     ...(input.state.hasT3Mcp
       ? [

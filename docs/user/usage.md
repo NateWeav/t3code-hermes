@@ -187,15 +187,19 @@ using a proxy through `ANTHROPIC_AUTH_TOKEN`.
 ## Connect a CLIProxyAPI hub
 
 On web or desktop, open **Settings → Providers → Usage providers → Add hub**.
-On mobile, open **Settings → Environments → CLIProxyAPI hubs → Add hub**. Choose the
-environment that will connect to the hub and enter its URL and management key.
+On mobile, open **Settings → Environments → CLIProxyAPI hubs → Add hub**. Enter the hub's URL
+and management key. T3 adds the hub to every connected environment you manage, so use a URL they
+can all reach. A hub missing from an environment that was offline, or paired later, says so in the
+list; add it again with its key to include it. Removing a hub removes it everywhere.
 
 The accounts appear under **Usage → Limits**. Codex accounts show banked reset credits; select an
 account and choose **Use reset** to redeem one. No hub plugin is required.
 
-This connection supplies usage information; configure
-the provider separately to send agent requests through the hub. Remove the hub from the same
-settings section when you no longer need it.
+This connection supplies usage information; configure the provider separately to send agent
+requests through the hub. When a Claude or Codex turn stops on a usage limit without a reset
+time, T3 asks the hub when the model's next account comes back, so **Resume at reset** and
+auto-resume work through the hub. Codex would otherwise wait out a long hub cooldown inside the
+turn, so T3 stops that turn as Limited instead.
 
 ## Subscription usage widget
 

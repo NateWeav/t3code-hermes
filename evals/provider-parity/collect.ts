@@ -141,6 +141,8 @@ export function runLive(input: {
   readonly hermesHome: string;
 }): Array<LiveReport> {
   const dir = NodePath.join(input.outDir, "live");
+  // A rerun replaces earlier samples; mixing them would score scenarios this run skipped.
+  NodeFS.rmSync(dir, { recursive: true, force: true });
   NodeFS.mkdirSync(dir, { recursive: true });
   for (const scenario of input.scenarios) {
     for (let sample = 1; sample <= input.samples; sample += 1) {
@@ -217,6 +219,8 @@ export async function runStackSuite(input: {
   const dir = NodePath.join(input.outDir, "stack");
   const home = NodePath.join(dir, "home");
   const project = NodePath.join(dir, "project");
+  // Metrics read the whole database, so a rerun starts from an empty one.
+  NodeFS.rmSync(dir, { recursive: true, force: true });
   NodeFS.mkdirSync(NodePath.join(home, "userdata"), { recursive: true });
   NodeFS.mkdirSync(project, { recursive: true });
   NodeFS.writeFileSync(NodePath.join(project, "README.md"), "# Parity stack suite\n");

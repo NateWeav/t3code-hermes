@@ -133,7 +133,11 @@ The patch keeps the existing human-readable content while exposing `rawInput` ar
 `rawOutput.hermesDelegation` on the parent call. The gateway stamps each top-level child's events
 with its `delegate_task` call id (`parent_tool_call_id`), so children are never matched by goals,
 task indices, or order: overlapping delegations can have identical goals, and unknown or conflicting
-ownership is dropped. Background children keep reporting after the turn that spawned them ends.
+ownership is dropped. A nested child (only in a profile that raises `delegation.max_spawn_depth`
+above its default of 1) reports through the same call, naming the `parent_id` that spawned it, and
+is forwarded only when the call already owns that parent; T3 Code shows it in its parent's thread.
+Versions before `27cbcb122ff4` drop nested children. Background children keep reporting after the
+turn that spawned them ends.
 Registry-forced stalls and worker crashes report a terminal event per child, with the same secret
 redaction as other live child progress, so detached work cannot stay falsely active. A parent result
 with `status: "dispatched"` only acknowledges launch; child lifecycle events settle each subagent.
@@ -149,6 +153,34 @@ build the agent as `hermes acp` does and drive the real executor, child relays, 
 monitor, and background worker. Run them with `tests/gateway/test_local_viewer_events_turn.py` in a
 scratch checkout with an isolated `HERMES_HOME` and `PYTHONDONTWRITEBYTECODE=1`, never in the live
 install.
+
+## `acp-editor-delegation`
+
+**Needed by:** subagents that answer inside the turn, and subagents that launch their own, as
+Claude's do. Stock gateway sessions run every top-level `delegate_task` in the background: the
+parent ends its turn, and the results come back in a turn the gateway runs later. Stock children
+cannot delegate, because `delegation.max_spawn_depth` defaults to 1 and is profile-wide.
+
+T3 Code asks for both in `initialize` (`clientCapabilities._meta.hermes.delegation`:
+`foreground`, `maxSpawnDepth`), and `hermes acp` passes them to `session.create` as `delegation`
+only when the gateway lists that field, so an older gateway is never sent it. In such a session:
+
+- `delegate_task` takes `background`, chosen per call like Claude's `run_in_background`. The
+  default (`false`) waits for the children inside the call, so the parent answers in the same turn.
+  Stopping the turn stops them, as it already does for an orchestrator child's workers.
+  `background: true` detaches them as before. A profile set to `delegation.gateway_mode: inline`
+  keeps joining every call.
+- Subagents nest up to the requested depth. The profile's `max_spawn_depth` is a floor, not a cap:
+  its default of 1 is a default for chat sessions rather than a user choice, and capping by it would
+  make the setting do nothing on a default profile. To keep a profile's editor sessions flat, set
+  `delegation.orchestrator_enabled: false`, which still makes every child a leaf.
+
+Both settings freeze into the session when it is created, so only sessions created after the patch
+is applied and the gateway restarts get them. The patch's
+`tests/acp_adapter/test_gateway_editor_delegation.py` drives a real gateway daemon and a real
+`hermes acp` process against a loopback model, covering foreground and background calls, a stock
+editor, each depth case, and a stop during a foreground call. Run it in a scratch checkout, as for
+`acp-delegation-progress`.
 
 ## `acp-fast-mode`
 

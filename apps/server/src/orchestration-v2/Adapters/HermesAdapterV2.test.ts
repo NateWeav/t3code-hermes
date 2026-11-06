@@ -2,6 +2,7 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import {
+  CheckpointId,
   HermesSettings,
   MessageId,
   NodeId,
@@ -38,6 +39,7 @@ import { parseSessionUpdateEvent } from "@t3tools/provider-acp/server/runtimeMod
 import type * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 import {
   discardLostHermesTurnsOnPrompt,
+  hideHermesStopNotices,
   makeHermesAcpRuntime,
 } from "../../provider/acp/HermesAcpSupport.ts";
 import delegationFixture from "../../provider/acp/fixtures/hermes-delegation.json" with { type: "json" };
@@ -353,7 +355,7 @@ describe("HermesAdapterV2 flavor", () => {
     }).events[0];
     if (event?._tag !== "ToolCallUpdated") throw new Error("expected a tool call");
     assert.notEqual(event.toolCall.title, "skill view (pr-review)");
-    assert.equal(flavor.normalizeToolCall?.(event.toolCall).title, "skill view (pr-review)");
+    assert.equal(flavor.normalizeToolCall?.(event.toolCall, "s").title, "skill view (pr-review)");
   });
 });
 
@@ -482,6 +484,79 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
           event.turnItem.title?.startsWith("delegate"),
       );
       assert.lengthOf(delegateRows, 0);
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+
+  it.effect("nests a grandchild's row and thread under the child that launched it", () =>
+    Effect.gen(function* () {
+      const batch = delegationFixture.cases.find((item) => item.name === "batch")!;
+      const toolCallId = batch.start.toolCallId;
+      const progress = (hermesDelegation: Record<string, unknown>) =>
+        ({
+          sessionUpdate: "tool_call_update",
+          toolCallId,
+          status: "in_progress",
+          rawOutput: { hermesDelegation },
+        }) as const;
+      const child = { task_index: 0, depth: 0, subagent_id: "sa-0" };
+      const grandchild = {
+        task_index: 0,
+        depth: 1,
+        subagent_id: "sa-0-0",
+        parent_id: "sa-0",
+        goal: "Reply with exactly: Hello",
+      };
+      const { threadId, events } = yield* runMockTurn({
+        name: "nested-delegation",
+        mockEnvironment: {},
+        promptUpdates: [
+          { ...batch.start, rawInput: batch.args } as EffectAcpSchema.SessionUpdate,
+          progress({ ...child, event: "subagent.start" }),
+          progress({ ...grandchild, event: "subagent.spawn_requested" }),
+          progress({
+            ...grandchild,
+            event: "subagent.complete",
+            status: "completed",
+            summary: "Hello",
+          }),
+          progress({ ...child, event: "subagent.complete", status: "completed", summary: "Hello" }),
+          { ...batch.complete, rawOutput: batch.result } as EffectAcpSchema.SessionUpdate,
+        ],
+      });
+      const latest = new Map<string, OrchestrationV2Subagent>();
+      for (const event of events) {
+        if (event.type === "subagent.updated")
+          latest.set(String(event.subagent.id), event.subagent);
+      }
+      const parent = [...latest.values()].find((subagent) => subagent.title === "Inspect routing");
+      const nested = [...latest.values()].find(
+        (subagent) => subagent.title === "Reply with exactly: Hello",
+      );
+      assert.isDefined(parent);
+      assert.isDefined(nested);
+      assert.equal(nested.threadId, parent.childThreadId);
+      assert.isNull(nested.runId);
+      assert.equal(nested.status, "completed");
+      assert.equal(nested.result, "Hello");
+      const nestedThread = events.find(
+        (event) =>
+          event.type === "app_thread.created" && event.appThread.id === nested.childThreadId,
+      );
+      if (nestedThread?.type !== "app_thread.created") throw new Error("no nested thread");
+      assert.deepEqual(nestedThread.appThread.lineage, {
+        parentThreadId: parent.childThreadId,
+        relationshipToParent: "subagent",
+        rootThreadId: threadId,
+      });
+      const rows = events.flatMap((event) =>
+        event.type === "turn_item.updated" && event.turnItem.type === "subagent"
+          ? [[event.turnItem.threadId, event.turnItem.title] as const]
+          : [],
+      );
+      assert.isTrue(
+        rows.some(([thread, title]) => thread === parent.childThreadId && title === nested.title),
+      );
+      assert.isFalse(rows.some(([thread, title]) => thread === threadId && title === nested.title));
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 
@@ -685,6 +760,121 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 
+  it.effect("nests a grandchild a background child launches after the turn settled", () =>
+    Effect.gen(function* () {
+      const toolCallId = "toolu_delegate_nested_after_turn";
+      const goal = "Spawn one subagent that replies Hello";
+      const child = {
+        goal,
+        subagent_id: "sa-0-nested",
+        task_index: 0,
+        task_count: 1,
+        depth: 0,
+      };
+      const grandchild = {
+        goal: "Reply with exactly: Hello",
+        subagent_id: "sa-0-grand",
+        parent_id: "sa-0-nested",
+        task_index: 0,
+        task_count: 1,
+        depth: 1,
+      };
+      const progress = (hermesDelegation: Record<string, unknown>) =>
+        ({
+          sessionUpdate: "tool_call_update",
+          toolCallId,
+          status: "in_progress",
+          rawOutput: { hermesDelegation },
+        }) as const;
+      const dispatched = { status: "dispatched", mode: "background", count: 1, goals: [goal] };
+      const { events } = yield* runMockTurn({
+        name: "delegate-nested-after-turn",
+        mockEnvironment: {},
+        promptUpdates: [
+          {
+            sessionUpdate: "tool_call",
+            toolCallId,
+            title: `delegate_task: 1 tasks: ${goal}`,
+            kind: "execute",
+            rawInput: { action: "spawn", tasks: [{ goal, role: "orchestrator" }] },
+            content: [
+              {
+                type: "content",
+                content: { type: "text", text: `Delegating 1 tasks\n\n1. ${goal}` },
+              },
+            ],
+          },
+          progress({ ...child, event: "subagent.start" }),
+          {
+            sessionUpdate: "tool_call_update",
+            toolCallId,
+            kind: "execute",
+            status: "completed",
+            rawOutput: dispatched,
+            content: [
+              { type: "content", content: { type: "text", text: JSON.stringify(dispatched) } },
+            ],
+          },
+          {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "It is running in the background." },
+          },
+        ],
+        idleUpdates: [
+          progress({ ...grandchild, event: "subagent.spawn_requested" }),
+          progress({
+            ...grandchild,
+            event: "subagent.complete",
+            status: "completed",
+            summary: "Hello",
+          }),
+          progress({ ...child, event: "subagent.complete", status: "completed", summary: "Hello" }),
+          { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Hello" } },
+        ],
+        continuationRequests: { offer: () => Effect.void },
+        runContinuation: true,
+      });
+      const latest = new Map<string, OrchestrationV2Subagent>();
+      for (const event of events) {
+        if (event.type === "subagent.updated")
+          latest.set(String(event.subagent.id), event.subagent);
+      }
+      const parent = [...latest.values()].find((subagent) => subagent.title === goal);
+      const nested = [...latest.values()].find((subagent) => subagent.title === grandchild.goal);
+      assert.isDefined(parent);
+      assert.isDefined(nested);
+      assert.equal(nested.threadId, parent.childThreadId);
+      assert.equal(nested.status, "completed");
+      assert.equal(parent.status, "completed");
+      const nestedRow = events.findLast(
+        (event) => event.type === "turn_item.updated" && event.turnItem.nodeId === nested.id,
+      );
+      if (nestedRow?.type !== "turn_item.updated") throw new Error("no nested row");
+      assert.equal(nestedRow.turnItem.threadId, parent.childThreadId);
+      assert.equal(nestedRow.turnItem.status, "completed");
+      const nestedReplies = events.flatMap((event) =>
+        event.type === "message.updated" &&
+        event.message.threadId === nested.childThreadId &&
+        event.message.role === "assistant"
+          ? [event.message.text]
+          : [],
+      );
+      assert.deepEqual(nestedReplies, ["Hello"]);
+      // The grandchild shows while it runs, not only once the gateway's follow-up turn starts.
+      const firstNested = events.findIndex(
+        (event) => event.type === "subagent.updated" && event.subagent.id === nested.id,
+      );
+      const followUp = events.findIndex(
+        (event, index) =>
+          index > firstNested &&
+          event.type === "provider_turn.updated" &&
+          event.providerTurn.status === "running",
+      );
+      assert.isAbove(firstNested, 0);
+      assert.isAbove(followUp, firstNested);
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+
   it.effect(
     "lists the commands that will wake Hermes and holds the marked ones until they end",
     () =>
@@ -801,6 +991,53 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
         afterRoot.map((providerThread) => providerThread.pendingBackgroundTasks ?? []),
         afterRoot.map(() => []),
       );
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+
+  it.effect("keeps a running command listed when a background subagent wakes Hermes", () =>
+    Effect.gen(function* () {
+      const dispatched = delegationFixture.cases.find((item) => item.name === "dispatched")!;
+      const offers = yield* Queue.unbounded<ProviderContinuationRequest>();
+      const { events } = yield* runMockTurn({
+        name: "background-wake-subagent",
+        mockEnvironment: {},
+        promptUpdates: [
+          ...hermesBackgroundStart({ toolCallId: "tc-tests", processId: TESTS_PROC, notify: true }),
+          { ...dispatched.start, rawInput: dispatched.args } as EffectAcpSchema.SessionUpdate,
+          { ...dispatched.complete, rawOutput: dispatched.result } as EffectAcpSchema.SessionUpdate,
+        ],
+        idleUpdates: [
+          {
+            sessionUpdate: "tool_call_update",
+            toolCallId: dispatched.start.toolCallId,
+            status: "in_progress",
+            rawOutput: {
+              hermesDelegation: {
+                event: "subagent.complete",
+                subagent_id: "sa-0-test1234",
+                delegation_id: "deleg_test1234",
+                task_index: 0,
+                status: "completed",
+                summary: "Parser reviewed.",
+              },
+            },
+          },
+          {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "The review is in." },
+          },
+        ],
+        continuationRequests: {
+          offer: (request) => Queue.offer(offers, request).pipe(Effect.asVoid),
+        },
+        runContinuation: true,
+      });
+      assert.notDeepInclude((yield* Queue.take(offers)).notification ?? {}, {
+        source: { kind: "command" },
+      });
+      assert.deepEqual(providerThreadRosters(events).at(-1), [
+        { taskId: TESTS_PROC, kind: "command", description: "pnpm test" },
+      ]);
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 });
@@ -980,6 +1217,47 @@ describe("Hermes prompts blocked by a lost gateway turn", () => {
   });
 });
 
+describe("Hermes stop notices", () => {
+  type Runtime = AcpSessionRuntime.AcpSessionRuntime["Service"];
+
+  it.effect("hides Hermes's stop notices after a Stop, never the agent's own text", () =>
+    Effect.gen(function* () {
+      const shown: Array<string> = [];
+      let deliver: Parameters<Runtime["handleSessionUpdate"]>[0] = () => Effect.void;
+      const runtime = hideHermesStopNotices({
+        prompt: () => Effect.succeed({ stopReason: "end_turn" as const }),
+        cancel: Effect.void,
+        handleSessionUpdate: (handler: Parameters<Runtime["handleSessionUpdate"]>[0]) =>
+          Effect.sync(() => {
+            deliver = handler;
+          }),
+      } as unknown as Runtime);
+      yield* runtime.handleSessionUpdate((notification) =>
+        Effect.sync(() => {
+          const update = notification.update;
+          if (update.sessionUpdate === "agent_message_chunk" && update.content.type === "text") {
+            shown.push(update.content.text);
+          }
+        }),
+      );
+      const say = (text: string) =>
+        deliver({
+          sessionId: "s",
+          update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } },
+        });
+      const notStarted = "Stopped before this turn started. Your message was not processed.";
+      yield* runtime.prompt({ prompt: [{ type: "text", text: "quote it" }] });
+      yield* say(notStarted);
+      yield* runtime.cancel;
+      yield* say(notStarted);
+      yield* say("\n\nOperation interrupted: handling API error (RateLimitError: slow down).");
+      yield* runtime.prompt({ prompt: [{ type: "text", text: "again" }] });
+      yield* say("Operation interrupted: the agent's own words");
+      assert.deepEqual(shown, [notStarted, "Operation interrupted: the agent's own words"]);
+    }),
+  );
+});
+
 describe.skipIf(windowsHost)("HermesAdapterV2 across a Hermes gateway restart", () => {
   it.effect(
     "explains the lost turn, then starts a fresh agent that clears it for the next message",
@@ -1116,5 +1394,182 @@ describe.skipIf(windowsHost)("HermesAdapterV2 across a Hermes gateway restart", 
         assert.include(replies.at(-1) ?? "", "Picking up where we left off.");
         assert.notInclude(replies.join("\n"), "Discarded the lost turn");
       }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+});
+
+describe("Hermes rollback", () => {
+  it.effect("rewinds Hermes's own session by the user turns it kept after the target", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const mockAgentPath = yield* path.fromFileUrl(
+        new URL("../../../scripts/acp-mock-agent.ts", import.meta.url),
+      );
+      const dir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-hermes-rollback-" });
+      const binaryPath = path.join(dir, "hermes");
+      yield* fileSystem.writeFileString(
+        binaryPath,
+        `#!/bin/sh\nexec '${process.execPath}' '${mockAgentPath}' "$@"\n`,
+      );
+      yield* fileSystem.chmod(binaryPath, 0o755);
+      const settings = hermesSettings(binaryPath);
+      const environment = { ...process.env, HERMES_HOME: dir };
+      const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      type Runtime = AcpSessionRuntime.AcpSessionRuntime["Service"];
+      const spawned: Array<Array<string>> = [];
+      let sessionId: string | undefined;
+      const usage = { inputTokens: 1, outputTokens: 1, totalTokens: 2 };
+      const adapter = yield* makeHermesAdapterV2({
+        instanceId,
+        settings,
+        environment,
+        childProcessSpawner,
+        selfInvocation: yield* resolveSelfInvocation(),
+        makeRuntime: ({ runtimePolicy: _policy, ...runtimeInput }) =>
+          makeHermesAcpRuntime({
+            ...runtimeInput,
+            hermesSettings: settings,
+            environment,
+            childProcessSpawner,
+          }).pipe(
+            Effect.map((runtime): Runtime => {
+              const prompts: Array<string> = [];
+              spawned.push(prompts);
+              let deliver: Parameters<Runtime["handleSessionUpdate"]>[0] | undefined;
+              const say = (text: string) =>
+                deliver!({
+                  sessionId: sessionId!,
+                  update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } },
+                });
+              return {
+                ...runtime,
+                handleSessionUpdate: (handler) =>
+                  Effect.sync(() => {
+                    deliver = handler;
+                  }).pipe(Effect.andThen(runtime.handleSessionUpdate(handler))),
+                prompt: (payload) =>
+                  Effect.gen(function* () {
+                    sessionId ??= (yield* runtime.start()).sessionId;
+                    const text = promptText(payload);
+                    prompts.push(text);
+                    // The gateway answers its own commands without admitting a turn.
+                    if (text === "/undo 1") {
+                      yield* say("Undid 1 turn (2 message(s)).\nRemoved message: test prompt\n");
+                      return { stopReason: "end_turn" as const };
+                    }
+                    if (text.startsWith("/title")) {
+                      yield* say("Session title set: renamed\n");
+                      return { stopReason: "end_turn" as const };
+                    }
+                    yield* say("Done.");
+                    return { stopReason: "end_turn" as const, usage };
+                  }),
+              };
+            }),
+          ),
+      });
+      const threadId = ThreadId.make("hermes-v2-rollback");
+      const policy = runtimePolicy("approval-required");
+      const modelSelection = { instanceId, model: "hermes-4" };
+      const session = yield* adapter.openSession({
+        threadId,
+        providerSessionId: ProviderSessionId.make("hermes-v2-session-rollback"),
+        modelSelection,
+        runtimePolicy: policy,
+      });
+      const providerThread = yield* session.ensureThread({
+        threadId,
+        modelSelection,
+        runtimePolicy: policy,
+      });
+      const runTurn = (ordinal: number, text = "test prompt") =>
+        Effect.gen(function* () {
+          const input = turnInput({
+            threadId,
+            providerThread,
+            runtimePolicy: policy,
+            now: yield* DateTime.now,
+            model: modelSelection.model,
+            ordinal,
+          });
+          yield* session.startTurn({ ...input, message: { ...input.message, text } });
+          return Array.from(
+            yield* session.events.pipe(
+              Stream.takeUntil((event) => event.type === "turn.terminal"),
+              Stream.runCollect,
+            ),
+          );
+        });
+      const events = [
+        ...(yield* runTurn(1)),
+        ...(yield* runTurn(2, "/title renamed")),
+        ...(yield* runTurn(3)),
+      ];
+      const providerTurns = [
+        ...new Map(
+          events.flatMap((event) =>
+            event.type === "provider_turn.updated"
+              ? [[event.providerTurn.id, event.providerTurn] as const]
+              : [],
+          ),
+        ).values(),
+      ];
+      const [first] = providerTurns;
+      assert.isDefined(first);
+
+      const rolledBack = yield* session.rollbackThread({
+        providerThread,
+        providerThreadTurns: providerTurns,
+        target: {
+          type: "provider_turn",
+          checkpointId: CheckpointId.make("checkpoint-hermes-rollback"),
+          appRunOrdinal: 1,
+          providerTurn: first,
+        },
+      });
+      assert.deepEqual(rolledBack.providerThread.nativeThreadRef, providerThread.nativeThreadRef);
+      const after = yield* runTurn(4);
+
+      // `/title` kept no user turn in Hermes, so only turn 3 is undone, in the same process.
+      assert.equal(spawned.length, 1);
+      const prompts = spawned[0]!;
+      assert.equal(prompts.at(-2), "/undo 1");
+      assert.include(prompts.at(-1) ?? "", "<t3_code_instructions>");
+      const texts = after.flatMap((event) =>
+        event.type === "turn_item.updated" && event.turnItem.type === "assistant_message"
+          ? [event.turnItem.text]
+          : [],
+      );
+      assert.notInclude(texts.join("\n"), "Undid");
+
+      // Rolling back past only a gateway-answered turn sends no `/undo` but still forgets it.
+      const lastProviderTurn = (turnEvents: ReadonlyArray<(typeof events)[number]>) =>
+        turnEvents.findLast((event) => event.type === "provider_turn.updated")?.providerTurn;
+      const kept = lastProviderTurn(after);
+      const titled = lastProviderTurn(yield* runTurn(5, "/title again"));
+      assert.isDefined(kept);
+      assert.isDefined(titled);
+      const beforeSecondRollback = yield* session.readThreadSnapshot({ providerThread });
+      assert.include(
+        beforeSecondRollback.providerTurns.map((turn) => turn.id),
+        titled.id,
+      );
+      yield* session.rollbackThread({
+        providerThread,
+        providerThreadTurns: beforeSecondRollback.providerTurns,
+        target: {
+          type: "provider_turn",
+          checkpointId: CheckpointId.make("checkpoint-hermes-rollback-title"),
+          appRunOrdinal: 4,
+          providerTurn: kept,
+        },
+      });
+      assert.equal(prompts.at(-1), "/title again");
+      const afterSecondRollback = yield* session.readThreadSnapshot({ providerThread });
+      assert.sameMembers(
+        afterSecondRollback.providerTurns.map((turn) => turn.id),
+        [first.id, kept.id],
+      );
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 });

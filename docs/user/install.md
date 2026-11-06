@@ -65,6 +65,21 @@ using the installer for your operating system. On Debian or Ubuntu, install the 
 `sudo apt install ./T3-Hermes-*.deb`. Upstream T3 Code package-manager entries install
 the upstream app, not Hermes.
 
+### Linux
+
+AppImage and `.deb` downloads are available for x86_64 and ARM64. Check your
+architecture with `uname -m`: for `x86_64`, choose a file ending in
+`x86_64.AppImage` or `amd64.deb`; for `aarch64`, choose `arm64.AppImage` or
+`arm64.deb`.
+
+To launch an AppImage, open a terminal in its download folder. Replace
+`T3-Code.AppImage` below with the exact filename you downloaded:
+
+```bash
+chmod +x ./T3-Code.AppImage
+./T3-Code.AppImage
+```
+
 The `.deb` updates itself like the other desktop builds. It asks for your
 password to install each update. If your desktop has no password prompt, the
 update fails. Download the new `.deb` and install it the same way.

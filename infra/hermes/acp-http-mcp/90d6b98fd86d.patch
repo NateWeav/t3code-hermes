@@ -19,12 +19,12 @@ index 62b8b34aa4..8636ec008a 100644
                  session_capabilities=SessionCapabilities(fork=SessionForkCapabilities(), list=SessionListCapabilities(),
 diff --git a/tests/acp_adapter/test_gateway_editor_http_mcp.py b/tests/acp_adapter/test_gateway_editor_http_mcp.py
 new file mode 100644
-index 0000000000..ec11171c62
+index 0000000000..8d5b7cd014
 --- /dev/null
 +++ b/tests/acp_adapter/test_gateway_editor_http_mcp.py
 @@ -0,0 +1,70 @@
-+"""An editor's HTTP MCP server over ``hermes acp`` and an ordinary gateway: advertised in ``initialize``,
-+bound by the owner as a stdio one is, and reached by the model, with no process started for it."""
++"""An editor's HTTP MCP server over ``hermes acp`` (the ``GatewayACPAgent`` viewer) and a gateway: advertised
++in ``initialize``, bound by the owner as a stdio one is, and reached by the model, with no process started."""
 +from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 +import json
 +import threading

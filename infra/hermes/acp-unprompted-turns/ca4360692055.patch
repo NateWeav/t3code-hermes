@@ -1,0 +1,209 @@
+diff --git a/acp_adapter/gateway_server.py b/acp_adapter/gateway_server.py
+index ff78c7e0f3..db6e3b60ba 100644
+--- a/acp_adapter/gateway_server.py
++++ b/acp_adapter/gateway_server.py
+@@ -3,6 +3,7 @@ from __future__ import annotations
+ 
+ import asyncio
+ from contextlib import suppress
++import contextvars
+ import logging
+ import os
+ import uuid
+@@ -43,6 +44,27 @@ def _slash_command(text):
+     return name if name in ROUTES else None
+ 
+ 
++# Set by the event pump while it projects a frame of a turn this editor did not submit.
++_UNPROMPTED = contextvars.ContextVar("acp_unprompted_turn", default=False)
++
++
++class _EditorConnection:
++    """The editor connection, stamping ``_meta.hermes.unprompted`` on each update of a turn the
++    editor did not submit. A wake the gateway runs ahead of a queued prompt streams while that prompt
++    is open, and only the stamp tells the editor the wake is a turn of its own."""
++
++    def __init__(self, conn):
++        self._inner = conn
++
++    def __getattr__(self, name):
++        return getattr(self._inner, name)
++
++    async def session_update(self, session_id, update, **meta):
++        if _UNPROMPTED.get():
++            meta["hermes"] = {**meta.get("hermes", {}), "unprompted": True}
++        return await self._inner.session_update(session_id=session_id, update=update, **meta)
++
++
+ def _bypass_route():
+     """--safe-mode / --ignore-user-config read no profile default route, so the session freezes the
+     launch's explicit one (``hermes -m <model> --provider <name> --safe-mode acp``). Both, refused at
+@@ -90,6 +112,8 @@ class GatewayACPAgent(GatewayReplyMixin, acp.Agent):
+         self._permissions = {}
+         self._admissions = {}
+         self._submitting = set()
++        # input_ids this editor submitted (latest 256): its admissions before their receipt arrives.
++        self._submitted_inputs = {}
+         # Session -> (content fingerprint, input_id, staged (text, attachments)) of a submit whose ack
+         # never arrived. The editor's retry (that session's next prompt, same content) reuses it, so the authority
+         # returns the same admission.
+@@ -128,6 +152,7 @@ class GatewayACPAgent(GatewayReplyMixin, acp.Agent):
+         add_observer = getattr(getattr(conn, "_conn", None), "add_observer", None)
+         if callable(add_observer):
+             add_observer(self._observe_client_message)
++        self._conn = _EditorConnection(conn)
+ 
+     def _observe_client_message(self, event):
+         """``initialize``'s raw capabilities (the SDK's typed model drops ``elicitation``)."""
+@@ -670,6 +695,9 @@ class GatewayACPAgent(GatewayReplyMixin, acp.Agent):
+         if prepared is None:
+             return PromptResponse(stop_reason='cancelled')
+         retry_key, input_id, staged = prepared
++        self._submitted_inputs[input_id] = None
++        while len(self._submitted_inputs) > 256:
++            self._submitted_inputs.pop(next(iter(self._submitted_inputs)))
+         text, attachments = staged
+         answered, text = await self._run_slash(held_id, session_id, text) if not attachments else (False, text)
+         if answered:
+@@ -959,7 +987,11 @@ class GatewayACPAgent(GatewayReplyMixin, acp.Agent):
+                     continue
+                 snapshot.update(replay_epoch=epoch, last_sequence=seq,
+                     execution_generation=event.get("execution_generation", snapshot.get("execution_generation")))
+-                await self._project(event)
++                token = _UNPROMPTED.set(self._unprompted(event))
++                try:
++                    await self._project(event)
++                finally:
++                    _UNPROMPTED.reset(token)
+         except asyncio.CancelledError:
+             raise
+         except Exception as exc:
+@@ -970,6 +1002,17 @@ class GatewayACPAgent(GatewayReplyMixin, acp.Agent):
+                 self._failure = exc
+                 self._changed.notify_all()
+ 
++    def _unprompted(self, event):
++        """A frame of a turn this editor did not submit: a gateway wake, or another surface's input."""
++        sid, aid = event.get("session_id"), event.get("admission_id")
++        # Session events carry the running turn's stamp too, but belong to no turn.
++        if aid is None or str(event.get("type")).startswith("session.") or (sid, aid) in self._inflight:
++            return False
++        # Before its receipt, an admission is ours by the input_id its pending row (published at
++        # admission, ahead of its ``message.start``) names.
++        return not any(row.get("admission_id") == aid and row.get("input_id") in self._submitted_inputs
++                       for row in self._snapshots.get(sid, {}).get("pending", []))
++
+     async def _project(self, event):
+         kind, payload = event.get("type"), event.get("payload", {})
+         sid, editor_id = event["session_id"], self._editor_id(event["session_id"])
+diff --git a/tests/acp_adapter/test_gateway_unprompted_turn.py b/tests/acp_adapter/test_gateway_unprompted_turn.py
+new file mode 100644
+index 0000000000..b77130cf77
+--- /dev/null
++++ b/tests/acp_adapter/test_gateway_unprompted_turn.py
+@@ -0,0 +1,105 @@
++"""A turn the editor did not submit reaches it stamped ``_meta.hermes.unprompted``. The gateway runs a
++wake (a stopped or finished background job handed back) ahead of a prompt queued behind it, so the
++wake streams while that prompt is open, and the stamp is all that separates the two turns."""
++import asyncio
++from types import SimpleNamespace
++from unittest.mock import AsyncMock
++
++import acp
++import pytest
++
++from acp_adapter.gateway_server import GatewayACPAgent
++from tests.waiting import async_wait_until
++
++
++class Gateway:
++    """The gateway client the viewer reads: its ordered event stream and ``prompt.submit``."""
++
++    def __init__(self):
++        self.events = asyncio.Queue()
++        self.seq = 0
++        self.on_submit = None
++
++    def publish(self, kind, payload, admission_id=None):
++        # Every frame carries the running turn's stamp, session events included.
++        self.seq += 1
++        params = {'session_id': 's', 'type': kind, 'payload': payload, 'replay_epoch': 'e', 'seq': self.seq}
++        if admission_id is not None:
++            params['admission_id'] = admission_id
++        self.events.put_nowait({'params': params})
++
++    def turn(self, admission_id, reply):
++        self.publish('message.start', {}, admission_id)
++        self.publish('message.delta', {'text': reply}, admission_id)
++        self.publish('session.usage', {'context_length': 200000, 'context_tokens': 1200}, admission_id)
++        self.publish('message.complete', {'text': reply, 'outcome': 'completed'}, admission_id)
++
++    async def rpc(self, method, **params):
++        assert method == 'prompt.submit', method
++        return await self.on_submit(params)
++
++
++async def connected():
++    # ``hermes acp`` builds the agent with no arguments, then the ACP SDK connects it.
++    agent = GatewayACPAgent()
++    conn = SimpleNamespace(session_update=AsyncMock())
++    agent.on_connect(conn)
++    gateway = Gateway()
++    agent._snapshots['s'] = {}
++    agent._gateway = gateway
++    agent._event_task = asyncio.create_task(agent._events())
++    return agent, gateway, conn
++
++
++def sent(conn):
++    """(kind, text, unprompted) of each update the editor received."""
++    return [(call.kwargs['update'].session_update, getattr(getattr(call.kwargs['update'], 'content', None), 'text', None),
++             call.kwargs.get('hermes', {}).get('unprompted', False))
++            for call in conn.session_update.await_args_list]
++
++
++@pytest.mark.asyncio
++async def test_a_wake_run_ahead_of_a_queued_prompt_is_stamped_and_the_prompts_turn_is_not():
++    agent, gateway, conn = await connected()
++
++    async def submit(params):
++        # The wake was admitted first: the editor's input queues behind it.
++        gateway.publish('session.info', {'pending': [
++            {'admission_id': 'wake', 'status': 'started', 'input_id': 'notification'},
++            {'admission_id': 'ours', 'status': 'queued', 'input_id': params['input_id']}]}, 'wake')
++        return {'admission_id': 'ours', 'status': 'queued'}
++
++    gateway.on_submit = submit
++    prompted = asyncio.create_task(agent.prompt([acp.text_block('Reply with exactly: RESUMED')], 's'))
++    await async_wait_until(lambda: ('s', 'ours') in agent._inflight)
++    gateway.turn('wake', 'Agent B was stopped.')
++    gateway.turn('ours', 'RESUMED')
++    assert (await asyncio.wait_for(prompted, 5)).stop_reason == 'end_turn'
++    agent._event_task.cancel()
++    assert sent(conn) == [
++        ('agent_message_chunk', 'Agent B was stopped.', True),
++        # Usage belongs to the session, not to the turn that happened to be running.
++        ('usage_update', None, False),
++        ('agent_message_chunk', 'RESUMED', False),
++        ('usage_update', None, False),
++    ]
++
++
++@pytest.mark.asyncio
++async def test_the_prompts_own_turn_is_not_stamped_when_it_streams_before_the_receipt():
++    agent, gateway, conn = await connected()
++
++    async def submit(params):
++        # Admission publishes the row before its turn can start; the ack can trail the whole turn.
++        gateway.publish('session.info', {'pending': [
++            {'admission_id': 'ours', 'status': 'queued', 'input_id': params['input_id']}]})
++        gateway.turn('ours', 'RESUMED')
++        await async_wait_until(lambda: 'ours' in agent._terminals)
++        return {'admission_id': 'ours', 'status': 'queued'}
++
++    gateway.on_submit = submit
++    response = await asyncio.wait_for(agent.prompt([acp.text_block('Reply with exactly: RESUMED')], 's'), 5)
++    agent._event_task.cancel()
++    assert response.stop_reason == 'end_turn'
++    assert [(kind, text, unprompted) for kind, text, unprompted in sent(conn) if text] == [
++        ('agent_message_chunk', 'RESUMED', False)]

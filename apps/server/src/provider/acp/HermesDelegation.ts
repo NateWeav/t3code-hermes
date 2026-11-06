@@ -26,6 +26,8 @@ export interface HermesSubagentUpdate {
   readonly result: string | null;
   readonly role: string | null;
   readonly usage: OrchestrationV2SubagentUsage | null;
+  /** Ends a background child, whose result the gateway hands the agent in a turn of its own. */
+  readonly wakesAgent?: boolean;
 }
 
 type Child = {
@@ -294,6 +296,8 @@ function remember<V>(map: Map<string, V>, key: string, value: V): V {
 export function makeHermesSubagentExtractor() {
   const launches = new Map<string, ReadonlyArray<Child>>();
   const lineages = new Map<string, Lineage>();
+  // Background calls whose children's ends each wake the agent in a turn of their own.
+  const dispatched = new Set<string>();
   return (tool: AcpToolCallState): ReadonlyArray<HermesSubagentUpdate> | undefined => {
     let children = launches.get(tool.toolCallId);
     if (children === undefined && isHermesDelegation(tool)) {
@@ -303,7 +307,7 @@ export function makeHermesSubagentExtractor() {
     const lineage =
       lineages.get(tool.toolCallId) ??
       remember(lineages, tool.toolCallId, { ids: new Map(), open: new Map() });
-    return settleDescendants(lineage, delegationUpdates(tool, children ?? [], lineage));
+    return settleDescendants(lineage, delegationUpdates(tool, children ?? [], lineage, dispatched));
   };
 }
 
@@ -372,6 +376,7 @@ function delegationUpdates(
   tool: AcpToolCallState,
   children: ReadonlyArray<Child>,
   lineage: Lineage,
+  dispatched: Set<string>,
 ): ReadonlyArray<HermesSubagentUpdate> {
   const output = record(tool.data.rawOutput);
   const progress = record(output.hermesDelegation);
@@ -383,13 +388,17 @@ function delegationUpdates(
     const content = contentText(tool);
     // Stock clips fallback JSON at 5,000 characters. The dispatch header
     // precedes the potentially long goals; clipping is not a child failure.
-    const dispatched =
+    const backgrounded =
       output.status === "dispatched" ||
       record(content).status === "dispatched" ||
       /^\{\s*"status"\s*:\s*"dispatched"\s*,\s*"mode"\s*:\s*"background"/.test(content);
-    if (dispatched) {
+    if (backgrounded) {
       // The patch (which also fills rawInput) reports each child's end later.
       const live = tool.data.rawInput !== undefined;
+      if (live) {
+        dispatched.add(id);
+        if (dispatched.size > REMEMBERED_LAUNCHES) dispatched.delete(dispatched.values().next().value!);
+      }
       return children.map((child) =>
         childUpdate(
           id,
@@ -446,7 +455,8 @@ function delegationUpdates(
     const subagentId = text(progress.subagent_id);
     if (subagentId !== undefined) lineage.ids.set(subagentId, `${id}:task:${index}`);
     if (progress.event === "subagent.complete") {
-      return [resultUpdate(id, childAt(index), index, progress)];
+      const update = resultUpdate(id, childAt(index), index, progress);
+      return [dispatched.has(id) ? { ...update, wakesAgent: true } : update];
     }
     return [
       childUpdate(

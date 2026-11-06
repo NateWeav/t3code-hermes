@@ -242,9 +242,11 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
   {
     name: "claude_background_wake_before_queued_prompt",
     facet: "background",
-    hermes: twin(
-      `${CLAUDE_AGENT_TOOLS} A Hermes twin can't pass yet: a child stopped mid-turn wakes the gateway, which runs that turn ahead of the queued prompt inside the prompt's ACP window, and the viewer marks no boundary, so T3 shows the wake's reply in the queued prompt's run.`,
-    ),
+    hermes: {
+      kind: "twin",
+      reason: `${CLAUDE_AGENT_TOOLS} The twin resumes Agent A with delegate_task's continue action.`,
+      twin: "hermes_background_wake_before_queued_prompt",
+    },
   },
   {
     name: "claude_background_wake_before_queued_prompt_no_echo",

@@ -199,8 +199,14 @@ import { assertTodoListOutput } from "./todo_list/codex_output.ts";
 import { assertTodoListCursorOutput } from "./todo_list/cursor_output.ts";
 import { assertTodoListGrokOutput } from "./todo_list/grok_output.ts";
 import { todoListInput } from "./todo_list/input.ts";
+import {
+  HERMES_TOOL_CALL_DENIED_WRITE_TARGET,
+  hermesToolCallDeniedWriteInput,
+} from "./hermes_tool_call_denied_write/input.ts";
+import { assertHermesToolCallDeniedWriteDetails } from "./hermes_tool_call_denied_write/output.ts";
 import { assertToolCallDeniedWriteClaudeOutput } from "./tool_call_denied_write/claude_output.ts";
 import { assertToolCallDeniedWriteFxOutput } from "./tool_call_denied_write/fx_output.ts";
+import { assertToolCallDeniedWriteOutput } from "./tool_call_denied_write/output.ts";
 import {
   DENIED_WRITE_POLICY,
   TOOL_CALL_DENIED_WRITE_TARGET,
@@ -253,6 +259,7 @@ import { turnInterruptRestartInput } from "./turn_interrupt_restart/input.ts";
 import { assertClaudeWebSearchOutput } from "./web_search/claude_output.ts";
 import { assertWebSearchOutput } from "./web_search/codex_output.ts";
 import { webSearchInput } from "./web_search/input.ts";
+import { assertProviderNeutralWebSearchOutput } from "./web_search/output.ts";
 import {
   ACP_REGISTRY_MODEL_SELECTION,
   CLAUDE_MODEL_SELECTION,
@@ -956,7 +963,8 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         modelSelection: CLAUDE_MODEL_SELECTION,
         runtimePolicyOverride: DENIED_WRITE_POLICY,
         expectedAbsentWorkspacePaths: [TOOL_CALL_DENIED_WRITE_TARGET],
-        assertOutput: assertToolCallDeniedWriteClaudeOutput,
+        assertOutput: assertToolCallDeniedWriteOutput,
+        assertProviderDetails: assertToolCallDeniedWriteClaudeOutput,
       },
       {
         driver: ProviderDriverKind.make("fx"),
@@ -965,6 +973,24 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         runtimePolicyOverride: DENIED_WRITE_POLICY,
         expectedAbsentWorkspacePaths: [TOOL_CALL_DENIED_WRITE_TARGET],
         assertOutput: assertToolCallDeniedWriteFxOutput,
+      },
+    ],
+  },
+  {
+    name: "hermes_tool_call_denied_write",
+    buildInput: hermesToolCallDeniedWriteInput,
+    providers: [
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./hermes_tool_call_denied_write/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runtimePolicyOverride: DENIED_WRITE_POLICY,
+        expectedAbsentWorkspacePaths: [HERMES_TOOL_CALL_DENIED_WRITE_TARGET],
+        assertOutput: assertToolCallDeniedWriteOutput,
+        assertProviderDetails: assertHermesToolCallDeniedWriteDetails,
       },
     ],
   },
@@ -1067,6 +1093,16 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         runtimePolicyOverride: READ_ONLY_ON_REQUEST_POLICY,
         assertOutput: assertToolCallReadOnlyOnRequestOutput,
       },
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./tool_call_read_only_on_request/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runtimePolicyOverride: READ_ONLY_ON_REQUEST_POLICY,
+        assertOutput: assertToolCallReadOnlyOnRequestOutput,
+      },
     ],
   },
   {
@@ -1118,7 +1154,8 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         // gpt-6 uses shell writes; gpt-5.6-terra triggers this fixture's apply_patch approval.
         modelSelection: { ...CODEX_MODEL_SELECTION, model: "gpt-5.6-terra" },
         runtimePolicyOverride: RESTRICTED_GRANULAR_POLICY,
-        assertOutput: assertToolCallRestrictedGranularOutput,
+        assertOutput: assertToolCallReadOnlyOnRequestOutput,
+        assertProviderDetails: assertToolCallRestrictedGranularOutput,
       },
       {
         driver: ProviderDriverKind.make("claudeAgent"),
@@ -1128,7 +1165,18 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         ),
         modelSelection: CLAUDE_MODEL_SELECTION,
         runtimePolicyOverride: RESTRICTED_GRANULAR_POLICY,
-        assertOutput: assertToolCallRestrictedGranularClaudeOutput,
+        assertOutput: assertToolCallReadOnlyOnRequestOutput,
+        assertProviderDetails: assertToolCallRestrictedGranularClaudeOutput,
+      },
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./tool_call_restricted_granular/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runtimePolicyOverride: RESTRICTED_GRANULAR_POLICY,
+        assertOutput: assertToolCallReadOnlyOnRequestOutput,
       },
     ],
   },
@@ -1794,13 +1842,21 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         driver: ProviderDriverKind.make("codex"),
         transcriptFile: new URL("./web_search/codex_transcript.ndjson", import.meta.url),
         modelSelection: CODEX_MODEL_SELECTION,
-        assertOutput: assertWebSearchOutput,
+        assertOutput: assertProviderNeutralWebSearchOutput,
+        assertProviderDetails: assertWebSearchOutput,
       },
       {
         driver: ProviderDriverKind.make("claudeAgent"),
         transcriptFile: new URL("./web_search/claude_transcript.ndjson", import.meta.url),
         modelSelection: CLAUDE_MODEL_SELECTION,
-        assertOutput: assertClaudeWebSearchOutput,
+        assertOutput: assertProviderNeutralWebSearchOutput,
+        assertProviderDetails: assertClaudeWebSearchOutput,
+      },
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL("./web_search/hermes_transcript.ndjson", import.meta.url),
+        modelSelection: HERMES_MODEL_SELECTION,
+        assertOutput: assertProviderNeutralWebSearchOutput,
       },
     ],
   },

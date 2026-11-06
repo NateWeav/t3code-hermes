@@ -44,7 +44,8 @@ const twin = (reason: string, twinName?: string): Applicability => ({
 const na = (reason: string): Applicability => ({ kind: "na", reason });
 
 const CLAUDE_AGENT_TOOLS = "The prompt drives Claude's Agent/TaskStop/SendMessage tools.";
-const CLAUDE_BASH_BACKGROUND = "The prompt drives Claude's Bash run_in_background.";
+const CLAUDE_BASH_BACKGROUND =
+  "The prompt drives Claude's Bash run_in_background, and the reference assertion pins Claude's task ids and Bash descriptions, so the Hermes twin mirrors it with Hermes's own.";
 const CLAUDE_COMPACT =
   "The prompt sends Claude's /compact; Hermes compacts with /compress. Claude's assertOutput still pins its recorded token counts, usage and wake or peer turn, which a twin needs moved to assertProviderDetails.";
 
@@ -195,17 +196,25 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
   {
     name: "claude_background_task_after_root",
     facet: "background",
-    hermes: twin(CLAUDE_BASH_BACKGROUND),
+    hermes: {
+      kind: "twin",
+      reason: CLAUDE_BASH_BACKGROUND,
+      twin: "hermes_background_task_after_root",
+    },
   },
   {
     name: "claude_background_task_wake",
     facet: "background",
-    hermes: twin(CLAUDE_BASH_BACKGROUND),
+    hermes: { kind: "twin", reason: CLAUDE_BASH_BACKGROUND, twin: "hermes_background_task_wake" },
   },
   {
     name: "claude_background_task_interrupt",
     facet: "background",
-    hermes: twin(CLAUDE_BASH_BACKGROUND),
+    hermes: {
+      kind: "twin",
+      reason: CLAUDE_BASH_BACKGROUND,
+      twin: "hermes_background_task_interrupt",
+    },
   },
   {
     name: "claude_background_subagent_after_root",

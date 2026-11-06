@@ -20,6 +20,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import { ChildProcessSpawner } from "effect/process";
 import type * as EffectAcpProtocol from "effect-acp/protocol";
 
@@ -205,7 +206,11 @@ function frameLabel(kind: string, method: string, params: unknown): string {
   return `${kind}:${method}${updateType}`;
 }
 
-/** Pairs JSON-RPC ids with their methods and emits the logical frames acp-replay-agent reads. */
+/**
+ * Pairs JSON-RPC ids with their methods and emits the logical frames acp-replay-agent reads. The
+ * first update after a prompt settles, with none open, is labeled `notification:session/update:
+ * unprompted-<n>` so replay can hold a gateway turn (a background wake) until the run settles.
+ */
 function wireToEntries(wire: ReadonlyArray<WireMessage>): {
   readonly entries: Array<ProviderReplayEntry>;
   readonly droppedFrames: number;
@@ -214,10 +219,13 @@ function wireToEntries(wire: ReadonlyArray<WireMessage>): {
   const t3Requests = new Map<string, string>();
   const agentRequests = new Map<string, string>();
   let droppedFrames = 0;
+  let promptSettled = false;
+  let unprompted = 0;
   for (const wireMessage of wire) {
     if (wireMessage.direction === "respawn") {
       t3Requests.clear();
       agentRequests.clear();
+      promptSettled = false;
       entries.push({ type: "runtime_exit", status: "success" });
       continue;
     }
@@ -230,11 +238,23 @@ function wireToEntries(wire: ReadonlyArray<WireMessage>): {
           String(message.id),
           message.method,
         );
+        if (message.method === "session/prompt") promptSettled = false;
       }
       const kind = isRequest ? "request" : "notification";
+      const opensUnpromptedTurn =
+        promptSettled &&
+        direction === "incoming" &&
+        message.method === "session/update" &&
+        ![...t3Requests.values()].includes("session/prompt");
+      if (opensUnpromptedTurn) {
+        promptSettled = false;
+        unprompted += 1;
+      }
       entries.push({
         type,
-        label: frameLabel(kind, message.method, message.params),
+        label: opensUnpromptedTurn
+          ? `notification:session/update:unprompted-${unprompted}`
+          : frameLabel(kind, message.method, message.params),
         frame: {
           kind,
           method: message.method,
@@ -250,6 +270,7 @@ function wireToEntries(wire: ReadonlyArray<WireMessage>): {
       continue;
     }
     pending.delete(String(message.id));
+    if (method === "session/prompt") promptSettled = true;
     entries.push({
       type,
       label: `response:${method}`,
@@ -475,6 +496,8 @@ const recordScenario = Effect.fn("recordHermesScenario")(function* (fixtureName:
 
   const tee = makeWireTee();
   const timer = makeParityLiveTimer();
+  // Provider threads whose roster still lists background work that will wake Hermes.
+  const backgroundRosters = new Set<string>();
   const layerRegistry = ProviderAdapterRegistry.layerFromAdaptersEffect(
     Effect.gen(function* () {
       const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -511,6 +534,16 @@ const recordScenario = Effect.fn("recordHermesScenario")(function* (fixtureName:
             adapter.openSession(input).pipe(
               Effect.map((session): ProviderAdapter.ProviderAdapterV2SessionRuntime => ({
                 ...session,
+                events: session.events.pipe(
+                  Stream.tap((event) =>
+                    Effect.sync(() => {
+                      if (event.type !== "provider_thread.updated") return;
+                      const tasks = event.providerThread.pendingBackgroundTasks ?? [];
+                      if (tasks.length > 0) backgroundRosters.add(event.providerThread.id);
+                      else backgroundRosters.delete(event.providerThread.id);
+                    }),
+                  ),
+                ),
                 startTurn: (turnInput) => onWallClock(session.startTurn(turnInput)),
                 steerTurn: (turnInput) => onWallClock(session.steerTurn(turnInput)),
                 interruptTurn: (turnInput) => onWallClock(session.interruptTurn(turnInput)),
@@ -535,10 +568,10 @@ const recordScenario = Effect.fn("recordHermesScenario")(function* (fixtureName:
     ),
   );
 
-  // The session stays open until every prompt is answered, every delegated child has finished,
-  // and Hermes has been quiet for a few seconds, so the transcript holds everything replay emits,
-  // gateway follow-up turns included. The turn that hands a delegation's results back streams
-  // only after a model call, so that wait is longer.
+  // The session stays open until every prompt is answered, every delegated child has finished, no
+  // background work that will wake Hermes is pending, and Hermes has been quiet for a few seconds,
+  // so the transcript holds everything replay emits, gateway follow-up turns included. The turn
+  // that hands a delegation's results back streams only after a model call, so that wait is longer.
   let quietPolls = 0;
   let seenFrames = -1;
   const waitForHermesIdle = Effect.sleep("1 second").pipe(
@@ -550,7 +583,8 @@ const recordScenario = Effect.fn("recordHermesScenario")(function* (fixtureName:
         return (
           quietPolls >= (delegations.seen ? 10 : 3) &&
           !delegations.running &&
-          !tee.hasPendingPrompt()
+          !tee.hasPendingPrompt() &&
+          backgroundRosters.size === 0
         );
       }),
     ),

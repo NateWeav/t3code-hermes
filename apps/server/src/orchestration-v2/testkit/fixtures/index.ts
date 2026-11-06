@@ -1464,6 +1464,13 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         assertOutput: assertSubagentV2ApprovalOutput,
         assertProviderDetails: assertCodexSubagentV2ApprovalDetails,
       },
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL("./subagent_v2_approval/hermes_transcript.ndjson", import.meta.url),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runtimePolicyOverride: SUBAGENT_V2_APPROVAL_POLICY,
+        assertOutput: assertSubagentV2ApprovalOutput,
+      },
     ],
   },
   {
@@ -1500,6 +1507,16 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         runtimePolicyOverride: SUBAGENT_V2_APPROVAL_POLICY,
         assertOutput: assertSubagentV2NestedApprovalOutput,
         assertProviderDetails: assertCodexSubagentV2NestedApprovalDetails,
+      },
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./subagent_v2_nested_approval/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runtimePolicyOverride: SUBAGENT_V2_APPROVAL_POLICY,
+        assertOutput: assertSubagentV2NestedApprovalOutput,
       },
     ],
   },

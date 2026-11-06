@@ -1924,12 +1924,16 @@ describe("Hermes prompts refused while the gateway finishes its own turn", () =>
   };
   const compress = { prompt: [{ type: "text" as const, text: "/compress" }] };
 
-  it.effect("resends a command Hermes refused until its own turn ends", () =>
+  it.effect("resends a command Hermes refused until its own turn ends, however long it runs", () =>
     Effect.gen(function* () {
-      const { runtime, sent } = busyRuntime((sent) => Effect.succeed(sent.length < 3));
+      const refusals = 100;
+      const { runtime, sent } = busyRuntime((sent) => Effect.succeed(sent.length <= refusals));
       const result = yield* runtime.prompt(compress);
       assert.equal(result.stopReason, "end_turn");
-      assert.deepEqual(sent, ["/compress", "/compress", "/compress"]);
+      assert.deepEqual(
+        sent,
+        Array.from({ length: refusals + 1 }, () => "/compress"),
+      );
     }),
   );
 

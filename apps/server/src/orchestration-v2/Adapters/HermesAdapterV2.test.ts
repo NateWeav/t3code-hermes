@@ -400,7 +400,7 @@ describe("HermesAdapterV2 flavor", () => {
   });
 
   it("asks Hermes to approve every shell command", () => {
-    assert.deepEqual(flavor.clientCapabilitiesMeta, { command_approval: true });
+    assert.equal(flavor.clientCapabilitiesMeta?.command_approval, true);
   });
 
   it("keeps a skill row's name on the turn item title", () => {

@@ -11,7 +11,7 @@ Scores how close the Hermes provider is to Claude and Codex in T3 Code, as one n
 | Stack       | A fresh T3 server with Claude, Codex and Hermes instances, the same three prompts each, timed from the server's database              | Haiku and Luna tokens | Latency against Claude, reliability                                                              |
 | Field       | Your own T3 Hermes history, opened read-only                                                                                          | Free                  | Tracked, not scored                                                                              |
 
-A scenario counts as **parity** when Hermes passes the same assertion function a reference provider's fixture uses. Passing only a Hermes-specific assertion counts half. Scenarios are classified in [scenarios.ts](scenarios.ts): `applicable`, `twin` (the prompt names another provider's tools, so it scores 0 until a Hermes-worded twin exists), or `na` with a reason. Declared capability flags are reported as a gap map and never scored.
+A scenario counts as **parity** when Hermes passes the same assertion function a reference provider's fixture uses. Passing only a Hermes-specific assertion counts half. The summary also reports **Claude Code coverage**: how many scored scenarios that have a Claude fixture are at parity. Every one of them at parity is the bar for "on par with Claude Code". Scenarios are classified in [scenarios.ts](scenarios.ts): `applicable`, `twin` (the prompt names another provider's tools, so it scores 0 until a Hermes-worded twin exists), or `na` with a reason. Declared capability flags are reported as a gap map and never scored.
 
 ## Set up the benchmark Hermes home
 
@@ -63,10 +63,11 @@ One live sample of every scenario takes about 15 minutes. The stack suite takes 
 Rules that keep the number honest:
 
 - Never edit a reference assertion or its fixtures to let Hermes pass. Shared assertions must keep passing for every provider that uses them.
+- A variant's `assertOutput` is the user-visible contract that parity compares. Checks of one provider's wire frames, native ids or token ledgers go in that variant's `assertProviderDetails`, which replay also runs. Moving a reference's wire checks there keeps them, and lets other providers share the rest.
 - Fixtures come only from the recorder, never from hand edits.
 - A Hermes-only assertion scores half; say why in the PR.
 - Changing a classification in `scenarios.ts` needs a reason in the entry.
 
-Scenarios marked `providerBound` (`message_steering`, `turn_interrupt_mid_tool`, `turn_interrupt_restart`, `subagent`, `subagent_v2`, `subagent_v2_nested`, `web_search`) have only reference assertions that check their own provider's identity, wire frames or item shapes. Hermes reaches half credit there with its own assertion, and full credit once the scenario gets a provider-neutral assertion that every provider's fixture passes.
+Scenarios marked `providerBound` (`message_steering`, `turn_interrupt_mid_tool`, `turn_interrupt_restart`, `subagent_v2`, `subagent_v2_nested`, `web_search`) have only reference assertions that check their own provider's identity, wire frames or item shapes. Hermes reaches half credit there with its own assertion, and full credit once the reference's wire checks move to its `assertProviderDetails`, leaving an `assertOutput` that Hermes can share.
 
 `run.test.ts` tests the grader and runs in CI.

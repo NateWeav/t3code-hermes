@@ -110,7 +110,8 @@ function resolveBenchHermesHome(): string {
 /**
  * Drops the agent harness's own model routing so the benchmark home's config decides. An empty
  * managed scope keeps a machine-wide `/etc/hermes/config.yaml` overlay out too: it layers over
- * every home, and can pin providers or a delegation model the benchmark home lacks.
+ * every home, and can pin providers, a delegation model, or a compression provider the benchmark
+ * home lacks.
  */
 function benchEnvironment(hermesHome: string): NodeJS.ProcessEnv {
   const noManagedScope = NodePath.join(hermesHome, "no-managed-scope");
@@ -457,7 +458,16 @@ const recordScenario = Effect.fn("recordHermesScenario")(function* (fixtureName:
   const path = yield* Path.Path;
   const hermesHome = resolveBenchHermesHome();
   const environment = benchEnvironment(hermesHome);
-  const fixtureInput = fixture.buildInput();
+  // Hermes ignores Codex's approval policy override; Supervised is the Hermes mode that asks.
+  const borrowedApprovalPolicy = ownVariant
+    ? undefined
+    : settingsVariant.runtimePolicyOverride?.approvalPolicy;
+  const fixtureInput = {
+    ...fixture.buildInput(),
+    ...(borrowedApprovalPolicy !== undefined && borrowedApprovalPolicy !== "never"
+      ? { runtimeMode: "approval-required" as const }
+      : {}),
+  };
   const workspace = yield* checkpointWorkspace(fixtureName, fixtureInput.workspaceFiles);
   const realWorkspace = yield* fs.realPath(workspace);
   // The files these prompts read, as the Claude recorder seeds them.

@@ -485,6 +485,79 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 
+  it.effect("nests a grandchild's row and thread under the child that launched it", () =>
+    Effect.gen(function* () {
+      const batch = delegationFixture.cases.find((item) => item.name === "batch")!;
+      const toolCallId = batch.start.toolCallId;
+      const progress = (hermesDelegation: Record<string, unknown>) =>
+        ({
+          sessionUpdate: "tool_call_update",
+          toolCallId,
+          status: "in_progress",
+          rawOutput: { hermesDelegation },
+        }) as const;
+      const child = { task_index: 0, depth: 0, subagent_id: "sa-0" };
+      const grandchild = {
+        task_index: 0,
+        depth: 1,
+        subagent_id: "sa-0-0",
+        parent_id: "sa-0",
+        goal: "Reply with exactly: Hello",
+      };
+      const { threadId, events } = yield* runMockTurn({
+        name: "nested-delegation",
+        mockEnvironment: {},
+        promptUpdates: [
+          { ...batch.start, rawInput: batch.args } as EffectAcpSchema.SessionUpdate,
+          progress({ ...child, event: "subagent.start" }),
+          progress({ ...grandchild, event: "subagent.spawn_requested" }),
+          progress({
+            ...grandchild,
+            event: "subagent.complete",
+            status: "completed",
+            summary: "Hello",
+          }),
+          progress({ ...child, event: "subagent.complete", status: "completed", summary: "Hello" }),
+          { ...batch.complete, rawOutput: batch.result } as EffectAcpSchema.SessionUpdate,
+        ],
+      });
+      const latest = new Map<string, OrchestrationV2Subagent>();
+      for (const event of events) {
+        if (event.type === "subagent.updated")
+          latest.set(String(event.subagent.id), event.subagent);
+      }
+      const parent = [...latest.values()].find((subagent) => subagent.title === "Inspect routing");
+      const nested = [...latest.values()].find(
+        (subagent) => subagent.title === "Reply with exactly: Hello",
+      );
+      assert.isDefined(parent);
+      assert.isDefined(nested);
+      assert.equal(nested.threadId, parent.childThreadId);
+      assert.isNull(nested.runId);
+      assert.equal(nested.status, "completed");
+      assert.equal(nested.result, "Hello");
+      const nestedThread = events.find(
+        (event) =>
+          event.type === "app_thread.created" && event.appThread.id === nested.childThreadId,
+      );
+      if (nestedThread?.type !== "app_thread.created") throw new Error("no nested thread");
+      assert.deepEqual(nestedThread.appThread.lineage, {
+        parentThreadId: parent.childThreadId,
+        relationshipToParent: "subagent",
+        rootThreadId: threadId,
+      });
+      const rows = events.flatMap((event) =>
+        event.type === "turn_item.updated" && event.turnItem.type === "subagent"
+          ? [[event.turnItem.threadId, event.turnItem.title] as const]
+          : [],
+      );
+      assert.isTrue(
+        rows.some(([thread, title]) => thread === parent.childThreadId && title === nested.title),
+      );
+      assert.isFalse(rows.some(([thread, title]) => thread === threadId && title === nested.title));
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+
   it.effect("shows Hermes's T3 tool calls as T3's, with the ids its summary dropped", () =>
     Effect.gen(function* () {
       // Hermes's gateway reports the call under a per-session server name, starts it with no
@@ -695,6 +768,121 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
         );
         assert.deepEqual(childReplies, ["Hello"]);
       }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+
+  it.effect("nests a grandchild a background child launches after the turn settled", () =>
+    Effect.gen(function* () {
+      const toolCallId = "toolu_delegate_nested_after_turn";
+      const goal = "Spawn one subagent that replies Hello";
+      const child = {
+        goal,
+        subagent_id: "sa-0-nested",
+        task_index: 0,
+        task_count: 1,
+        depth: 0,
+      };
+      const grandchild = {
+        goal: "Reply with exactly: Hello",
+        subagent_id: "sa-0-grand",
+        parent_id: "sa-0-nested",
+        task_index: 0,
+        task_count: 1,
+        depth: 1,
+      };
+      const progress = (hermesDelegation: Record<string, unknown>) =>
+        ({
+          sessionUpdate: "tool_call_update",
+          toolCallId,
+          status: "in_progress",
+          rawOutput: { hermesDelegation },
+        }) as const;
+      const dispatched = { status: "dispatched", mode: "background", count: 1, goals: [goal] };
+      const { events } = yield* runMockTurn({
+        name: "delegate-nested-after-turn",
+        mockEnvironment: {},
+        promptUpdates: [
+          {
+            sessionUpdate: "tool_call",
+            toolCallId,
+            title: `delegate_task: 1 tasks: ${goal}`,
+            kind: "execute",
+            rawInput: { action: "spawn", tasks: [{ goal, role: "orchestrator" }] },
+            content: [
+              {
+                type: "content",
+                content: { type: "text", text: `Delegating 1 tasks\n\n1. ${goal}` },
+              },
+            ],
+          },
+          progress({ ...child, event: "subagent.start" }),
+          {
+            sessionUpdate: "tool_call_update",
+            toolCallId,
+            kind: "execute",
+            status: "completed",
+            rawOutput: dispatched,
+            content: [
+              { type: "content", content: { type: "text", text: JSON.stringify(dispatched) } },
+            ],
+          },
+          {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "It is running in the background." },
+          },
+        ],
+        idleUpdates: [
+          progress({ ...grandchild, event: "subagent.spawn_requested" }),
+          progress({
+            ...grandchild,
+            event: "subagent.complete",
+            status: "completed",
+            summary: "Hello",
+          }),
+          progress({ ...child, event: "subagent.complete", status: "completed", summary: "Hello" }),
+          { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Hello" } },
+        ],
+        continuationRequests: { offer: () => Effect.void },
+        runContinuation: true,
+      });
+      const latest = new Map<string, OrchestrationV2Subagent>();
+      for (const event of events) {
+        if (event.type === "subagent.updated")
+          latest.set(String(event.subagent.id), event.subagent);
+      }
+      const parent = [...latest.values()].find((subagent) => subagent.title === goal);
+      const nested = [...latest.values()].find((subagent) => subagent.title === grandchild.goal);
+      assert.isDefined(parent);
+      assert.isDefined(nested);
+      assert.equal(nested.threadId, parent.childThreadId);
+      assert.equal(nested.status, "completed");
+      assert.equal(parent.status, "completed");
+      const nestedRow = events.findLast(
+        (event) => event.type === "turn_item.updated" && event.turnItem.nodeId === nested.id,
+      );
+      if (nestedRow?.type !== "turn_item.updated") throw new Error("no nested row");
+      assert.equal(nestedRow.turnItem.threadId, parent.childThreadId);
+      assert.equal(nestedRow.turnItem.status, "completed");
+      const nestedReplies = events.flatMap((event) =>
+        event.type === "message.updated" &&
+        event.message.threadId === nested.childThreadId &&
+        event.message.role === "assistant"
+          ? [event.message.text]
+          : [],
+      );
+      assert.deepEqual(nestedReplies, ["Hello"]);
+      // The grandchild shows while it runs, not only once the gateway's follow-up turn starts.
+      const firstNested = events.findIndex(
+        (event) => event.type === "subagent.updated" && event.subagent.id === nested.id,
+      );
+      const followUp = events.findIndex(
+        (event, index) =>
+          index > firstNested &&
+          event.type === "provider_turn.updated" &&
+          event.providerTurn.status === "running",
+      );
+      assert.isAbove(firstNested, 0);
+      assert.isAbove(followUp, firstNested);
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 
   it.effect("reopens a finished child that a later run continues, in its own thread", () =>

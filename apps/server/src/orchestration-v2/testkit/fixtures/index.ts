@@ -181,8 +181,9 @@ import { assertPiSimpleOutput } from "./simple/pi_output.ts";
 import { simpleInput } from "./simple/input.ts";
 import { malformedSessionUpdateInput } from "./malformed_session_update/input.ts";
 import { assertMalformedSessionUpdateOutput } from "./malformed_session_update/output.ts";
-import { assertSubagentOutput } from "./subagent/codex_output.ts";
-import { assertClaudeSubagentOutput } from "./subagent/claude_output.ts";
+import { assertClaudeSubagentDetails } from "./subagent/claude_output.ts";
+import { assertCodexSubagentDetails } from "./subagent/codex_output.ts";
+import { assertSubagentOutput } from "./subagent/output.ts";
 import { subagentInput } from "./subagent/input.ts";
 import { assertCursorSubagentOutput } from "./subagent/cursor_output.ts";
 import { assertKiroSubagentOutput } from "./subagent/kiro_output.ts";
@@ -195,7 +196,8 @@ import {
   SUBAGENT_V2_APPROVAL_POLICY,
   subagentV2ApprovalInput,
 } from "./subagent_v2_approval/input.ts";
-import { assertSubagentV2NestedOutput } from "./subagent_v2_nested/codex_output.ts";
+import { assertCodexSubagentV2NestedDetails } from "./subagent_v2_nested/codex_output.ts";
+import { assertSubagentV2NestedOutput } from "./subagent_v2_nested/output.ts";
 import { assertSubagentV2NestedApprovalOutput } from "./subagent_v2_nested_approval/codex_output.ts";
 import { subagentV2NestedApprovalInput } from "./subagent_v2_nested_approval/input.ts";
 import { assertClaudeThreadRollbackOutput } from "./thread_rollback/claude_output.ts";
@@ -1190,12 +1192,14 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         modelSelection: { ...CODEX_MODEL_SELECTION, model: "gpt-5.6-luna" },
         runtimePolicyOverride: READ_ONLY_ON_REQUEST_POLICY,
         assertOutput: assertSubagentOutput,
+        assertProviderDetails: assertCodexSubagentDetails,
       },
       {
         driver: ProviderDriverKind.make("claudeAgent"),
         transcriptFile: new URL("./subagent/claude_transcript.ndjson", import.meta.url),
         modelSelection: CLAUDE_MODEL_SELECTION,
-        assertOutput: assertClaudeSubagentOutput,
+        assertOutput: assertSubagentOutput,
+        assertProviderDetails: assertClaudeSubagentDetails,
       },
       {
         driver: ProviderDriverKind.make("cursor"),
@@ -1209,6 +1213,14 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         transcriptFile: new URL("./subagent/kiro_transcript.ndjson", import.meta.url),
         modelSelection: KIRO_MODEL_SELECTION,
         assertOutput: assertKiroSubagentOutput,
+      },
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL("./subagent/hermes_transcript.ndjson", import.meta.url),
+        modelSelection: HERMES_MODEL_SELECTION,
+        // A gateway follow-up turn would surface as a second run and fail the one-run contract.
+        runContinuationWorker: true,
+        assertOutput: assertSubagentOutput,
       },
     ],
   },
@@ -1264,6 +1276,14 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         driver: ProviderDriverKind.make("codex"),
         transcriptFile: new URL("./subagent_v2_nested/codex_transcript.ndjson", import.meta.url),
         modelSelection: CODEX_MODEL_SELECTION,
+        assertOutput: assertSubagentV2NestedOutput,
+        assertProviderDetails: assertCodexSubagentV2NestedDetails,
+      },
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL("./subagent_v2_nested/hermes_transcript.ndjson", import.meta.url),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runContinuationWorker: true,
         assertOutput: assertSubagentV2NestedOutput,
       },
     ],

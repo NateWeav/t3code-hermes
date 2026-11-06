@@ -9,6 +9,15 @@ can run on any model your Hermes profile lists, and take a follow-up after they 
 To make Hermes agents use only T3 Code subagents, turn on **Use T3 Code subagents only** under
 Settings → Providers → Hermes. It is off by default.
 
+## Subagents that answer in the same turn
+
+Stock Hermes runs every one of its subagents in the background: the agent ends its turn, and its
+answer arrives in a later one. With the **Subagents in the turn** patch (see
+[Hermes patches](./hermes-patches.md)), the agent waits for its subagents and answers in the same
+turn, unless it chooses to run them in the background. Its subagents can also launch their own, up
+to three levels deep. Stopping the turn stops subagents it is waiting for. The patch applies to
+conversations started after it is applied and the Hermes gateway restarts.
+
 ## Things to know
 
 - The setting turns off Hermes's `delegation` toolset in your Hermes `config.yaml`. That file is

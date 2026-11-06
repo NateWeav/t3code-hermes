@@ -176,7 +176,7 @@ it.effect("routes shared-runtime events only to their owning root run", () =>
   }),
 );
 
-it("routes only enrolled workflow members after the root turn ends", () => {
+it("routes only enrolled workflow members and nested subagents after the root turn ends", () => {
   const threadId = ThreadId.make("thread:late-child");
   const rootProviderTurnId = ProviderTurnId.make("provider-turn:late-child");
   const identity: RunExecutionService.ProviderEventRouteIdentity = {
@@ -330,6 +330,55 @@ it("routes only enrolled workflow members after the root turn ends", () => {
       ThreadId.make("thread:late-child:unrelated-descendant"),
     ),
   );
+
+  // A native subagent a child launches after the root turn ended announces its thread first.
+  const grandchildId = ThreadId.make("thread:late-child:native-grandchild");
+  const nestedRow: OrchestrationV2Subagent = {
+    ...coordinator,
+    id: NodeId.make("node:late-child:native-grandchild"),
+    threadId: earlyChild,
+    runId: null,
+    childThreadId: grandchildId,
+    status: "pending",
+    workflow: undefined,
+  };
+  const [claimedRowAccepted, afterClaimedRow] = RunExecutionService.routeProviderEvent(
+    {
+      type: "subagent.updated",
+      driver,
+      subagent: { ...nestedRow, runId: RunId.make("run:late-child:new") },
+    },
+    identity,
+    ended,
+  );
+  assert.isTrue(claimedRowAccepted);
+  assert.isFalse(
+    RunExecutionService.routeProviderEvent(
+      childCreated(grandchildId, earlyChild),
+      identity,
+      afterClaimedRow,
+    )[0],
+  );
+  const [nestedRowAccepted, afterNestedRow] = RunExecutionService.routeProviderEvent(
+    { type: "subagent.updated", driver, subagent: nestedRow },
+    identity,
+    ended,
+  );
+  assert.isTrue(nestedRowAccepted);
+  assert.isFalse(
+    RunExecutionService.routeProviderEvent(
+      childCreated(grandchildId, lateChild),
+      identity,
+      afterNestedRow,
+    )[0],
+  );
+  const [grandchildAccepted, afterGrandchild] = RunExecutionService.routeProviderEvent(
+    childCreated(grandchildId, earlyChild),
+    identity,
+    afterNestedRow,
+  );
+  assert.isTrue(grandchildAccepted);
+  assert.isTrue(afterGrandchild.ownedThreadIds.has(grandchildId));
 });
 
 it("moves a child thread to the run that shows its subagent now", () => {

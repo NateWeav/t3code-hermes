@@ -241,8 +241,8 @@ Three kinds of issue come out of it:
 
 - **`upstream-sync-conflict`**: the merge conflicted and was aborted, so `main` is untouched. The
   issue lists the conflicted files (from `git ls-files -u`) and the run fails. Outside this repo,
-  the Hermes `upstream-sync` profile receives the issue by webhook, merges upstream in an isolated
-  worktree, opens a `hermes/upstream-sync-<sha>` PR, merges it (merge commit, never squash) once CI
+  a T3 Code webhook task receives the issue and starts a thread in a fresh worktree, which merges
+  upstream, opens a `hermes/upstream-sync-<sha>` PR, merges it (merge commit, never squash) once CI
   is green, and re-dispatches the sync so the release follows. Where upstream now covers something
   the fork built, the resolver takes upstream's version and re-applies only the Hermes behavior it
   lacks. It must merge the commit the issue names, not `upstream/main`. Each resolution PR also
@@ -309,8 +309,8 @@ in one line.
 **Keeping patches current.** The Hermes patches in [`infra/hermes/`](./infra/hermes) follow Hermes
 `main`, not T3 Code upstream. [`hermes-patches.yml`](./.github/workflows/hermes-patches.yml) checks
 them against it every three hours at :20 and files a **`hermes-patch-drift`** issue when one stops
-applying, stacking, or passing its tests, or becomes obsolete. The same `upstream-sync` profile
-answers it with a `hermes/patch-drift-<sha>` PR that adds rebased versions, and merges it once CI is
+applying, stacking, or passing its tests, or becomes obsolete. A second webhook task answers it
+with a `hermes/patch-drift-<sha>` PR that adds rebased versions, and merges it once CI is
 green. See [`infra/hermes/README.md`](./infra/hermes/README.md#versions).
 
 ## CI on the fork

@@ -47,7 +47,7 @@ const CLAUDE_AGENT_TOOLS = "The prompt drives Claude's Agent/TaskStop/SendMessag
 const CLAUDE_BASH_BACKGROUND =
   "The prompt drives Claude's Bash run_in_background; the Hermes twin starts the command with terminal (background, notify).";
 const CLAUDE_COMPACT =
-  "The prompt sends Claude's /compact; Hermes compacts with /compress. Claude's assertOutput still pins its recorded token counts, usage and wake or peer turn, which a twin needs moved to assertProviderDetails.";
+  "The prompt sends Claude's /compact; Hermes compacts with /compress, and its peer turn and wake are a notify background job's own turn.";
 
 export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
   // Turn loop
@@ -265,8 +265,16 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
   },
 
   // Context: compaction and resume
-  { name: "claude_compact_after_resume_wake", facet: "context", hermes: twin(CLAUDE_COMPACT) },
-  { name: "claude_compact_after_peer_turn", facet: "context", hermes: twin(CLAUDE_COMPACT) },
+  {
+    name: "claude_compact_after_resume_wake",
+    facet: "context",
+    hermes: twin(CLAUDE_COMPACT, "hermes_compact_after_resume_wake"),
+  },
+  {
+    name: "claude_compact_after_peer_turn",
+    facet: "context",
+    hermes: twin(CLAUDE_COMPACT, "hermes_compact_after_peer_turn"),
+  },
   {
     name: "claude_compact_after_peer_turn_no_echo",
     facet: "context",

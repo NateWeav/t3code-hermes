@@ -11,6 +11,8 @@ import {
   type ServerProviderSlashCommand,
 } from "@t3tools/contracts";
 import * as SecureRandom from "effect/crypto/SecureRandom";
+import * as Clock from "effect/Clock";
+import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -671,6 +673,51 @@ function lostTurnRefusal(
   if (details.includes("(your input is accepted and kept)"))
     return { submitted: true, lostAdmissionIds };
   return undefined;
+}
+
+// The gateway's turn is outside T3's clock; a TestClock sleep would wait for an advance that never comes.
+const wallClock = Clock.Clock.defaultValue();
+
+/**
+ * Hermes refuses `/compress` and other idle-only commands with `session_busy` while the gateway
+ * finishes a turn of its own, such as a background job's wake, whose end ACP never reports. The
+ * refusal admitted nothing, so the prompt is resent each `resendAfter` until the gateway is idle
+ * or the turn is stopped. Only a live gateway answers `session_busy`, so this needs no cap.
+ */
+export function resendHermesPromptsRefusedBusy(
+  runtime: AcpSessionRuntime.AcpSessionRuntime["Service"],
+  resendAfter: Duration.Input = "1 second",
+): AcpSessionRuntime.AcpSessionRuntime["Service"] {
+  let cancels = 0;
+  const send = (
+    payload: Parameters<typeof runtime.prompt>[0],
+    options: Parameters<typeof runtime.prompt>[1],
+    cancelsAtSend: number,
+  ): ReturnType<typeof runtime.prompt> =>
+    runtime.prompt(payload, options).pipe(
+      Effect.catchIf(
+        (error) => cancels === cancelsAtSend && hermesPromptErrorDetails(error) === "session_busy",
+        (error) =>
+          Effect.sleep(resendAfter).pipe(
+            Effect.provideService(Clock.Clock, wallClock),
+            Effect.andThen(
+              Effect.suspend(() =>
+                cancels === cancelsAtSend
+                  ? send(payload, options, cancelsAtSend)
+                  : Effect.fail(error),
+              ),
+            ),
+          ),
+      ),
+    );
+  return {
+    ...runtime,
+    cancel: Effect.suspend(() => {
+      cancels += 1;
+      return runtime.cancel;
+    }),
+    prompt: (payload, options) => Effect.suspend(() => send(payload, options, cancels)),
+  };
 }
 
 /**

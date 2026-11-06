@@ -110,8 +110,10 @@ describe("Claude Agent SDK replay fixtures", () => {
   );
 
   const afterRootFixture = findReplayFixture("claude_background_subagent_after_root");
-  const afterRootProvider = afterRootFixture?.providers[0];
-  if (afterRootFixture !== undefined && afterRootProvider !== undefined) {
+  const afterRootVariant = afterRootFixture?.providers[0];
+  if (afterRootFixture !== undefined && afterRootVariant !== undefined) {
+    // These cases alter the transcript and assert their own outcome, not the fixture's details.
+    const { assertProviderDetails: _details, ...afterRootProvider } = afterRootVariant;
     const OPEN_TOOL_ID = "toolu_01QDa5jV5g1H9h6QyDfeJohD";
     const SUBAGENT_TASK_ID = "a2995bfced8019363";
 

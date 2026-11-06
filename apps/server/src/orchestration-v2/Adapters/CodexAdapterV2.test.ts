@@ -1174,6 +1174,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
     onRequest: (method: string, params: unknown) => Effect.Effect<void> = () => Effect.void,
     readChildMetadata?: Parameters<typeof withCodexReplayChildMetadata>[2],
     beforeEmitInbound?: CodexReplay.CodexAppServerReplayDriver["beforeEmitInbound"],
+    adapterOptions: Pick<CodexAdapterV2.CodexAdapterV2Options, "limitResetAt"> = {},
   ) =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
@@ -1241,6 +1242,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
               continuationRequests.push(request);
             }).pipe(Effect.andThen(changes.notify)),
         },
+        ...adapterOptions,
       });
       const threadId = ThreadId.make(`thread-${transcript.scenario}`);
       const runtime = yield* adapter.openSession({
@@ -5679,6 +5681,118 @@ describe("CodexAdapterV2 post-settle continuation", () => {
         ),
       ),
     ),
+  );
+
+  it.effect.each([
+    { name: "long", resetAt: "1970-01-01T02:00:00.000Z", stops: true },
+    { name: "short", resetAt: "1970-01-01T00:00:30.000Z", stops: false },
+  ] as const)(
+    "stops a 429 retry as Limited only when the hub's cooldown is long ($name)",
+    ({ name, resetAt, stops }) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const nativeThreadId = `native-hub-cooldown-${name}`;
+          const nativeTurnId = `turn-hub-cooldown-${name}`;
+          const lookups: Array<{ readonly driver: string; readonly model: string }> = [];
+          const transcript = makeCodexReplayTranscript({
+            scenario: `codex-hub-cooldown-${name}`,
+            entries: [
+              ...codexReplayPreamble({ nativeThreadId, nativeTurnId, prompt: "Continue." }),
+              {
+                type: "emit_inbound",
+                label: "error",
+                frame: {
+                  method: "error",
+                  params: {
+                    threadId: nativeThreadId,
+                    turnId: nativeTurnId,
+                    willRetry: true,
+                    error: {
+                      message: "Reconnecting... 1/5",
+                      codexErrorInfo: { responseStreamDisconnected: { httpStatusCode: 429 } },
+                      additionalDetails: "exceeded retry limit, last status: 429 Too Many Requests",
+                    },
+                  },
+                },
+              },
+              ...(stops
+                ? ([
+                    {
+                      type: "expect_outbound",
+                      label: "turn/interrupt",
+                      frame: {
+                        id: 4,
+                        method: "turn/interrupt",
+                        params: { threadId: nativeThreadId, turnId: nativeTurnId },
+                      },
+                    },
+                    { type: "emit_inbound", label: "turn/interrupt", frame: { id: 4, result: {} } },
+                  ] as const)
+                : []),
+              {
+                type: "emit_inbound",
+                label: "turn/completed",
+                frame: {
+                  method: "turn/completed",
+                  params: {
+                    threadId: nativeThreadId,
+                    turn: makeCodexReplayTurn({
+                      id: nativeTurnId,
+                      status: stops ? "interrupted" : "completed",
+                    }),
+                  },
+                },
+              },
+            ],
+          });
+          const harness = yield* makeCodexReplayHarness(
+            transcript,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            {
+              limitResetAt: (input) =>
+                Effect.sync(() => {
+                  lookups.push(input);
+                  return resetAt;
+                }),
+            },
+          );
+          yield* harness.runtime.startTurn(
+            makeCodexTestTurnInput({
+              threadId: harness.threadId,
+              providerThread: harness.providerThread,
+              now: yield* DateTime.now,
+              text: "Continue.",
+              attemptId: RunAttemptId.make(`attempt-hub-cooldown-${name}`),
+            }),
+          );
+          yield* harness.firstTerminal;
+          assert.deepEqual(lookups, [
+            { driver: CodexAdapterV2.CODEX_DRIVER_KIND, model: CODEX_TEST_MODEL_SELECTION.model },
+          ]);
+          const terminal = harness.terminalEvents()[0];
+          if (!stops) {
+            assert.equal(terminal?.status, "completed");
+            return;
+          }
+          assert.equal(terminal?.status, "failed");
+          if (terminal?.status !== "failed") return;
+          assert.equal(terminal.failure.class, "usage_limit");
+          assert.equal(terminal.failure.resetAt, resetAt);
+          assert.equal(terminal.retry?.attempt, 1);
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              IdAllocator.layer,
+              McpProviderSessions.layer,
+              NodeServices.layer,
+              NodeCrypto.layer,
+            ),
+          ),
+        ),
+      ),
   );
 
   // regression: #17501 Codex 429 retry exhaustion classifies as a usage limit

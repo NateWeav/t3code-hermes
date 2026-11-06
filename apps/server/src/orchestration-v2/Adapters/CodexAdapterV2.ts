@@ -28,6 +28,7 @@ import {
   codexUsageLimitResetAt,
   type CodexRateLimitSnapshot,
 } from "../../provider/codexUsageLimits.ts";
+import * as UsageLimitSources from "../../usage/UsageLimitSources.ts";
 import {
   CodexSettings,
   defaultInstanceIdForDriver,
@@ -1121,6 +1122,20 @@ function codexExhaustionHttpStatus(errorInfo: CodexErrorInfo | null | undefined)
     : null;
 }
 
+function codexErrorHttpStatus(errorInfo: CodexErrorInfo | null | undefined): number | null {
+  if (typeof errorInfo !== "object" || errorInfo === null) return null;
+  const detail: unknown = Object.values(errorInfo)[0];
+  return typeof detail === "object" &&
+    detail !== null &&
+    "httpStatusCode" in detail &&
+    typeof detail.httpStatusCode === "number"
+    ? detail.httpStatusCode
+    : null;
+}
+
+// Codex sleeps out a hub's Retry-After in place; past this, the thread is stopped as Limited instead.
+const HUB_COOLDOWN_STOP_MS = 60_000;
+
 function codexUsageLimitError(
   code: string | null,
   errorInfo: CodexErrorInfo | null | undefined,
@@ -1148,6 +1163,8 @@ function withCodexManagedFailure(
 
 interface ActiveCodexTurnContext {
   hookStopReason?: string;
+  /** Set when T3 interrupts a turn Codex would otherwise sleep through a long hub cooldown. */
+  hubLimitStop?: boolean;
   capacityRetryAttempt?: number;
   capacityRetryPending?: Deferred.Deferred<ActiveCodexTurnContext | undefined>;
   closedCommandItemIds?: ReadonlySet<string>;
@@ -1618,6 +1635,7 @@ export const createCodexAdapterV2 = Effect.fn("CodexAdapterV2.createCodexAdapter
   const hostEnvironment = yield* HostProcess.Environment;
   const idAllocator = yield* IdAllocator.IdAllocatorV2;
   const serverConfig = yield* ServerConfig;
+  const hubs = yield* Effect.serviceOption(UsageLimitSources.UsageLimitSources);
   const homeLayout = yield* resolveCodexHomeLayout(config);
 
   yield* materializeCodexShadowHome(homeLayout).pipe(
@@ -1649,6 +1667,7 @@ export const createCodexAdapterV2 = Effect.fn("CodexAdapterV2.createCodexAdapter
     idAllocator,
     serverConfig,
     continuationRequests,
+    ...(Option.isSome(hubs) ? { limitResetAt: hubs.value.limitResetAt } : {}),
     ...hooks,
   });
 });
@@ -1667,6 +1686,8 @@ export interface CodexAdapterV2Options {
   readonly fileSystem: FileSystem.FileSystem;
   readonly idAllocator: IdAllocator.IdAllocatorV2["Service"];
   readonly serverConfig: ServerConfig["Service"];
+  /** Omitting this leaves Codex to sleep through long hub cooldowns. */
+  readonly limitResetAt?: UsageLimitSources.UsageLimitSources["Service"]["limitResetAt"];
   /** Omitting this leaves late completions projection-only. */
   readonly continuationRequests?: {
     readonly offer: (
@@ -4732,6 +4753,41 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               driver: CODEX_PROVIDER,
               turnItem: codexRetryTurnItem(context, state, "running", updatedAt),
             });
+            if (
+              context.hubLimitStop === true ||
+              adapterOptions.limitResetAt === undefined ||
+              codexErrorHttpStatus(payload.error.codexErrorInfo) !== 429
+            )
+              return;
+            const resetAt = yield* adapterOptions.limitResetAt({
+              driver: CODEX_PROVIDER,
+              model: context.input.modelSelection.model,
+            });
+            if (
+              resetAt === null ||
+              Date.parse(resetAt) - DateTime.toEpochMillis(updatedAt) <= HUB_COOLDOWN_STOP_MS
+            )
+              return;
+            context.hubLimitStop = true;
+            context.latestProviderFailure = {
+              nativeMessage: payload.error.message,
+              nativeCode: code,
+              failure: makeProviderFailure({
+                message: failure.message,
+                code,
+                class: "usage_limit",
+                retryable: true,
+                resetAt,
+              }),
+            };
+            yield* client
+              .request("turn/interrupt", { threadId: payload.threadId, turnId: payload.turnId })
+              .pipe(
+                Effect.catch((cause) =>
+                  Effect.logWarning("orchestration-v2.codex-hub-limit-stop-failed", { cause }),
+                ),
+                Effect.forkIn(scope),
+              );
           }).pipe(Effect.orDie),
         );
 
@@ -5806,7 +5862,9 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                   failure.class === "usage_limit"
                     ? {
                         ...failure,
-                        resetAt: codexUsageLimitResetAt(yield* Ref.get(rateLimitSnapshot)),
+                        resetAt:
+                          failure.resetAt ??
+                          codexUsageLimitResetAt(yield* Ref.get(rateLimitSnapshot)),
                       }
                     : failure,
                 ...(input.providerRetry === undefined
@@ -6534,10 +6592,12 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             }
             const nativeStatus = mapCodexTurnStatus(payload.turn.status);
             const status =
-              nativeStatus === "completed" &&
-              (yield* Ref.get(interruptingNativeTurns)).has(payload.turn.id)
-                ? "interrupted"
-                : nativeStatus;
+              context.hubLimitStop === true && nativeStatus === "interrupted"
+                ? "failed"
+                : nativeStatus === "completed" &&
+                    (yield* Ref.get(interruptingNativeTurns)).has(payload.turn.id)
+                  ? "interrupted"
+                  : nativeStatus;
             const terminal = {
               context,
               nativeTurnId: payload.turn.id,

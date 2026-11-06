@@ -178,7 +178,26 @@ function makeWireTee() {
     }
     return pending.size > 0;
   };
-  return { wire, attachRuntime, hasPendingPrompt };
+  // Background `delegate_task` children report through the delegation patch's per-child
+  // `hermesDelegation` events long after their parent's prompt is answered.
+  const delegations = () => {
+    const running = new Set<string>();
+    let seen = false;
+    for (const wireMessage of wire) {
+      if (wireMessage.direction !== "incoming") continue;
+      const params = wireMessage.message.params;
+      const update = isRecord(params) && isRecord(params.update) ? params.update : undefined;
+      const rawOutput = isRecord(update?.rawOutput) ? update.rawOutput : undefined;
+      const child = isRecord(rawOutput?.hermesDelegation) ? rawOutput.hermesDelegation : undefined;
+      if (child === undefined || typeof child.event !== "string") continue;
+      seen = true;
+      const key = `${String(update?.toolCallId)}:${String(child.subagent_id ?? child.task_index)}`;
+      if (child.event === "subagent.complete") running.delete(key);
+      else running.add(key);
+    }
+    return { seen, running: running.size > 0 };
+  };
+  return { wire, attachRuntime, hasPendingPrompt, delegations };
 }
 
 function frameLabel(kind: string, method: string, params: unknown): string {
@@ -488,8 +507,7 @@ const recordScenario = Effect.fn("recordHermesScenario")(function* (fixtureName:
         environment,
         childProcessSpawner,
         selfInvocation: yield* resolveSelfInvocation(),
-        // Without it the adapter drops the gateway's own turns (background wakes) as production
-        // never would.
+        // As in production, so turns the gateway runs on its own (background wakes) reach the thread.
         continuationRequests: yield* ProviderContinuationRequests.ProviderContinuationRequests,
         // Production's runtime factory, with the protocol logger teeing raw lines.
         makeRuntime: ({ runtimePolicy, processEnvironment, ...input }) =>
@@ -550,9 +568,10 @@ const recordScenario = Effect.fn("recordHermesScenario")(function* (fixtureName:
     ),
   );
 
-  // The session stays open until every prompt is answered, no background work that will wake
-  // Hermes is pending, and Hermes has been quiet for a few seconds, so the transcript holds
-  // everything replay emits, gateway follow-up turns included.
+  // The session stays open until every prompt is answered, every delegated child has finished, no
+  // background work that will wake Hermes is pending, and Hermes has been quiet for a few seconds,
+  // so the transcript holds everything replay emits, gateway follow-up turns included. The turn
+  // that hands a delegation's results back streams only after a model call, so that wait is longer.
   let quietPolls = 0;
   let seenFrames = -1;
   const waitForHermesIdle = Effect.sleep("1 second").pipe(
@@ -560,7 +579,13 @@ const recordScenario = Effect.fn("recordHermesScenario")(function* (fixtureName:
       Effect.sync(() => {
         quietPolls = seenFrames === tee.wire.length ? quietPolls + 1 : 0;
         seenFrames = tee.wire.length;
-        return quietPolls >= 3 && !tee.hasPendingPrompt() && backgroundRosters.size === 0;
+        const delegations = tee.delegations();
+        return (
+          quietPolls >= (delegations.seen ? 10 : 3) &&
+          !delegations.running &&
+          !tee.hasPendingPrompt() &&
+          backgroundRosters.size === 0
+        );
       }),
     ),
     Effect.repeat({ until: (idle) => idle }),

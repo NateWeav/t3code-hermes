@@ -70,6 +70,11 @@
       "neededFor": "Subagents that answer inside the turn and can launch their own, as Claude's do. Without it, Hermes runs every subagent in the background, so its answer arrives in a later turn, and a subagent cannot launch another.",
       "versions": [
         {
+          "hermesCommit": "6b21d0564de0492e2ebd0d8f63fca86c03b5c892",
+          "hermesCommitDate": "2026-11-06T19:53:45Z",
+          "file": "acp-editor-delegation/6b21d0564de0.patch"
+        },
+        {
           "hermesCommit": "ca4360692055bdb4df3a695c164646e528891da8",
           "hermesCommitDate": "2026-11-06T04:01:15Z",
           "file": "acp-editor-delegation/ca4360692055.patch"

@@ -647,6 +647,49 @@ it.effect("explains a rejected SSH push after creating the repository", () =>
   }).pipe(Effect.provide(layer({ git: failingPush("authentication_failed") }))),
 );
 
+// regression: an auto-selected SSH remote kept failing every later fetch after a refused push.
+// Hermes fork: "auto" already selects HTTPS, so upstream's SSH-refusal fallback never triggers for
+// it; assert the remote is HTTPS from the first push instead.
+it.effect("publishes an auto-selected remote over HTTPS without an SSH attempt", () => {
+  const gitArgs: Array<ReadonlyArray<string>> = [];
+  let pushAttempts = 0;
+  return Effect.gen(function* () {
+    const service = yield* SourceControlRepositoryService.SourceControlRepositoryService;
+    const result = yield* service.publishRepository({
+      cwd: "/workspace",
+      provider: SourceControlProviderKind.make("github"),
+      repository: "octocat/t3code",
+      visibility: "private",
+    });
+
+    assert.strictEqual(result.status, "pushed");
+    assert.strictEqual(result.remoteUrl, CLONE_URLS.url);
+    assert.strictEqual(pushAttempts, 1);
+    assert.deepStrictEqual(gitArgs, [["rev-parse", "--verify", "HEAD"]]);
+  }).pipe(
+    Effect.provide(
+      layer({
+        git: {
+          execute: (input) =>
+            Effect.sync(() => {
+              gitArgs.push(input.args);
+              return processOutput();
+            }),
+          pushCurrentBranch: () => {
+            pushAttempts += 1;
+            return Effect.succeed({
+              status: "pushed" as const,
+              branch: "main",
+              upstreamBranch: "origin/main",
+              setUpstream: true,
+            });
+          },
+        },
+      }),
+    ),
+  );
+});
+
 // regression: #19219 publishing did not explain why the first push failed
 it.effect("says the repository exists when an unclassified publish push fails", () =>
   Effect.gen(function* () {

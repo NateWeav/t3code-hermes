@@ -276,7 +276,17 @@ export const make = Effect.gen(function* () {
     }
 
     const parsed = yield* decodeJobsFileJson(raw.value).pipe(
-      Effect.flatMap((json) => Effect.try(() => parseHermesCronJobs(json))),
+      Effect.flatMap((json) =>
+        Effect.try({
+          try: () => parseHermesCronJobs(json),
+          catch: (cause) =>
+            new HermesCronError({
+              reason: "unreadable",
+              detail: "The Hermes cron store has an unexpected shape.",
+              cause,
+            }),
+        }),
+      ),
       Effect.orElseSucceed(() => null),
     );
     if (parsed === null) {

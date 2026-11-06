@@ -149,7 +149,15 @@ export const make = Effect.gen(function* () {
           ? unreadable
           : selected.value === null
             ? disabled
-            : yield* Effect.tryPromise(() => readHermesMemoryFiles(selected.value!.env)).pipe(
+            : yield* Effect.tryPromise({
+                try: () => readHermesMemoryFiles(selected.value!.env),
+                catch: (cause) =>
+                  new HermesMemoryError({
+                    reason: "unreadable",
+                    detail: "The Hermes memory files could not be read.",
+                    cause,
+                  }),
+              }).pipe(
                 Effect.map(({ files }): HermesMemorySnapshot => ({
                   availability: "ready",
                   detail: null,

@@ -1,5 +1,6 @@
 import {
   type ServerSettingsPatch,
+  type SettingsSecretValue,
   type UsageLimitSourceConfig,
   UsageLimitSourceId,
 } from "@t3tools/contracts";
@@ -51,13 +52,18 @@ function usageLimitSourceId(url: string, sources: Sources): UsageLimitSourceId {
 
 export function planUsageLimitSourceAdd<EnvironmentId extends string>(
   targets: ReadonlyArray<UsageLimitSourceTarget<EnvironmentId>>,
-  input: { readonly url: string; readonly managementKey: string; readonly label?: string },
+  input: {
+    readonly url: string;
+    readonly managementKey: SettingsSecretValue;
+    readonly label?: string;
+  },
 ): ReadonlyArray<UsageLimitSourceWrite<EnvironmentId>> {
   const label = input.label?.trim();
   const config: UsageLimitSourceConfig = {
     kind: "cliproxy",
     url: input.url.trim(),
-    managementKey: input.managementKey.trim(),
+    managementKey:
+      typeof input.managementKey === "string" ? input.managementKey.trim() : input.managementKey,
     enabled: true,
     ...(label ? { label } : {}),
   };

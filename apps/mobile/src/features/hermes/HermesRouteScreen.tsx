@@ -60,7 +60,7 @@ import { useCallback, useContext, useMemo, useState } from "react";
 import { Alert, Platform, Pressable, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { AndroidScreenHeader } from "../../components/ui/AndroidScreenHeader";
+import { AppBar } from "../../components/ui/AppBar";
 import { AppText as Text } from "../../components/ui/AppText";
 import { ScreenScrollView } from "../../components/ui/ScreenScrollView";
 import { copyTextWithHaptic } from "../../lib/copyTextWithHaptic";
@@ -133,7 +133,7 @@ export function HermesRouteScreen() {
       {Platform.OS === "android" ? (
         <>
           <NativeStackScreenOptions options={{ headerShown: false }} />
-          <AndroidScreenHeader title="Hermes" onBack={() => navigation.goBack()} />
+          <AppBar embedded title="Hermes" onBack={() => navigation.goBack()} />
         </>
       ) : null}
       {environmentId === null ? (

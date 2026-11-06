@@ -93,6 +93,19 @@ const makeTwoVersionCheckout = Effect.gen(function* () {
 const stateOf = (root: string, patch: HermesPatchDefinition) =>
   readHermesPatches(root, [patch]).pipe(Effect.map(([status]) => status?.state));
 
+// The checkout reader inherits the real process environment, so the test must set it there.
+const bindGitToProcessEnv = (gitDir: string, workTree: string) => {
+  const saved = { GIT_DIR: process.env.GIT_DIR, GIT_WORK_TREE: process.env.GIT_WORK_TREE };
+  process.env.GIT_DIR = gitDir;
+  process.env.GIT_WORK_TREE = workTree;
+  return () => {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  };
+};
+
 describe("hermes patches", () => {
   it("embeds every infra/hermes patch version the manifest lists, byte for byte", () => {
     const manifest = JSON.parse(
@@ -749,15 +762,9 @@ describe("hermes patches", () => {
       const decoy = yield* makeCheckout;
       // Already patched, so reading the decoy instead would say "applied".
       NodeFS.writeFileSync(NodePath.join(decoy.root, "session.py"), "remote_cwd = configured()\n");
-      const saved = { GIT_DIR: process.env.GIT_DIR, GIT_WORK_TREE: process.env.GIT_WORK_TREE };
-      process.env.GIT_DIR = NodePath.join(decoy.root, ".git");
-      process.env.GIT_WORK_TREE = decoy.root;
-      const restore = Effect.sync(() => {
-        for (const [key, value] of Object.entries(saved)) {
-          if (value === undefined) delete process.env[key];
-          else process.env[key] = value;
-        }
-      });
+      const restore = Effect.sync(
+        bindGitToProcessEnv(NodePath.join(decoy.root, ".git"), decoy.root),
+      );
 
       const [status] = yield* readHermesPatches(root, [patch]).pipe(Effect.ensuring(restore));
       assert.strictEqual(status?.state, "notApplied");

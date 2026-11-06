@@ -181,6 +181,7 @@ export function UsageProviderSettings({
         <AddUsageLimitSourceDialog
           open
           onOpenChange={setAdding}
+          environmentId={environmentId}
           onAdd={(input) => void writeHubs(planUsageLimitSourceAdd(targets, input))}
         />
       ) : null}

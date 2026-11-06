@@ -221,7 +221,9 @@ describe("MessagesTimeline work rows", () => {
     const props = baseProps();
     const runId = RunId.make("completed-run");
     const container = document.createElement("div");
-    container.style.cssText = "height: 600px; width: 900px; display: flex; flex-direction: column;";
+    // Keep the heading on screen so Playwright does not scroll it before clicking.
+    container.style.cssText =
+      "height: min(600px, 100vh); width: 900px; display: flex; flex-direction: column;";
     await using screen = await render(
       <MessagesTimeline
         {...props}
@@ -236,7 +238,9 @@ describe("MessagesTimeline work rows", () => {
       { container },
     );
     const heading = screen.getByRole("button", { name: /^Worked for/ });
-    await expect.element(heading).toBeVisible();
+    // LegendList keeps rows click-through until its initial scroll settles on animation
+    // frames, which the fake clock below would freeze.
+    await expect.element(heading).toHaveStyle({ pointerEvents: "auto" });
     const viewport = props.listRef.current!.getScrollableNode()!;
     // Legend keeps rows transparent and unclickable until its initial scroll settles.
     await vi.waitFor(() => {

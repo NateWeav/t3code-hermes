@@ -30,7 +30,7 @@ import {
   SERVICE_LAUNCHER_CONTEXT_ENV,
   SERVICE_LAUNCHER_PROTOCOL,
 } from "../cloud/serviceProtocol.ts";
-import { deriveServerPaths } from "../config.ts";
+import { DEFAULT_PORT, deriveServerPaths } from "../config.ts";
 import { resolveServerConfig } from "./config.ts";
 
 const deriveExplicitServerPaths = (baseDir: string, devUrl: URL | undefined) =>
@@ -753,6 +753,43 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
     tailscaleServePort: Option.none<number>(),
     lan: Option.none<boolean>(),
   });
+
+  it.effect("uses the automatic port selector only when no port is configured", () =>
+    Effect.gen(function* () {
+      const baseDir = yield* FileSystem.FileSystem.pipe(
+        Effect.flatMap((fs) => fs.makeTempDirectoryScoped({ prefix: "t3-cli-auto-port-" })),
+      );
+      const selected: number[] = [];
+      const selectAutomaticPort = (preferred: number) =>
+        Effect.sync(() => {
+          selected.push(preferred);
+          return 50_123;
+        });
+      const resolvePort = (flags: {
+        readonly mode?: Option.Option<"web" | "desktop">;
+        readonly port: Option.Option<number>;
+      }) =>
+        resolveServerConfig({ ...minimalWebFlags(baseDir), ...flags }, Option.none(), {
+          selectAutomaticPort,
+        }).pipe(
+          Effect.map((config) => config.port),
+          Effect.provide(
+            Layer.merge(
+              NetService.layer,
+              ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })),
+            ),
+          ),
+        );
+
+      expect(yield* resolvePort({ port: Option.none() })).toBe(50_123);
+      expect(selected).toEqual([DEFAULT_PORT]);
+      expect(yield* resolvePort({ port: Option.some(8788) })).toBe(8788);
+      expect(
+        yield* resolvePort({ mode: Option.some("desktop" as const), port: Option.none() }),
+      ).toBe(DEFAULT_PORT);
+      expect(selected).toEqual([DEFAULT_PORT]);
+    }),
+  );
 
   it.effect(
     "resolves each signal's endpoint through T3CODE_OTLP_*_URL, an OTEL endpoint, the bootstrap envelope, and persisted Settings, in that order",

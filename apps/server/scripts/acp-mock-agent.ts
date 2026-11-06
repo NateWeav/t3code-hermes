@@ -29,6 +29,10 @@ const hermesDelegationDelayMs = Math.max(
   0,
   Number(process.env.T3_ACP_HERMES_DELEGATION_DELAY_MS) || 0,
 );
+const hermesDelegationExitOnCancel = process.env.T3_ACP_HERMES_DELEGATION_EXIT_ON_CANCEL === "1";
+const hermesDelegationHang = process.env.T3_ACP_HERMES_DELEGATION_HANG === "1";
+const hermesDelegationHangAfterDispatch =
+  process.env.T3_ACP_HERMES_DELEGATION_HANG_AFTER_DISPATCH === "1";
 // GitHub Copilot CLI advertises URL-shaped session mode ids.
 const copilotModesProfile = process.env.T3_ACP_COPILOT_MODES === "1";
 const copilotModeId = (name: string) =>
@@ -67,6 +71,9 @@ const completeFirstPromptOnSecond = process.env.T3_ACP_COMPLETE_FIRST_PROMPT_ON_
 const redirectOverlappingPrompts = process.env.T3_ACP_REDIRECT_OVERLAPPING_PROMPTS === "1";
 const floodStderr = process.env.T3_ACP_FLOOD_STDERR === "1";
 const hangPromptForever = process.env.T3_ACP_HANG_PROMPT_FOREVER === "1";
+const agentVersion = process.env.T3_ACP_AGENT_VERSION ?? "0.0.0";
+const geminiApiKey = process.env.GEMINI_API_KEY;
+const idleError = process.env.T3_ACP_IDLE_ERROR;
 const emitTrackedToolCallKindThenHang = process.env.T3_ACP_EMIT_TRACKED_TOOL_CALL_KIND_THEN_HANG;
 const clientFsProbePath = process.env.T3_ACP_CLIENT_FS_PROBE_PATH;
 const clientFsProbeLogPath = process.env.T3_ACP_CLIENT_FS_PROBE_LOG_PATH;
@@ -562,7 +569,7 @@ const program = Effect.gen(function* () {
       parameterizedModelPicker = request.capabilities?._meta?.parameterizedModelPicker === true;
       return {
         protocolVersion: 2,
-        info: { name: "t3-acp-mock-agent", version: process.env.T3_ACP_AGENT_VERSION ?? "0.0.0" },
+        info: { name: "t3-acp-mock-agent", version: agentVersion },
         ...(omitInitializeModelState ? {} : { _meta: { modelState: modelState() } }),
         capabilities: {
           session: {
@@ -600,7 +607,7 @@ const program = Effect.gen(function* () {
       if (antigravityProfile) {
         if (
           request.methodId !== "oauth-personal" &&
-          !(request.methodId === "gemini-api-key" && process.env.GEMINI_API_KEY)
+          !(request.methodId === "gemini-api-key" && geminiApiKey)
         ) {
           return yield* AcpError.AcpRequestError.invalidParams(
             `Mock Antigravity rejected auth method ${request.methodId}.`,
@@ -843,7 +850,7 @@ const program = Effect.gen(function* () {
     Effect.gen(function* () {
       const cancelledSessionId = String(sessionId ?? "mock-session-1");
       cancelledSessions.add(cancelledSessionId);
-      if (process.env.T3_ACP_HERMES_DELEGATION_EXIT_ON_CANCEL === "1") {
+      if (hermesDelegationExitOnCancel) {
         return yield* Effect.sync(() => process.exit(19));
       }
       if (completeFirstPromptOnCancel) {
@@ -864,7 +871,6 @@ const program = Effect.gen(function* () {
       const requestedSessionId = String(request.sessionId ?? sessionId);
       beginAcpMockPrompt(cancelledSessions, requestedSessionId);
       promptCount += 1;
-      const idleError = process.env.T3_ACP_IDLE_ERROR;
       if (idleError === "grok-background" && promptCount === 1) {
         // The structured completion lands before the prompt settles, so it is buffered.
         const taskId = "call-idle-error-background";
@@ -1415,7 +1421,7 @@ const program = Effect.gen(function* () {
             if (hermesDelegationDelayMs > 0) yield* Effect.sleep(hermesDelegationDelayMs);
           }
         }
-        if (process.env.T3_ACP_HERMES_DELEGATION_HANG === "1") return yield* Effect.never;
+        if (hermesDelegationHang) return yield* Effect.never;
         yield* send({
           ...scenario.complete,
           toolCallId,
@@ -1423,10 +1429,7 @@ const program = Effect.gen(function* () {
         });
         if (scenario.name === "dispatched") {
           pendingHermesDelegation = toolCallId;
-          if (
-            promptCount === 1 &&
-            process.env.T3_ACP_HERMES_DELEGATION_HANG_AFTER_DISPATCH === "1"
-          ) {
+          if (promptCount === 1 && hermesDelegationHangAfterDispatch) {
             return yield* Effect.never;
           }
         }
@@ -2173,6 +2176,11 @@ const program = Effect.gen(function* () {
     }
     if (method === "_test/finish-cancel") {
       return Deferred.succeed(nativeCancelRelease, undefined).pipe(Effect.as({}));
+    }
+    if (method === "_test/emit-update") {
+      return agent.client
+        .sessionUpdate(params as AcpSchema.SessionNotification)
+        .pipe(Effect.as({}));
     }
     if (method === "_test/startup-metadata") {
       return Effect.gen(function* () {

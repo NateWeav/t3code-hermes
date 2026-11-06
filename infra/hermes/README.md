@@ -264,7 +264,8 @@ A foreground `terminal` command's drained output is teed, as the gateway's new `
 event, to the running call's viewers: at most four batches a second, whole lines only, newest 8 KiB
 of a flood, with the result's own secret redaction. Colour is kept unless an escape sequence split
 a secret, and the shell wrapper's marker lines are cut. Streaming stops for the rest of a command
-once its output shows a private key marker, since a key spans lines. Turns run by a managed worker
+once its output shows `PRIVATE KEY` (any PEM, OpenSSH or PGP private-key header), since a key spans
+lines. Turns run by a managed worker
 (bypass sessions, or `gateway.managed_workers`) do not stream yet.
 
 Verified against hermes-agent `53a6ced422` (`main`, 2026-11-06), alone and after the other patches.

@@ -279,10 +279,10 @@ index 787a710631..f1d0a043c6 100644
      from gateway.session_cli_turn import classic_cli_turn
 diff --git a/tests/acp_adapter/test_gateway_terminal_output.py b/tests/acp_adapter/test_gateway_terminal_output.py
 new file mode 100644
-index 0000000000..b7954776c1
+index 0000000000..4d967f85f0
 --- /dev/null
 +++ b/tests/acp_adapter/test_gateway_terminal_output.py
-@@ -0,0 +1,151 @@
+@@ -0,0 +1,155 @@
 +"""A foreground ``terminal`` command's output reaches an editor while it runs.
 +
 +The real terminal tool runs a real shell command through the local backend; its live output goes
@@ -425,13 +425,17 @@ index 0000000000..b7954776c1
 +    assert [update.field_meta for update in _updates(editor)] == [None, None]
 +
 +
-+def test_output_from_a_private_key_onward_is_never_streamed():
++@pytest.mark.parametrize("header, rest", [
++    ("-----BEGIN OPENSSH PRIVATE", " KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA\n-----END OPENSSH PRIVATE KEY-----\n"),
++    ("-----BEGIN PGP PRIVATE", " KEY BLOCK-----\n\nlQOYBGVhc2VjcmV0AAAA\n-----END PGP PRIVATE KEY BLOCK-----\n"),
++])
++def test_output_from_a_private_key_onward_is_never_streamed(header, rest):
 +    """A key spans lines, so a batch boundary could split it past the redaction pattern."""
 +    sent = []
-+    live = LiveOutput(sent.append, "cat id_rsa", ())
-+    live.feed("before\n-----BEGIN OPENSSH PRIVATE")
++    live = LiveOutput(sent.append, "cat key", ())
++    live.feed(f"before\n{header}")
 +    live.flush()
-+    live.feed(" KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA\n-----END OPENSSH PRIVATE KEY-----\nafter\n")
++    live.feed(f"{rest}after\n")
 +    live.flush(final=True)
 +    assert sent == ["before"]
 diff --git a/tools/environments/base.py b/tools/environments/base.py
@@ -522,10 +526,10 @@ index 7c7c5db8c2..3c5f0a4bae 100644
              # Spill tee activates at the first overflow, then mirrors every chunk.
 diff --git a/tools/environments/live_output.py b/tools/environments/live_output.py
 new file mode 100644
-index 0000000000..c764f26647
+index 0000000000..2ae4de0425
 --- /dev/null
 +++ b/tools/environments/live_output.py
-@@ -0,0 +1,99 @@
+@@ -0,0 +1,100 @@
 +"""A foreground command's output while it runs, for the viewers of its ``terminal`` call.
 +
 +Display only: the model still gets ``finalize_foreground_result``'s output, which also replaces what the
@@ -543,8 +547,9 @@ index 0000000000..c764f26647
 +# A flood keeps only its newest lines per batch: viewers show a tail, and every batch lands in the
 +# session's bounded replay ring.
 +_MAX_BATCH_CHARS = 8 * 1024
-+# A private key spans lines, so a batch boundary could split it past the redaction pattern.
-+_KEY_MARKER = "PRIVATE KEY-----"
++# A private key spans lines, so a batch boundary could split it past the redaction pattern. Every
++# private-key header holds this (PEM, OpenSSH, ``PGP PRIVATE KEY BLOCK``); a false match only ends the live view.
++_KEY_MARKER = "PRIVATE KEY"
 +
 +
 +class LiveOutput:

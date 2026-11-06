@@ -236,6 +236,8 @@ export type OrchestratorFixtureInputStep =
       readonly waitForTurnItemType?: OrchestrationV2TurnItem["type"];
       /** With waitForTurnItemType: wait until that item has this status. */
       readonly waitForTurnItemStatus?: OrchestrationV2TurnItem["status"];
+      /** With waitForTurnItemType: wait until the run has this many such items. */
+      readonly waitForTurnItemCount?: number;
       /** With waitForTurnItemType: wait for it in one of the run's subagent threads. */
       readonly inSubagentThread?: boolean;
     }
@@ -849,6 +851,9 @@ export function materializeFixtureInput(input: {
               ...(step.waitForTurnItemStatus === undefined
                 ? {}
                 : { itemStatus: step.waitForTurnItemStatus }),
+              ...(step.waitForTurnItemCount === undefined
+                ? {}
+                : { itemCount: step.waitForTurnItemCount }),
               ...(step.inSubagentThread === true ? { inSubagentThreads: true } : {}),
             });
           }
@@ -1397,6 +1402,30 @@ export function assertReplayLabelPrefixCount(
   assert.equal(countReplayLabelsWithPrefix(transcript, prefix), expected);
 }
 
+/** An ACP transcript's requests per agent process: each method, or a slash-command prompt's text. */
+export function acpOutboundRequestsByProcess(
+  transcript: ProviderReplayTranscript,
+): ReadonlyArray<ReadonlyArray<string>> {
+  const processes: Array<Array<string>> = [[]];
+  for (const entry of transcript.entries) {
+    if (entry.type === "runtime_exit") {
+      processes.push([]);
+      continue;
+    }
+    if (entry.type !== "expect_outbound" || field(entry.frame, "kind") !== "request") continue;
+    const prompt = field(field(entry.frame, "params"), "prompt");
+    const text = Array.isArray(prompt) ? field(prompt[0], "text") : undefined;
+    processes
+      .at(-1)
+      ?.push(
+        typeof text === "string" && text.startsWith("/")
+          ? text
+          : String(field(entry.frame, "method")),
+      );
+  }
+  return processes.filter((requests) => requests.length > 0);
+}
+
 export function assertRuntimeRequestKinds(
   projection: OrchestrationV2ThreadProjection,
   expectedKinds: ReadonlyArray<string>,
@@ -1506,4 +1535,24 @@ export function backgroundNotifications(projection: OrchestrationV2ThreadProject
       ? [{ summary: item.summary, outcome: item.outcome, source: item.source }]
       : [],
   );
+}
+
+/** The value keyed by this transcript's scenario, so a reference and its twin share one contract. */
+export function forScenario<T>(
+  transcript: ProviderReplayTranscript,
+  byScenario: Readonly<Record<string, T>>,
+): T {
+  const value = byScenario[transcript.scenario];
+  assert.isDefined(value, `no entry for scenario ${transcript.scenario}`);
+  return value;
+}
+
+/** The first background task any roster listed, with the index of the event that listed it. */
+export function firstBackgroundRosterTask(result: OrchestratorV2ScenarioResult) {
+  for (const [index, event] of result.domainEvents.entries()) {
+    if (event.type !== "provider-thread.updated") continue;
+    const task = event.payload.pendingBackgroundTasks?.[0];
+    if (task !== undefined) return { task, index };
+  }
+  throw new Error("no background task reached the roster");
 }

@@ -387,6 +387,85 @@ describe("deriveRunlessWorkStartedAt", () => {
       deriveRunlessWorkStartedAt({ ...v2Projection, nodes: [rootTurn("running")] }),
     ).toBeNull();
   });
+
+  it("times a live mirrored Hermes run from its latest prompt until it idles or ends", () => {
+    const hermesRun = {
+      profile: "upstream-sync",
+      sourceKey: "webhook:upstream-conflict",
+      sourceLabel: "webhook/upstream-conflict",
+      sessionId: "session-1",
+      latestSessionId: "session-1",
+      live: true,
+    };
+    const prompt = {
+      id: TurnItemId.make("hermes-run:upstream-sync:session-1:m1"),
+      threadId: v2Projection.thread.id,
+      runId: null,
+      nodeId: null,
+      providerThreadId: null,
+      providerTurnId: null,
+      nativeItemRef: null,
+      parentItemId: null,
+      ordinal: 1,
+      status: "completed" as const,
+      title: null,
+      startedAt: now,
+      completedAt: now,
+      updatedAt: now,
+      createdBy: "user" as const,
+      creationSource: "server" as const,
+      type: "user_message" as const,
+      messageId: MessageId.make("hermes-run:upstream-sync:session-1:m1"),
+      inputIntent: "turn_start" as const,
+      text: "Resolve the upstream merge conflict.",
+      attachments: [],
+    };
+    const mirrored = {
+      ...v2Projection,
+      thread: { ...v2Projection.thread, createdAt: later, hermesRun },
+      turnItems: [prompt],
+    };
+    const withRun = (changes: Partial<typeof hermesRun> & { idle?: boolean }) => ({
+      ...mirrored,
+      thread: { ...mirrored.thread, hermesRun: { ...hermesRun, ...changes } },
+    });
+
+    expect(deriveRunlessWorkStartedAt(mirrored)).toBe("2026-07-28T10:00:00.000Z");
+    const at = (iso: string) => DateTime.makeUnsafe(iso);
+    const notice = {
+      ...prompt,
+      id: TurnItemId.make("hermes-run:upstream-sync:session-1:notice"),
+      type: "system_notice" as const,
+      message: "Background process finished.",
+      ordinal: 5,
+      startedAt: at("2026-07-28T10:20:00.000Z"),
+    };
+    const laterNotice = {
+      ...notice,
+      id: TurnItemId.make("hermes-run:upstream-sync:session-1:notice-2"),
+      ordinal: 7,
+      startedAt: at("2026-07-28T10:25:00.000Z"),
+    };
+    const wake = {
+      ...prompt,
+      id: TurnItemId.make("hermes-run:upstream-sync:session-1:m9"),
+      ordinal: 9,
+      startedAt: at("2026-07-28T10:30:00.000Z"),
+    };
+    // Older history pages land after the items already loaded.
+    expect(deriveRunlessWorkStartedAt({ ...mirrored, turnItems: [wake, prompt, notice] })).toBe(
+      "2026-07-28T10:30:00.000Z",
+    );
+    // A history page that starts mid-response, or holds nothing yet.
+    expect(deriveRunlessWorkStartedAt({ ...mirrored, turnItems: [laterNotice, notice] })).toBe(
+      "2026-07-28T10:20:00.000Z",
+    );
+    expect(deriveRunlessWorkStartedAt({ ...mirrored, turnItems: [] })).toBe(
+      "2026-07-28T10:05:00.000Z",
+    );
+    expect(deriveRunlessWorkStartedAt(withRun({ idle: true }))).toBeNull();
+    expect(deriveRunlessWorkStartedAt(withRun({ live: false }))).toBeNull();
+  });
 });
 
 describe("deriveProviderSubagentStatus", () => {

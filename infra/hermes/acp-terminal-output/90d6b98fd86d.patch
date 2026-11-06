@@ -1,0 +1,658 @@
+diff --git a/acp_adapter/gateway_server.py b/acp_adapter/gateway_server.py
+index 1adcaed863..13391eeb11 100644
+--- a/acp_adapter/gateway_server.py
++++ b/acp_adapter/gateway_server.py
+@@ -120,6 +120,9 @@ class GatewayACPAgent(GatewayReplyMixin, acp.Agent):
+         self._aliases = {}
+         self._form_elicitation = False
+         self._delegation = {}  # the editor's ``_meta.hermes.delegation`` (acp_adapter/editor_delegation.py)
++        # The editor renders ``_meta.terminal_output`` (``acp_adapter/terminal_output.py``); the open calls it was sent for.
++        self._terminal_output = False
++        self._live_terminals = set()
+         from hermes_cli.gateway_mutations import PreparedMutations
+         self._mutations = PreparedMutations()
+         # Session -> title the editor was last shown (``session_info_update`` fires on a change).
+@@ -146,9 +149,11 @@ class GatewayACPAgent(GatewayReplyMixin, acp.Agent):
+         if getattr(event, "direction", None) == "incoming" and isinstance(message, dict) \
+                 and message.get("method") == "initialize":
+             from acp_adapter.elicitation import client_supports_form_elicitation
++            from acp_adapter.terminal_output import client_renders_terminal_output
+             self._form_elicitation = client_supports_form_elicitation(message.get("params"))
+             from acp_adapter.editor_delegation import requested_delegation
+             self._delegation = requested_delegation(message.get("params"))
++            self._terminal_output = client_renders_terminal_output(message.get("params"))
+ 
+     async def initialize(self, **kwargs):
+         from hermes_cli import __version__
+@@ -1063,6 +1068,13 @@ class GatewayACPAgent(GatewayReplyMixin, acp.Agent):
+         if kind in {"reasoning.delta", "todo.updated"}:
+             await self._project_side_update(kind, sid, editor_id, payload)
+             return
++        if kind == "tool.output":
++            from acp_adapter.terminal_output import project_tool_output
++            await project_tool_output(self, sid, editor_id, payload)
++            return
++        if kind == "tool.complete":
++            from acp_adapter.terminal_output import close_tool_terminal
++            await close_tool_terminal(self, sid, editor_id, payload)
+         if kind in {"tool.start", "tool.complete"}:
+             await self._project_tool(kind, sid, editor_id, aid, payload)
+             return
+diff --git a/acp_adapter/terminal_output.py b/acp_adapter/terminal_output.py
+new file mode 100644
+index 0000000000..bae45a4086
+--- /dev/null
++++ b/acp_adapter/terminal_output.py
+@@ -0,0 +1,69 @@
++"""A running ``terminal`` call's output as the editor's display-only terminal.
++
++ACP v1 has no update that appends to a tool call: ``content`` replaces the card's content, so streaming
++through it would resend the whole output with each piece. Editors that render a terminal from tool-call
++``_meta`` advertise ``clientCapabilities._meta.terminal_output: true`` (Zed, T3 Code), and codex-acp and
++claude-agent-acp then use ``terminal_info``, ``terminal_output`` and ``terminal_exit``. Hermes does the same
++with the gateway's ``tool.output`` frames. The call's ``tool.complete`` update still sends its result as
++content, so a client without the capability sees no change.
++"""
++
++from __future__ import annotations
++
++import json
++from typing import Any
++
++import acp
++
++
++def client_renders_terminal_output(initialize_params: Any) -> bool:
++    """``clientCapabilities._meta.terminal_output`` is true, read from the raw initialize params
++    (the pinned SDK's ``ClientCapabilities`` keeps no ``_meta``)."""
++    capabilities = initialize_params.get("clientCapabilities") if isinstance(initialize_params, dict) else None
++    meta = capabilities.get("_meta") if isinstance(capabilities, dict) else None
++    return isinstance(meta, dict) and meta.get("terminal_output") is True
++
++
++async def project_tool_output(agent, sid, editor_id, payload) -> None:
++    """One ``tool.output`` frame as a ``tool_call_update`` carrying only ``_meta.terminal_output``.
++
++    Before a call's first one, the call is announced again (``tool_call``, which editors upsert) with a
++    ``terminal`` content block and ``terminal_info``: Zed creates the terminal only from a ``tool_call``,
++    and only calls that print anything get one. Frames for a call the editor no longer shows open are
++    dropped."""
++    key = (sid, payload.get("tool_id"))
++    text = payload.get("text")
++    if not agent._terminal_output or key not in agent._tool_args or not isinstance(text, str) or not text \
++            or not agent._conn:
++        return
++    call_id = key[1]
++    if key not in agent._live_terminals:
++        from acp_adapter.tools import build_tool_start
++        agent._live_terminals.intersection_update(agent._tool_args)
++        agent._live_terminals.add(key)
++        tool_name, args, _ = agent._tool_args[key]
++        opened = build_tool_start(call_id, tool_name, args)
++        opened.status = "in_progress"
++        opened.content = [acp.tool_terminal_ref(call_id)]
++        opened.field_meta = {"terminal_info": {"terminal_id": call_id}}
++        await agent._conn.session_update(session_id=editor_id, update=opened)
++    update = acp.update_tool_call(call_id)
++    update.field_meta = {"terminal_output": {"terminal_id": call_id, "data": text}}
++    await agent._conn.session_update(session_id=editor_id, update=update)
++
++
++async def close_tool_terminal(agent, sid, editor_id, payload) -> None:
++    """Before a call's ``tool.complete`` replaces its card: ``terminal_exit`` for the terminal it opened."""
++    key = (sid, payload.get("tool_call_id"))
++    if key not in agent._live_terminals:
++        return
++    agent._live_terminals.discard(key)
++    try:
++        exit_code = json.loads(payload.get("result") or "").get("exit_code")
++    except (TypeError, ValueError, AttributeError):
++        exit_code = None
++    if agent._conn:
++        update = acp.update_tool_call(key[1])
++        update.field_meta = {"terminal_exit": {
++            "terminal_id": key[1], "exit_code": exit_code if isinstance(exit_code, int) else None, "signal": None}}
++        await agent._conn.session_update(session_id=editor_id, update=update)
+diff --git a/agent/tool_executor.py b/agent/tool_executor.py
+index 962ce4df09..5bc4f04a7c 100644
+--- a/agent/tool_executor.py
++++ b/agent/tool_executor.py
+@@ -741,9 +741,10 @@ def _dispatch_authorized_once(
+     from agent.terminal_approval_batch import prepare_current_terminal
+     prepare_current_terminal(ref)
+     _advance_start_order(lambda: _begin_tool_execution(agent, ref, display_index))
+-    from agent.tool_progress_relay import bound_tool_progress
++    from agent.tool_progress_relay import bound_tool_output, bound_tool_progress
+     from tools.connectors.data_use import collect_data_use
+-    with bound_tool_progress(agent.tool_progress_callback, ref.name, ref.call_id), collect_data_use() as data_use:
++    with bound_tool_progress(agent.tool_progress_callback, ref.name, ref.call_id), \
++            bound_tool_output(agent.tool_progress_callback, ref.name, ref.call_id), collect_data_use() as data_use:
+         try:
+             return _run_with_activity_heartbeat(agent, ref.name, lambda: execute(ref.args))
+         finally:
+diff --git a/agent/tool_progress_relay.py b/agent/tool_progress_relay.py
+index 33bc6e39f8..03c63132d5 100644
+--- a/agent/tool_progress_relay.py
++++ b/agent/tool_progress_relay.py
+@@ -74,3 +74,40 @@ def tool_progress_payload(name: Optional[str], message: Optional[str], kwargs: d
+     return {"tool_id": str(kwargs.get("tool_call_id") or ""), "name": str(name or ""),
+             "progress": float(kwargs.get("progress") or 0.0), "total": kwargs.get("total"),
+             "percent": kwargs.get("percent"), "message": str(message) if message else None}
++
++
++TOOL_OUTPUT_EVENT = "tool.output"
++
++OutputReporter = Callable[[str], None]
++_output: contextvars.ContextVar[Optional[OutputReporter]] = contextvars.ContextVar("tool_output_reporter", default=None)
++
++
++def _output_reporter(callback, tool_name: str, tool_call_id: str) -> OutputReporter:
++    def report(text: str) -> None:
++        try:
++            callback(TOOL_OUTPUT_EVENT, tool_name, None, None, tool_call_id=tool_call_id, text=text)
++        except Exception:  # health: allow BLE001 -- a UI sink failing must never fail the tool call
++            logger.debug("tool.output callback failed for %s", tool_name, exc_info=True)
++    return report
++
++
++@contextlib.contextmanager
++def bound_tool_output(callback, tool_name: str, tool_call_id: str) -> Iterator[None]:
++    """Bind this call's live-output sink for the block (no-op when the agent has no progress callback).
++    The tool decides what to send and how often: ``tools/environments/live_output.py`` for ``terminal``."""
++    token = _output.set(_output_reporter(callback, tool_name, tool_call_id or "") if callback else None)
++    try:
++        yield
++    finally:
++        _output.reset(token)
++
++
++def current_tool_output() -> Optional[OutputReporter]:
++    """The running call's live-output sink (display only, never the model's result), or None."""
++    return _output.get()
++
++
++def tool_output_payload(name: Optional[str], kwargs: dict) -> dict:
++    """The ``tool.output`` wire payload: the next piece of a running call's output, in order."""
++    return {"tool_id": str(kwargs.get("tool_call_id") or ""), "name": str(name or ""),
++            "text": str(kwargs.get("text") or "")}
+diff --git a/apps/shared/src/gateway-contract.generated.ts b/apps/shared/src/gateway-contract.generated.ts
+index 24680fc7a6..856a8039ce 100644
+--- a/apps/shared/src/gateway-contract.generated.ts
++++ b/apps/shared/src/gateway-contract.generated.ts
+@@ -5950,6 +5950,12 @@ export interface ToolProgressPayload {
+   percent?: number | null
+   message?: string | null
+ }
++/** ``agent.tool_progress_relay.tool_output_payload`` — the next redacted piece of a running foreground ``terminal`` call's output (``tools/environments/live_output.py``), whole lines, at most four per second; display only, the call's result replaces it. */
++export interface ToolOutputPayload {
++  tool_id: string
++  name: string
++  text: string
++}
+ /** ``tool_progress._normalize_todo_state`` — full task snapshot. */
+ export interface TodoUpdatedPayload {
+   todos: unknown[]
+@@ -7277,6 +7283,8 @@ export interface BackendGatewayEventMap {
+   'tool.complete': ToolCompletePayload
+   /** The model is emitting a tool call's arguments. */
+   'tool.generating': ToolGeneratingPayload
++  /** Live output of a running tool call (a foreground terminal command). */
++  'tool.output': ToolOutputPayload
+   /** Tool output was classified as risky (prompt-injection / secret findings). */
+   'tool.output_risk': ToolOutputRiskPayload
+   /** Live progress of a running tool call (MCP notifications/progress). */
+@@ -7366,6 +7374,7 @@ export const GATEWAY_EVENT_TYPES = [
+   'todo.updated',
+   'tool.complete',
+   'tool.generating',
++  'tool.output',
+   'tool.output_risk',
+   'tool.progress',
+   'tool.start',
+diff --git a/apps/shared/src/gateway-contract.openrpc.json b/apps/shared/src/gateway-contract.openrpc.json
+index ee6b03501e..ae9ef4be4c 100644
+--- a/apps/shared/src/gateway-contract.openrpc.json
++++ b/apps/shared/src/gateway-contract.openrpc.json
+@@ -45145,6 +45145,31 @@
+         "title": "ToolLabelKind",
+         "type": "string"
+       },
++      "ToolOutputPayload": {
++        "additionalProperties": false,
++        "description": "``agent.tool_progress_relay.tool_output_payload`` \u2014 the next redacted piece of a running\nforeground ``terminal`` call's output (``tools/environments/live_output.py``), whole lines, at\nmost four per second; display only, the call's result replaces it.",
++        "properties": {
++          "tool_id": {
++            "title": "Tool Id",
++            "type": "string"
++          },
++          "name": {
++            "title": "Name",
++            "type": "string"
++          },
++          "text": {
++            "title": "Text",
++            "type": "string"
++          }
++        },
++        "required": [
++          "tool_id",
++          "name",
++          "text"
++        ],
++        "title": "ToolOutputPayload",
++        "type": "object"
++      },
+       "ToolOutputRiskPayload": {
+         "additionalProperties": false,
+         "description": "``tool_progress._progress_output_risk``.",
+@@ -50737,6 +50762,18 @@
+         }
+       ]
+     },
++    {
++      "name": "tool.output",
++      "summary": "Live output of a running tool call (a foreground terminal command).",
++      "params": [
++        {
++          "name": "payload",
++          "schema": {
++            "$ref": "#/components/schemas/ToolOutputPayload"
++          }
++        }
++      ]
++    },
+     {
+       "name": "tool.output_risk",
+       "summary": "Tool output was classified as risky (prompt-injection / secret findings).",
+diff --git a/gateway/local_viewer_events.py b/gateway/local_viewer_events.py
+index d90daf24b6..6722caf233 100644
+--- a/gateway/local_viewer_events.py
++++ b/gateway/local_viewer_events.py
+@@ -142,6 +142,10 @@ def publish_progress(turn, event_type, name, preview, kwargs) -> None:
+         from agent.tool_progress_relay import tool_progress_payload
+         turn._publish_execution(event_type, tool_progress_payload(name, preview, kwargs))
+         return
++    if event_type == "tool.output":
++        from agent.tool_progress_relay import tool_output_payload
++        turn._publish_execution("tool.output", tool_output_payload(name, kwargs))
++        return
+     if event_type != "reasoning.available" and event_type not in _MOA_KEYS:
+         return
+     from gateway.session_cli_turn import classic_cli_turn
+diff --git a/tests/acp_adapter/test_gateway_terminal_output.py b/tests/acp_adapter/test_gateway_terminal_output.py
+new file mode 100644
+index 0000000000..4d967f85f0
+--- /dev/null
++++ b/tests/acp_adapter/test_gateway_terminal_output.py
+@@ -0,0 +1,155 @@
++"""A foreground ``terminal`` command's output reaches an editor while it runs.
++
++The real terminal tool runs a real shell command through the local backend; its live output goes
++through the bound ``tool.output`` sink, the gateway turn's progress callback and the viewer stream
++into ``GatewayACPAgent``, which projects it as ``_meta.terminal_output`` for an editor that renders
++it (Zed, T3 Code)."""
++from __future__ import annotations
++
++import json
++import threading
++from types import SimpleNamespace
++from unittest.mock import AsyncMock
++
++import pytest
++
++import tools.terminal_tool as terminal_tool_module
++from acp_adapter.gateway_server import GatewayACPAgent
++from agent.tool_progress_relay import bound_tool_output
++from gateway.config import Platform
++from gateway.run_turn_runner import TurnRunner
++from tools.ansi_strip import strip_ansi
++from tools.environments.live_output import LiveOutput
++from tools.environments.local import LocalEnvironment
++
++TOKEN = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
++
++
++def _turn(published, first_output):
++    """A LOCAL (ACP-created) session's turn whose viewer frames land in *published*."""
++    def publish(kind, payload):
++        published.append((kind, payload))
++        if kind == "tool.output":
++            first_output.set()
++        return True
++
++    turn = object.__new__(TurnRunner)
++    turn._ctx = SimpleNamespace(source=SimpleNamespace(platform=Platform.LOCAL, chat_id="chat"),
++                                progress_queue=None, _live_status_adapter=None, log_queue=None)
++    turn._approval_owner = (SimpleNamespace(sessions={"s": SimpleNamespace(tool_progress_mode=None)}), "s", 1)
++    turn._publish_execution = publish
++    return turn
++
++
++def _editor(*, terminal_output):
++    editor = GatewayACPAgent()
++    editor._snapshots["s"] = {}
++    editor._gateway = AsyncMock()
++    editor._conn = AsyncMock()
++    capabilities = {"_meta": {"terminal_output": True}} if terminal_output else {}
++    editor._observe_client_message(SimpleNamespace(direction="incoming", message={
++        "method": "initialize", "params": {"protocolVersion": 1, "clientCapabilities": capabilities}}))
++    return editor
++
++
++def _updates(editor):
++    return [call.kwargs["update"] for call in editor._conn.session_update.await_args_list]
++
++
++async def _project(editor, kind, payload):
++    await editor._project({"session_id": "s", "type": kind, "admission_id": "a", "payload": payload})
++
++
++@pytest.fixture
++def terminal(monkeypatch, tmp_path):
++    env = LocalEnvironment(cwd=str(tmp_path))
++    monkeypatch.setattr(terminal_tool_module, "_get_env_config", lambda: {
++        "env_type": "local", "timeout": 60, "cwd": str(tmp_path), "host_cwd": None, "modal_mode": "auto",
++        "docker_image": "", "modal_image": "", "daytona_image": ""})
++    monkeypatch.setattr(terminal_tool_module, "_start_cleanup_thread", lambda: None)
++    monkeypatch.setattr(terminal_tool_module, "_check_all_guards", lambda *_a, **_k: {"approved": True})
++    monkeypatch.setitem(terminal_tool_module._active_environments, "default", env)
++    monkeypatch.setitem(terminal_tool_module._last_activity, "default", 0.0)
++    try:
++        yield tmp_path
++    finally:
++        env.cleanup()
++
++
++@pytest.mark.asyncio
++async def test_a_running_command_streams_its_output_to_an_editor_that_renders_it(terminal):
++    # The command holds after its first line until the test has seen that line arrive.
++    command = ("printf '\\033[32mline 1\\033[0m\\n'; while [ ! -e go ]; do sleep 0.05; done; "
++               f"echo token={TOKEN}; printf 'progress 50%%\\rprogress 100%%\\n'")
++    published, first_output, result = [], threading.Event(), {}
++    turn = _turn(published, first_output)
++
++    def run():
++        with bound_tool_output(turn.progress_callback, "terminal", "c1"):
++            result.update(json.loads(terminal_tool_module.terminal_tool(command=command)))
++
++    worker = threading.Thread(target=run)
++    worker.start()
++    streamed_while_running = first_output.wait(30)
++    (terminal / "go").touch()
++    worker.join(30)
++    assert streamed_while_running and not worker.is_alive()
++
++    frames = [payload for kind, payload in published if kind == "tool.output"]
++    assert {(frame["tool_id"], frame["name"]) for frame in frames} == {("c1", "terminal")}
++    live = "".join(frame["text"] for frame in frames)
++    assert frames[0]["text"] == "\x1b[32mline 1\x1b[0m"
++    assert "progress 50%\rprogress 100%" in live
++    assert TOKEN not in live and TOKEN not in result["output"]
++    assert "__HERMES_" not in live
++    # The model's result is unchanged, and it is what the viewer was shown, without colour.
++    assert "\x1b" not in result["output"] and result["exit_code"] == 0
++    assert strip_ansi(live).strip() == result["output"]
++
++    editor = _editor(terminal_output=True)
++    start = {"tool_call_id": "c1", "tool_name": "terminal", "args": {"command": command}}
++    await _project(editor, "tool.start", start)
++    for frame in frames:
++        await _project(editor, "tool.output", frame)
++    await _project(editor, "tool.complete", {**start, "is_error": False, "result": json.dumps(result)})
++    started, opened, *streamed, exited, completed = _updates(editor)
++    # Zed creates the display terminal only from a ``tool_call``, which it upserts onto the started call.
++    assert (opened.session_update, opened.tool_call_id, opened.title, opened.status) == (
++        "tool_call", "c1", started.title, "in_progress")
++    assert [block.terminal_id for block in opened.content] == ["c1"]
++    assert opened.field_meta == {"terminal_info": {"terminal_id": "c1"}}
++    assert all(update.content is None and set(update.field_meta) == {"terminal_output"} for update in streamed)
++    assert "".join(update.field_meta["terminal_output"]["data"] for update in streamed) == live
++    assert exited.field_meta == {"terminal_exit": {"terminal_id": "c1", "exit_code": 0, "signal": None}}
++    assert completed.status == "completed" and completed.field_meta is None
++
++
++@pytest.mark.asyncio
++async def test_output_reaches_only_an_editor_that_renders_it_and_only_while_the_call_is_open():
++    start = {"tool_call_id": "c1", "tool_name": "terminal", "args": {"command": "make"}}
++    output = {"tool_id": "c1", "name": "terminal", "text": "building"}
++    plain = _editor(terminal_output=False)
++    await _project(plain, "tool.start", start)
++    await _project(plain, "tool.output", output)
++    assert len(_updates(plain)) == 1
++
++    editor = _editor(terminal_output=True)
++    await _project(editor, "tool.start", start)
++    await _project(editor, "tool.complete", {**start, "is_error": False, "result": '{"output": "", "exit_code": 0}'})
++    await _project(editor, "tool.output", output)
++    assert [update.field_meta for update in _updates(editor)] == [None, None]
++
++
++@pytest.mark.parametrize("header, rest", [
++    ("-----BEGIN OPENSSH PRIVATE", " KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA\n-----END OPENSSH PRIVATE KEY-----\n"),
++    ("-----BEGIN PGP PRIVATE", " KEY BLOCK-----\n\nlQOYBGVhc2VjcmV0AAAA\n-----END PGP PRIVATE KEY BLOCK-----\n"),
++])
++def test_output_from_a_private_key_onward_is_never_streamed(header, rest):
++    """A key spans lines, so a batch boundary could split it past the redaction pattern."""
++    sent = []
++    live = LiveOutput(sent.append, "cat key", ())
++    live.feed(f"before\n{header}")
++    live.flush()
++    live.feed(f"{rest}after\n")
++    live.flush(final=True)
++    assert sent == ["before"]
+diff --git a/tools/environments/base.py b/tools/environments/base.py
+index bcb2ba0ae8..dfdf6cf699 100644
+--- a/tools/environments/base.py
++++ b/tools/environments/base.py
+@@ -508,12 +508,15 @@ class BaseEnvironment(ABC):
+     def _wait_for_process(
+         self, proc: ProcessHandle, timeout: int = 120, *,
+         bounded_capture: bool = False, watch_interrupt_tid: int | None = None,
+-        output=None, yield_handler: Callable[[ProcessHandle, str], dict] | None = None) -> dict:
++        output=None, yield_handler: Callable[[ProcessHandle, str], dict] | None = None,
++        live_output=None) -> dict:
+         """Poll-based wait with interrupt checking and stdout draining (shared, not overridden).
+         ``yield_handler(proc, output_so_far)``: when the tool thread is asked to yield
+         (``tools.interrupt.request_yield`` — a user message arrived mid-command), the drain
+         thread is stopped, the still-running process is handed to the handler and its dict
+         is returned as the result; the process is NOT killed.
++        ``live_output`` (a ``LiveOutput`` fed by *output*'s tee) is flushed while the process runs
++        and once after it exits, for the running tool call's viewers.
+         ``bounded_capture=True`` (foreground terminal-tool path only) retains at most
+         ``tool_output.max_bytes`` in a head/tail window so a verbose subprocess cannot OOM the
+         process; the default keeps full fidelity for internal consumers. Fires the activity
+@@ -575,6 +578,8 @@ class BaseEnvironment(ABC):
+                     # The flag tells Hermes' own deadline apart from a command's own ``exit 124``.
+                     return {**self._finalize_wait_result(output, rendered, 124), "hermes_timed_out": True}
+                 touch_activity_if_due(_activity_state, "terminal command running")
++                if live_output is not None:
++                    live_output.flush()
+                 trace.heartbeat()
+                 time.sleep(_poll_sleep)
+                 if _poll_sleep < 0.2:
+@@ -594,6 +599,8 @@ class BaseEnvironment(ABC):
+             proc.stdout.close()
+         except Exception:
+             pass
++        if live_output is not None:
++            live_output.flush(final=True)
+         trace.natural_exit(proc.returncode)
+ 
+         # Join the stdin writer before reading its error list: a child that exits without
+@@ -716,6 +723,8 @@ class BaseEnvironment(ABC):
+         parent_activity_cb = get_activity_callback()
+         proc_holder: list = []
+         output_holder: list = []
++        from tools.environments.live_output import live_output_for
++        live = live_output_for(command, (getattr(self, "_cwd_marker", ""), self._pipe_marker)) if bounded_capture else None
+ 
+         def _spawn_and_wait() -> dict:
+             if parent_activity_cb is not None:
+@@ -732,11 +741,14 @@ class BaseEnvironment(ABC):
+                 self._force_kill_process(spawned)
+             output = _new_output_collector(spawned, bounded_capture)
+             output_holder.append(output)
++            if live is not None:
++                output.tee = live.feed
+             try:
+                 return self._wait_for_process(
+                     spawned, timeout=effective_timeout, bounded_capture=bounded_capture,
+                     watch_interrupt_tid=parent_tid, output=output,
+-                    **({"yield_handler": yield_handler} if yield_handler is not None else {}))
++                    **({"yield_handler": yield_handler} if yield_handler is not None else {}),
++                    **({"live_output": live} if live is not None else {}))
+             finally:
+                 with _live_foreground_cond:
+                     _live_foreground.pop(id(spawned), None)
+diff --git a/tools/environments/base_output.py b/tools/environments/base_output.py
+index 7c7c5db8c2..3c5f0a4bae 100644
+--- a/tools/environments/base_output.py
++++ b/tools/environments/base_output.py
+@@ -33,6 +33,8 @@ class _BoundedOutputCollector:
+ 
+     # Hard ceiling on spill file size; protects disk from runaway output.
+     _SPILL_CAP_CHARS = 5_000_000
++    # Sees every chunk before retention (``LiveOutput.feed``); never changes what is retained.
++    tee: Callable[[str], None] | None = None
+ 
+     def __init__(self, max_chars: int, spill_path: Path | None = None):
+         self.max_chars = max(1, int(max_chars))
+@@ -101,6 +103,8 @@ class _BoundedOutputCollector:
+     def append(self, text: str) -> None:
+         if not text:
+             return
++        if self.tee is not None:
++            self.tee(text)
+         with self._lock:
+             text_len = len(text)
+             # Spill tee activates at the first overflow, then mirrors every chunk.
+diff --git a/tools/environments/live_output.py b/tools/environments/live_output.py
+new file mode 100644
+index 0000000000..2ae4de0425
+--- /dev/null
++++ b/tools/environments/live_output.py
+@@ -0,0 +1,100 @@
++"""A foreground command's output while it runs, for the viewers of its ``terminal`` call.
++
++Display only: the model still gets ``finalize_foreground_result``'s output, which also replaces what the
++viewer was shown when the call completes. Each batch gets the same secret redaction as that result, holds
++whole lines (``\\n`` or ``\\r``), and goes out at most every ``_FLUSH_INTERVAL_S``.
++"""
++
++from __future__ import annotations
++
++import threading
++import time
++from typing import Callable, Iterable, Optional
++
++_FLUSH_INTERVAL_S = 0.25
++# A flood keeps only its newest lines per batch: viewers show a tail, and every batch lands in the
++# session's bounded replay ring.
++_MAX_BATCH_CHARS = 8 * 1024
++# A private key spans lines, so a batch boundary could split it past the redaction pattern. Every
++# private-key header holds this (PEM, OpenSSH, ``PGP PRIVATE KEY BLOCK``); a false match only ends the live view.
++_KEY_MARKER = "PRIVATE KEY"
++
++
++class LiveOutput:
++    def __init__(self, emit: Callable[[str], None], command: str, markers: Iterable[str]):
++        self._emit = emit
++        self._command = command
++        # The shell wrapper's cwd/pipe-status lines, printed after the command; the result strips them.
++        self._markers = tuple(marker for marker in markers if marker)
++        self._lock = threading.Lock()
++        self._chunks: list[str] = []
++        self._chars = 0
++        self._scan_tail = ""
++        self._last = 0.0
++        self._done = False
++
++    def feed(self, text: str) -> None:
++        """The drain thread's next decoded chunk."""
++        with self._lock:
++            if self._done:
++                return
++            scanned = self._scan_tail + text
++            if _KEY_MARKER in scanned:
++                self._stop()
++                return
++            self._scan_tail = scanned[-len(_KEY_MARKER):]
++            self._chunks.append(text)
++            self._chars += len(text)
++            while self._chars > 4 * _MAX_BATCH_CHARS and len(self._chunks) > 1:
++                self._chars -= len(self._chunks.pop(0))
++
++    def flush(self, *, final: bool = False) -> None:
++        """Send what arrived since the last batch; ``final`` once the process has exited."""
++        now = time.monotonic()
++        with self._lock:
++            if self._done or not self._chunks or (not final and now - self._last < _FLUSH_INTERVAL_S):
++                return
++            text = "".join(self._chunks)
++            cut = min((at for marker in self._markers if (at := text.find(marker)) != -1), default=-1)
++            if cut != -1:
++                # The wrapper starts each marker line with its own newline.
++                text = text[:cut].removesuffix("\n")
++                self._stop()
++            elif final:
++                self._stop()
++            else:
++                # Hold the last line break back with the partial line after it: it may be the wrapper's.
++                end = max(text.rfind("\n"), text.rfind("\r"))
++                if end <= 0:
++                    return
++                self._chunks, self._chars = [text[end:]], len(text) - end
++                text = text[:end]
++            self._last = now
++        if len(text) > _MAX_BATCH_CHARS:
++            text = text[-_MAX_BATCH_CHARS:]
++            text = text[max(text.find("\n"), 0):]
++        if text:
++            self._emit(_redacted(text, self._command))
++
++    def _stop(self) -> None:
++        self._done = True
++        self._chunks, self._chars = [], 0
++
++
++def _redacted(text: str, command: str) -> str:
++    """The result's redaction (``finalize_foreground_result``), keeping colour unless an escape
++    sequence split a secret the plain text shows."""
++    from agent.redact import redact_terminal_output
++    from tools.ansi_strip import strip_ansi
++    shown = redact_terminal_output(text, command)
++    if "\x1b" not in text:
++        return shown
++    plain = redact_terminal_output(strip_ansi(text), command)
++    return shown if strip_ansi(shown) == plain else plain
++
++
++def live_output_for(command: str, markers: Iterable[str]) -> Optional[LiveOutput]:
++    """A ``LiveOutput`` for the running tool call's viewers, or None when nothing listens."""
++    from agent.tool_progress_relay import current_tool_output
++    emit = current_tool_output()
++    return None if emit is None else LiveOutput(emit, command, markers)
+diff --git a/tui_gateway/contracts/events.py b/tui_gateway/contracts/events.py
+index 4fc6964c1f..d143632d38 100644
+--- a/tui_gateway/contracts/events.py
++++ b/tui_gateway/contracts/events.py
+@@ -470,6 +470,19 @@ class ToolProgressPayload(Payload):
+ event("tool.progress", ToolProgressPayload, doc="Live progress of a running tool call (MCP notifications/progress).")
+ 
+ 
++class ToolOutputPayload(Payload):
++    """``agent.tool_progress_relay.tool_output_payload`` — the next redacted piece of a running
++    foreground ``terminal`` call's output (``tools/environments/live_output.py``), whole lines, at
++    most four per second; display only, the call's result replaces it."""
++
++    tool_id: str
++    name: str
++    text: str
++
++
++event("tool.output", ToolOutputPayload, doc="Live output of a running tool call (a foreground terminal command).")
++
++
+ class TodoUpdatedPayload(Payload):
+     """``tool_progress._normalize_todo_state`` — full task snapshot."""
+ 

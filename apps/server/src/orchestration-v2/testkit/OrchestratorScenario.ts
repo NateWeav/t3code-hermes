@@ -77,6 +77,8 @@ export type OrchestratorV2ScenarioStep =
       readonly itemType: OrchestrationV2TurnItem["type"];
       /** Wait until the item also has this status. */
       readonly itemStatus?: OrchestrationV2TurnItem["status"];
+      /** Wait until the run has this many such items; defaults to one. */
+      readonly itemCount?: number;
       /** Look in the threads of the run's provider subagents instead of the run itself. */
       readonly inSubagentThreads?: boolean;
     }
@@ -226,7 +228,8 @@ const hasActiveRun = (projection: OrchestrationV2ThreadProjection) =>
 const SCENARIO_WAIT_ATTEMPTS = 10_000;
 // Iteration budgets burn through idle event-loop turns during async I/O; exhaust both iterations and wall-clock deadline.
 const SCENARIO_WAIT_DEADLINE_MS = 60_000;
-const scenarioWaitDeadline = () => performance.now() + SCENARIO_WAIT_DEADLINE_MS;
+const scenarioWaitDeadline = (deadlineMs = SCENARIO_WAIT_DEADLINE_MS) =>
+  performance.now() + deadlineMs;
 const scenarioWaitExhausted = (attemptsRemaining: number, deadlineAt: number) =>
   attemptsRemaining <= 0 && performance.now() >= deadlineAt;
 
@@ -260,6 +263,8 @@ export function runOrchestratorV2Scenario(
   options: {
     readonly replayGate?: ProviderReplayGate;
     readonly afterSteps?: Effect.Effect<void>;
+    /** Live recorders wait on real provider turns, which can outlast the replay wait deadline. */
+    readonly waitDeadlineMs?: number;
   } = {},
 ): Effect.Effect<
   OrchestratorV2ScenarioResult,
@@ -300,7 +305,7 @@ export function runOrchestratorV2Scenario(
       const waitForPendingRuntimeRequest = (
         threadId: ThreadId,
         attemptsRemaining = SCENARIO_WAIT_ATTEMPTS,
-        deadlineAt = scenarioWaitDeadline(),
+        deadlineAt = scenarioWaitDeadline(options.waitDeadlineMs),
       ): Effect.Effect<
         OrchestrationV2RuntimeRequest,
         Orchestrator.OrchestratorV2Error | OrchestratorV2ScenarioStepError,
@@ -326,7 +331,7 @@ export function runOrchestratorV2Scenario(
       const waitForThreadIdle = (
         threadId: ThreadId,
         attemptsRemaining = SCENARIO_WAIT_ATTEMPTS,
-        deadlineAt = scenarioWaitDeadline(),
+        deadlineAt = scenarioWaitDeadline(options.waitDeadlineMs),
       ): Effect.Effect<
         void,
         Orchestrator.OrchestratorV2Error | OrchestratorV2ScenarioStepError,
@@ -360,7 +365,7 @@ export function runOrchestratorV2Scenario(
       const waitForNoBackgroundWork = (
         threadId: ThreadId,
         attemptsRemaining = SCENARIO_WAIT_ATTEMPTS,
-        deadlineAt = scenarioWaitDeadline(),
+        deadlineAt = scenarioWaitDeadline(options.waitDeadlineMs),
       ): Effect.Effect<
         void,
         Orchestrator.OrchestratorV2Error | OrchestratorV2ScenarioStepError,
@@ -385,7 +390,7 @@ export function runOrchestratorV2Scenario(
         threadId: ThreadId,
         runId: OrchestrationV2Run["id"],
         attemptsRemaining = SCENARIO_WAIT_ATTEMPTS,
-        deadlineAt = scenarioWaitDeadline(),
+        deadlineAt = scenarioWaitDeadline(options.waitDeadlineMs),
       ): Effect.Effect<
         void,
         Orchestrator.OrchestratorV2Error | OrchestratorV2ScenarioStepError,
@@ -418,7 +423,7 @@ export function runOrchestratorV2Scenario(
         runId: OrchestrationV2Run["id"],
         status: OrchestrationV2Run["status"],
         attemptsRemaining = SCENARIO_WAIT_ATTEMPTS,
-        deadlineAt = scenarioWaitDeadline(),
+        deadlineAt = scenarioWaitDeadline(options.waitDeadlineMs),
       ): Effect.Effect<
         void,
         Orchestrator.OrchestratorV2Error | OrchestratorV2ScenarioStepError,
@@ -451,9 +456,10 @@ export function runOrchestratorV2Scenario(
         runId: OrchestrationV2Run["id"],
         itemType: OrchestrationV2TurnItem["type"],
         itemStatus: OrchestrationV2TurnItem["status"] | undefined,
+        itemCount: number,
         inSubagentThreads: boolean,
         attemptsRemaining = SCENARIO_WAIT_ATTEMPTS,
-        deadlineAt = scenarioWaitDeadline(),
+        deadlineAt = scenarioWaitDeadline(options.waitDeadlineMs),
       ): Effect.Effect<
         void,
         Orchestrator.OrchestratorV2Error | OrchestratorV2ScenarioStepError,
@@ -463,15 +469,19 @@ export function runOrchestratorV2Scenario(
           const projection = yield* orchestrator.getThreadProjection(threadId);
           const matches = (item: OrchestrationV2TurnItem) =>
             item.type === itemType && (itemStatus === undefined || item.status === itemStatus);
+          let found = 0;
           if (!inSubagentThreads) {
-            if (projection.turnItems.some((item) => item.runId === runId && matches(item))) return;
+            found = projection.turnItems.filter(
+              (item) => item.runId === runId && matches(item),
+            ).length;
           } else {
             for (const subagent of projection.subagents) {
               if (subagent.runId !== runId || subagent.childThreadId === null) continue;
               const child = yield* orchestrator.getThreadProjection(subagent.childThreadId);
-              if (child.turnItems.some(matches)) return;
+              found += child.turnItems.filter(matches).length;
             }
           }
+          if (found >= itemCount) return;
           if (scenarioWaitExhausted(attemptsRemaining, deadlineAt)) {
             return yield* new OrchestratorV2ScenarioStepError({
               scenario: scenario.name,
@@ -484,6 +494,7 @@ export function runOrchestratorV2Scenario(
             runId,
             itemType,
             itemStatus,
+            itemCount,
             inSubagentThreads,
             attemptsRemaining - 1,
             deadlineAt,
@@ -679,6 +690,7 @@ export function runOrchestratorV2Scenario(
               step.runId,
               step.itemType,
               step.itemStatus,
+              step.itemCount ?? 1,
               step.inSubagentThreads === true,
             );
             break;

@@ -36,12 +36,18 @@ export interface ParityScenario {
 }
 
 const applicable = { kind: "applicable" } as const;
-const twin = (reason: string): Applicability => ({ kind: "twin", reason });
+const twin = (reason: string, twinName?: string): Applicability => ({
+  kind: "twin",
+  reason,
+  ...(twinName === undefined ? {} : { twin: twinName }),
+});
 const na = (reason: string): Applicability => ({ kind: "na", reason });
 
 const CLAUDE_AGENT_TOOLS = "The prompt drives Claude's Agent/TaskStop/SendMessage tools.";
-const CLAUDE_BASH_BACKGROUND = "The prompt drives Claude's Bash run_in_background.";
-const CLAUDE_COMPACT = "The prompt sends Claude's /compact; Hermes compacts with /compress.";
+const CLAUDE_BASH_BACKGROUND =
+  "The prompt drives Claude's Bash run_in_background; the Hermes twin starts the command with terminal (background, notify).";
+const CLAUDE_COMPACT =
+  "The prompt sends Claude's /compact; Hermes compacts with /compress, and its peer turn and wake are a notify background job's own turn.";
 
 export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
   // Turn loop
@@ -79,8 +85,14 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
     hermes: applicable,
     exercises: ["streaming.streamsToolOutput", "tools.emitsToolOutput"],
   },
-  { name: "web_search", facet: "tools", hermes: applicable, providerBound: true },
-  { name: "claude_local_bash_task", facet: "tools", hermes: applicable },
+  { name: "web_search", facet: "tools", hermes: applicable },
+  {
+    name: "claude_local_bash_task",
+    facet: "tools",
+    hermes: na(
+      "Covers Claude SDK local_bash task frames not becoming subagents; the assertion pins Claude's recorded command and replies.",
+    ),
+  },
   {
     name: "claude_mcp_tool_presentation",
     facet: "tools",
@@ -99,7 +111,7 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
   {
     name: "tool_call_denied_write",
     facet: "approvals",
-    hermes: twin("The prompt names Claude's Write tool."),
+    hermes: twin("The prompt names Claude's Write tool.", "hermes_tool_call_denied_write"),
   },
 
   // Interrupt, steer, queue
@@ -140,13 +152,17 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
     facet: "planning",
     hermes: twin(
       "The prompt names Codex's update_plan tool; Hermes tracks todos with its todo tool.",
+      "hermes_todo_list",
     ),
     exercises: ["planning.emitsTodoList"],
   },
   {
     name: "plan_questions",
     facet: "planning",
-    hermes: twin("The prompt names Codex's request_user_input tool; Hermes asks with clarify."),
+    hermes: twin(
+      "The prompt names Codex's request_user_input tool; Hermes asks with clarify, which its ACP sessions offer once the acp-editor-clarify patch is applied.",
+      "hermes_plan_questions",
+    ),
     exercises: ["planning.supportsStructuredQuestions"],
   },
   {
@@ -160,6 +176,7 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
   {
     name: "subagent",
     facet: "subagents",
+    // Not provider-bound: Claude's and Codex's prompts, ids and provider threads are in their details.
     hermes: applicable,
     exercises: ["subagents.supportsSubagents", "subagents.emitsSubagentLifecycle"],
   },
@@ -171,44 +188,63 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
     hermes: applicable,
     exercises: ["approvals.approvalsCanOriginateFromSubagents"],
   },
-  { name: "subagent_v2_nested", facet: "subagents", hermes: applicable, providerBound: true },
+  // Not provider-bound: Codex's agent-path titles and provider threads are in its details.
+  { name: "subagent_v2_nested", facet: "subagents", hermes: applicable },
   { name: "subagent_v2_nested_approval", facet: "subagents", hermes: applicable },
   {
     name: "claude_nested_subagent_model",
     facet: "subagents",
-    hermes: twin("The prompt drives Claude's Agent tool with a per-subagent model."),
+    hermes: twin(
+      "The prompt drives Claude's Agent tool with a per-subagent model. Hermes's delegate_task cannot pick one: `model` is a reserved task parameter, so children run on delegation.model or the parent's model.",
+    ),
   },
 
   // Background work that outlives the turn
   {
     name: "claude_background_task_after_root",
     facet: "background",
-    hermes: twin(CLAUDE_BASH_BACKGROUND),
+    hermes: {
+      kind: "twin",
+      reason: CLAUDE_BASH_BACKGROUND,
+      twin: "hermes_background_task_after_root",
+    },
   },
   {
     name: "claude_background_task_wake",
     facet: "background",
-    hermes: twin(CLAUDE_BASH_BACKGROUND),
+    hermes: { kind: "twin", reason: CLAUDE_BASH_BACKGROUND, twin: "hermes_background_task_wake" },
   },
   {
     name: "claude_background_task_interrupt",
     facet: "background",
-    hermes: twin(CLAUDE_BASH_BACKGROUND),
+    hermes: {
+      kind: "twin",
+      reason: CLAUDE_BASH_BACKGROUND,
+      twin: "hermes_background_task_interrupt",
+    },
   },
   {
     name: "claude_background_subagent_after_root",
     facet: "background",
-    hermes: twin(CLAUDE_AGENT_TOOLS),
+    hermes: {
+      kind: "twin",
+      reason: `${CLAUDE_AGENT_TOOLS} Hermes's delegate_task always runs in the background.`,
+      twin: "hermes_background_subagent_after_root",
+    },
   },
   {
     name: "claude_background_subagent_lifecycle",
     facet: "background",
-    hermes: twin(CLAUDE_AGENT_TOOLS),
+    hermes: twin(
+      `${CLAUDE_AGENT_TOOLS} It resumes Agent A after it finished and picks its model, and Hermes's delegate_task can do neither: it only lists, steers or stops running children, and has no per-task model.`,
+    ),
   },
   {
     name: "claude_background_wake_before_queued_prompt",
     facet: "background",
-    hermes: twin(CLAUDE_AGENT_TOOLS),
+    hermes: twin(
+      `${CLAUDE_AGENT_TOOLS} A Hermes twin can't pass yet: a child stopped mid-turn wakes the gateway, which runs that turn ahead of the queued prompt inside the prompt's ACP window, and the viewer marks no boundary, so T3 shows the wake's reply in the queued prompt's run.`,
+    ),
   },
   {
     name: "claude_background_wake_before_queued_prompt_no_echo",
@@ -218,7 +254,9 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
   {
     name: "claude_nested_background_subagent_wake",
     facet: "background",
-    hermes: twin(CLAUDE_AGENT_TOOLS),
+    hermes: twin(
+      `${CLAUDE_AGENT_TOOLS} Hermes's default delegation.max_spawn_depth is 1, so a child cannot delegate, and nested delegation is separate work.`,
+    ),
   },
   {
     name: "claude_background_monitor_wake",
@@ -227,8 +265,16 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
   },
 
   // Context: compaction and resume
-  { name: "claude_compact_after_resume_wake", facet: "context", hermes: twin(CLAUDE_COMPACT) },
-  { name: "claude_compact_after_peer_turn", facet: "context", hermes: twin(CLAUDE_COMPACT) },
+  {
+    name: "claude_compact_after_resume_wake",
+    facet: "context",
+    hermes: twin(CLAUDE_COMPACT, "hermes_compact_after_resume_wake"),
+  },
+  {
+    name: "claude_compact_after_peer_turn",
+    facet: "context",
+    hermes: twin(CLAUDE_COMPACT, "hermes_compact_after_peer_turn"),
+  },
   {
     name: "claude_compact_after_peer_turn_no_echo",
     facet: "context",

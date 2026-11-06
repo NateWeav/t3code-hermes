@@ -464,8 +464,8 @@ const recordScenario = Effect.fn("recordHermesScenario")(function* (fixtureName:
   const scenario = {
     name: `${fixtureName}/hermes-record`,
     commands: materialized.commands,
-    // Gates and held-run receipts pace replay on the test clock. Live, Hermes and wall time pace
-    // themselves, so they become plain waits, and the recorder waits for Hermes to idle.
+    // Replay gates and held runs pace replay on the test clock; live, Hermes and wall time pace
+    // themselves. The clock steps stay: they order background dispatches as replay does.
     steps: materialized.steps.flatMap((step) =>
       step.type === "release_replay_gate" || step.type === "release_replay_gate_after_waiting"
         ? []

@@ -39,6 +39,7 @@ import { parseSessionUpdateEvent } from "@t3tools/provider-acp/server/runtimeMod
 import type * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 import {
   discardLostHermesTurnsOnPrompt,
+  hideHermesStopNotices,
   makeHermesAcpRuntime,
 } from "../../provider/acp/HermesAcpSupport.ts";
 import delegationFixture from "../../provider/acp/fixtures/hermes-delegation.json" with { type: "json" };
@@ -920,6 +921,47 @@ describe("Hermes prompts blocked by a lost gateway turn", () => {
       "Hermes: admitted_turn_failed",
     );
   });
+});
+
+describe("Hermes stop notices", () => {
+  type Runtime = AcpSessionRuntime.AcpSessionRuntime["Service"];
+
+  it.effect("hides Hermes's stop notices after a Stop, never the agent's own text", () =>
+    Effect.gen(function* () {
+      const shown: Array<string> = [];
+      let deliver: Parameters<Runtime["handleSessionUpdate"]>[0] = () => Effect.void;
+      const runtime = hideHermesStopNotices({
+        prompt: () => Effect.succeed({ stopReason: "end_turn" as const }),
+        cancel: Effect.void,
+        handleSessionUpdate: (handler: Parameters<Runtime["handleSessionUpdate"]>[0]) =>
+          Effect.sync(() => {
+            deliver = handler;
+          }),
+      } as unknown as Runtime);
+      yield* runtime.handleSessionUpdate((notification) =>
+        Effect.sync(() => {
+          const update = notification.update;
+          if (update.sessionUpdate === "agent_message_chunk" && update.content.type === "text") {
+            shown.push(update.content.text);
+          }
+        }),
+      );
+      const say = (text: string) =>
+        deliver({
+          sessionId: "s",
+          update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } },
+        });
+      const notStarted = "Stopped before this turn started. Your message was not processed.";
+      yield* runtime.prompt({ prompt: [{ type: "text", text: "quote it" }] });
+      yield* say(notStarted);
+      yield* runtime.cancel;
+      yield* say(notStarted);
+      yield* say("\n\nOperation interrupted: handling API error (RateLimitError: slow down).");
+      yield* runtime.prompt({ prompt: [{ type: "text", text: "again" }] });
+      yield* say("Operation interrupted: the agent's own words");
+      assert.deepEqual(shown, [notStarted, "Operation interrupted: the agent's own words"]);
+    }),
+  );
 });
 
 describe.skipIf(windowsHost)("HermesAdapterV2 across a Hermes gateway restart", () => {

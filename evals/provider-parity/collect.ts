@@ -250,6 +250,10 @@ export async function runStackSuite(input: {
                       { name: "HERMES_HOME", value: input.hermesHome },
                       { name: "HERMES_MANAGED_DIR", value: noManagedScope },
                     ],
+                    // The same `hermes` the live recorder runs, such as a patched scratch checkout.
+                    ...(process.env.T3_HERMES_BIN === undefined
+                      ? {}
+                      : { config: { binaryPath: process.env.T3_HERMES_BIN } }),
                   }
                 : {}),
             },
@@ -280,7 +284,7 @@ export async function runStackSuite(input: {
   server.stdout.on("data", (chunk) => output.push(String(chunk)));
   server.stderr.on("data", (chunk) => output.push(String(chunk)));
   try {
-    await waitForServer(port, server);
+    await waitForServer(port, server, NodePath.join(home, "userdata", "server-runtime.json"));
     // Headless serve never bootstraps a project from its cwd.
     const added = runCli(["project", "add", project, "--title", "parity-stack"], project, home);
     if (!added.ok)
@@ -357,16 +361,23 @@ export function readStackMetrics(
   });
 }
 
-async function waitForServer(port: number, server: NodeChildProcess.ChildProcess): Promise<void> {
+/** Until the server answers and has written the runtime state the CLI finds it by. */
+async function waitForServer(
+  port: number,
+  server: NodeChildProcess.ChildProcess,
+  runtimeStatePath: string,
+): Promise<void> {
   const deadline = Date.now() + 120_000;
   while (Date.now() < deadline) {
     if (server.exitCode !== null) throw new Error(`Stack server exited with ${server.exitCode}.`);
     try {
       await fetch(`http://127.0.0.1:${port}/`);
-      return;
+      // Without it the CLI writes offline and refuses the running server's lock.
+      if (NodeFS.existsSync(runtimeStatePath)) return;
     } catch {
-      await new Promise((done) => setTimeout(done, 500));
+      // Not listening yet.
     }
+    await new Promise((done) => setTimeout(done, 500));
   }
   throw new Error("Stack server did not start within 2 minutes.");
 }

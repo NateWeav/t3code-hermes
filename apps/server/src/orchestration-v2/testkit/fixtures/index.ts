@@ -218,10 +218,12 @@ import { assertSubagentOutput } from "./subagent/output.ts";
 import { subagentInput } from "./subagent/input.ts";
 import { assertCursorSubagentOutput } from "./subagent/cursor_output.ts";
 import { assertKiroSubagentOutput } from "./subagent/kiro_output.ts";
-import { assertSubagentContinueOutput } from "./subagent_continue/codex_output.ts";
+import { assertCodexSubagentContinueDetails } from "./subagent_continue/codex_output.ts";
 import { subagentContinueInput } from "./subagent_continue/input.ts";
-import { assertSubagentV2Output } from "./subagent_v2/codex_output.ts";
+import { assertSubagentContinueOutput } from "./subagent_continue/output.ts";
+import { assertCodexSubagentV2Details } from "./subagent_v2/codex_output.ts";
 import { subagentV2Input, subagentV2NestedInput } from "./subagent_v2/input.ts";
+import { assertSubagentV2Output } from "./subagent_v2/output.ts";
 import { assertCodexSubagentV2ApprovalDetails } from "./subagent_v2_approval/codex_output.ts";
 import { assertSubagentV2ApprovalOutput } from "./subagent_v2_approval/output.ts";
 import {
@@ -1429,6 +1431,14 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         // gpt-5.6-luna still runs multi-agent v1 (collabAgentToolCall); subagent_v2 covers v2.
         modelSelection: { ...CODEX_MODEL_SELECTION, model: "gpt-5.6-luna" },
         assertOutput: assertSubagentContinueOutput,
+        assertProviderDetails: assertCodexSubagentContinueDetails,
+      },
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL("./subagent_continue/hermes_transcript.ndjson", import.meta.url),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runContinuationWorker: true,
+        assertOutput: assertSubagentContinueOutput,
       },
     ],
   },
@@ -1441,12 +1451,20 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         transcriptFile: new URL("./subagent_v2/codex_transcript.ndjson", import.meta.url),
         modelSelection: CODEX_MODEL_SELECTION,
         assertOutput: assertSubagentV2Output,
+        assertProviderDetails: assertCodexSubagentV2Details,
       },
       {
         driver: ProviderDriverKind.make("muse"),
         transcriptFile: new URL("./subagent_v2/muse_transcript.ndjson", import.meta.url),
         modelSelection: MUSE_MODEL_SELECTION,
         assertOutput: assertMuseSubagentV2Output,
+      },
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL("./subagent_v2/hermes_transcript.ndjson", import.meta.url),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runContinuationWorker: true,
+        assertOutput: assertSubagentV2Output,
       },
     ],
   },
@@ -1461,6 +1479,13 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         runtimePolicyOverride: SUBAGENT_V2_APPROVAL_POLICY,
         assertOutput: assertSubagentV2ApprovalOutput,
         assertProviderDetails: assertCodexSubagentV2ApprovalDetails,
+      },
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL("./subagent_v2_approval/hermes_transcript.ndjson", import.meta.url),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runtimePolicyOverride: SUBAGENT_V2_APPROVAL_POLICY,
+        assertOutput: assertSubagentV2ApprovalOutput,
       },
     ],
   },
@@ -1498,6 +1523,16 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         runtimePolicyOverride: SUBAGENT_V2_APPROVAL_POLICY,
         assertOutput: assertSubagentV2NestedApprovalOutput,
         assertProviderDetails: assertCodexSubagentV2NestedApprovalDetails,
+      },
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./subagent_v2_nested_approval/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runtimePolicyOverride: SUBAGENT_V2_APPROVAL_POLICY,
+        assertOutput: assertSubagentV2NestedApprovalOutput,
       },
     ],
   },

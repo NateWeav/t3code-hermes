@@ -1,0 +1,211 @@
+diff --git a/acp_adapter/entry.py b/acp_adapter/entry.py
+index 32832f527c..71da220f45 100644
+--- a/acp_adapter/entry.py
++++ b/acp_adapter/entry.py
+@@ -201,6 +201,14 @@ def main(argv: list[str] | None = None) -> None:
+     # MCP discovery and execution belong to the gateway daemon; this process is a viewer.
+     agent = HermesACPAgent()
+ 
++    # The first session's reply carries the model picker: build it now, not while the editor waits.
++    # Not on Windows, where a native-extension import racing the ACP threads' imports deadlocks (#58083).
++    if sys.platform != "win32":
++        import threading
++        from acp_adapter.gateway_session_meta import warm_model_state
++
++        threading.Thread(target=warm_model_state, name="acp-model-picker", daemon=True).start()
++
+     async def serve():
+         # MCP and execution belong to the daemon. Close only this viewer, while
+         # its event loop is still alive, including on protocol/transport errors.
+diff --git a/acp_adapter/gateway_session_meta.py b/acp_adapter/gateway_session_meta.py
+index 0d6ff12748..2710937933 100644
+--- a/acp_adapter/gateway_session_meta.py
++++ b/acp_adapter/gateway_session_meta.py
+@@ -6,10 +6,13 @@ Main's in-process server read these off its live agent (``server.py`` ``_session
+ """
+ from __future__ import annotations
+ 
++from concurrent.futures import Future
+ from datetime import UTC, datetime
+ import logging
+ from pathlib import Path
+ import sqlite3
++import threading
++import time
+ 
+ from acp.schema import (
+     AvailableCommand, AvailableCommandsUpdate, ModelInfo, SessionConfigOptionSelect, SessionConfigSelectOption,
+@@ -125,7 +128,7 @@ async def session_config_options(client, session_id, models, info, mode_id):
+     return options
+ 
+ 
+-def model_state(info: dict) -> SessionModelState | None:
++def _build_model_state(info: dict) -> SessionModelState | None:
+     """The picker for the session's model (``session.info``), from the shared inventory; a single
+     current-model row when nothing is listable, as main's ``_build_model_state``. Blocking."""
+     from acp_adapter.auth import detect_provider
+@@ -150,6 +153,52 @@ def model_state(info: dict) -> SessionModelState | None:
+     return SessionModelState(available_models=[ModelInfo(model_id=choice, name=model)], current_model_id=choice)
+ 
+ 
++# A session's open, its first mode or model pick and the owner's echo of each build this picker within
++# about a second, and every build reads every provider's credentials (a few hundred ms, more while
++# they contend): concurrent and back-to-back builds for one model share one.
++PICKER_REUSE_SECONDS = 5.0
++_pickers: dict[tuple[str, str], tuple[float, Future]] = {}
++_pickers_lock = threading.Lock()
++
++
++def model_state(info: dict) -> SessionModelState | None:
++    """``_build_model_state``, one build shared by the calls for a model within ``PICKER_REUSE_SECONDS``
++    of its start; each caller gets its own copy. Blocking."""
++    from acp_adapter.auth import detect_provider
++    key = (str(info.get("model") or "").strip(), info.get("provider") or detect_provider() or "openrouter")
++    with _pickers_lock:
++        entry = _pickers.get(key)
++        shared = entry is not None and time.monotonic() - entry[0] < PICKER_REUSE_SECONDS
++        if not shared:
++            entry = _pickers[key] = (time.monotonic(), Future())
++    if shared:
++        picker = entry[1].result()
++    else:
++        try:
++            picker = _build_model_state({"model": key[0], "provider": key[1]})
++        except BaseException as exc:
++            with _pickers_lock:
++                if _pickers.get(key) is entry:
++                    del _pickers[key]
++            entry[1].set_exception(exc)
++            raise
++        entry[1].set_result(picker)
++    return None if picker is None else picker.model_copy(deep=True)
++
++
++def warm_model_state() -> None:
++    """Builds the profile model's picker, so the first session's reply finds it built (``hermes acp``
++    runs this as it starts, before an editor's ``session/new`` asks)."""
++    try:
++        from hermes_cli.config import load_config
++        configured = load_config().get("model")
++        configured = configured if isinstance(configured, dict) else {}
++        model_state({"model": configured.get("default"), "provider": configured.get("provider")})
++    except Exception:
++        # Boundary: a warm-up; the session's own build reports any real failure.
++        logger.debug("Could not warm the ACP model picker", exc_info=True)
++
++
+ def provenance_meta(db_path: Path, acp_session_id: str, session_id: str) -> dict | None:
+     """``_meta.hermes.sessionProvenance`` for the editor's id, the logical session's current
+     compression tip and its lineage (``acp_adapter/provenance.py``). Blocking."""
+diff --git a/tests/acp_adapter/conftest.py b/tests/acp_adapter/conftest.py
+index 163948e86f..784d4ed252 100644
+--- a/tests/acp_adapter/conftest.py
++++ b/tests/acp_adapter/conftest.py
+@@ -30,8 +30,12 @@ import pytest
+ @pytest.fixture(autouse=True)
+ def _offline_model_inventory(monkeypatch):
+     """Stub the shared model inventory so ACP tests never hit the network."""
++    from acp_adapter import gateway_session_meta
+     from hermes_cli import inventory
+ 
++    # A test's own inventory patch must not be answered by a picker another test built.
++    monkeypatch.setattr(gateway_session_meta, "_pickers", {})
++
+     class _StubPickerContext:
+         def with_overrides(self, **_kwargs):
+             return self
+diff --git a/tests/acp_adapter/test_gateway_model_picker_reuse.py b/tests/acp_adapter/test_gateway_model_picker_reuse.py
+new file mode 100644
+index 0000000000..f8787b3fbe
+--- /dev/null
++++ b/tests/acp_adapter/test_gateway_model_picker_reuse.py
+@@ -0,0 +1,89 @@
++"""The model picker a session's open, its first mode pick and the owner's echoes all ask for within a
++second is built once for them, and once ahead of the first session by ``hermes acp`` itself."""
++from concurrent.futures import ThreadPoolExecutor
++import threading
++from unittest.mock import AsyncMock
++
++from acp.schema import ModelInfo, SessionModelState
++import pytest
++
++from acp_adapter import gateway_session_meta
++from acp_adapter.gateway_server import GatewayACPAgent
++
++
++@pytest.fixture
++def builds(monkeypatch):
++    """Each picker build's ``(model, provider)``, with the inventory stubbed to one row."""
++    calls = []
++
++    def build(model, provider, _base_url):
++        calls.append((model, provider))
++        choice = f"{provider}:{model}"
++        return SessionModelState(available_models=[ModelInfo(model_id=choice, name=model)], current_model_id=choice)
++
++    monkeypatch.setattr("acp_adapter.model_catalog.build_model_state", build)
++    return calls
++
++
++@pytest.mark.asyncio
++async def test_session_open_and_its_mode_pick_build_the_picker_once(builds, tmp_path):
++    info = {"cwd": str(tmp_path), "model": "model-a", "provider": "provider-a", "edit_approval_policy": "ask"}
++    snapshot = {"session_id": "s", "info": info, "revision": 1, "execution_generation": 0}
++
++    async def rpc(method, **params):
++        if method == "runtime.describe":
++            return {"session_create": {"sources": ["acp"]}, "capabilities": ["acp-editor-policy-v1"]}
++        if method in ("session.create", "session.resume"):
++            return {**snapshot, "info": dict(info)}
++        if method == "session.mutate":
++            info["edit_approval_policy"] = params["payload"]["policy"]
++            return {"status": "applied"}
++        if method == "session.info":
++            return dict(info)
++        assert method == "config.set", method
++        return {"key": params["key"], "value": params["value"], "scope": "session"}
++
++    agent = GatewayACPAgent()
++    agent._gateway = AsyncMock()
++    agent._gateway.rpc.side_effect = rpc
++    created = await agent.new_session(cwd=str(tmp_path))
++    reply = await agent.set_config_option(config_id="edit_approval_policy", session_id="s", value="session")
++
++    assert builds == [("model-a", "provider-a")]
++    assert created.models.current_model_id == "provider-a:model-a"
++    picker = next(option for option in reply.config_options if option.id == "model")
++    assert picker.current_value == "provider-a:model-a"
++
++
++def test_concurrent_builds_share_one_and_each_caller_gets_its_own_copy(monkeypatch):
++    release = threading.Event()
++    calls = []
++
++    def build(model, provider, _base_url):
++        calls.append(model)
++        release.wait(10)
++        return SessionModelState(available_models=[ModelInfo(model_id="p:m", name="m")], current_model_id="p:m")
++
++    monkeypatch.setattr("acp_adapter.model_catalog.build_model_state", build)
++    with ThreadPoolExecutor(2) as pool:
++        first = pool.submit(gateway_session_meta.model_state, {"model": "m", "provider": "p"})
++        second = pool.submit(gateway_session_meta.model_state, {"model": "m", "provider": "p"})
++        release.set()
++        pickers = [first.result(10), second.result(10)]
++    assert calls == ["m"]
++    assert pickers[0] == pickers[1] and pickers[0] is not pickers[1]
++
++
++def test_a_later_build_reads_the_inventory_again(builds, monkeypatch):
++    gateway_session_meta.model_state({"model": "m", "provider": "p"})
++    monkeypatch.setattr(gateway_session_meta, "PICKER_REUSE_SECONDS", 0)
++    gateway_session_meta.model_state({"model": "m", "provider": "p"})
++    assert builds == [("m", "p"), ("m", "p")]
++
++
++def test_warm_up_builds_the_profile_models_picker_for_the_first_session(builds, monkeypatch):
++    monkeypatch.setattr("hermes_cli.config.load_config",
++                        lambda: {"model": {"default": "model-a", "provider": "provider-a"}})
++    gateway_session_meta.warm_model_state()
++    gateway_session_meta.model_state({"model": "model-a", "provider": "provider-a"})
++    assert builds == [("model-a", "provider-a")]

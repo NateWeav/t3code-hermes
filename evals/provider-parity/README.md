@@ -51,7 +51,7 @@ pnpm provider-parity --out runs/<name> --field              # + your history
 pnpm provider-parity --out runs/<name> --all --baseline runs/<prev>
 ```
 
-`--scenario a,b` narrows live runs. `--references` also replays the Claude and Codex fixtures. `--hermes-home` defaults to `~/.hermes-bench`; `--db` defaults to `$T3HERMES_HOME/userdata/statev2.sqlite`. A run writes `scorecard.json` and `summary.md`; pass the run directory to `--baseline` next time to see deltas and regressions.
+`--scenario a,b` narrows live runs. `--references` also replays the Claude and Codex fixtures. `--hermes-home` defaults to `~/.hermes-bench`, and `T3_HERMES_BIN` points the live runs and the stack suite's Hermes at another `hermes`, such as a patched scratch checkout's `.venv/bin/hermes`; `--db` defaults to `$T3HERMES_HOME/userdata/statev2.sqlite`. A run writes `scorecard.json` and `summary.md`; pass the run directory to `--baseline` next time to see deltas and regressions.
 
 One live sample of every scenario takes about 15 minutes. The stack suite takes 5 to 10 minutes and runs real Claude and Codex turns.
 
@@ -70,7 +70,5 @@ Rules that keep the number honest:
 - Fixtures come only from the recorder, never from hand edits.
 - A Hermes-only assertion scores half; say why in the PR.
 - Changing a classification in `scenarios.ts` needs a reason in the entry.
-
-Scenarios marked `providerBound` (`subagent_v2`) have only reference assertions that check their own provider's identity, wire frames or item shapes. Hermes reaches half credit there with its own assertion, and full credit once the reference's wire checks move to its `assertProviderDetails`, leaving an `assertOutput` that Hermes can share.
 
 `run.test.ts` tests the grader and runs in CI.

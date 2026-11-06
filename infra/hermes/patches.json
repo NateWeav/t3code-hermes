@@ -283,6 +283,42 @@
           "file": "acp-subagent-approvals/ca4360692055.patch"
         }
       ]
+    },
+    {
+      "id": "acp-http-mcp",
+      "title": "T3 tools over HTTP",
+      "neededFor": "Faster thread starts: Hermes reaches T3's tools over HTTP instead of through a bridge process it starts for each new thread and again for its first reply. Without it, a new thread's first reply waits about a second longer.",
+      "versions": [
+        {
+          "hermesCommit": "90d6b98fd86d20981ee06ddd5b7d93e4320f26a4",
+          "hermesCommitDate": "2026-11-06T07:12:42Z",
+          "file": "acp-http-mcp/90d6b98fd86d.patch"
+        }
+      ]
+    },
+    {
+      "id": "acp-model-picker-reuse",
+      "title": "Model list reuse",
+      "neededFor": "Faster thread starts: Hermes builds the model list a new thread's setup shows once, and ahead of time, instead of up to four times while the thread opens. Without it, a new thread's first reply waits about a second longer.",
+      "versions": [
+        {
+          "hermesCommit": "90d6b98fd86d20981ee06ddd5b7d93e4320f26a4",
+          "hermesCommitDate": "2026-11-06T07:12:42Z",
+          "file": "acp-model-picker-reuse/90d6b98fd86d.patch"
+        }
+      ]
+    },
+    {
+      "id": "acp-context-length-reuse",
+      "title": "Context length reuse",
+      "neededFor": "Faster thread starts on a custom model endpoint that publishes no context length. Without it, Hermes asks the endpoint for the model's context window on every agent build, and a new thread waits for those requests, several seconds when the endpoint is slow to answer.",
+      "versions": [
+        {
+          "hermesCommit": "90d6b98fd86d20981ee06ddd5b7d93e4320f26a4",
+          "hermesCommitDate": "2026-11-06T07:12:42Z",
+          "file": "acp-context-length-reuse/90d6b98fd86d.patch"
+        }
+      ]
     }
   ]
 }

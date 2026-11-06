@@ -467,6 +467,56 @@ all the other patches. Run the patch's `tests/gateway/test_delegation_task_model
 `tests/acp_adapter/test_gateway_delegation_continue.py` (which reuses the progress patch's
 `test_gateway_delegation_progress.py`) in a scratch checkout, as for `acp-delegation-progress`.
 
+## `acp-http-mcp`
+
+**Needed by:** a fast thread start. The gateway binds an editor's HTTP and SSE MCP servers as it
+binds stdio ones, but `hermes acp` never advertised `mcpCapabilities`, so T3 Code gave Hermes its
+tools through `acp-mcp-bridge`, a process the gateway starts when the session is created and again
+for its first turn: about half a second to two seconds each. The patch advertises
+`mcpCapabilities.http` and `.sse`, and T3 Code then sends its MCP server as an HTTP server, with
+the `t3-mcp-call-limit-ms` header the bridge sends (Hermes's HTTP client also ends a call at 300 s).
+Without the patch T3 Code keeps the bridge.
+
+Verified against hermes-agent `90d6b98fd86d` (`main`, 2026-11-06), alone and after the other
+patches. The change is in `hermes acp` only. The patch's
+`tests/acp_adapter/test_gateway_editor_http_mcp.py` drives a real gateway daemon and `hermes acp`:
+the model calls an HTTP MCP server's tool, which sees the editor's headers. Run it in a scratch
+checkout, as for `acp-delegation-progress`.
+
+## `acp-model-picker-reuse`
+
+**Needed by:** a fast thread start. Every `session/new` reply, mode or model pick and gateway echo
+of one carries the model picker, and `hermes acp` built it each time by reading every provider's
+credentials (0.2 to 0.7 s, more while builds contend). A new thread's open, its mode pick and their
+echoes built it up to four times within a second. With the patch, the builds for one model within
+five seconds share one, and `hermes acp` builds the profile model's picker as it starts, so a
+session opened later finds the inventory warm. A credentials change shows in a picker at most five
+seconds late. No wire change; T3 Code needs nothing for it.
+
+Verified against hermes-agent `90d6b98fd86d` (`main`, 2026-11-06), alone and after the other
+patches. The change is in `hermes acp` only. Run the patch's
+`tests/acp_adapter/test_gateway_model_picker_reuse.py` in a scratch checkout, as for
+`acp-delegation-progress`.
+
+## `acp-context-length-reuse`
+
+**Needed by:** a fast thread start on a custom model endpoint whose profile sets no
+`model.context_length`. Hermes resolves the model's context window on every agent build: a new
+session, its first turn, and the gateway's own lookups. On a custom endpoint each one probes it
+(`/models`, the local-server checks, Ollama `/api/show`). An endpoint that publishes no window
+answers the same way every time, and one that is slow to answer holds each new thread for the
+probes' 3 to 5 s timeouts, often twice. With the patch, the gateway remembers the window per
+provider, endpoint and model once every probe of a resolution got an answer. A resolution where a
+probe failed (no connection, a timeout, a 5xx or 429) is not remembered, so the next one asks again.
+`model.context_length` and per-model `custom_providers` windows still win. A window Hermes persists
+(after a context overflow, or from a probe that found one) replaces the remembered one. A server
+restarted with a different window shows after the gateway restarts. No wire change; T3 Code needs
+nothing for it.
+
+Verified against hermes-agent `90d6b98fd86d` (`main`, 2026-11-06), alone and after the other
+patches. Run the patch's `tests/gateway/test_context_probe_memo_gateway.py` in a scratch checkout,
+as for `acp-delegation-progress`.
+
 ## Retired
 
 **`acp-background-reports`** and **`acp-durable-completion-receipts`** hooked Hermes's in-process

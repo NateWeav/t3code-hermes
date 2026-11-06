@@ -332,13 +332,14 @@ function settleDescendants(
     }
     return false;
   };
-  const orphans = [...lineage.open.keys()].filter(descends);
-  for (const nativeTaskId of orphans) lineage.open.delete(nativeTaskId);
+  const orphans = [...lineage.open].filter(([nativeTaskId]) => descends(nativeTaskId));
+  for (const [nativeTaskId] of orphans) lineage.open.delete(nativeTaskId);
   return [
     ...updates,
-    ...orphans.map((nativeTaskId) => ({
+    ...orphans.map(([nativeTaskId, parentNativeTaskId]) => ({
       ...childUpdate("", undefined, 0, "interrupted"),
       nativeTaskId,
+      parentNativeTaskId,
     })),
   ];
 }

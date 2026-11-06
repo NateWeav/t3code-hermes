@@ -310,6 +310,65 @@ describe("CLIProxyAPI built-in management API", () => {
     }),
   );
 
+  it.effect("dates a pooled model's reset from the account whose cooldown ends first", () =>
+    Effect.gen(function* () {
+      let files: ReadonlyArray<unknown> = [];
+      const api = yield* makeCliproxyApi.pipe(
+        Effect.provideService(
+          HttpClient.HttpClient,
+          HttpClient.make((request) =>
+            Effect.succeed(HttpClientResponse.fromWeb(request, Response.json({ files }))),
+          ),
+        ),
+        Effect.provide(NodeCrypto.layer),
+      );
+      const cooldown = (scope: string, retry_at: string, model_key?: string) => ({
+        scope,
+        retry_at,
+        reason: "quota",
+        ...(model_key === undefined ? {} : { model_key }),
+      });
+      const resetAt = (provider: string, model: string) =>
+        api.modelResetAt(config, { provider, model });
+
+      files = [
+        {
+          provider: "claude",
+          cooldowns: [
+            cooldown("model", "1970-01-01T02:00:00.250000001Z", "claude-opus-5-5"),
+            cooldown("model", "1970-01-01T09:00:00Z", "claude-haiku-4-5-20251001"),
+          ],
+        },
+        {
+          provider: "claude",
+          cooldowns: [
+            cooldown("credential", "1970-01-01T01:00:00Z"),
+            cooldown("model", "1970-01-01T03:00:00Z", "claude-opus-5-5"),
+          ],
+        },
+        { provider: "claude", disabled: true, cooldowns: [] },
+        { provider: "claude", unavailable: true, status: "error", cooldowns: [] },
+        { provider: "codex", cooldowns: [] },
+      ];
+      expect(yield* resetAt("claude", "claude-opus-5-5[1m]")).toBe("1970-01-01T02:00:01.000Z");
+      // The first account's dated key still counts, or it would look usable and yield null.
+      expect(yield* resetAt("claude", "claude-haiku-4-5")).toBe("1970-01-01T01:00:00.000Z");
+      // A usable account means the hub's timers do not explain the limit.
+      expect(yield* resetAt("codex", "gpt-6-sol")).toBeNull();
+
+      // Hubs without cooldown views expose only whole-credential retries.
+      files = [
+        {
+          provider: "codex",
+          unavailable: true,
+          next_retry_after: "1970-01-01T08:30:00+08:00",
+          cooldowns: null,
+        },
+      ];
+      expect(yield* resetAt("codex", "gpt-6-sol")).toBe("1970-01-01T00:30:00.000Z");
+    }),
+  );
+
   it.effect("keeps usage when the credits endpoint fails", () =>
     Effect.gen(function* () {
       const test = fixture({

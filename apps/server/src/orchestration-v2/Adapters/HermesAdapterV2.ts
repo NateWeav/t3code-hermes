@@ -47,6 +47,7 @@ import {
   normalizeHermesWebSearchQuery,
   preserveHermesAgentActivityTitle,
   readHermesCompressReply,
+  resendHermesPromptsRefusedBusy,
   resolveHermesAcpBaseModelId,
   resolveHermesSessionModeId,
 } from "../../provider/acp/HermesAcpSupport.ts";
@@ -232,7 +233,11 @@ export function makeHermesAcpAdapterFlavor(
     restartRuntimeAfterPromptFailure: isHermesGatewayTurnLoss,
     makeRuntime: (input) =>
       adoptOrLaunchRuntime(input).pipe(
-        Effect.map((runtime) => hideHermesStopNotices(discardLostHermesTurnsOnPrompt(runtime))),
+        Effect.map((runtime) =>
+          hideHermesStopNotices(
+            resendHermesPromptsRefusedBusy(discardLostHermesTurnsOnPrompt(runtime)),
+          ),
+        ),
         Effect.tap((runtime) =>
           Effect.sync(() => runtimeModes.set(runtime, input.runtimePolicy.runtimeMode)),
         ),

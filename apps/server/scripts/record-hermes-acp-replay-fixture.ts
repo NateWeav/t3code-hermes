@@ -498,16 +498,22 @@ const recordScenario = Effect.fn("recordHermesScenario")(function* (fixtureName:
     driver: HERMES_PROVIDER,
     modelSelection,
   }).pipe(Effect.provide(IdAllocator.layer), provideDeterministicTestRuntime);
+  const isGate = (step: (typeof materialized.steps)[number]) =>
+    step.type === "release_replay_gate" || step.type === "release_replay_gate_after_waiting";
   const scenario = {
     name: `${fixtureName}/hermes-record`,
     commands: materialized.commands,
-    // Replay gates and held runs pace replay on the test clock; live, Hermes and wall time pace
-    // themselves. The clock steps stay: they order background dispatches as replay does.
-    steps: materialized.steps.flatMap((step) =>
-      step.type === "release_replay_gate" || step.type === "release_replay_gate_after_waiting"
-        ? []
-        : [step.type === "finish_held_run" ? { ...step, type: "await_run_status" as const } : step],
-    ),
+    // Gates pace replay on the test clock; live, Hermes and wall time pace themselves. A borrowed
+    // reference input's waits follow that reference's frames, so it keeps only its dispatches and the
+    // clock steps that order them, and waits for Hermes to idle. A Hermes input drops only its gates.
+    steps:
+      ownVariant === undefined && materialized.steps.some(isGate)
+        ? materialized.steps.filter((step) => step.type === "dispatch" || step.type === "advance_clock")
+        : materialized.steps.flatMap((step) =>
+            isGate(step)
+              ? []
+              : [step.type === "finish_held_run" ? { ...step, type: "await_run_status" as const } : step],
+          ),
     projectionThreadIds: materialized.projectionThreadIds,
     runtimePolicyOverride: { ...settingsVariant.runtimePolicyOverride, cwd: realWorkspace },
   };
@@ -608,7 +614,10 @@ const recordScenario = Effect.fn("recordHermesScenario")(function* (fixtureName:
     Effect.asVoid,
     Effect.provideService(Clock.Clock, wallClock),
   );
-  const exit = yield* runOrchestratorV2Scenario(scenario, { afterSteps: waitForHermesIdle }).pipe(
+  const exit = yield* runOrchestratorV2Scenario(scenario, {
+    afterSteps: waitForHermesIdle,
+    waitDeadlineMs: 5 * 60_000,
+  }).pipe(
     Effect.provide(
       ProviderReplayHarness.layerWithRegistry(
         scenario,

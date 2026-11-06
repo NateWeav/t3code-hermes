@@ -32,10 +32,17 @@ import {
   claudeCompactAfterPeerTurnInput,
   claudeCompactAfterPeerTurnNoEchoInput,
 } from "./claude_compact_after_peer_turn/input.ts";
-import { assertClaudeCompactAfterPeerTurnOutput } from "./claude_compact_after_peer_turn/output.ts";
+import {
+  assertClaudeCompactAfterPeerTurnDetails,
+  assertCompactAfterPeerTurnOutput,
+} from "./claude_compact_after_peer_turn/output.ts";
 import { assertClaudeCompactAfterPeerTurnNoEchoOutput } from "./claude_compact_after_peer_turn_no_echo/output.ts";
 import { claudeCompactAfterResumeWakeInput } from "./claude_compact_after_resume_wake/input.ts";
-import { assertClaudeCompactAfterResumeWakeOutput } from "./claude_compact_after_resume_wake/output.ts";
+import {
+  assertClaudeCompactAfterResumeWakeDetails,
+  assertCompactAfterResumeWakeOutput,
+  assertHermesCompactAfterResumeWakeDetails,
+} from "./claude_compact_after_resume_wake/output.ts";
 import { claudeIdleResumeInput } from "./claude_idle_resume/input.ts";
 import { assertHermesIdleResumeSession } from "./claude_idle_resume/hermes_output.ts";
 import {
@@ -165,6 +172,8 @@ import { planQuestionsInput } from "./plan_questions/input.ts";
 import { hermesTodoListInput } from "./hermes_todo_list/input.ts";
 import { hermesCompressNoopInput } from "./hermes_compress_noop/input.ts";
 import { assertHermesCompressNoopOutput } from "./hermes_compress_noop/output.ts";
+import { hermesCompactAfterPeerTurnInput } from "./hermes_compact_after_peer_turn/input.ts";
+import { hermesCompactAfterResumeWakeInput } from "./hermes_compact_after_resume_wake/input.ts";
 import { assertProposedPlanOutput } from "./proposed_plan/codex_output.ts";
 import { assertProposedPlanCursorOutput } from "./proposed_plan/cursor_output.ts";
 import { proposedPlanInput } from "./proposed_plan/input.ts";
@@ -410,7 +419,25 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         ),
         modelSelection: CLAUDE_MODEL_SELECTION,
         runContinuationWorker: true,
-        assertOutput: assertClaudeCompactAfterResumeWakeOutput,
+        assertOutput: assertCompactAfterResumeWakeOutput,
+        assertProviderDetails: assertClaudeCompactAfterResumeWakeDetails,
+      },
+    ],
+  },
+  {
+    name: "hermes_compact_after_resume_wake",
+    buildInput: hermesCompactAfterResumeWakeInput,
+    providers: [
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./hermes_compact_after_resume_wake/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runContinuationWorker: true,
+        assertOutput: assertCompactAfterResumeWakeOutput,
+        assertProviderDetails: assertHermesCompactAfterResumeWakeDetails,
       },
     ],
   },
@@ -438,7 +465,24 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         ),
         modelSelection: CLAUDE_MODEL_SELECTION,
         runContinuationWorker: true,
-        assertOutput: assertClaudeCompactAfterPeerTurnOutput,
+        assertOutput: assertCompactAfterPeerTurnOutput,
+        assertProviderDetails: assertClaudeCompactAfterPeerTurnDetails,
+      },
+    ],
+  },
+  {
+    name: "hermes_compact_after_peer_turn",
+    buildInput: hermesCompactAfterPeerTurnInput,
+    providers: [
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./hermes_compact_after_peer_turn/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runContinuationWorker: true,
+        assertOutput: assertCompactAfterPeerTurnOutput,
       },
     ],
   },

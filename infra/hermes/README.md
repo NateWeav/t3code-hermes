@@ -260,6 +260,8 @@ receipt arrives, by the `input_id` their pending row names. T3 Code shows stampe
 of their own; without the patch, the wake's reply stays in the queued message's run.
 
 Verified against hermes-agent `ca43606920` (`main`, 2026-11-06), alone and after the other patches.
+Its `90d6b98fd8` version (`main`, 2026-11-06) is the same change on top of `acp-active-steering`,
+and applies only after it.
 The change is in `hermes acp` only, so new `hermes acp` processes pick it up; restarting the gateway
 is not required. Run the patch's `tests/acp_adapter/test_gateway_unprompted_turn.py` in a scratch
 checkout, as for `acp-delegation-progress`.

@@ -6,7 +6,7 @@ import type { OrchestratorFixtureInput } from "../shared.ts";
 export const HERMES_BACKGROUND_WAKE_BEFORE_QUEUED_PROMPT_LAUNCH_PROMPT = [
   "Live-test background subagents. You must call the delegate_task tool before replying. Do exactly this, with no extra steps.",
   "",
-  "1) In one message, make TWO separate delegate_task calls, each with ONE task (never both in one call's tasks):",
+  "1) In one message, make TWO separate delegate_task calls, each with background set to true and ONE task (never both in one call's tasks):",
   '   - Agent A, goal: "Reply with exactly: A_FIRST"',
   '   - Agent B, goal: "Run this exact command with the terminal tool: sleep 60 && echo B_DONE. Then reply with exactly: B_FINAL"',
   "2) After both calls return, reply with exactly LAUNCHED and stop. Do not wait for them or check on them.",
@@ -20,7 +20,7 @@ export const HERMES_BACKGROUND_WAKE_BEFORE_QUEUED_PROMPT_STOP_PROMPT =
 
 // `continue` resumes a finished child; it comes with the delegation patch that adds it.
 export const HERMES_BACKGROUND_WAKE_BEFORE_QUEUED_PROMPT_RESUME_PROMPT = [
-  'Use the delegate_task tool with action "continue" to send Agent A (its subagent_id from the launch result) this message: Reply with exactly: A_SECOND',
+  'Use the delegate_task tool with action "continue" and background set to true to send Agent A (its subagent_id from the launch result) this message: Reply with exactly: A_SECOND',
   "Then reply with exactly RESUMED and stop. When Agent A's new completion is reported, reply with exactly A_RESUME_REPORTED and stop.",
 ].join("\n");
 

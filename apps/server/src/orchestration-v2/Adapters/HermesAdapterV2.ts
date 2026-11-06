@@ -91,6 +91,8 @@ export interface HermesAdapterV2Options {
   readonly continuationRequests?: Parameters<typeof makeAcpAdapterV2>[0]["continuationRequests"];
   /** Replaces the `hermes acp` spawn; tests point it at the mock agent. */
   readonly makeRuntime?: AcpAdapterV2Flavor["makeRuntime"];
+  readonly assertComplete?: AcpAdapterV2Flavor["assertComplete"];
+  readonly testHooks?: Parameters<typeof makeAcpAdapterV2>[0]["testHooks"];
 }
 
 /**
@@ -243,6 +245,7 @@ export function makeHermesAcpAdapterFlavor(
       ),
     extractSubagentUpdates: makeHermesSubagentExtractor(),
     extractAwaitableBackgroundTasks: extractHermesAwaitableBackgroundTasks,
+    ...(options.assertComplete === undefined ? {} : { assertComplete: options.assertComplete }),
   };
 }
 
@@ -261,6 +264,7 @@ export const makeHermesAdapterV2 = Effect.fn("makeHermesAdapterV2")(function* (
     ...(options.continuationRequests === undefined
       ? {}
       : { continuationRequests: options.continuationRequests }),
+    ...(options.testHooks === undefined ? {} : { testHooks: options.testHooks }),
   });
 });
 

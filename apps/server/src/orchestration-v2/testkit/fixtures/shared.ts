@@ -292,7 +292,13 @@ export interface ProviderOrchestratorReplayVariant {
   readonly runtimePolicyOverride?: RuntimePolicyV2Override;
   readonly runContinuationWorker?: boolean;
   readonly expectedAbsentWorkspacePaths?: ReadonlyArray<string>;
+  /** What the user sees; other providers' variants share it as the scenario's contract. */
   readonly assertOutput: (
+    result: OrchestratorV2ScenarioResult,
+    transcript: ProviderReplayTranscript,
+  ) => void;
+  /** This provider's wire details (frames, native ids, token ledgers), checked after `assertOutput`. */
+  readonly assertProviderDetails?: (
     result: OrchestratorV2ScenarioResult,
     transcript: ProviderReplayTranscript,
   ) => void;
@@ -367,6 +373,12 @@ export const OPENCODE2_MODEL_SELECTION = {
 export const PI_MODEL_SELECTION = {
   instanceId: ProviderInstanceId.make("pi"),
   model: "openrouter/deepseek/deepseek-v4-flash",
+} satisfies ModelSelection;
+
+// The provider-parity benchmark profile's model (evals/provider-parity).
+export const HERMES_MODEL_SELECTION = {
+  instanceId: ProviderInstanceId.make("hermes"),
+  model: "custom:cliproxyapi-claude:claude-haiku-5-5",
 } satisfies ModelSelection;
 
 export const ACP_REGISTRY_MODEL_SELECTION = {

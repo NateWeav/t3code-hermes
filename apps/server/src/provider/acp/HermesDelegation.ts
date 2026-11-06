@@ -25,6 +25,8 @@ export interface HermesSubagentUpdate {
   readonly result: string | null;
   readonly role: string | null;
   readonly usage: OrchestrationV2SubagentUsage | null;
+  /** Ends a background child, whose result the gateway hands the agent in a turn of its own. */
+  readonly wakesAgent?: boolean;
   readonly continuation?: { readonly id: string; readonly prompt: string };
 }
 
@@ -284,13 +286,18 @@ type SpawnedTask = { readonly toolCallId: string; readonly index: number };
  */
 export function makeHermesSubagentExtractor() {
   const launches = new Map<string, ReadonlyArray<Child>>();
+  const dispatched = new Set<string>();
   const spawnedTasks = new Map<string, SpawnedTask>();
   // Continue calls by call id: frames after the run settled carry no rawInput.
   const continuations = new Map<string, { readonly subagentId: string; readonly prompt: string }>();
   const remember = <V>(map: Map<string, V>, key: string, value: V) => {
     map.delete(key);
     map.set(key, value);
-    if (map.size > REMEMBERED_LAUNCHES) map.delete(map.keys().next().value!);
+    if (map.size > REMEMBERED_LAUNCHES) {
+      const oldest = map.keys().next().value!;
+      map.delete(oldest);
+      dispatched.delete(oldest);
+    }
   };
   return (tool: AcpToolCallState): ReadonlyArray<HermesSubagentUpdate> | undefined => {
     let children = launches.get(tool.toolCallId);
@@ -315,14 +322,16 @@ export function makeHermesSubagentExtractor() {
       const spawned = spawnedTasks.get(subagentId);
       if (spawned !== undefined) {
         const continuation = { id: tool.toolCallId, prompt: continued.prompt };
-        return progressUpdates(spawned.toolCallId, launches.get(spawned.toolCallId) ?? [], {
-          ...progress,
-          task_index: spawned.index,
-        }).map((update) => ({ ...update, continuation }));
+        return progressUpdates(
+          spawned.toolCallId,
+          launches.get(spawned.toolCallId) ?? [],
+          { ...progress, task_index: spawned.index },
+          dispatched,
+        ).map((update) => ({ ...update, continuation }));
       }
     }
     if (children === undefined && !isHermesDelegationProgress(tool)) return undefined;
-    return delegationUpdates(tool, children ?? []);
+    return delegationUpdates(tool, children ?? [], dispatched);
   };
 }
 
@@ -331,6 +340,7 @@ function progressUpdates(
   id: string,
   children: ReadonlyArray<Child>,
   progress: Record<string, unknown>,
+  dispatched: ReadonlySet<string>,
 ): ReadonlyArray<HermesSubagentUpdate> {
   const index = count(progress.task_index);
   const childAt = (at: number) => children.find((child) => child.index === at);
@@ -345,7 +355,8 @@ function progressUpdates(
     return [];
   }
   if (progress.event === "subagent.complete") {
-    return [resultUpdate(id, childAt(index), index, progress)];
+    const update = resultUpdate(id, childAt(index), index, progress);
+    return [dispatched.has(id) ? { ...update, wakesAgent: true } : update];
   }
   return [
     childUpdate(
@@ -361,6 +372,7 @@ function progressUpdates(
 function delegationUpdates(
   tool: AcpToolCallState,
   children: ReadonlyArray<Child>,
+  dispatched: Set<string>,
 ): ReadonlyArray<HermesSubagentUpdate> {
   const output = record(tool.data.rawOutput);
   const progress = record(output.hermesDelegation);
@@ -372,13 +384,14 @@ function delegationUpdates(
     const content = contentText(tool);
     // Stock clips fallback JSON at 5,000 characters. The dispatch header
     // precedes the potentially long goals; clipping is not a child failure.
-    const dispatched =
+    const backgrounded =
       output.status === "dispatched" ||
       record(content).status === "dispatched" ||
       /^\{\s*"status"\s*:\s*"dispatched"\s*,\s*"mode"\s*:\s*"background"/.test(content);
-    if (dispatched) {
+    if (backgrounded) {
       // The patch (which also fills rawInput) reports each child's end later.
       const live = tool.data.rawInput !== undefined;
+      if (live) dispatched.add(id);
       return children.map((child) =>
         childUpdate(
           id,
@@ -426,7 +439,7 @@ function delegationUpdates(
   }
 
   if (typeof progress.event === "string") {
-    return progressUpdates(id, children, progress);
+    return progressUpdates(id, children, progress, dispatched);
   }
 
   return children.map((child) => childUpdate(id, child, child.index, "running"));

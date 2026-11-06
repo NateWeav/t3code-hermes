@@ -68,6 +68,6 @@ Rules that keep the number honest:
 - A Hermes-only assertion scores half; say why in the PR.
 - Changing a classification in `scenarios.ts` needs a reason in the entry.
 
-Scenarios marked `providerBound` (`message_steering`, `subagent_v2`, `subagent_v2_nested`, `subagent`) have only reference assertions that check their own provider's identity, wire frames or item shapes. Hermes reaches half credit there with its own assertion, and full credit once the reference's wire checks move to its `assertProviderDetails`, leaving an `assertOutput` that Hermes can share.
+Scenarios marked `providerBound` (`message_steering`, `subagent_v2`) have only reference assertions that check their own provider's identity, wire frames or item shapes. Hermes reaches half credit there with its own assertion, and full credit once the reference's wire checks move to its `assertProviderDetails`, leaving an `assertOutput` that Hermes can share.
 
 `run.test.ts` tests the grader and runs in CI.

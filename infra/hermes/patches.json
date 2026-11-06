@@ -65,6 +65,18 @@
       ]
     },
     {
+      "id": "acp-editor-delegation",
+      "title": "Subagents in the turn",
+      "neededFor": "Subagents that answer inside the turn and can launch their own, as Claude's do. Without it, Hermes runs every subagent in the background, so its answer arrives in a later turn, and a subagent cannot launch another.",
+      "versions": [
+        {
+          "hermesCommit": "ca4360692055bdb4df3a695c164646e528891da8",
+          "hermesCommitDate": "2026-11-06T04:01:15Z",
+          "file": "acp-editor-delegation/ca4360692055.patch"
+        }
+      ]
+    },
+    {
       "id": "acp-background-reports",
       "title": "Background process reports",
       "neededFor": "Monitoring status while Hermes's background processes run, and waking the agent when they finish. Without it, a background command reads as finished the moment it starts, and the agent never hears that it is done.",

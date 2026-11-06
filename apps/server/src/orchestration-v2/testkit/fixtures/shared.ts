@@ -236,6 +236,8 @@ export type OrchestratorFixtureInputStep =
       readonly waitForTurnItemType?: OrchestrationV2TurnItem["type"];
       /** With waitForTurnItemType: wait until that item has this status. */
       readonly waitForTurnItemStatus?: OrchestrationV2TurnItem["status"];
+      /** With waitForTurnItemType: wait until the run has this many such items. */
+      readonly waitForTurnItemCount?: number;
       /** With waitForTurnItemType: wait for it in one of the run's subagent threads. */
       readonly inSubagentThread?: boolean;
     }
@@ -841,6 +843,9 @@ export function materializeFixtureInput(input: {
               ...(step.waitForTurnItemStatus === undefined
                 ? {}
                 : { itemStatus: step.waitForTurnItemStatus }),
+              ...(step.waitForTurnItemCount === undefined
+                ? {}
+                : { itemCount: step.waitForTurnItemCount }),
               ...(step.inSubagentThread === true ? { inSubagentThreads: true } : {}),
             });
           }

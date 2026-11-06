@@ -70,6 +70,12 @@ import { grokPromptErrorInput } from "./grok_prompt_error/input.ts";
 import { assertGrokPromptErrorOutput } from "./grok_prompt_error/output.ts";
 import { grokSubagentLineageInput } from "./grok_subagent_lineage/input.ts";
 import { assertGrokSubagentLineageOutput } from "./grok_subagent_lineage/output.ts";
+import { hermesBackgroundTaskAfterRootInput } from "./hermes_background_task_after_root/input.ts";
+import { assertHermesBackgroundTaskAfterRootOutput } from "./hermes_background_task_after_root/output.ts";
+import { hermesBackgroundTaskInterruptInput } from "./hermes_background_task_interrupt/input.ts";
+import { assertHermesBackgroundTaskInterruptOutput } from "./hermes_background_task_interrupt/output.ts";
+import { hermesBackgroundTaskWakeInput } from "./hermes_background_task_wake/input.ts";
+import { assertHermesBackgroundTaskWakeOutput } from "./hermes_background_task_wake/output.ts";
 import { assertClaudeMessageSteeringOutput } from "./message_steering/claude_output.ts";
 import { assertMessageSteeringOutput } from "./message_steering/codex_output.ts";
 import { assertCursorMessageSteeringOutput } from "./message_steering/cursor_output.ts";
@@ -701,6 +707,53 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         modelSelection: { ...GROK_MODEL_SELECTION, model: "grok-4.7-build-fast" },
         runContinuationWorker: true,
         assertOutput: assertGrokBackgroundBashFastWakeOutput,
+      },
+    ],
+  },
+  {
+    name: "hermes_background_task_after_root",
+    buildInput: hermesBackgroundTaskAfterRootInput,
+    providers: [
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./hermes_background_task_after_root/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        assertOutput: assertHermesBackgroundTaskAfterRootOutput,
+      },
+    ],
+  },
+  {
+    name: "hermes_background_task_interrupt",
+    buildInput: hermesBackgroundTaskInterruptInput,
+    providers: [
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./hermes_background_task_interrupt/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runContinuationWorker: true,
+        assertOutput: assertHermesBackgroundTaskInterruptOutput,
+      },
+    ],
+  },
+  {
+    name: "hermes_background_task_wake",
+    buildInput: hermesBackgroundTaskWakeInput,
+    providers: [
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./hermes_background_task_wake/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runContinuationWorker: true,
+        assertOutput: assertHermesBackgroundTaskWakeOutput,
       },
     ],
   },

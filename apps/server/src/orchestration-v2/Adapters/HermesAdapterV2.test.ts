@@ -579,79 +579,94 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 
-  it.effect("holds on a notifying background command the agent marks until it sees it end", () =>
-    Effect.gen(function* () {
-      let matched: ReadonlyArray<string> = [];
-      const { events } = yield* runMockTurn({
-        name: "background-wait-exit",
-        mockEnvironment: {},
-        promptUpdates: [
-          ...hermesBackgroundStart({ toolCallId: "tc-tests", processId: TESTS_PROC, notify: true }),
-          // No completion wake is armed, so nothing could release a hold on it.
-          ...hermesBackgroundStart({ toolCallId: "tc-dev", processId: DEV_PROC, notify: false }),
-        ],
-        afterTurn: ({ session, providerThread }) =>
-          Effect.gen(function* () {
-            ({ matched } = yield* session.awaitBackgroundTasks!({
-              providerThread,
-              taskIds: [TESTS_PROC, DEV_PROC],
-              awaited: true,
-            }));
-          }).pipe(Effect.orDie),
-        followUpPromptUpdates: [
-          {
-            sessionUpdate: "tool_call",
-            toolCallId: "tc-wait",
-            title: "process_manage: wait aaaa1111",
-            kind: "other",
-            // Hermes takes any unique prefix, and its `wait` result omits the id.
-            rawInput: { action: "wait", session_id: "aaaa1111" },
-          },
-          {
-            sessionUpdate: "tool_call_update",
-            toolCallId: "tc-wait",
-            kind: "other",
-            status: "completed",
-            content: [
-              {
-                type: "content",
-                content: {
-                  type: "text",
-                  text: "process_manage result\n- **status:** exited\n- **exit_code:** 0",
+  it.effect(
+    "lists the commands that will wake Hermes and holds the marked ones until they end",
+    () =>
+      Effect.gen(function* () {
+        let matched: ReadonlyArray<string> = [];
+        const { events } = yield* runMockTurn({
+          name: "background-wait-exit",
+          mockEnvironment: {},
+          promptUpdates: [
+            ...hermesBackgroundStart({
+              toolCallId: "tc-tests",
+              processId: TESTS_PROC,
+              notify: true,
+            }),
+            // No completion wake is armed, so nothing could release a hold on it.
+            ...hermesBackgroundStart({ toolCallId: "tc-dev", processId: DEV_PROC, notify: false }),
+          ],
+          afterTurn: ({ session, providerThread }) =>
+            Effect.gen(function* () {
+              ({ matched } = yield* session.awaitBackgroundTasks!({
+                providerThread,
+                taskIds: [TESTS_PROC, DEV_PROC],
+                awaited: true,
+              }));
+            }).pipe(Effect.orDie),
+          followUpPromptUpdates: [
+            {
+              sessionUpdate: "tool_call",
+              toolCallId: "tc-wait",
+              title: "process_manage: wait aaaa1111",
+              kind: "other",
+              // Hermes takes any unique prefix, and its `wait` result omits the id.
+              rawInput: { action: "wait", session_id: "aaaa1111" },
+            },
+            {
+              sessionUpdate: "tool_call_update",
+              toolCallId: "tc-wait",
+              kind: "other",
+              status: "completed",
+              content: [
+                {
+                  type: "content",
+                  content: {
+                    type: "text",
+                    text: "process_manage result\n- **status:** exited\n- **exit_code:** 0",
+                  },
                 },
-              },
-            ],
-          },
-        ],
-      });
-      assert.deepEqual(matched, [TESTS_PROC]);
-      const rosters = providerThreadRosters(events);
-      const held = rosters.find((roster) => roster.length > 0);
-      assert.deepEqual(held, [
-        { taskId: TESTS_PROC, kind: "command", awaited: true, description: "pnpm test" },
-      ]);
-      assert.isTrue(backgroundWorkHoldsCompletion(held ?? []));
-      assert.deepEqual(rosters.at(-1), []);
-    }).pipe(Effect.provide(testLayer), Effect.scoped),
+              ],
+            },
+          ],
+        });
+        assert.deepEqual(matched, [TESTS_PROC]);
+        const rosters = providerThreadRosters(events);
+        const listed = rosters.find((roster) => roster.length > 0);
+        assert.deepEqual(listed, [
+          { taskId: TESTS_PROC, kind: "command", description: "pnpm test" },
+        ]);
+        assert.isFalse(backgroundWorkHoldsCompletion(listed ?? []));
+        const held = rosters.find((roster) => roster.some((task) => task.awaited === true));
+        assert.deepEqual(held, [
+          { taskId: TESTS_PROC, kind: "command", awaited: true, description: "pnpm test" },
+        ]);
+        assert.isTrue(backgroundWorkHoldsCompletion(held ?? []));
+        assert.deepEqual(rosters.at(-1), []);
+      }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 
-  it.effect("releases the marks when Hermes wakes the agent", () =>
+  // Hermes's wake names no process: it releases every listed one, and names a lone one.
+  it.effect.each([
+    {
+      name: "one",
+      processIds: [TESTS_PROC],
+      notification: {
+        source: { kind: "command" },
+        outcome: "unknown",
+        summary: 'Command "pnpm test" finished',
+      },
+    },
+    { name: "two", processIds: [TESTS_PROC, DEV_PROC], notification: undefined },
+  ] as const)("releases $name listed command(s) when Hermes wakes the agent", (row) =>
     Effect.gen(function* () {
       const offers = yield* Queue.unbounded<ProviderContinuationRequest>();
       const { events } = yield* runMockTurn({
-        name: "background-wait-wake",
+        name: `background-wake-${row.name}`,
         mockEnvironment: {},
-        promptUpdates: hermesBackgroundStart({
-          toolCallId: "tc-tests",
-          processId: TESTS_PROC,
-          notify: true,
-        }),
-        afterTurn: ({ session, providerThread }) =>
-          session.awaitBackgroundTasks!({
-            providerThread,
-            taskIds: [TESTS_PROC],
-            awaited: true,
-          }).pipe(Effect.asVoid, Effect.orDie),
+        promptUpdates: row.processIds.flatMap((processId) =>
+          hermesBackgroundStart({ toolCallId: `tc-${processId}`, processId, notify: true }),
+        ),
         idleUpdates: [
           {
             sessionUpdate: "agent_message_chunk",
@@ -663,11 +678,23 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
         },
         runContinuation: true,
       });
-      // Hermes's notice names no process, so the wake releases every mark.
+      assert.deepEqual((yield* Queue.take(offers)).notification, row.notification);
       const firstTerminal = events.findIndex((event) => event.type === "turn.terminal");
-      const rosters = providerThreadRosters(events.slice(firstTerminal + 1));
-      assert.lengthOf(rosters[0] ?? [], 1);
-      assert.deepEqual(rosters.slice(1), [[], []]);
+      assert.lengthOf(
+        providerThreadRosters(events.slice(0, firstTerminal)).at(-1) ?? [],
+        row.processIds.length,
+      );
+      const afterRoot = events
+        .slice(firstTerminal + 1)
+        .flatMap((event) =>
+          event.type === "provider_thread.updated" ? [event.providerThread] : [],
+        );
+      // The release lands between runs, on a thread the root run settled idle.
+      assert.equal(afterRoot[0]?.status, "idle");
+      assert.deepEqual(
+        afterRoot.map((providerThread) => providerThread.pendingBackgroundTasks ?? []),
+        afterRoot.map(() => []),
+      );
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 });

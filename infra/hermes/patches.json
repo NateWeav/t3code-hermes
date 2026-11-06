@@ -152,6 +152,18 @@
           "file": "acp-launch-yolo-resume/5b32cfc23007.patch"
         }
       ]
+    },
+    {
+      "id": "acp-subagent-model-continue",
+      "title": "Subagent models and follow-ups",
+      "neededFor": "Apply after Live subagent progress. Lets Hermes pick a subagent's model from the ones your profile lists, and send a finished subagent a follow-up. Without it, every subagent runs on the default model, and a finished one can't be asked anything more.",
+      "versions": [
+        {
+          "hermesCommit": "ca4360692055bdb4df3a695c164646e528891da8",
+          "hermesCommitDate": "2026-11-06T04:01:15Z",
+          "file": "acp-subagent-model-continue/ca4360692055.patch"
+        }
+      ]
     }
   ]
 }

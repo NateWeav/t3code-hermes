@@ -172,9 +172,6 @@ export type ConformanceStatus =
   | "na"
   | "no-reference";
 
-const PROVIDER_BOUND_REASON =
-  "Every reference assertion checks its own provider's identity, wire frames or item shapes, so no Hermes run can pass one.";
-
 /** Points per status; `null` is excluded from the facet's denominator. */
 const STATUS_POINTS: Readonly<Record<ConformanceStatus, number | null>> = {
   parity: 1,
@@ -272,10 +269,7 @@ export function scoreScenario(input: {
     if (scenario.hermes.kind === "twin" && scenario.hermes.twin === undefined) {
       return result("twin-missing", { reason: scenario.hermes.reason });
     }
-    return result("missing", {
-      failure: live?.failure ?? null,
-      reason: scenario.providerBound ? PROVIDER_BOUND_REASON : null,
-    });
+    return result("missing", { failure: live?.failure ?? null });
   }
   const replayed = replay.get(`${scoredAs}/${HERMES}`);
   if (replayed === undefined || !replayed.passed) {

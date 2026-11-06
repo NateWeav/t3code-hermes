@@ -221,8 +221,9 @@ import { assertKiroSubagentOutput } from "./subagent/kiro_output.ts";
 import { assertCodexSubagentContinueDetails } from "./subagent_continue/codex_output.ts";
 import { subagentContinueInput } from "./subagent_continue/input.ts";
 import { assertSubagentContinueOutput } from "./subagent_continue/output.ts";
-import { assertSubagentV2Output } from "./subagent_v2/codex_output.ts";
+import { assertCodexSubagentV2Details } from "./subagent_v2/codex_output.ts";
 import { subagentV2Input, subagentV2NestedInput } from "./subagent_v2/input.ts";
+import { assertSubagentV2Output } from "./subagent_v2/output.ts";
 import { assertCodexSubagentV2ApprovalDetails } from "./subagent_v2_approval/codex_output.ts";
 import { assertSubagentV2ApprovalOutput } from "./subagent_v2_approval/output.ts";
 import {
@@ -1432,6 +1433,13 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         assertOutput: assertSubagentContinueOutput,
         assertProviderDetails: assertCodexSubagentContinueDetails,
       },
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL("./subagent_continue/hermes_transcript.ndjson", import.meta.url),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runContinuationWorker: true,
+        assertOutput: assertSubagentContinueOutput,
+      },
     ],
   },
   {
@@ -1443,12 +1451,20 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         transcriptFile: new URL("./subagent_v2/codex_transcript.ndjson", import.meta.url),
         modelSelection: CODEX_MODEL_SELECTION,
         assertOutput: assertSubagentV2Output,
+        assertProviderDetails: assertCodexSubagentV2Details,
       },
       {
         driver: ProviderDriverKind.make("muse"),
         transcriptFile: new URL("./subagent_v2/muse_transcript.ndjson", import.meta.url),
         modelSelection: MUSE_MODEL_SELECTION,
         assertOutput: assertMuseSubagentV2Output,
+      },
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL("./subagent_v2/hermes_transcript.ndjson", import.meta.url),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runContinuationWorker: true,
+        assertOutput: assertSubagentV2Output,
       },
     ],
   },

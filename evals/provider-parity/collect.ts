@@ -250,6 +250,10 @@ export async function runStackSuite(input: {
                       { name: "HERMES_HOME", value: input.hermesHome },
                       { name: "HERMES_MANAGED_DIR", value: noManagedScope },
                     ],
+                    // The same `hermes` the live recorder runs, such as a patched scratch checkout.
+                    ...(process.env.T3_HERMES_BIN === undefined
+                      ? {}
+                      : { config: { binaryPath: process.env.T3_HERMES_BIN } }),
                   }
                 : {}),
             },

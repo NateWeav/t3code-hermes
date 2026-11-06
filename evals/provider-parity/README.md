@@ -51,7 +51,7 @@ pnpm provider-parity --out runs/<name> --field              # + your history
 pnpm provider-parity --out runs/<name> --all --baseline runs/<prev>
 ```
 
-`--scenario a,b` narrows live runs. `--references` also replays the Claude and Codex fixtures. `--hermes-home` defaults to `~/.hermes-bench`; `--db` defaults to `$T3HERMES_HOME/userdata/statev2.sqlite`. A run writes `scorecard.json` and `summary.md`; pass the run directory to `--baseline` next time to see deltas and regressions.
+`--scenario a,b` narrows live runs. `--references` also replays the Claude and Codex fixtures. `--hermes-home` defaults to `~/.hermes-bench`, and `T3_HERMES_BIN` points the live runs and the stack suite's Hermes at another `hermes`, such as a patched scratch checkout's `.venv/bin/hermes`; `--db` defaults to `$T3HERMES_HOME/userdata/statev2.sqlite`. A run writes `scorecard.json` and `summary.md`; pass the run directory to `--baseline` next time to see deltas and regressions.
 
 One live sample of every scenario takes about 15 minutes. The stack suite takes 5 to 10 minutes and runs real Claude and Codex turns.
 

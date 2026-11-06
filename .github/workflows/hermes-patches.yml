@@ -8,8 +8,8 @@ name: Hermes Patches
 # manifest order, and must not fail any patch-relevant Hermes test that passes
 # on unpatched main.
 #
-# Drift files a `hermes-patch-drift` issue; the maintainer's Hermes resolver
-# picks it up from the webhook and opens a PR adding rebased versions. It parses
+# Drift files a `hermes-patch-drift` issue; the maintainer's resolver (a T3 Code
+# webhook task) picks it up and opens a PR adding rebased versions. It reads
 # the issue body, so keep .github/scripts/hermes-patch-drift.cjs's report
 # format stable.
 #

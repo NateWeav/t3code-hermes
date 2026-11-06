@@ -38,7 +38,7 @@ Hermes test that passes on unpatched `main`. A patch that changes `acp_adapter/`
 test that builds the agent as `hermes acp` does (`HermesACPAgent()` with no arguments, or
 `GatewayACPAgent`), and no test that forces the in-process server
 (`HermesACPAgent.__new__(HermesACPAgent, ...)`, `session_manager=`). Drift files a
-`hermes-patch-drift` issue, and the maintainer's Hermes resolver answers it with
+`hermes-patch-drift` issue, and the maintainer's resolver (a T3 Code webhook task) answers it with
 a PR that adds a rebased version, or deletes a patch upstream made obsolete, and applies the 30-day
 rule. To run the same check locally against a clean Hermes checkout outside `~/.hermes` (Hermes's
 test guard fails tests run from under it):

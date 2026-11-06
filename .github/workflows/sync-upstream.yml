@@ -10,8 +10,8 @@ name: Sync Upstream
 # commits that are already pushed. A merge also keeps the Hermes commits intact
 # and makes the next sync's conflict set smaller.
 #
-# A conflict files an `upstream-sync-conflict` issue; the Hermes upstream-sync
-# resolver picks it up from the webhook, merges its resolution PR once CI is
+# A conflict files an `upstream-sync-conflict` issue; the resolver (a T3 Code
+# webhook task) picks it up, merges its resolution PR once CI is
 # green, and dispatches this workflow again to release. Runs leave a conflict
 # that is already reported alone until a newer upstream nightly appears.
 #
@@ -253,7 +253,7 @@ jobs:
 
           conflicts="$(cat "$RUNNER_TEMP/conflicts.txt")"
 
-          # The Hermes resolver's webhook script parses this body: it needs
+          # The resolver reads this body from the issue: it needs
           # "Merging `upstream/main` (`<sha>`)", the run URL, and the file list
           # between "Conflicted files:" and "Resolve by hand:". Keep them.
           {

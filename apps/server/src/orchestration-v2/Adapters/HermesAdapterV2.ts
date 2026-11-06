@@ -87,8 +87,8 @@ export const HermesProviderCapabilitiesV2 = {
   },
   streaming: {
     ...AcpProviderCapabilitiesV2.streaming,
-    // The gateway projects only `tool.start` and `tool.complete`; a command's output arrives whole.
-    streamsToolOutput: false,
+    // With the `acp-terminal-output` patch; stock Hermes sends a command's output whole when it ends.
+    streamsToolOutput: true,
   },
   tools: {
     ...AcpProviderCapabilitiesV2.tools,
@@ -208,9 +208,10 @@ export function makeHermesAcpAdapterFlavor(
     driver: HERMES_PROVIDER,
     runtimeHarness: "Hermes",
     capabilities: HermesProviderCapabilitiesV2,
-    clientCapabilitiesMeta: HERMES_DELEGATION_META,
     // Hermes takes image blocks whatever its handshake advertises.
     supportsImagePrompts: true,
+    // Hermes with `acp-terminal-output` streams a running command's output as `_meta.terminal_output`.
+    clientCapabilitiesMeta: { ...HERMES_DELEGATION_META, terminal_output: true },
     supportsCompaction: true,
     compactionCommand: "/compress",
     // The gateway's `/undo N` (`session.mutate rewind`) drops the session's last N user turns. It

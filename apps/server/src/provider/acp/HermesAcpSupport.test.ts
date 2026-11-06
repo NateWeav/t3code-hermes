@@ -371,6 +371,13 @@ describe("normalizeHermesTerminalResult", () => {
     expect(normalized.data.rawOutput).toEqual({ exitCode: 1 });
   });
 
+  it("drops a running call's echo of its command, which is not output", () => {
+    const running = { ...completedTerminal("$ git status"), status: "inProgress" as const };
+    const normalized = normalizeHermesTerminalResult(running);
+    expect(normalized.data.content).toBeUndefined();
+    expect(normalized.command).toBe("git status");
+  });
+
   it("leaves failure text, in-flight calls, and other tools untouched", () => {
     const failure = completedTerminal("terminal failed: command timed out", "failed");
     expect(normalizeHermesTerminalResult(failure)).toBe(failure);

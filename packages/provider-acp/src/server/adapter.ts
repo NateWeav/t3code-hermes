@@ -1034,6 +1034,23 @@ function decodeByteText(value: unknown): string | undefined {
   }
 }
 
+/**
+ * Zed's display-only terminal (codex-acp, claude-agent-acp): a running call's next output arrives as
+ * `_meta.terminal_output.data` on a `tool_call_update`, for a client that advertises
+ * `_meta.terminal_output`. `only` is true when the update changes nothing else on the card.
+ */
+function acpTerminalOutputMeta(
+  update: Extract<EffectAcpSchema.SessionUpdate, { readonly sessionUpdate: "tool_call_update" }>,
+): { readonly data: string; readonly only: boolean } | undefined {
+  const output = unknownRecord(unknownRecord(update._meta)?.terminal_output);
+  if (typeof output?.data !== "string" || output.data.length === 0) return undefined;
+  const only = Object.entries(update).every(
+    ([key, value]) =>
+      key === "sessionUpdate" || key === "toolCallId" || key === "_meta" || value == null,
+  );
+  return { data: output.data, only };
+}
+
 function textFromUnknown(value: unknown): string | undefined {
   if (typeof value === "string") {
     return value;
@@ -5217,6 +5234,40 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           return true;
         });
 
+        // Untraced: it runs per output chunk. Live output bypasses the tool's state, so a running
+        // command item never persists it.
+        const rendersTerminalOutputMeta = flavor.clientCapabilitiesMeta?.terminal_output === true;
+        const projectTerminalOutputMeta = Effect.fnUntraced(function* (
+          notification: EffectAcpSchema.SessionNotification,
+          context: ActiveAcpTurn | null,
+        ) {
+          const update = notification.update;
+          if (!rendersTerminalOutputMeta || update.sessionUpdate !== "tool_call_update") {
+            return false;
+          }
+          const output = acpTerminalOutputMeta(update);
+          if (output === undefined) return false;
+          const tool =
+            context !== null && notification.sessionId === context.nativeThreadId
+              ? context.tools.get(update.toolCallId)
+              : undefined;
+          if (
+            context !== null &&
+            tool?.kind === "execute" &&
+            tool.status !== "completed" &&
+            tool.status !== "failed"
+          ) {
+            yield* emitProviderEvent({
+              type: "command_output.delta",
+              driver,
+              threadId: context.input.threadId,
+              itemId: providerTurnItemId(`${context.nativeThreadId}:tool:${update.toolCallId}`),
+              chunk: output.data,
+            });
+          }
+          return output.only;
+        });
+
         const idleErrorFailure = (error: EffectAcpSchema.PromptResponse["error"]) =>
           flavor.promptFailure?.(
             new EffectAcpErrors.AcpRequestError({
@@ -5320,6 +5371,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           )
             return;
           if (yield* projectAgentTerminalUpdate(notification, context)) return;
+          if (yield* projectTerminalOutputMeta(notification, context)) return;
           if (
             update.sessionUpdate === "usage_update" ||
             update.sessionUpdate === "session_info_update"

@@ -110,7 +110,8 @@ function resolveBenchHermesHome(): string {
 /**
  * Drops the agent harness's own model routing so the benchmark home's config decides. An empty
  * managed scope keeps a machine-wide `/etc/hermes/config.yaml` overlay out too: it layers over
- * every home, and a compression provider it pins that the benchmark home lacks aborts `/compress`.
+ * every home, and can pin providers, a delegation model, or a compression provider the benchmark
+ * home lacks.
  */
 function benchEnvironment(hermesHome: string): NodeJS.ProcessEnv {
   const noManagedScope = NodePath.join(hermesHome, "no-managed-scope");

@@ -171,6 +171,86 @@
       ]
     },
     {
+      "id": "acp-editor-clarify",
+      "title": "Clarifying questions",
+      "neededFor": "Hermes asking you a clarifying question with choices you can pick from. Without it, Hermes's T3 sessions have no clarify tool, so it asks in its reply and you answer with a new message.",
+      "versions": [
+        {
+          "hermesCommit": "90d6b98fd86d20981ee06ddd5b7d93e4320f26a4",
+          "hermesCommitDate": "2026-11-06T07:12:42Z",
+          "file": "acp-editor-clarify/90d6b98fd86d.patch"
+        },
+        {
+          "hermesCommit": "44ec783afd1193afb7576d9c01d7fe9d18c87339",
+          "hermesCommitDate": "2026-11-06T03:04:48Z",
+          "file": "acp-editor-clarify/44ec783afd11.patch"
+        }
+      ]
+    },
+    {
+      "id": "acp-terminal-output",
+      "title": "Live command output",
+      "neededFor": "Seeing a Hermes shell command's output while it runs. Without it, a command's card stays empty until the command finishes.",
+      "versions": [
+        {
+          "hermesCommit": "90d6b98fd86d20981ee06ddd5b7d93e4320f26a4",
+          "hermesCommitDate": "2026-11-06T07:12:42Z",
+          "file": "acp-terminal-output/90d6b98fd86d.patch"
+        },
+        {
+          "hermesCommit": "53a6ced422214d07255302a5b900c313af3b677a",
+          "hermesCommitDate": "2026-11-06T03:28:41Z",
+          "file": "acp-terminal-output/53a6ced42221.patch"
+        }
+      ]
+    },
+    {
+      "id": "acp-active-steering",
+      "title": "Steering a running turn",
+      "neededFor": "A message you send while Hermes is working reaching the running turn, as it does for Claude and Codex. Without it, T3 stops the turn and starts it again with your message.",
+      "versions": [
+        {
+          "hermesCommit": "ca4360692055bdb4df3a695c164646e528891da8",
+          "hermesCommitDate": "2026-11-06T04:01:15Z",
+          "file": "acp-active-steering/ca4360692055.patch"
+        }
+      ]
+    },
+    {
+      "id": "acp-unprompted-turns",
+      "title": "Wakes as their own runs",
+      "neededFor": "A background wake shown as a run of its own. Without it, when a message is queued behind a turn Hermes runs for a finished background job or subagent, T3 shows that turn's reply inside the queued message's reply.",
+      "versions": [
+        {
+          "hermesCommit": "90d6b98fd86d20981ee06ddd5b7d93e4320f26a4",
+          "hermesCommitDate": "2026-11-06T07:12:42Z",
+          "file": "acp-unprompted-turns/90d6b98fd86d.patch"
+        },
+        {
+          "hermesCommit": "ca4360692055bdb4df3a695c164646e528891da8",
+          "hermesCommitDate": "2026-11-06T04:01:15Z",
+          "file": "acp-unprompted-turns/ca4360692055.patch"
+        }
+      ]
+    },
+    {
+      "id": "acp-command-approval",
+      "title": "Command approvals",
+      "neededFor": "Approval before each shell command in Supervised and Auto-accept edits threads, as Claude Code asks before each Bash command. Without it, Hermes asks only before file edits and commands it flags as dangerous, and a file edit Hermes runs without asking shows no diff.",
+      "versions": [
+        {
+          "hermesCommit": "90d6b98fd86d20981ee06ddd5b7d93e4320f26a4",
+          "hermesCommitDate": "2026-11-06T07:12:42Z",
+          "file": "acp-command-approval/90d6b98fd86d.patch"
+        },
+        {
+          "hermesCommit": "ca4360692055bdb4df3a695c164646e528891da8",
+          "hermesCommitDate": "2026-11-06T04:01:15Z",
+          "file": "acp-command-approval/ca4360692055.patch"
+        }
+      ]
+    },
+    {
       "id": "acp-subagent-model-continue",
       "title": "Subagent models and follow-ups",
       "neededFor": "Apply after Live subagent progress. Lets Hermes pick a subagent's model from the ones your profile lists, and send a finished subagent a follow-up. Without it, every subagent runs on the default model, and a finished one can't be asked anything more.",

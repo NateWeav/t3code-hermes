@@ -1,0 +1,441 @@
+diff --git a/acp_adapter/gateway_server.py b/acp_adapter/gateway_server.py
+index ff78c7e0f3..9387b7e771 100644
+--- a/acp_adapter/gateway_server.py
++++ b/acp_adapter/gateway_server.py
+@@ -89,6 +89,9 @@ class GatewayACPAgent(GatewayReplyMixin, acp.Agent):
+         self._editor_mcp = {}
+         self._permissions = {}
+         self._admissions = {}
++        # Admission -> the execution generation its claim runs (``message.start``): what
++        # ``_hermes/steer`` steers once the admission is this editor's prompt's.
++        self._claims = {}
+         self._submitting = set()
+         # Session -> (content fingerprint, input_id, staged (text, attachments)) of a submit whose ack
+         # never arrived. The editor's retry (that session's next prompt, same content) reuses it, so the authority
+@@ -145,9 +148,48 @@ class GatewayACPAgent(GatewayReplyMixin, acp.Agent):
+             agent_capabilities=AgentCapabilities(load_session=True,
+                 prompt_capabilities=PromptCapabilities(image=True),
+                 session_capabilities=SessionCapabilities(fork=SessionForkCapabilities(), list=SessionListCapabilities(),
+-                                                         resume=SessionResumeCapabilities())),
++                                                         resume=SessionResumeCapabilities()),
++                field_meta={"hermes": {"steer": True}}),
+             auth_methods=build_auth_methods())
+ 
++    async def ext_method(self, method, params):
++        """``_hermes/steer`` (``_meta.hermes.steer``): ``text`` for the turn this editor's running prompt
++        started, the way Codex's ``turn/steer`` takes it. ``{"steered": true}``: that turn reads it before
++        it ends. ``false``: no turn of this editor's took it (none runs, or the turn already read its last
++        steer), so the editor sends the text as its next prompt. Never chat text, unlike ``/steer``."""
++        if method != "hermes/steer":
++            raise acp.RequestError.method_not_found("_" + method)
++        session_id = self._aliases.get(params.get("sessionId"), params.get("sessionId"))
++        text = params.get("text")
++        if session_id not in self._snapshots or not isinstance(text, str) or not text.strip():
++            raise acp.RequestError.invalid_params({"sessionId": params.get("sessionId")})
++        generation = await self._own_claim(session_id)
++        if generation is None:
++            return {"steered": False}
++        from hermes_cli.gateway_client import GatewayRPCError
++        try:
++            result = await (await self._client()).rpc("session.steer", session_id=session_id, text=text,
++                                                      execution_generation=generation)
++        except GatewayRPCError:
++            return {"steered": False}  # the owner's definite no (the turn ended, nothing to take it)
++        return {"steered": result.get("status") == "queued"}
++
++    async def _own_claim(self, session_id):
++        """The generation the owner claimed for this editor's prompt, waiting for its ack and its
++        ``message.start`` when the steer overtook them; None once no prompt of this editor's is on its way
++        or running."""
++        def known():
++            admission_id = self._admissions.get(session_id)
++            if admission_id is None:
++                return session_id not in self._submitting
++            return admission_id in self._claims or admission_id in self._terminals or self._failure is not None
++        async with self._changed:
++            with suppress(TimeoutError):  # a submit that failed before its ack notifies nobody
++                async with asyncio.timeout(10):
++                    await self._changed.wait_for(known)
++            admission_id = self._admissions.get(session_id)
++            return None if admission_id in self._terminals else self._claims.get(admission_id)
++
+     async def authenticate(self, method_id, **kwargs):
+         from acp_adapter.server import HermesACPAgent
+         return await HermesACPAgent.authenticate(self, method_id, **kwargs)
+@@ -751,6 +793,8 @@ class GatewayACPAgent(GatewayReplyMixin, acp.Agent):
+             return None
+         admission_id = receipt["admission_id"]
+         self._admissions[session_id] = admission_id
++        async with self._changed:
++            self._changed.notify_all()  # a ``_hermes/steer`` that overtook this ack
+         if receipt.get("status") == "terminal":
+             # A retry of an un-acked submit whose turn already settled: report that turn once.
+             await self._settled_receipt(client, held_id, session_id, receipt)
+@@ -977,6 +1021,13 @@ class GatewayACPAgent(GatewayReplyMixin, acp.Agent):
+         if kind in {"session.info", "session.updated", "session.usage", "session.tools_changed"}:
+             await self._project_session_state(kind, sid, editor_id, payload, event)
+             return
++        if kind == "message.start":
++            async with self._changed:
++                self._claims[aid] = event.get("execution_generation")
++                while len(self._claims) > 256:
++                    self._claims.pop(next(iter(self._claims)))
++                self._changed.notify_all()
++            return
+         if await self._gap_guard(kind, sid, aid):
+             return
+         if kind in {"approval.request", "clarify.request"}:
+@@ -995,6 +1046,11 @@ class GatewayACPAgent(GatewayReplyMixin, acp.Agent):
+             return
+         if kind == "message.delta":
+             text = _text(payload)
++            if "text" in payload and payload["text"] is None:
++                # The owner's segment boundary (an answer the turn went on from): what follows is a new reply.
++                self._close_segment(aid)
++                self._end_message(sid)
++                return
+             self._streamed[aid] = self._streamed.get(aid, "") + text
+             if text and self._conn:
+                 await self._conn.session_update(session_id=editor_id, update=self._chunk(sid, text))
+diff --git a/agent/conversation_loop.py b/agent/conversation_loop.py
+index dc47cd7218..ae83fafe11 100644
+--- a/agent/conversation_loop.py
++++ b/agent/conversation_loop.py
+@@ -1830,6 +1830,8 @@ def run_conversation(
+ 
+     # Steer / redirect / interrupt set this mid-turn; the result reports whether the turn ran untouched.
+     agent._turn_user_intervened = False
++    # The last turn's final drain closed steer intake; this turn reads steers again.
++    getattr(agent, "open_steer_intake", lambda: None)()
+     # Images attached natively to this user turn stay visible to vision_analyze for the turn, so
+     # it does not embed the same pixels a second time into the same request (#76411).
+     with native_turn_images(user_message):
+diff --git a/agent/interrupt_control.py b/agent/interrupt_control.py
+index af647a1c4f..873b6e45ac 100644
+--- a/agent/interrupt_control.py
++++ b/agent/interrupt_control.py
+@@ -108,6 +108,18 @@ def _steer_fates(agent) -> dict:
+     return vars(agent).setdefault("_steer_ticket_fates", {})
+ 
+ 
++def _take_pending_steer(agent) -> Optional[str]:
++    """Take every buffered steer (each ticket's fate: consumed); the caller holds the steer lock."""
++    text = _ic_slot(agent, "_pending_steer_lock", "_pending_steer")
++    parts = _steer_parts(agent)
++    _set_steer_parts(agent, [])
++    for ticket, _ in parts:
++        if ticket is not None:
++            _steer_fates(agent)[ticket] = True
++    agent._steer_last_drain = (text, parts)  # requeue_drained_steer restores its tickets
++    return text
++
++
+ def requeue_drained_steer(agent, steer_text: str) -> None:
+     """Put drained steer text back (nothing took it). When it is the last drain's text, its parts go back
+     with their tickets, so a transfer in it reads unconsumed again."""
+@@ -315,6 +327,8 @@ class InterruptControlMixin:
+             return False
+         cleaned = text.strip()
+         with _ic_lock(self, "_pending_steer_lock"):
++            if vars(self).get("_steer_intake_closed"):
++                return False  # the turn read its last steer: the caller sends this as the next prompt
+             _set_steer_parts(self, _steer_parts(self) + [(ticket, cleaned)])
+         # The turn no longer ran on its own (first-task-done detection reads this off the result).
+         self._turn_user_intervened = True
+@@ -398,22 +412,31 @@ class InterruptControlMixin:
+     def _drain_pending_steer(self) -> Optional[str]:
+         """Return the pending steer text (if any) and clear the slot; None when nothing is pending."""
+         with _ic_lock(self, "_pending_steer_lock"):
+-            text = _ic_slot(self, "_pending_steer_lock", "_pending_steer")
+-            parts = _steer_parts(self)
+-            _set_steer_parts(self, [])
+-            for ticket, _ in parts:
+-                if ticket is not None:
+-                    _steer_fates(self)[ticket] = True
+-            self._steer_last_drain = (text, parts)  # requeue_drained_steer restores its tickets
++            return _take_pending_steer(self)
++
++    def _drain_final_steer(self) -> Optional[str]:
++        """The text answer's drain, the turn's last chance to read a steer: the pending text, or None
++        after closing intake, so a later ``steer()`` is refused (its caller sends the text as the next
++        prompt) instead of waiting unread in the buffer for some later turn."""
++        with _ic_lock(self, "_pending_steer_lock"):
++            text = _take_pending_steer(self)
++            self._steer_intake_closed = text is None
+         return text
+ 
++    def open_steer_intake(self) -> None:
++        """A turn starts (or a gateway claim adopts this agent): ``steer()`` takes text again."""
++        with _ic_lock(self, "_pending_steer_lock"):
++            self._steer_intake_closed = False
++
+     def _drain_leftover_steer(self) -> Optional[str]:
+         """The turn finalizer's drain: return and clear the ticketless steers (they become the next user
+         turn) and keep each ticketed one buffered. A transfer is never a follow-up a restart may discard:
+-        settlement withdraws it and its admission goes back to its own queue place."""
++        settlement withdraws it and its admission goes back to its own queue place. Intake closes: no
++        drain of this turn is left to read a later steer."""
+         with _ic_lock(self, "_pending_steer_lock"):
+             parts = _steer_parts(self)
+             _set_steer_parts(self, [part for part in parts if part[0] is not None])
++            self._steer_intake_closed = True
+         return "\n".join(text for ticket, text in parts if ticket is None) or None
+ 
+     def withdraw_steer(self, ticket) -> bool:
+diff --git a/agent/turn_stop_gates.py b/agent/turn_stop_gates.py
+index 7ac100a13b..131b920709 100644
+--- a/agent/turn_stop_gates.py
++++ b/agent/turn_stop_gates.py
+@@ -1,9 +1,10 @@
+ """Text-response stop gates for the conversation turn loop.
+ 
+-When the model stops with a text answer, four gates may instead append the answer as an
++When the model stops with a text answer, five gates may instead append the answer as an
+ interim row plus a user-role nudge and continue the turn: late language-server verdicts on this
+ turn's edits (a durable row, see ``_late_lsp_verdicts``), verify-on-stop (#65919),
+-the ``pre_verify`` plugin hook after code edits, and the kanban worker terminal-tool guard.
++the ``pre_verify`` plugin hook after code edits, the kanban worker terminal-tool guard, and a
++``/steer`` the answer has not read yet (also a durable row).
+ Each keeps the candidate answer as a budget-exhaustion fallback
+ (``pending_verification_response``) and clears ``final_response`` so the finalizer can tell
+ this gate from error exits (#61631). Nothing here imports ``agent.conversation_loop`` at
+@@ -12,6 +13,7 @@ module level (cycle).
+ 
+ from __future__ import annotations
+ 
++import contextlib
+ import logging
+ import os
+ from dataclasses import dataclass
+@@ -136,7 +138,7 @@ def apply_stop_gates(
+     conversation_history: Any, pending_verification_response: Any,
+     pending_verification_response_previewed: Any,
+ ) -> StopGateVerdict:
+-    """Run verify-on-stop → pre_verify hook → kanban stop guard, in that order. Nudges
++    """Run verify-on-stop → pre_verify hook → kanban stop guard → pending /steer, in that order. Nudges
+     are user-role rows appended only after the assistant answer row, so role alternation
+     holds. Hook lookups are imported lazily from their origin modules (tests patch them
+     there)."""
+@@ -216,6 +218,28 @@ def apply_stop_gates(
+             "(kanban_complete/kanban_request_review/kanban_block) — nudging to finish"
+         )
+         return verdict
++
++    # Last, so no gate continues the turn after intake closed: a steer sent while the model wrote this
++    # answer. Like the late-LSP note, the answer stays as a durable interim row and the steer becomes
++    # its own user row, so the model answers it in this turn instead of a follow-up turn.
++    _drain = getattr(agent, "_drain_final_steer", None)
++    _steer = _drain() if callable(_drain) else None
++    if isinstance(_steer, str) and _steer:
++        from agent.prompt_builder import steer_user_row
++
++        _append_interim_answer(agent, final_msg, messages, conversation_history, "steer interim flush failed")
++        # End the answer's stream segment as a tool batch does: viewers show the steer's answer as its own reply.
++        if callable(getattr(agent, "stream_delta_callback", None)):
++            with contextlib.suppress(Exception):
++                agent.stream_delta_callback(None)
++        append_message(messages, steer_user_row(_steer))
++        agent._session_messages = messages
++        logger.info("Delivered /steer after a text answer (%d chars) as new user message", len(_steer))
++        return StopGateVerdict(
++            continue_turn=True, final_response=None,
++            pending_verification_response=final_response,
++            pending_verification_response_previewed=agent._interim_content_was_streamed(final_response or ""),
++        )
+     return StopGateVerdict(
+         continue_turn=False, final_response=final_response,
+         pending_verification_response=pending_verification_response,
+diff --git a/gateway/session_authority.py b/gateway/session_authority.py
+index 052252b70e..eb432fc7a0 100644
+--- a/gateway/session_authority.py
++++ b/gateway/session_authority.py
+@@ -1021,6 +1021,8 @@ class SessionAuthority:
+                 del self.pending_stops[session_id]
+                 from agent.interrupt_compat import request_hard_interrupt
+                 request_hard_interrupt(agent)
++            # This claim's turn reads steers (the agent's last turn closed intake), latched ones first.
++            getattr(agent, 'open_steer_intake', lambda: None)()
+             latched, steers = self.pending_steers.pop(session_id, (None, ()))
+             for text in steers if latched == generation else ():
+                 agent.steer(text)
+diff --git a/hermes_cli/cli_loops_mixin.py b/hermes_cli/cli_loops_mixin.py
+index 3b5c5cbe78..67ed823d19 100644
+--- a/hermes_cli/cli_loops_mixin.py
++++ b/hermes_cli/cli_loops_mixin.py
+@@ -563,7 +563,9 @@ class CLILoopsMixin:
+                 elif accepted:
+                     _cprint(f"  {t('cli.steer.queued', preview=_preview(payload))}")
+                 else:
+-                    _cprint(f"  {t('cli.steer.rejected_empty')}")
++                    # Not taken (the turn already read its last steer): it is the next prompt.
++                    self._pending_input.put(payload)
++                    _cprint(f"  {t('cli.steer.no_agent_queued', preview=_preview(payload))}")
+         else:
+             self._pending_input.put(payload)
+             _cprint(f"  {t('cli.steer.no_agent_queued', preview=_preview(payload))}")
+diff --git a/tests/acp_adapter/test_gateway_active_steer.py b/tests/acp_adapter/test_gateway_active_steer.py
+new file mode 100644
+index 0000000000..4b4a2010dc
+--- /dev/null
++++ b/tests/acp_adapter/test_gateway_active_steer.py
+@@ -0,0 +1,106 @@
++"""``_hermes/steer``: a steer sent while this editor's prompt runs reaches that turn, even one that
++makes no tool call, and nothing else ever runs it.
++
++Real gateway daemon, real ``hermes acp`` stdio process (``acp_adapter.entry``, the ``GatewayACPAgent``
++viewer), loopback model. The steer overtakes its prompt's ack and claim; the turn answers its prompt,
++then the steer, inside the one ``session/prompt``. A finished turn closed its agent's steer intake, so
++the steered turn is the session's second: its claim must open intake again. A steer once the turn has
++ended is refused, never queued as a prompt.
++"""
++import asyncio
++from http.server import BaseHTTPRequestHandler
++import json
++import threading
++
++import pytest
++
++from tests.acp_adapter.test_gateway_sessions import editor
++
++
++class SteerPeer(BaseHTTPRequestHandler):
++    """Holds the answer to ``HOLD_FOR_STEER`` until the test releases it; answers ``SAW_STEER`` to a
++    request whose newest user row carries the steer."""
++
++    def log_message(self, *args):
++        pass
++
++    def do_GET(self):
++        self.send_response(200)
++        self.send_header("Content-Type", "application/json")
++        self.end_headers()
++        self.wfile.write(json.dumps({"data": [{"id": "local-wire-stub", "object": "model"}]}).encode())
++
++    def do_POST(self):
++        request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
++        messages = request.get("messages") or []
++        last = json.dumps(next((m.get("content") for m in reversed(messages) if m.get("role") == "user"), ""))
++        if "STEER_NOTE" in last:
++            reply = "SAW_STEER"
++        elif "HOLD_FOR_STEER" in last:
++            self.server.held.set()
++            assert self.server.release.wait(15), "the test never released the held answer"
++            reply = "FIRST_ANSWER"
++        else:
++            reply = "WARM_ANSWER"
++        if messages:
++            self.server.requests.append(request)
++        base = {"id": "chatcmpl-steer", "model": "local-wire-stub", "created": 1}
++        self.send_response(200)
++        self.send_header("Content-Type", "text/event-stream" if request.get("stream") else "application/json")
++        self.end_headers()
++        if not request.get("stream"):
++            self.wfile.write(json.dumps({**base, "object": "chat.completion", "choices": [
++                {"index": 0, "message": {"role": "assistant", "content": reply}, "finish_reason": "stop"}],
++                "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}}).encode())
++            return
++        for delta, finish in [({"role": "assistant", "content": reply}, None), ({}, "stop")]:
++            chunk = {**base, "object": "chat.completion.chunk", "choices": [
++                {"index": 0, "delta": delta, "finish_reason": finish}]}
++            self.wfile.write(("data: " + json.dumps(chunk) + "\n\n").encode())
++            self.wfile.flush()
++        self.wfile.write(b"data: [DONE]\n\n")
++
++
++def _reply_text(frames):
++    return "".join(f["params"]["update"]["content"]["text"] for f in frames
++                   if f.get("method") == "session/update"
++                   and f["params"]["update"].get("sessionUpdate") == "agent_message_chunk")
++
++
++@pytest.mark.platforms("linux")
++@pytest.mark.asyncio
++async def test_a_steer_reaches_the_running_turn_without_a_tool_call(daemon, tmp_path, model_peer):
++    model_peer.RequestHandlerClass = SteerPeer
++    model_peer.held, model_peer.release = threading.Event(), threading.Event()
++    async with editor(daemon, tmp_path) as acp:
++        init = await acp.rpc("initialize", protocolVersion=1, clientCapabilities={})
++        assert init["result"]["agentCapabilities"]["_meta"]["hermes"]["steer"] is True, init
++        sid = (await acp.rpc("session/new", cwd=str(tmp_path), mcpServers=[]))["result"]["sessionId"]
++        warm = await acp.rpc("session/prompt", sessionId=sid, prompt=[{"type": "text", "text": "Warm up"}])
++        assert warm.get("result", {}).get("stopReason") == "end_turn", warm
++
++        turn = asyncio.create_task(acp.rpc("session/prompt", sessionId=sid,
++                                           prompt=[{"type": "text", "text": "HOLD_FOR_STEER"}]))
++        await asyncio.sleep(0)  # the prompt's request is written first; the steer follows it at once
++        steer = await acp.rpc("_hermes/steer", sessionId=sid, text="STEER_NOTE: answer SAW_STEER")
++        assert steer.get("result") == {"steered": True}, steer
++        assert not turn.done(), turn.result()
++        model_peer.release.set()
++        reply = await asyncio.wait_for(turn, 40)
++        assert reply.get("result", {}).get("stopReason") == "end_turn", reply
++
++        late = await acp.rpc("_hermes/steer", sessionId=sid, text="STEER_NOTE: too late")
++        assert late.get("result") == {"steered": False}, late
++
++    assert model_peer.held.is_set()
++    turns = [request["messages"] for request in model_peer.requests]
++    # One model call per answer: the warm-up, the held answer, the steer's answer. The late steer ran nothing.
++    assert len(turns) == 3, [m[-1] for m in turns]
++    *_, held, steered = turns
++    assert "STEER_NOTE" not in json.dumps(held)
++    answered, steer_row = steered[-2:]
++    assert answered["role"] == "assistant" and answered["content"] == "FIRST_ANSWER", steered[-3:]
++    assert steer_row["role"] == "user" and "STEER_NOTE: answer SAW_STEER" in steer_row["content"], steer_row
++    text = _reply_text(acp.frames)
++    assert text.count("FIRST_ANSWER") == 1 and text.count("SAW_STEER") == 1, text
++    assert "Steer queued" not in text, text
+diff --git a/tests/agent/test_steer.py b/tests/agent/test_steer.py
+index 2cd5b99880..a7a9404d2b 100644
+--- a/tests/agent/test_steer.py
++++ b/tests/agent/test_steer.py
+@@ -129,6 +129,24 @@ class TestSteerDrain:
+         assert agent._pending_steer is None
+         assert agent.withdraw_steer("t") is True, "dropped unread: never delivered"
+ 
++    def test_the_final_drain_closes_intake_once_nothing_is_left_to_read(self):
++        agent = _bare_agent()
++        agent.steer("sent while answering")
++        assert agent._drain_final_steer() == "sent while answering"
++        assert agent.steer("sent during the steer's answer") is True, "the turn goes on to read it"
++        assert agent._drain_final_steer() == "sent during the steer's answer"
++        assert agent._drain_final_steer() is None
++        assert agent.steer("after the last drain") is False, "no drain of this turn is left to read it"
++        assert agent._pending_steer is None
++        agent.open_steer_intake()
++        assert agent.steer("next turn") is True
++
++    def test_the_leftover_drain_closes_intake(self):
++        agent = _bare_agent()
++        agent.steer("typed /steer")
++        assert agent._drain_leftover_steer() == "typed /steer"
++        assert agent.steer("after the finalizer") is False
++
+ 
+ 
+ class TestActiveTurnRedirect:
+diff --git a/tests/hermes_cli/test_cli_steer_busy_path.py b/tests/hermes_cli/test_cli_steer_busy_path.py
+index 64eba34a4b..fcb6becd97 100644
+--- a/tests/hermes_cli/test_cli_steer_busy_path.py
++++ b/tests/hermes_cli/test_cli_steer_busy_path.py
+@@ -107,6 +107,20 @@ class TestSteerBusyPathDispatch:
+         cli.agent.steer.assert_called_once_with("focus on errors")
+         cli._pending_input.put.assert_not_called()
+ 
++    def test_a_steer_the_running_turn_refuses_is_the_next_turn(self):
++        """The turn already read its last steer (``agent.steer`` is False): the text is queued as the
++        next turn, never dropped."""
++        cli = _make_cli()
++        cli._agent_running = True
++        cli.agent = MagicMock()
++        cli.agent.steer = MagicMock(return_value=False)
++        cli._pending_input = MagicMock()
++
++        cli.process_command("/steer arrived as the turn ended")
++
++        cli.agent.steer.assert_called_once_with("arrived as the turn ended")
++        cli._pending_input.put.assert_called_once_with("arrived as the turn ended")
++
+     def test_idle_path_queues_as_next_turn(self):
+         """Control — when the agent is NOT running, /steer correctly falls
+         back to next-turn queue semantics.  Demonstrates why the fix was

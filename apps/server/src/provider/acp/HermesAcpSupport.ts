@@ -7,12 +7,14 @@ import {
   type ProviderApprovalOption,
   type OrchestrationV2ProviderFailure,
   ProviderDriverKind,
-  type RuntimeMode,
   type ServerProviderSlashCommand,
 } from "@t3tools/contracts";
 import * as SecureRandom from "effect/crypto/SecureRandom";
+import * as Clock from "effect/Clock";
+import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
@@ -22,40 +24,61 @@ import { AgentScope } from "@t3tools/shared/AgentScope";
 import { normalizeModelSlug } from "@t3tools/shared/model";
 import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
 
-import type {
-  AcpSessionModeState,
-  AcpToolCallState,
+import {
+  collectSessionConfigOptionValues,
+  type AcpSessionModeState,
+  type AcpToolCallState,
 } from "@t3tools/provider-acp/server/runtimeModel";
+import type { ProviderAdapterV2RuntimePolicy } from "@t3tools/provider-core/server/ProviderAdapter";
 import * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
+import { unknownRecord } from "@t3tools/provider-acp/server/clientPolicy";
 
 const HERMES_DRIVER_KIND = ProviderDriverKind.make("hermes");
 /** Hermes authenticates from `~/.hermes/.env`; the method id is a formality. */
 const HERMES_AUTH_METHOD_ID = "hermes";
 export const HERMES_FALLBACK_MODEL_ID = "hermes-4";
 
+/** How much Hermes asks before it acts, as Claude's permission mode follows T3's policy. */
+export type HermesApprovalPosture = "ask" | "acceptEdits" | "dontAsk";
+
 /**
- * Mode ids Hermes derives from its edit-approval policy (`default`, `accept_edits`, `dont_ask`).
- * Matching is by id, name, then substring, so builds that rename a policy still resolve. Order is
- * preference: `dont_ask` auto-allows every edit, while `accept_edits` still asks outside the
- * workspace.
+ * Hermes with `acp-command-approval` asks before shell commands and shows an edit it runs unasked.
+ * Stock Hermes puts an edit's diff only on its approval request, so it stays in Default and T3's
+ * policy answers each edit.
  */
-const HERMES_AUTONOMOUS_MODE_ALIASES = [
-  "dont_ask",
-  "don't ask",
-  "auto",
-  "autonomous",
-  "auto approve",
-  "yolo",
-  "full access",
-  "accept edits",
-  "bypass",
-];
-const HERMES_ACCEPT_EDITS_MODE_ALIASES = [
-  "accept_edits",
-  "accept edits",
-  ...HERMES_AUTONOMOUS_MODE_ALIASES,
-];
-const HERMES_APPROVAL_MODE_ALIASES = ["ask", "approve", "manual", "confirm", "default"];
+export function hermesFollowsApprovalPosture(
+  initializeResult: EffectAcpSchema.InitializeResponse,
+): boolean {
+  return unknownRecord(initializeResult.agentCapabilities?._meta)?.command_approval === true;
+}
+
+export function hermesApprovalPosture(
+  policy: Pick<ProviderAdapterV2RuntimePolicy, "runtimeMode" | "approvalPolicy" | "sandboxPolicy">,
+): HermesApprovalPosture {
+  if (policy.approvalPolicy !== undefined && policy.approvalPolicy !== "never") return "ask";
+  // T3 can refuse a write the read-only sandbox forbids only if Hermes asks first.
+  if (unknownRecord(policy.sandboxPolicy)?.type === "readOnly") return "ask";
+  switch (policy.runtimeMode) {
+    // T3 allows every ACP request under Auto, so Hermes asking would only add round trips.
+    case "auto":
+    case "full-access":
+      return "dontAsk";
+    case "auto-accept-edits":
+      return "acceptEdits";
+    default:
+      return "ask";
+  }
+}
+
+/**
+ * Hermes's ACP modes (`acp_adapter/modes.py`): `modes` ids, and the values of the
+ * `edit_approval_policy` config option that `setMode` writes when Hermes advertises it.
+ */
+const HERMES_MODES = {
+  ask: { modeId: "default", policy: "ask" },
+  acceptEdits: { modeId: "accept_edits", policy: "workspace_session" },
+  dontAsk: { modeId: "dont_ask", policy: "session" },
+} as const satisfies Record<HermesApprovalPosture, { modeId: string; policy: string }>;
 
 /**
  * Slash commands the Hermes ACP adapter handles, mirroring `_ADVERTISED_COMMANDS` in
@@ -133,12 +156,12 @@ const HERMES_EXIT_CODE_FIELD = /^- \*\*exit_code:\*\* (-?\d+)$/;
 /**
  * Hermes's `terminal` tool sends a markdown summary instead of `rawOutput`, so client previews
  * would read "terminal result". Move the output into `rawOutput.stdout` and drop the summary; other
- * text passes through.
+ * text passes through. A running call's only content is Hermes's `$ <command>` echo of its input,
+ * which would read as output; it is dropped too.
  */
 export function normalizeHermesTerminalResult(toolCall: AcpToolCallState): AcpToolCallState {
   if (
     toolCall.kind !== "execute" ||
-    (toolCall.status !== "completed" && toolCall.status !== "failed") ||
     toolCall.data.rawOutput !== undefined ||
     !Array.isArray(toolCall.data.content) ||
     toolCall.data.content.length !== 1
@@ -148,6 +171,11 @@ export function normalizeHermesTerminalResult(toolCall: AcpToolCallState): AcpTo
   const entry = toolCall.data.content[0] as EffectAcpSchema.ToolCallContent;
   if (entry.type !== "content" || entry.content.type !== "text") {
     return toolCall;
+  }
+  if (toolCall.status !== "completed" && toolCall.status !== "failed") {
+    if (!entry.content.text.startsWith("$ ")) return toolCall;
+    const { content: _echo, ...data } = toolCall.data;
+    return { ...toolCall, data };
   }
   const [heading = "", ...lines] = entry.content.text.split("\n");
   if (!HERMES_TERMINAL_RESULT_HEADINGS.has(heading.trim())) {
@@ -191,6 +219,129 @@ export function normalizeHermesTerminalResult(toolCall: AcpToolCallState): AcpTo
         ...(exitCode !== undefined ? { exitCode } : {}),
       },
     },
+  };
+}
+
+const HERMES_WEB_SEARCH_START = "Searching the web for: ";
+
+/**
+ * Hermes sends `web_search` without `rawInput`, so its card had no query. The start text carries
+ * the whole query (the title cuts it at 80 characters); later updates keep it as `rawInput`.
+ */
+export function normalizeHermesWebSearchQuery(toolCall: AcpToolCallState): AcpToolCallState {
+  const content = toolCall.data.content;
+  if (toolCall.kind !== "fetch" || toolCall.data.rawInput !== undefined) return toolCall;
+  if (!Array.isArray(content) || content.length !== 1) return toolCall;
+  const entry = content[0] as EffectAcpSchema.ToolCallContent;
+  if (entry.type !== "content" || entry.content.type !== "text") return toolCall;
+  const text = entry.content.text;
+  if (!text.startsWith(HERMES_WEB_SEARCH_START)) return toolCall;
+  const query = text.slice(HERMES_WEB_SEARCH_START.length).trim();
+  return query.length === 0
+    ? toolCall
+    : { ...toolCall, data: { ...toolCall.data, rawInput: { query } } };
+}
+
+/** Hermes's permission cards; no tool call shares these ids. */
+const HERMES_PERMISSION_CARD_ID = /^(?:edit-approval|perm-check)-\d+$/;
+const HERMES_EDIT_DIFFS_KEPT = 64;
+
+function soleDiff(
+  content: ReadonlyArray<EffectAcpSchema.ToolCallContent> | null | undefined,
+): Extract<EffectAcpSchema.ToolCallContent, { type: "diff"; path: string }> | undefined {
+  const diffs = (content ?? []).filter((entry) => entry.type === "diff");
+  const diff = diffs.length === 1 ? diffs[0] : undefined;
+  return diff?.type === "diff" && "path" in diff ? diff : undefined;
+}
+
+/**
+ * Hermes sends an edit's diff on its approval request (`edit-approval-N`), or on an unasked edit's
+ * start (`acp-command-approval`); the write's completion replaces it with a status line. This keeps
+ * the diff on the card, the approved one first, and drops the update closing the approval card.
+ */
+export function makeHermesEditApprovalCards() {
+  const pendingByPath = new Map<string, EffectAcpSchema.ToolCallContent>();
+  const startedByToolCallId = new Map<string, EffectAcpSchema.ToolCallContent>();
+  const byToolCallId = new Map<string, EffectAcpSchema.ToolCallContent>();
+  // One instance serves every session and subagent of a provider instance.
+  const scoped = (sessionId: string, key: string) => `${sessionId}\0${key}`;
+  const keep = (
+    map: Map<string, EffectAcpSchema.ToolCallContent>,
+    key: string,
+    diff: EffectAcpSchema.ToolCallContent,
+  ) => {
+    map.delete(key);
+    map.set(key, diff);
+    if (map.size > HERMES_EDIT_DIFFS_KEPT) map.delete(map.keys().next().value!);
+  };
+  return {
+    onPermissionRequest: (request: EffectAcpSchema.RequestPermissionRequest) => {
+      const toolCall = request.toolCall;
+      if (toolCall.kind !== "edit" || !HERMES_PERMISSION_CARD_ID.test(toolCall.toolCallId)) return;
+      const diff = soleDiff(toolCall.content);
+      if (diff === undefined) return;
+      // `locations` carry the path as the model wrote it; the diff carries it resolved.
+      const requestedPath = unknownRecord(unknownRecord(toolCall.rawInput)?.arguments)?.path;
+      for (const path of new Set([diff.path, requestedPath])) {
+        if (typeof path === "string" && path.length > 0)
+          keep(pendingByPath, scoped(request.sessionId, path), diff);
+      }
+    },
+    normalizeToolCall: (toolCall: AcpToolCallState, sessionId: string): AcpToolCallState => {
+      if (toolCall.kind !== "edit") return toolCall;
+      const toolCallKey = scoped(sessionId, toolCall.toolCallId);
+      const settled = toolCall.status === "completed" || toolCall.status === "failed";
+      if (!settled) {
+        const started = soleDiff(
+          toolCall.data.content as ReadonlyArray<EffectAcpSchema.ToolCallContent> | undefined,
+        );
+        if (started !== undefined) keep(startedByToolCallId, toolCallKey, started);
+      }
+      let diff = byToolCallId.get(toolCallKey);
+      if (diff === undefined && settled) {
+        const locations = toolCall.data.locations;
+        const path =
+          Array.isArray(locations) && locations.length === 1
+            ? unknownRecord(locations[0])?.path
+            : undefined;
+        diff =
+          (typeof path === "string" ? pendingByPath.get(scoped(sessionId, path)) : undefined) ??
+          startedByToolCallId.get(toolCallKey);
+        if (diff === undefined) return toolCall;
+        for (const [key, pending] of pendingByPath) {
+          if (pending === diff) pendingByPath.delete(key);
+        }
+        startedByToolCallId.delete(toolCallKey);
+        keep(byToolCallId, toolCallKey, diff);
+      }
+      // A denied or failed write keeps Hermes's reason; it wrote nothing.
+      return diff === undefined || toolCall.status !== "completed"
+        ? toolCall
+        : { ...toolCall, data: { ...toolCall.data, content: [diff] } };
+    },
+    ignoreSessionUpdate: (notification: EffectAcpSchema.SessionNotification) =>
+      notification.update.sessionUpdate === "tool_call_update" &&
+      HERMES_PERMISSION_CARD_ID.test(notification.update.toolCallId),
+  };
+}
+
+/**
+ * Hermes's `clarify` arrives twice: as a tool call titled `clarify: <question>`, and as the
+ * `elicitation/create` form T3 shows as the question. This drops the tool call's updates.
+ */
+export function makeHermesClarifyCallFilter() {
+  const clarifyCalls = new Set<string>();
+  return (notification: EffectAcpSchema.SessionNotification): boolean => {
+    const { update } = notification;
+    if (update.sessionUpdate !== "tool_call" && update.sessionUpdate !== "tool_call_update") {
+      return false;
+    }
+    const key = `${notification.sessionId}\n${update.toolCallId}`;
+    const title = typeof update.title === "string" ? update.title : "";
+    if (title === "clarify" || title.startsWith("clarify: ")) clarifyCalls.add(key);
+    else if (!clarifyCalls.has(key)) return false;
+    if (update.status === "completed" || update.status === "failed") clarifyCalls.delete(key);
+    return true;
   };
 }
 
@@ -306,6 +457,8 @@ export function buildHermesAcpSpawnInput(
   };
 }
 
+const HERMES_SESSION_LOAD_REPLAY_IDLE_GAP = "90 seconds";
+
 export const makeHermesAcpRuntime = Effect.fn("HermesAcpSupport.makeHermesAcpRuntime")(function* (
   input: HermesAcpRuntimeInput,
 ): Effect.fn.Return<
@@ -324,6 +477,9 @@ export const makeHermesAcpRuntime = Effect.fn("HermesAcpSupport.makeHermesAcpRun
           );
   const build = Layer.build(
     AcpSessionRuntime.layer({
+      // Hermes always answers `session/load`, often seconds after replaying history. Treating a
+      // quiet replay as loaded would send `set_model` and the rollback rewind before the load.
+      sessionLoadReplayIdleGap: HERMES_SESSION_LOAD_REPLAY_IDLE_GAP,
       ...runtimeInput,
       ...(requestLogger === undefined ? {} : { requestLogger }),
       spawn: buildHermesAcpSpawnInput(input.hermesSettings, input.cwd, input.environment),
@@ -391,52 +547,32 @@ export function applyHermesAcpModelSelection<E>(input: {
     .pipe(Effect.mapError(input.mapError), Effect.as(targetModelId));
 }
 
-function findModeIdByAliases(
-  modes: ReadonlyArray<AcpSessionModeState["availableModes"][number]>,
-  aliases: ReadonlyArray<string>,
-): string | undefined {
-  const searchText = (mode: (typeof modes)[number]) =>
-    [mode.id, mode.name, mode.description]
-      .filter((value): value is string => typeof value === "string" && value.length > 0)
-      .join(" ")
-      .toLowerCase();
-
-  for (const alias of aliases) {
-    const exact = modes.find(
-      (mode) => mode.id.toLowerCase() === alias || mode.name.toLowerCase() === alias,
-    );
-    if (exact) return exact.id;
-  }
-  for (const alias of aliases) {
-    const partial = modes.find((mode) => searchText(mode).includes(alias));
-    if (partial) return partial.id;
-  }
-  return undefined;
-}
-
 /**
- * Pick the Hermes session mode that matches the thread's runtime mode.
- * Returns `undefined` when the agent advertises no modes, or when the mode
- * it already runs is the best match — callers then skip `session/set_mode`.
+ * The value to pass `setMode` for a posture, or `undefined` when Hermes already runs it or does
+ * not offer it. Hermes advertises both `modes` and an `edit_approval_policy` option, and `setMode`
+ * writes the option, whose values are not the `modes` ids.
  */
 export function resolveHermesSessionModeId(input: {
-  readonly runtimeMode: RuntimeMode;
+  readonly posture: HermesApprovalPosture;
+  readonly configOptions: ReadonlyArray<EffectAcpSchema.SessionConfigOption>;
   readonly modeState: AcpSessionModeState | undefined;
 }): string | undefined {
-  const modeState = input.modeState;
-  if (!modeState || modeState.availableModes.length === 0) {
-    return undefined;
+  const mode = HERMES_MODES[input.posture];
+  const option = input.configOptions.find(
+    (candidate) => candidate.category === "mode" && candidate.type === "select",
+  );
+  if (option !== undefined) {
+    return option.currentValue !== mode.policy &&
+      collectSessionConfigOptionValues(option).includes(mode.policy)
+      ? mode.policy
+      : undefined;
   }
-  const aliases =
-    input.runtimeMode === "approval-required"
-      ? HERMES_APPROVAL_MODE_ALIASES
-      : input.runtimeMode === "auto-accept-edits"
-        ? HERMES_ACCEPT_EDITS_MODE_ALIASES
-        : HERMES_AUTONOMOUS_MODE_ALIASES;
-  const requestedModeId = findModeIdByAliases(modeState.availableModes, aliases);
-  return requestedModeId === undefined || requestedModeId === modeState.currentModeId
-    ? undefined
-    : requestedModeId;
+  const modeState = input.modeState;
+  return modeState !== undefined &&
+    modeState.currentModeId !== mode.modeId &&
+    modeState.availableModes.some((candidate) => candidate.id === mode.modeId)
+    ? mode.modeId
+    : undefined;
 }
 
 /**
@@ -460,6 +596,25 @@ export function hermesApprovalOptions(
   ];
 }
 
+/**
+ * Hermes answers `/compress` with its manual-compression summary ("Compressed: 12 → 5 messages",
+ * "Approx request size: ~41,200 → ~9,800 tokens"). A no-op, refused or aborted run removed nothing.
+ */
+export function readHermesCompressReply(text: string): {
+  readonly compacted: boolean;
+  readonly beforeTokenCount?: number;
+  readonly afterTokenCount?: number;
+} {
+  if (/^(?:No changes from compression|Compression refused|Compression aborted)\b/mu.test(text)) {
+    return { compacted: false };
+  }
+  const tokens = /^Approx request size: ~([\d,]+) → ~([\d,]+) tokens/mu.exec(text);
+  const count = (value: string) => Number(value.replaceAll(",", ""));
+  return tokens === null
+    ? { compacted: true }
+    : { compacted: true, beforeTokenCount: count(tokens[1]!), afterTokenCount: count(tokens[2]!) };
+}
+
 const isAcpRequestError = Schema.is(EffectAcpErrors.AcpRequestError);
 
 /** `hermes acp` answers a failed prompt with `Internal error` and puts its own reason in `data.details`. */
@@ -467,6 +622,19 @@ function hermesPromptErrorDetails(cause: unknown): string | undefined {
   if (!isAcpRequestError(cause)) return undefined;
   const details = (cause.data as { readonly details?: unknown } | null | undefined)?.details;
   return typeof details === "string" && details.trim() !== "" ? details.trim() : undefined;
+}
+
+/**
+ * An update of a gateway turn this editor did not submit, such as a wake run ahead of a queued
+ * prompt. The `acp-unprompted-turns` patch stamps it; an unpatched Hermes never does.
+ */
+export function isHermesUnpromptedTurnUpdate(
+  notification: EffectAcpSchema.SessionNotification,
+): boolean {
+  const hermes = notification._meta?.["hermes"];
+  return (
+    typeof hermes === "object" && hermes !== null && Reflect.get(hermes, "unprompted") === true
+  );
 }
 
 /**
@@ -510,6 +678,41 @@ const HERMES_TURN_OUTPUT = new Set([
   "plan",
 ]);
 
+const HERMES_STOP_NOTICE =
+  /^(?:Operation interrupted\b|Stopped (?:before this turn started|waiting for another Hermes process on this session)\. Your message was not processed\.$)/u;
+
+/**
+ * Hermes answers a Stop with a status line as reply text, which its gateway calls cancellation
+ * metadata but filters only in part. T3 already shows the stop, so it drops them until the next prompt.
+ */
+export function hideHermesStopNotices(
+  runtime: AcpSessionRuntime.AcpSessionRuntime["Service"],
+): AcpSessionRuntime.AcpSessionRuntime["Service"] {
+  let stopped = false;
+  return {
+    ...runtime,
+    handleSessionUpdate: (handler) =>
+      runtime.handleSessionUpdate((notification) => {
+        const update = notification.update;
+        return stopped &&
+          update.sessionUpdate === "agent_message_chunk" &&
+          update.content.type === "text" &&
+          HERMES_STOP_NOTICE.test(update.content.text.trim())
+          ? Effect.void
+          : handler(notification);
+      }),
+    prompt: (payload, options) =>
+      Effect.suspend(() => {
+        stopped = false;
+        return runtime.prompt(payload, options);
+      }),
+    cancel: Effect.suspend(() => {
+      stopped = true;
+      return runtime.cancel;
+    }),
+  };
+}
+
 /** How Hermes refused a prompt because a turn lost in a gateway restart blocks the session. */
 function lostTurnRefusal(
   cause: unknown,
@@ -525,6 +728,51 @@ function lostTurnRefusal(
   if (details.includes("(your input is accepted and kept)"))
     return { submitted: true, lostAdmissionIds };
   return undefined;
+}
+
+// The gateway's turn is outside T3's clock; a TestClock sleep would wait for an advance that never comes.
+const wallClock = Clock.Clock.defaultValue();
+
+/**
+ * Hermes refuses `/compress` and other idle-only commands with `session_busy` while the gateway
+ * finishes a turn of its own, such as a background job's wake, whose end ACP never reports. The
+ * refusal admitted nothing, so the prompt is resent each `resendAfter` until the gateway is idle
+ * or the turn is stopped. Only a live gateway answers `session_busy`, so this needs no cap.
+ */
+export function resendHermesPromptsRefusedBusy(
+  runtime: AcpSessionRuntime.AcpSessionRuntime["Service"],
+  resendAfter: Duration.Input = "1 second",
+): AcpSessionRuntime.AcpSessionRuntime["Service"] {
+  let cancels = 0;
+  const send = (
+    payload: Parameters<typeof runtime.prompt>[0],
+    options: Parameters<typeof runtime.prompt>[1],
+    cancelsAtSend: number,
+  ): ReturnType<typeof runtime.prompt> =>
+    runtime.prompt(payload, options).pipe(
+      Effect.catchIf(
+        (error) => cancels === cancelsAtSend && hermesPromptErrorDetails(error) === "session_busy",
+        (error) =>
+          Effect.sleep(resendAfter).pipe(
+            Effect.provideService(Clock.Clock, wallClock),
+            Effect.andThen(
+              Effect.suspend(() =>
+                cancels === cancelsAtSend
+                  ? send(payload, options, cancelsAtSend)
+                  : Effect.fail(error),
+              ),
+            ),
+          ),
+      ),
+    );
+  return {
+    ...runtime,
+    cancel: Effect.suspend(() => {
+      cancels += 1;
+      return runtime.cancel;
+    }),
+    prompt: (payload, options) => Effect.suspend(() => send(payload, options, cancels)),
+  };
 }
 
 /**
@@ -590,3 +838,43 @@ export function discardLostHermesTurnsOnPrompt(
       ),
   };
 }
+
+const HERMES_STEER_METHOD = "_hermes/steer";
+const decodeHermesSteerCapability = Schema.decodeUnknownOption(
+  Schema.Struct({ hermes: Schema.Struct({ steer: Schema.Literal(true) }) }),
+);
+const decodeHermesSteerResult = Schema.decodeUnknownOption(
+  Schema.Struct({ steered: Schema.Boolean }),
+);
+
+/**
+ * `hermes acp` with the `acp-active-steering` patch steers the running turn through
+ * `_hermes/steer`: Hermes answers whether that turn took the text, and a turn reads every steer
+ * it took before it ends, so there is no delivery report to wait for.
+ */
+export const hermesSteering = {
+  supported: (
+    initializeResult: AcpSessionRuntime.AcpSessionRuntimeStartResult["initializeResult"],
+  ) => Option.isSome(decodeHermesSteerCapability(initializeResult.agentCapabilities?._meta)),
+  send: (
+    runtime: AcpSessionRuntime.AcpSessionRuntime["Service"],
+    sessionId: string,
+    text: string,
+  ) =>
+    runtime.request(HERMES_STEER_METHOD, { sessionId, text }).pipe(
+      Effect.flatMap((result) =>
+        Option.match(decodeHermesSteerResult(result), {
+          onSome: ({ steered }) => Effect.succeed(steered ? {} : null),
+          onNone: () =>
+            Effect.fail(
+              new EffectAcpErrors.AcpRequestError({
+                code: -32603,
+                errorMessage: "Hermes did not say whether it took the steering message.",
+                method: HERMES_STEER_METHOD,
+                data: result,
+              }),
+            ),
+        }),
+      ),
+    ),
+};

@@ -58,7 +58,10 @@ import {
 import { claudeLocalBashTaskInput } from "./claude_local_bash_task/input.ts";
 import { assertClaudeLocalBashTaskOutput } from "./claude_local_bash_task/output.ts";
 import { claudeNestedBackgroundSubagentWakeInput } from "./claude_nested_background_subagent_wake/input.ts";
-import { assertClaudeNestedBackgroundSubagentWakeOutput } from "./claude_nested_background_subagent_wake/output.ts";
+import {
+  assertClaudeNestedBackgroundSubagentWakeDetails,
+  assertNestedBackgroundSubagentWakeOutput,
+} from "./claude_nested_background_subagent_wake/output.ts";
 import { claudeNestedSubagentModelInput } from "./claude_nested_subagent_model/input.ts";
 import {
   assertClaudeNestedSubagentModelDetails,
@@ -107,6 +110,7 @@ import { hermesBackgroundSubagentLifecycleInput } from "./hermes_background_suba
 import { assertHermesBackgroundSubagentLifecycleDetails } from "./hermes_background_subagent_lifecycle/output.ts";
 import { hermesNestedSubagentModelInput } from "./hermes_nested_subagent_model/input.ts";
 import { assertHermesNestedSubagentModelDetails } from "./hermes_nested_subagent_model/output.ts";
+import { hermesNestedBackgroundSubagentWakeInput } from "./hermes_nested_background_subagent_wake/input.ts";
 import { hermesBackgroundTaskAfterRootInput } from "./hermes_background_task_after_root/input.ts";
 import { hermesBackgroundTaskInterruptInput } from "./hermes_background_task_interrupt/input.ts";
 import { hermesBackgroundTaskWakeInput } from "./hermes_background_task_wake/input.ts";
@@ -218,14 +222,16 @@ import { assertSubagentContinueOutput } from "./subagent_continue/codex_output.t
 import { subagentContinueInput } from "./subagent_continue/input.ts";
 import { assertSubagentV2Output } from "./subagent_v2/codex_output.ts";
 import { subagentV2Input, subagentV2NestedInput } from "./subagent_v2/input.ts";
-import { assertSubagentV2ApprovalOutput } from "./subagent_v2_approval/codex_output.ts";
+import { assertCodexSubagentV2ApprovalDetails } from "./subagent_v2_approval/codex_output.ts";
+import { assertSubagentV2ApprovalOutput } from "./subagent_v2_approval/output.ts";
 import {
   SUBAGENT_V2_APPROVAL_POLICY,
   subagentV2ApprovalInput,
 } from "./subagent_v2_approval/input.ts";
 import { assertCodexSubagentV2NestedDetails } from "./subagent_v2_nested/codex_output.ts";
 import { assertSubagentV2NestedOutput } from "./subagent_v2_nested/output.ts";
-import { assertSubagentV2NestedApprovalOutput } from "./subagent_v2_nested_approval/codex_output.ts";
+import { assertCodexSubagentV2NestedApprovalDetails } from "./subagent_v2_nested_approval/codex_output.ts";
+import { assertSubagentV2NestedApprovalOutput } from "./subagent_v2_nested_approval/output.ts";
 import { subagentV2NestedApprovalInput } from "./subagent_v2_nested_approval/input.ts";
 import { assertClaudeThreadRollbackOutput } from "./thread_rollback/claude_output.ts";
 import { assertThreadRollbackOutput } from "./thread_rollback/codex_output.ts";
@@ -583,7 +589,8 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         ),
         modelSelection: CLAUDE_MODEL_SELECTION,
         runContinuationWorker: true,
-        assertOutput: assertClaudeNestedBackgroundSubagentWakeOutput,
+        assertOutput: assertNestedBackgroundSubagentWakeOutput,
+        assertProviderDetails: assertClaudeNestedBackgroundSubagentWakeDetails,
       },
     ],
   },
@@ -883,6 +890,22 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         runContinuationWorker: true,
         assertOutput: assertNestedSubagentModelOutput,
         assertProviderDetails: assertHermesNestedSubagentModelDetails,
+      },
+    ],
+  },
+  {
+    name: "hermes_nested_background_subagent_wake",
+    buildInput: hermesNestedBackgroundSubagentWakeInput,
+    providers: [
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./hermes_nested_background_subagent_wake/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runContinuationWorker: true,
+        assertOutput: assertNestedBackgroundSubagentWakeOutput,
       },
     ],
   },
@@ -1437,6 +1460,7 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         modelSelection: CODEX_MODEL_SELECTION,
         runtimePolicyOverride: SUBAGENT_V2_APPROVAL_POLICY,
         assertOutput: assertSubagentV2ApprovalOutput,
+        assertProviderDetails: assertCodexSubagentV2ApprovalDetails,
       },
     ],
   },
@@ -1473,6 +1497,7 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         modelSelection: CODEX_MODEL_SELECTION,
         runtimePolicyOverride: SUBAGENT_V2_APPROVAL_POLICY,
         assertOutput: assertSubagentV2NestedApprovalOutput,
+        assertProviderDetails: assertCodexSubagentV2NestedApprovalDetails,
       },
     ],
   },

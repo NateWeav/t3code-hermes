@@ -231,7 +231,7 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
     facet: "background",
     hermes: {
       kind: "twin",
-      reason: `${CLAUDE_AGENT_TOOLS} Hermes's delegate_task always runs in the background.`,
+      reason: `${CLAUDE_AGENT_TOOLS} The Hermes twin runs delegate_task in the background.`,
       twin: "hermes_background_subagent_after_root",
     },
   },
@@ -261,9 +261,11 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
   {
     name: "claude_nested_background_subagent_wake",
     facet: "background",
-    hermes: twin(
-      `${CLAUDE_AGENT_TOOLS} Hermes's default delegation.max_spawn_depth is 1, so a child cannot delegate, and nested delegation is separate work.`,
-    ),
+    hermes: {
+      kind: "twin",
+      reason: `${CLAUDE_AGENT_TOOLS} A Hermes subagent's own delegate_task always waits, so the twin's grandchild runs inside the background child's call.`,
+      twin: "hermes_nested_background_subagent_wake",
+    },
   },
   {
     name: "claude_background_monitor_wake",

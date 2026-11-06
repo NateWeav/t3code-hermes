@@ -58,7 +58,7 @@ import {
   resolveHermesAcpBaseModelId,
   resolveHermesSessionModeId,
 } from "../../provider/acp/HermesAcpSupport.ts";
-import { makeHermesSubagentExtractor } from "../../provider/acp/HermesDelegation.ts";
+import { makeHermesDelegation } from "../../provider/acp/HermesDelegation.ts";
 import * as HermesSpareRuntime from "../../provider/acp/HermesSpareRuntime.ts";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
@@ -95,6 +95,10 @@ export const HermesProviderCapabilitiesV2 = {
     ...AcpProviderCapabilitiesV2.streaming,
     // With the `acp-terminal-output` patch; stock Hermes sends a command's output whole when it ends.
     streamsToolOutput: true,
+  },
+  approvals: {
+    ...AcpProviderCapabilitiesV2.approvals,
+    approvalsCanOriginateFromSubagents: true,
   },
   tools: {
     ...AcpProviderCapabilitiesV2.tools,
@@ -357,7 +361,7 @@ export function makeHermesAcpAdapterFlavor(
           ),
         ),
       ),
-    extractSubagentUpdates: makeHermesSubagentExtractor(),
+    ...makeHermesDelegation(),
     extractAwaitableBackgroundTasks: extractHermesAwaitableBackgroundTasks,
     // Patched Hermes steers the running turn; stock Hermes steers by restarting it.
     steering: hermesSteering,

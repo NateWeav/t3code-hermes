@@ -522,17 +522,17 @@ describe("makeHermesEditApprovalCards", () => {
       data: { locations: [{ path: "notes.txt" }], content: [startedDiff] },
     });
     const unasked = started("toolu_4");
-    expect(cards.normalizeToolCall(unasked)).toBe(unasked);
+    expect(cards.normalizeToolCall(unasked, "sess-1")).toBe(unasked);
     expect(
-      cards.normalizeToolCall(write("toolu_4", "completed", "✅ write_file completed")).data
-        .content,
+      cards.normalizeToolCall(write("toolu_4", "completed", "✅ write_file completed"), "sess-1")
+        .data.content,
     ).toEqual([startedDiff]);
 
-    cards.normalizeToolCall(started("toolu_5"));
+    cards.normalizeToolCall(started("toolu_5"), "sess-1");
     cards.onPermissionRequest(approval);
     expect(
-      cards.normalizeToolCall(write("toolu_5", "completed", "✅ write_file completed")).data
-        .content,
+      cards.normalizeToolCall(write("toolu_5", "completed", "✅ write_file completed"), "sess-1")
+        .data.content,
     ).toEqual([diff]);
   });
 

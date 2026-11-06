@@ -8047,7 +8047,18 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
         ) {
           const userTurns = acpUserTurnsAfterRollbackTarget(rollbackInput);
           if (userTurns === null) return false;
-          if (userTurns === 0) return true;
+          const boundary =
+            rollbackInput.target.type === "provider_turn"
+              ? rollbackInput.target.providerTurn.ordinal
+              : 0;
+          const forgetTurnsAfterBoundary = Ref.update(
+            providerTurns,
+            (current) => new Map([...current].filter(([, turn]) => turn.ordinal <= boundary)),
+          );
+          if (userTurns === 0) {
+            yield* forgetTurnsAfterBoundary;
+            return true;
+          }
           const { providerThread } = rollbackInput;
           useProviderThreadIdentity(providerThread);
           const requestedSessionId = yield* nativeThreadId(driver, providerThread);
@@ -8083,14 +8094,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             updated.delete(sessionId);
             return updated;
           });
-          const boundary =
-            rollbackInput.target.type === "provider_turn"
-              ? rollbackInput.target.providerTurn.ordinal
-              : 0;
-          yield* Ref.update(
-            providerTurns,
-            (current) => new Map([...current].filter(([, turn]) => turn.ordinal <= boundary)),
-          );
+          yield* forgetTurnsAfterBoundary;
           return true;
         });
 

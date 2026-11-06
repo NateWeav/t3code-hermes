@@ -29,12 +29,13 @@ custom_providers:
     base_url: <Anthropic-compatible endpoint>
     key_env: CLIPROXYAPI_API_KEY
     model: claude-haiku-5-5
-    models: { claude-haiku-5-5: {} }
+    # The lifecycle twin runs one subagent on the second model.
+    models: { claude-haiku-5-5: {}, claude-haiku-4-5-20251001: {} }
     discover_models: false
     api_mode: anthropic_messages
 ```
 
-Put `CLIPROXYAPI_API_KEY=...` in `~/.hermes-bench/.env` (mode 600). Keep the provider name: committed fixtures pin the model id `custom:cliproxyapi-claude:claude-haiku-5-5`. The recorder refuses `~/.hermes` and its profiles. A new home builds its own Python environment on first launch, which can outlast a recorder run; if Hermes then reports that no dependency environment is committed, run `HERMES_HOME=<home> hermes pm repair` once.
+Put `CLIPROXYAPI_API_KEY=...` in `~/.hermes-bench/.env` (mode 600). Keep the provider name: committed fixtures pin the model id `custom:cliproxyapi-claude:claude-haiku-5-5`. A subagent can run only on a model the profile lists, so keep both. The recorder refuses `~/.hermes` and its profiles. A new home builds its own Python environment on first launch, which can outlast a recorder run; if Hermes then reports that no dependency environment is committed, run `HERMES_HOME=<home> hermes pm repair` once.
 
 ## Run it
 

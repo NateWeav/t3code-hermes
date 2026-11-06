@@ -5,12 +5,21 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 
+import { reportLabel } from "@t3tools/provider-core/server/notification";
+
 import type { OrchestratorV2ScenarioResult } from "../../OrchestratorScenario.ts";
+import {
+  HERMES_BACKGROUND_SUBAGENT_LIFECYCLE_LAUNCH_PROMPT,
+  HERMES_BACKGROUND_SUBAGENT_LIFECYCLE_RESUME_PROMPT,
+  HERMES_BACKGROUND_SUBAGENT_LIFECYCLE_STOP_PROMPT,
+  HERMES_LIFECYCLE_AGENT_A_MODEL,
+} from "../hermes_background_subagent_lifecycle/input.ts";
 import {
   assertBaseProjection,
   assertSemanticProjectionIntegrity,
   assertUserMessagesInclude,
   backgroundNotifications,
+  forScenario,
   projectionFor,
 } from "../shared.ts";
 import {
@@ -22,7 +31,26 @@ import {
 
 const AGENT_A_TASK_ID = "a1a715b7d0bdfefea";
 const AGENT_B_TASK_ID = "af44d5c14aa3ce867";
-const AGENT_A_OBSERVED_MODEL = "claude-haiku-4-5";
+const PROMPTS = {
+  claude_background_subagent_lifecycle: [
+    CLAUDE_BACKGROUND_SUBAGENT_LIFECYCLE_LAUNCH_PROMPT,
+    CLAUDE_BACKGROUND_SUBAGENT_LIFECYCLE_STOP_PROMPT,
+    CLAUDE_BACKGROUND_SUBAGENT_LIFECYCLE_RESUME_PROMPT,
+    CLAUDE_BACKGROUND_SUBAGENT_LIFECYCLE_FINAL_PROMPT,
+  ],
+  hermes_background_subagent_lifecycle: [
+    HERMES_BACKGROUND_SUBAGENT_LIFECYCLE_LAUNCH_PROMPT,
+    HERMES_BACKGROUND_SUBAGENT_LIFECYCLE_STOP_PROMPT,
+    HERMES_BACKGROUND_SUBAGENT_LIFECYCLE_RESUME_PROMPT,
+    CLAUDE_BACKGROUND_SUBAGENT_LIFECYCLE_FINAL_PROMPT,
+  ],
+};
+/** The model each prompt asks Agent A to run on, as the provider reports it. */
+const AGENT_A_MODELS = {
+  claude_background_subagent_lifecycle: "claude-haiku-4-5",
+  hermes_background_subagent_lifecycle: HERMES_LIFECYCLE_AGENT_A_MODEL,
+};
+const AGENT_A_FIRST_PROMPT = "Reply with exactly: A_FIRST";
 
 function assistantTexts(
   projection: OrchestrationV2ThreadProjection,
@@ -47,7 +75,7 @@ function conversation(projection: OrchestrationV2ThreadProjection): ReadonlyArra
     );
 }
 
-function frameField(frame: unknown, key: string): unknown {
+export function frameField(frame: unknown, key: string): unknown {
   return typeof frame === "object" && frame !== null ? Reflect.get(frame, key) : undefined;
 }
 
@@ -80,25 +108,48 @@ function assertRecordedResumeShape(transcript: ProviderReplayTranscript) {
   assert.deepEqual(agentAStarts.slice(1), sendMessageToolUseIds(transcript));
 }
 
-export function assertClaudeBackgroundSubagentLifecycleOutput(
+function thinkingOf(child: OrchestrationV2ThreadProjection | undefined) {
+  return (child?.turnItems ?? []).flatMap((item) =>
+    item.type === "reasoning" && item.title === "Thinking" ? [item] : [],
+  );
+}
+
+/** Agent A is the subagent whose thread starts with its first prompt; Agent B is the other. */
+export function lifecycleAgents(result: OrchestratorV2ScenarioResult, scenario: string) {
+  const projection = projectionFor(result, scenario);
+  const childOf = (childThreadId: ThreadId | null | undefined) =>
+    childThreadId == null ? undefined : result.projections.get(childThreadId);
+  const agentA = projection.subagents.find(
+    (subagent) =>
+      conversation(childOf(subagent.childThreadId) ?? projection)[0] ===
+      `user:${AGENT_A_FIRST_PROMPT}`,
+  );
+  const agentB = projection.subagents.find((subagent) => subagent !== agentA);
+  return {
+    projection,
+    agentA,
+    agentB,
+    agentAChild: childOf(agentA?.childThreadId),
+    agentBChild: childOf(agentB?.childThreadId),
+  };
+}
+
+export function assertBackgroundSubagentLifecycleOutput(
   result: OrchestratorV2ScenarioResult,
   transcript: ProviderReplayTranscript,
 ) {
-  assertRecordedResumeShape(transcript);
   assertBaseProjection({
     result,
     transcript,
     runCount: 7,
     runStatuses: Array.from({ length: 7 }, () => "completed" as const),
   });
-  const projection = projectionFor(result, transcript.scenario);
+  const { projection, agentA, agentB, agentAChild, agentBChild } = lifecycleAgents(
+    result,
+    transcript.scenario,
+  );
   assertSemanticProjectionIntegrity(projection);
-  assertUserMessagesInclude(projection, [
-    CLAUDE_BACKGROUND_SUBAGENT_LIFECYCLE_LAUNCH_PROMPT,
-    CLAUDE_BACKGROUND_SUBAGENT_LIFECYCLE_STOP_PROMPT,
-    CLAUDE_BACKGROUND_SUBAGENT_LIFECYCLE_RESUME_PROMPT,
-    CLAUDE_BACKGROUND_SUBAGENT_LIFECYCLE_FINAL_PROMPT,
-  ]);
+  assertUserMessagesInclude(projection, forScenario(transcript, PROMPTS));
 
   const creators = projection.runs.map((run) => {
     const message = projection.messages.find((candidate) => candidate.id === run.userMessageId);
@@ -126,37 +177,33 @@ export function assertClaudeBackgroundSubagentLifecycleOutput(
   }
 
   assert.lengthOf(projection.subagents, 2);
-  const agentA = projection.subagents.find(
-    (subagent) => subagent.nativeTaskRef?.nativeId === AGENT_A_TASK_ID,
-  );
-  const agentB = projection.subagents.find(
-    (subagent) => subagent.nativeTaskRef?.nativeId === AGENT_B_TASK_ID,
-  );
-  assert.equal(agentB?.status, "cancelled");
-  assert.equal(agentA?.status, "completed");
+  assert.isDefined(agentA, "Agent A's thread starts with its first prompt");
+  assert.isDefined(agentB);
+  assert.include(["cancelled", "interrupted"], agentB.status, "Agent B was stopped");
+  assert.equal(agentA.status, "completed");
   const agentWake = (
-    name: string,
+    subagent: { readonly title: string | null; readonly childThreadId: ThreadId | null },
     outcome: "completed" | "cancelled",
-    childThreadId: ThreadId | null | undefined,
   ) => ({
-    summary: `Subagent "${name}" ${outcome === "completed" ? "finished" : "was stopped"}`,
+    summary: `Subagent "${reportLabel(subagent.title ?? undefined)}" ${outcome === "completed" ? "finished" : "was stopped"}`,
     outcome,
     source:
-      childThreadId == null
+      subagent.childThreadId == null
         ? { kind: "subagent" as const }
-        : { kind: "subagent" as const, childThreadId },
+        : { kind: "subagent" as const, childThreadId: subagent.childThreadId },
   });
   assert.deepEqual(backgroundNotifications(projection), [
-    agentWake("Agent A", "completed", agentA?.childThreadId),
-    agentWake("Agent B", "cancelled", agentB?.childThreadId),
-    agentWake("Agent A", "completed", agentA?.childThreadId),
+    agentWake(agentA, "completed"),
+    agentWake(agentB, "cancelled"),
+    agentWake(agentA, "completed"),
   ]);
-  assert.equal(agentA?.result, "A_SECOND");
-  assert.equal(agentA?.model, AGENT_A_OBSERVED_MODEL);
-  assert.equal(agentA?.runId, projection.runs[4]?.id);
+  assert.equal(agentA.result, "A_SECOND");
+  const agentAModel = forScenario(transcript, AGENT_A_MODELS);
+  assert.equal(agentA.model, agentAModel);
+  assert.equal(agentA.runId, projection.runs[4]?.id);
 
   const agentAStatuses = result.domainEvents.flatMap((event) =>
-    event.type === "subagent.updated" && event.payload.nativeTaskRef?.nativeId === AGENT_A_TASK_ID
+    event.type === "subagent.updated" && event.payload.id === agentA.id
       ? [event.payload.status]
       : [],
   );
@@ -165,52 +212,23 @@ export function assertClaudeBackgroundSubagentLifecycleOutput(
   assert.isAbove(agentAStatuses.lastIndexOf("running"), firstCompleted);
   assert.equal(agentAStatuses.at(-1), "completed");
 
-  const agentAChild =
-    agentA?.childThreadId == null ? undefined : result.projections.get(agentA.childThreadId);
   assert.isDefined(agentAChild);
-  assert.equal(agentAChild.thread.modelSelection.model, AGENT_A_OBSERVED_MODEL);
+  assert.equal(agentAChild.thread.modelSelection.model, agentAModel);
   assert.deepEqual(assistantTexts(agentAChild), ["A_FIRST", "A_SECOND"]);
   assert.deepEqual(conversation(agentAChild), [
-    "user:Reply with exactly: A_FIRST",
+    `user:${AGENT_A_FIRST_PROMPT}`,
     "assistant:A_FIRST",
     "user:Reply with exactly: A_SECOND",
     "assistant:A_SECOND",
   ]);
 
-  const thinkingOf = (child: OrchestrationV2ThreadProjection | undefined) =>
-    (child?.turnItems ?? []).flatMap((item) =>
-      item.type === "reasoning" && item.title === "Thinking" ? [item] : [],
-    );
-  const agentAThinking = thinkingOf(agentAChild);
-  assert.lengthOf(agentAThinking, 2, "both of Agent A's runs thought before replying");
-  assert.include(agentAThinking[0]?.text, '"A_FIRST"');
-  assert.include(agentAThinking[1]?.text, '"A_SECOND"');
-  for (const item of agentAThinking) {
-    assert.equal(item.status, "completed");
-    assert.isFalse(item.streaming);
-    assert.isNull(item.runId);
-  }
-  const agentAOrder = agentAChild.turnItems.flatMap((item) =>
-    item.type === "assistant_message"
-      ? [item.text.trim()]
-      : item.type === "reasoning" && item.title === "Thinking"
-        ? ["thinking"]
-        : [],
-  );
-  assert.deepEqual(agentAOrder, ["thinking", "A_FIRST", "thinking", "A_SECOND"]);
-  const agentBChild =
-    agentB?.childThreadId == null ? undefined : result.projections.get(agentB.childThreadId);
-  assert.lengthOf(thinkingOf(agentBChild), 1);
-  assert.include(thinkingOf(agentBChild)[0]?.text, "B_DONE");
   const subagentThinking = new Set(
-    [...agentAThinking, ...thinkingOf(agentBChild)].map((item) => item.text),
+    [...thinkingOf(agentAChild), ...thinkingOf(agentBChild)].map((item) => item.text),
   );
   assert.isFalse(
     thinkingOf(projection).some((item) => subagentThinking.has(item.text)),
     "subagent thinking leaked into the parent thread",
   );
-
-  assert.equal(agentB?.progress, "Running Wait 90 seconds then print B_DONE");
   for (const child of [agentAChild, agentBChild]) {
     for (const item of child?.turnItems ?? []) {
       assert.notInclude(["pending", "running", "waiting"], item.status, item.id);
@@ -228,4 +246,43 @@ export function assertClaudeBackgroundSubagentLifecycleOutput(
         (event.payload.pendingBackgroundTasks?.length ?? 0) > 0,
     ),
   );
+}
+
+/**
+ * Claude's SDK resumes Agent A under SendMessage's tool_use_id, names the agents by description,
+ * stops B as `cancelled`, reports its Bash progress, and streams each run's thinking into the
+ * child threads.
+ */
+export function assertClaudeBackgroundSubagentLifecycleDetails(
+  result: OrchestratorV2ScenarioResult,
+  transcript: ProviderReplayTranscript,
+) {
+  assertRecordedResumeShape(transcript);
+  const { agentA, agentB, agentAChild, agentBChild } = lifecycleAgents(result, transcript.scenario);
+  assert.equal(agentA?.nativeTaskRef?.nativeId, AGENT_A_TASK_ID);
+  assert.equal(agentB?.nativeTaskRef?.nativeId, AGENT_B_TASK_ID);
+  assert.equal(agentA?.title, "Agent A");
+  assert.equal(agentB?.title, "Agent B");
+  assert.equal(agentB?.status, "cancelled");
+
+  const agentAThinking = thinkingOf(agentAChild);
+  assert.lengthOf(agentAThinking, 2, "both of Agent A's runs thought before replying");
+  assert.include(agentAThinking[0]?.text, '"A_FIRST"');
+  assert.include(agentAThinking[1]?.text, '"A_SECOND"');
+  for (const item of agentAThinking) {
+    assert.equal(item.status, "completed");
+    assert.isFalse(item.streaming);
+    assert.isNull(item.runId);
+  }
+  const agentAOrder = (agentAChild?.turnItems ?? []).flatMap((item) =>
+    item.type === "assistant_message"
+      ? [item.text.trim()]
+      : item.type === "reasoning" && item.title === "Thinking"
+        ? ["thinking"]
+        : [],
+  );
+  assert.deepEqual(agentAOrder, ["thinking", "A_FIRST", "thinking", "A_SECOND"]);
+  assert.lengthOf(thinkingOf(agentBChild), 1);
+  assert.include(thinkingOf(agentBChild)[0]?.text, "B_DONE");
+  assert.equal(agentB?.progress, "Running Wait 90 seconds then print B_DONE");
 }

@@ -236,6 +236,8 @@ export type OrchestratorFixtureInputStep =
       readonly waitForTurnItemType?: OrchestrationV2TurnItem["type"];
       /** With waitForTurnItemType: wait until that item has this status. */
       readonly waitForTurnItemStatus?: OrchestrationV2TurnItem["status"];
+      /** With waitForTurnItemType: wait until the run has this many such items. */
+      readonly waitForTurnItemCount?: number;
       /** With waitForTurnItemType: wait for it in one of the run's subagent threads. */
       readonly inSubagentThread?: boolean;
     }
@@ -847,6 +849,9 @@ export function materializeFixtureInput(input: {
               ...(step.waitForTurnItemStatus === undefined
                 ? {}
                 : { itemStatus: step.waitForTurnItemStatus }),
+              ...(step.waitForTurnItemCount === undefined
+                ? {}
+                : { itemCount: step.waitForTurnItemCount }),
               ...(step.inSubagentThread === true ? { inSubagentThreads: true } : {}),
             });
           }
@@ -1504,4 +1509,24 @@ export function backgroundNotifications(projection: OrchestrationV2ThreadProject
       ? [{ summary: item.summary, outcome: item.outcome, source: item.source }]
       : [],
   );
+}
+
+/** The value keyed by this transcript's scenario, so a reference and its twin share one contract. */
+export function forScenario<T>(
+  transcript: ProviderReplayTranscript,
+  byScenario: Readonly<Record<string, T>>,
+): T {
+  const value = byScenario[transcript.scenario];
+  assert.isDefined(value, `no entry for scenario ${transcript.scenario}`);
+  return value;
+}
+
+/** The first background task any roster listed, with the index of the event that listed it. */
+export function firstBackgroundRosterTask(result: OrchestratorV2ScenarioResult) {
+  for (const [index, event] of result.domainEvents.entries()) {
+    if (event.type !== "provider-thread.updated") continue;
+    const task = event.payload.pendingBackgroundTasks?.[0];
+    if (task !== undefined) return { task, index };
+  }
+  throw new Error("no background task reached the roster");
 }

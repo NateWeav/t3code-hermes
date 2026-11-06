@@ -2304,8 +2304,8 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
         const emitProviderEvent = (event: ProviderAdapter.ProviderAdapterV2Event) =>
           Queue.offer(events, event).pipe(Effect.asVoid);
 
-        // `t3_background_wait` state (see `extractAwaitableBackgroundTasks`): running work the
-        // agent may mark, with its description, and the marked ids published as the root roster.
+        // `extractAwaitableBackgroundTasks` state: running work that will wake the agent, with its
+        // description, published as the root roster; the ids the agent marked hold its thread.
         const awaitableBackgroundTasks = new Map<string, string | undefined>();
         const awaitedBackgroundTaskIds = new Set<string>();
         // Every root-thread emit carries the roster, so none clobbers it with a stale copy.
@@ -2316,25 +2316,33 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             ? providerThread
             : {
                 ...providerThread,
-                pendingBackgroundTasks: Array.from(awaitedBackgroundTaskIds, (taskId) => {
-                  const description = awaitableBackgroundTasks.get(taskId);
-                  return {
+                pendingBackgroundTasks: Array.from(
+                  awaitableBackgroundTasks,
+                  ([taskId, description]) => ({
                     taskId,
                     kind: "command" as const,
-                    awaited: true as const,
+                    ...(awaitedBackgroundTaskIds.has(taskId) ? { awaited: true as const } : {}),
                     ...(description === undefined ? {} : { description }),
-                  };
-                }),
+                  }),
+                ),
               };
+        // Between turns the run settled the root thread idle, and its subscription stays open for
+        // the roster, so a late roster or title update must not mark the thread active again.
+        const settledRootThread = (
+          providerThread: OrchestrationV2ProviderThread,
+        ): OrchestrationV2ProviderThread =>
+          providerThread.status === "active"
+            ? { ...providerThread, status: "idle" }
+            : providerThread;
         const emitAwaitedBackgroundRoster = Effect.fnUntraced(function* () {
           const sessionId = yield* Ref.get(activeSessionId);
           if (sessionId === null) return;
           const known = (yield* Ref.get(providerThreadByNativeSessionId)).get(sessionId);
           if (known === undefined) return;
-          const providerThread = withAwaitedBackgroundRoster({
-            ...known,
-            updatedAt: yield* DateTime.now,
-          });
+          const current = { ...known, updatedAt: yield* DateTime.now };
+          const providerThread = withAwaitedBackgroundRoster(
+            (yield* Ref.get(activeTurn)) === null ? settledRootThread(current) : current,
+          );
           yield* Ref.update(providerThreadByNativeSessionId, (current) =>
             new Map(current).set(sessionId, providerThread),
           );
@@ -2356,10 +2364,13 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             let rosterChanged = false;
             for (const task of tasks) {
               if (task.status === "running") {
+                rosterChanged ||=
+                  !awaitableBackgroundTasks.has(task.taskId) ||
+                  awaitableBackgroundTasks.get(task.taskId) !== task.description;
                 awaitableBackgroundTasks.set(task.taskId, task.description);
               } else {
-                awaitableBackgroundTasks.delete(task.taskId);
-                rosterChanged = awaitedBackgroundTaskIds.delete(task.taskId) || rosterChanged;
+                rosterChanged = awaitableBackgroundTasks.delete(task.taskId) || rosterChanged;
+                awaitedBackgroundTaskIds.delete(task.taskId);
               }
             }
             if (rosterChanged) yield* emitAwaitedBackgroundRoster();
@@ -3866,6 +3877,8 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             const status = toolStatus(tool.status);
             if (status === "pending" || status === "running") return true;
           }
+          // Elsewhere a quiet wake turn ends while children work; they carry over to the next run.
+          if (flavor.deferFinalizeForBackgroundWork !== true) return false;
           for (const subagent of context.subagents.values()) {
             if (acpSubagentStatusBlocksTurnSettlement(subagent.task.status)) {
               return true;
@@ -4710,15 +4723,28 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                 continuationGeneration,
                 (value) => value + 1,
               );
-              const reports = yield* Ref.modify(wakeReports, ({ reports }) => [
-                reports,
-                { reports, offered: new Set(reports.keys()) },
-              ]);
-              return Option.some({ route, generation, reports });
+              // The wake names no process: it may follow the end of any tracked one, and only a
+              // lone one can be named.
+              const woken = [...awaitableBackgroundTasks];
+              releaseAwaitableBackgroundTasks();
+              const reports = yield* Ref.modify(wakeReports, ({ reports: recorded }) => {
+                const [only] = woken;
+                const reports =
+                  woken.length === 1 && only !== undefined
+                    ? new Map(recorded).set(only[0], {
+                        kind: "command",
+                        label: only[1],
+                        outcome: "unknown",
+                      })
+                    : recorded;
+                return [reports, { reports, offered: new Set(reports.keys()) }];
+              });
+              return Option.some({ route, generation, reports, released: woken.length > 0 });
             }),
           );
           if (Option.isNone(pending)) return false;
-          const { route, generation, reports } = pending.value;
+          const { route, generation, reports, released } = pending.value;
+          if (released) yield* emitAwaitedBackgroundRoster();
           const notification = backgroundWorkNotification([...reports.values()]);
           yield* Effect.logInfo("orchestration-v2.acp-wake-turn-detected", {
             driver,
@@ -5166,9 +5192,11 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                 updatedAt: now,
               };
               const providerThread =
-                notification.sessionId === (yield* Ref.get(activeSessionId))
-                  ? withAwaitedBackgroundRoster(updated)
-                  : updated;
+                notification.sessionId !== (yield* Ref.get(activeSessionId))
+                  ? updated
+                  : flavor.extractAwaitableBackgroundTasks !== undefined && context === null
+                    ? withAwaitedBackgroundRoster(settledRootThread(updated))
+                    : withAwaitedBackgroundRoster(updated);
               yield* Ref.update(providerThreadByNativeSessionId, (current) =>
                 new Map(current).set(notification.sessionId, providerThread),
               );
@@ -5275,6 +5303,10 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                   if (projectCarryover) yield* openCarryoverNestedSubagent(subagentUpdate);
                   if (!acpSubagentStatusIsTerminal(subagentUpdate.status)) {
                     continue;
+                  }
+                  // Flavors with end notices name the child from the notice instead.
+                  if (flavor.extractSubagentEndNotice === undefined) {
+                    yield* recordCarryoverSubagentWake(subagentUpdate);
                   }
                   if (
                     yield* updateCarryoverSubagentStatus(
@@ -6272,6 +6304,34 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             null,
             update,
           );
+        });
+
+        // A background child that ends after its root settled is what wakes the agent next.
+        const recordCarryoverSubagentWake = Effect.fnUntraced(function* (
+          update: AcpAdapterV2SubagentUpdate,
+        ) {
+          const outcome =
+            update.status === "completed" || update.status === "failed"
+              ? update.status
+              : update.status === "interrupted" || update.status === "cancelled"
+                ? "cancelled"
+                : undefined;
+          if (outcome === undefined) return;
+          const match = (yield* Ref.get(carryoverSubagents))?.subagents.find(
+            (subagent) =>
+              (subagent.task.nativeTaskRef?.nativeId ?? String(subagent.task.id)) ===
+                update.nativeTaskId ||
+              (update.childSessionId !== null && subagent.childSessionId === update.childSessionId),
+          );
+          if (match === undefined || !acpSubagentStatusBlocksTurnSettlement(match.task.status)) {
+            return;
+          }
+          yield* recordWakeReport(String(match.task.id), {
+            kind: "subagent",
+            label: match.task.title ?? match.task.prompt,
+            outcome,
+            childThreadId: match.childThreadId,
+          });
         });
 
         const finishSubagentFromNotice = Effect.fnUntraced(function* (notice: {
@@ -8680,10 +8740,26 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           providerSessionId: input.providerSessionId,
           providerSession,
           events: Stream.fromEffectRepeat(Queue.take(events)),
-          // A closed runtime sees no wake turn, so nothing would release its marks.
+          // A closed runtime sees no wake turn, so nothing would release its marks. Until a wake or
+          // an end does, the root run keeps ingesting so the roster's clear lands on it.
           ...(flavor.extractAwaitableBackgroundTasks === undefined
             ? {}
-            : { backgroundTasksEndWithProcess: true as const }),
+            : {
+                backgroundTasksEndWithProcess: true as const,
+                hasPendingBackgroundWorkForThread: (providerThread, probe) =>
+                  probe?.includeSubagents === true
+                    ? (sessionRuntime.hasPendingBackgroundWork ?? Effect.succeed(false))
+                    : Ref.get(activeSessionId).pipe(
+                        Effect.map(
+                          (sessionId) =>
+                            sessionId !== null &&
+                            providerThread.nativeThreadRef?.nativeId === sessionId &&
+                            // Live work, or a published roster whose clear is still queued.
+                            (awaitableBackgroundTasks.size > 0 ||
+                              (providerThread.pendingBackgroundTasks?.length ?? 0) > 0),
+                        ),
+                      ),
+              }),
           ...(flavor.getModelContextWindow === undefined
             ? {}
             : {
@@ -8715,7 +8791,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                   if (yield* Ref.get(continuationRequested)) return true;
                   if ((yield* Ref.get(runningBackgroundTaskIds)).size > 0) return true;
                   // Keeps the runtime that will see the wake turn alive.
-                  if (awaitedBackgroundTaskIds.size > 0) return true;
+                  if (awaitableBackgroundTasks.size > 0) return true;
                   const active = yield* Ref.get(activeTurn);
                   if (
                     active !== null &&

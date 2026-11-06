@@ -1,9 +1,15 @@
 import { ProviderDriverKind } from "@t3tools/contracts";
 
 import { claudeBackgroundSubagentAfterRootInput } from "./claude_background_subagent_after_root/input.ts";
-import { assertClaudeBackgroundSubagentAfterRootOutput } from "./claude_background_subagent_after_root/output.ts";
+import {
+  assertBackgroundSubagentAfterRootOutput,
+  assertClaudeBackgroundSubagentAfterRootDetails,
+} from "./claude_background_subagent_after_root/output.ts";
 import { claudeBackgroundTaskAfterRootInput } from "./claude_background_task_after_root/input.ts";
-import { assertClaudeBackgroundTaskAfterRootOutput } from "./claude_background_task_after_root/output.ts";
+import {
+  assertBackgroundTaskAfterRootOutput,
+  assertClaudeBackgroundTaskAfterRootDetails,
+} from "./claude_background_task_after_root/output.ts";
 import { claudeBackgroundSubagentLifecycleInput } from "./claude_background_subagent_lifecycle/input.ts";
 import { assertClaudeBackgroundSubagentLifecycleOutput } from "./claude_background_subagent_lifecycle/output.ts";
 import { claudeBackgroundTaskInterruptInput } from "./claude_background_task_interrupt/input.ts";
@@ -11,11 +17,17 @@ import { claudeBackgroundWakeBeforeQueuedPromptInput } from "./claude_background
 import { assertClaudeBackgroundWakeBeforeQueuedPromptOutput } from "./claude_background_wake_before_queued_prompt/output.ts";
 import { claudeBackgroundWakeBeforeQueuedPromptNoEchoInput } from "./claude_background_wake_before_queued_prompt_no_echo/input.ts";
 import { assertClaudeBackgroundWakeBeforeQueuedPromptNoEchoOutput } from "./claude_background_wake_before_queued_prompt_no_echo/output.ts";
-import { assertClaudeBackgroundTaskInterruptOutput } from "./claude_background_task_interrupt/output.ts";
+import {
+  assertBackgroundTaskInterruptOutput,
+  assertClaudeBackgroundTaskInterruptDetails,
+} from "./claude_background_task_interrupt/output.ts";
 import { claudeBackgroundMonitorWakeInput } from "./claude_background_monitor_wake/input.ts";
 import { assertClaudeBackgroundMonitorWakeOutput } from "./claude_background_monitor_wake/output.ts";
 import { claudeBackgroundTaskWakeInput } from "./claude_background_task_wake/input.ts";
-import { assertClaudeBackgroundTaskWakeOutput } from "./claude_background_task_wake/output.ts";
+import {
+  assertBackgroundTaskWakeOutput,
+  assertClaudeBackgroundTaskWakeDetails,
+} from "./claude_background_task_wake/output.ts";
 import {
   claudeCompactAfterPeerTurnInput,
   claudeCompactAfterPeerTurnNoEchoInput,
@@ -70,6 +82,14 @@ import { grokPromptErrorInput } from "./grok_prompt_error/input.ts";
 import { assertGrokPromptErrorOutput } from "./grok_prompt_error/output.ts";
 import { grokSubagentLineageInput } from "./grok_subagent_lineage/input.ts";
 import { assertGrokSubagentLineageOutput } from "./grok_subagent_lineage/output.ts";
+import { hermesBackgroundSubagentAfterRootInput } from "./hermes_background_subagent_after_root/input.ts";
+import { hermesBackgroundTaskAfterRootInput } from "./hermes_background_task_after_root/input.ts";
+import { hermesBackgroundTaskInterruptInput } from "./hermes_background_task_interrupt/input.ts";
+import { hermesBackgroundTaskWakeInput } from "./hermes_background_task_wake/input.ts";
+import {
+  assertHermesBackgroundTaskWakeDetails,
+  assertHermesRosterListsBackgroundProcess,
+} from "./hermes_background_task_wake/output.ts";
 import { assertClaudeMessageSteeringOutput } from "./message_steering/claude_output.ts";
 import { assertMessageSteeringOutput } from "./message_steering/codex_output.ts";
 import { assertCursorMessageSteeringOutput } from "./message_steering/cursor_output.ts";
@@ -273,7 +293,8 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         ),
         modelSelection: CLAUDE_MODEL_SELECTION,
         runContinuationWorker: true,
-        assertOutput: assertClaudeBackgroundSubagentAfterRootOutput,
+        assertOutput: assertBackgroundSubagentAfterRootOutput,
+        assertProviderDetails: assertClaudeBackgroundSubagentAfterRootDetails,
       },
     ],
   },
@@ -288,7 +309,8 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
           import.meta.url,
         ),
         modelSelection: CLAUDE_MODEL_SELECTION,
-        assertOutput: assertClaudeBackgroundTaskAfterRootOutput,
+        assertOutput: assertBackgroundTaskAfterRootOutput,
+        assertProviderDetails: assertClaudeBackgroundTaskAfterRootDetails,
       },
     ],
   },
@@ -320,7 +342,8 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         ),
         modelSelection: CLAUDE_MODEL_SELECTION,
         runContinuationWorker: true,
-        assertOutput: assertClaudeBackgroundTaskInterruptOutput,
+        assertOutput: assertBackgroundTaskInterruptOutput,
+        assertProviderDetails: assertClaudeBackgroundTaskInterruptDetails,
       },
     ],
   },
@@ -432,7 +455,8 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         ),
         modelSelection: CLAUDE_MODEL_SELECTION,
         runContinuationWorker: true,
-        assertOutput: assertClaudeBackgroundTaskWakeOutput,
+        assertOutput: assertBackgroundTaskWakeOutput,
+        assertProviderDetails: assertClaudeBackgroundTaskWakeDetails,
       },
     ],
   },
@@ -703,6 +727,72 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         modelSelection: { ...GROK_MODEL_SELECTION, model: "grok-4.7-build-fast" },
         runContinuationWorker: true,
         assertOutput: assertGrokBackgroundBashFastWakeOutput,
+      },
+    ],
+  },
+  {
+    name: "hermes_background_subagent_after_root",
+    buildInput: hermesBackgroundSubagentAfterRootInput,
+    providers: [
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./hermes_background_subagent_after_root/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runContinuationWorker: true,
+        assertOutput: assertBackgroundSubagentAfterRootOutput,
+      },
+    ],
+  },
+  {
+    name: "hermes_background_task_after_root",
+    buildInput: hermesBackgroundTaskAfterRootInput,
+    providers: [
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./hermes_background_task_after_root/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        assertOutput: assertBackgroundTaskAfterRootOutput,
+        assertProviderDetails: assertHermesRosterListsBackgroundProcess,
+      },
+    ],
+  },
+  {
+    name: "hermes_background_task_interrupt",
+    buildInput: hermesBackgroundTaskInterruptInput,
+    providers: [
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./hermes_background_task_interrupt/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runContinuationWorker: true,
+        assertOutput: assertBackgroundTaskInterruptOutput,
+        assertProviderDetails: assertHermesRosterListsBackgroundProcess,
+      },
+    ],
+  },
+  {
+    name: "hermes_background_task_wake",
+    buildInput: hermesBackgroundTaskWakeInput,
+    providers: [
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./hermes_background_task_wake/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runContinuationWorker: true,
+        assertOutput: assertBackgroundTaskWakeOutput,
+        assertProviderDetails: assertHermesBackgroundTaskWakeDetails,
       },
     ],
   },

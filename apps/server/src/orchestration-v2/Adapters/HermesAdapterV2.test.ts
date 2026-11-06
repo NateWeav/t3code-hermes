@@ -652,20 +652,19 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 
-  it.effect(
-    "writes a delegated child's answer into its thread when it finishes after the turn",
-    () =>
-      Effect.gen(function* () {
-        const toolCallId = "toolu_delegate_after_turn";
-        const goal = "Reply with exactly: Hello";
+  it.effect("writes a late delegated child's answer into its thread and names it on the wake", () =>
+    Effect.gen(function* () {
+      // Each call is its own background unit; the second child is still working at the wake.
+      const delegation = (key: string, goal: string) => {
+        const toolCallId = `toolu_delegate_${key}`;
         const child = {
           goal,
-          subagent_id: "sa-0-after",
-          child_session_id: "20261105_231056_after",
+          subagent_id: `sa-0-${key}`,
+          child_session_id: `20261105_231056_${key}`,
           task_index: 0,
           task_count: 1,
           depth: 0,
-          delegation_id: "deleg_after",
+          delegation_id: `deleg_${key}`,
         };
         const progress = (hermesDelegation: Record<string, unknown>) =>
           ({
@@ -675,60 +674,88 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
             rawOutput: { hermesDelegation: { ...child, ...hermesDelegation } },
           }) as const;
         const dispatched = { status: "dispatched", mode: "background", count: 1, goals: [goal] };
-        const { events } = yield* runMockTurn({
-          name: "delegate-after-turn",
-          mockEnvironment: {},
-          promptUpdates: [
-            {
-              sessionUpdate: "tool_call",
-              toolCallId,
-              title: `delegate_task: 1 tasks: ${goal}`,
-              kind: "execute",
-              rawInput: { action: "spawn", tasks: [{ goal }] },
-              content: [
-                {
-                  type: "content",
-                  content: { type: "text", text: `Delegating 1 tasks\n\n1. ${goal}` },
-                },
-              ],
-            },
-            progress({ event: "subagent.start", text: goal }),
-            {
-              sessionUpdate: "tool_call_update",
-              toolCallId,
-              kind: "execute",
-              status: "completed",
-              rawOutput: dispatched,
-              content: [
-                { type: "content", content: { type: "text", text: JSON.stringify(dispatched) } },
-              ],
-            },
-            {
-              sessionUpdate: "agent_message_chunk",
-              content: { type: "text", text: "It is running in the background." },
-            },
-          ],
-          // The child ends after the parent's prompt settled, then the gateway hands its result back.
-          idleUpdates: [
-            progress({ event: "subagent.complete", status: "completed", summary: "Hello" }),
-            { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Hello" } },
-          ],
-          continuationRequests: { offer: () => Effect.void },
-          runContinuation: true,
-        });
-        const subagent = events.findLast((event) => event.type === "subagent.updated");
-        if (subagent?.type !== "subagent.updated") throw new Error("no subagent was projected");
-        assert.equal(subagent.subagent.status, "completed");
-        assert.equal(subagent.subagent.result, "Hello");
-        const childReplies = events.flatMap((event) =>
-          event.type === "message.updated" &&
-          event.message.threadId === subagent.subagent.childThreadId &&
-          event.message.role === "assistant"
-            ? [event.message.text]
-            : [],
-        );
-        assert.deepEqual(childReplies, ["Hello"]);
-      }).pipe(Effect.provide(testLayer), Effect.scoped),
+        const launch: ReadonlyArray<EffectAcpSchema.SessionUpdate> = [
+          {
+            sessionUpdate: "tool_call",
+            toolCallId,
+            title: `delegate_task: 1 tasks: ${goal}`,
+            kind: "execute",
+            rawInput: { action: "spawn", tasks: [{ goal }] },
+            content: [
+              {
+                type: "content",
+                content: { type: "text", text: `Delegating 1 tasks\n\n1. ${goal}` },
+              },
+            ],
+          },
+          progress({ event: "subagent.start", text: goal }),
+          {
+            sessionUpdate: "tool_call_update",
+            toolCallId,
+            kind: "execute",
+            status: "completed",
+            rawOutput: dispatched,
+            content: [
+              { type: "content", content: { type: "text", text: JSON.stringify(dispatched) } },
+            ],
+          },
+        ];
+        return { launch, progress };
+      };
+      const goal = "Reply with exactly: Hello";
+      const done = delegation("after", goal);
+      const working = delegation("working", "Run sleep 60, then reply with exactly: Later");
+      const offers = yield* Queue.unbounded<ProviderContinuationRequest>();
+      const { events } = yield* runMockTurn({
+        name: "delegate-after-turn",
+        mockEnvironment: {},
+        promptUpdates: [
+          ...done.launch,
+          ...working.launch,
+          {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "They are running in the background." },
+          },
+        ],
+        // The child ends after the parent's prompt settled, then the gateway hands its result back.
+        idleUpdates: [
+          done.progress({ event: "subagent.complete", status: "completed", summary: "Hello" }),
+          { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Hello" } },
+        ],
+        continuationRequests: {
+          offer: (request) => Queue.offer(offers, request).pipe(Effect.asVoid),
+        },
+        // The wake's run ends on its quiet window, though the other child still works.
+        runContinuation: true,
+      });
+      const subagents = new Map(
+        events.flatMap((event) =>
+          event.type === "subagent.updated" ? [[event.subagent.prompt, event.subagent]] : [],
+        ),
+      );
+      const subagent = subagents.get(goal);
+      if (subagent === undefined) throw new Error("no subagent was projected");
+      assert.equal(subagent.status, "completed");
+      assert.equal(subagent.result, "Hello");
+      assert.equal(
+        subagents.get("Run sleep 60, then reply with exactly: Later")?.status,
+        "running",
+      );
+      // The gateway turn that hands the result back names the child that woke it.
+      assert.deepEqual((yield* Queue.take(offers)).notification, {
+        source: { kind: "subagent", childThreadId: subagent.childThreadId! },
+        outcome: "completed",
+        summary: `Subagent "${goal}" finished`,
+      });
+      const childReplies = events.flatMap((event) =>
+        event.type === "message.updated" &&
+        event.message.threadId === subagent.childThreadId &&
+        event.message.role === "assistant"
+          ? [event.message.text]
+          : [],
+      );
+      assert.deepEqual(childReplies, ["Hello"]);
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 
   it.effect("nests a grandchild a background child launches after the turn settled", () =>
@@ -846,79 +873,94 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 
-  it.effect("holds on a notifying background command the agent marks until it sees it end", () =>
-    Effect.gen(function* () {
-      let matched: ReadonlyArray<string> = [];
-      const { events } = yield* runMockTurn({
-        name: "background-wait-exit",
-        mockEnvironment: {},
-        promptUpdates: [
-          ...hermesBackgroundStart({ toolCallId: "tc-tests", processId: TESTS_PROC, notify: true }),
-          // No completion wake is armed, so nothing could release a hold on it.
-          ...hermesBackgroundStart({ toolCallId: "tc-dev", processId: DEV_PROC, notify: false }),
-        ],
-        afterTurn: ({ session, providerThread }) =>
-          Effect.gen(function* () {
-            ({ matched } = yield* session.awaitBackgroundTasks!({
-              providerThread,
-              taskIds: [TESTS_PROC, DEV_PROC],
-              awaited: true,
-            }));
-          }).pipe(Effect.orDie),
-        followUpPromptUpdates: [
-          {
-            sessionUpdate: "tool_call",
-            toolCallId: "tc-wait",
-            title: "process_manage: wait aaaa1111",
-            kind: "other",
-            // Hermes takes any unique prefix, and its `wait` result omits the id.
-            rawInput: { action: "wait", session_id: "aaaa1111" },
-          },
-          {
-            sessionUpdate: "tool_call_update",
-            toolCallId: "tc-wait",
-            kind: "other",
-            status: "completed",
-            content: [
-              {
-                type: "content",
-                content: {
-                  type: "text",
-                  text: "process_manage result\n- **status:** exited\n- **exit_code:** 0",
+  it.effect(
+    "lists the commands that will wake Hermes and holds the marked ones until they end",
+    () =>
+      Effect.gen(function* () {
+        let matched: ReadonlyArray<string> = [];
+        const { events } = yield* runMockTurn({
+          name: "background-wait-exit",
+          mockEnvironment: {},
+          promptUpdates: [
+            ...hermesBackgroundStart({
+              toolCallId: "tc-tests",
+              processId: TESTS_PROC,
+              notify: true,
+            }),
+            // No completion wake is armed, so nothing could release a hold on it.
+            ...hermesBackgroundStart({ toolCallId: "tc-dev", processId: DEV_PROC, notify: false }),
+          ],
+          afterTurn: ({ session, providerThread }) =>
+            Effect.gen(function* () {
+              ({ matched } = yield* session.awaitBackgroundTasks!({
+                providerThread,
+                taskIds: [TESTS_PROC, DEV_PROC],
+                awaited: true,
+              }));
+            }).pipe(Effect.orDie),
+          followUpPromptUpdates: [
+            {
+              sessionUpdate: "tool_call",
+              toolCallId: "tc-wait",
+              title: "process_manage: wait aaaa1111",
+              kind: "other",
+              // Hermes takes any unique prefix, and its `wait` result omits the id.
+              rawInput: { action: "wait", session_id: "aaaa1111" },
+            },
+            {
+              sessionUpdate: "tool_call_update",
+              toolCallId: "tc-wait",
+              kind: "other",
+              status: "completed",
+              content: [
+                {
+                  type: "content",
+                  content: {
+                    type: "text",
+                    text: "process_manage result\n- **status:** exited\n- **exit_code:** 0",
+                  },
                 },
-              },
-            ],
-          },
-        ],
-      });
-      assert.deepEqual(matched, [TESTS_PROC]);
-      const rosters = providerThreadRosters(events);
-      const held = rosters.find((roster) => roster.length > 0);
-      assert.deepEqual(held, [
-        { taskId: TESTS_PROC, kind: "command", awaited: true, description: "pnpm test" },
-      ]);
-      assert.isTrue(backgroundWorkHoldsCompletion(held ?? []));
-      assert.deepEqual(rosters.at(-1), []);
-    }).pipe(Effect.provide(testLayer), Effect.scoped),
+              ],
+            },
+          ],
+        });
+        assert.deepEqual(matched, [TESTS_PROC]);
+        const rosters = providerThreadRosters(events);
+        const listed = rosters.find((roster) => roster.length > 0);
+        assert.deepEqual(listed, [
+          { taskId: TESTS_PROC, kind: "command", description: "pnpm test" },
+        ]);
+        assert.isFalse(backgroundWorkHoldsCompletion(listed ?? []));
+        const held = rosters.find((roster) => roster.some((task) => task.awaited === true));
+        assert.deepEqual(held, [
+          { taskId: TESTS_PROC, kind: "command", awaited: true, description: "pnpm test" },
+        ]);
+        assert.isTrue(backgroundWorkHoldsCompletion(held ?? []));
+        assert.deepEqual(rosters.at(-1), []);
+      }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 
-  it.effect("releases the marks when Hermes wakes the agent", () =>
+  // Hermes's wake names no process: it releases every listed one, and names a lone one.
+  it.effect.each([
+    {
+      name: "one",
+      processIds: [TESTS_PROC],
+      notification: {
+        source: { kind: "command" },
+        outcome: "unknown",
+        summary: 'Command "pnpm test" finished',
+      },
+    },
+    { name: "two", processIds: [TESTS_PROC, DEV_PROC], notification: undefined },
+  ] as const)("releases $name listed command(s) when Hermes wakes the agent", (row) =>
     Effect.gen(function* () {
       const offers = yield* Queue.unbounded<ProviderContinuationRequest>();
       const { events } = yield* runMockTurn({
-        name: "background-wait-wake",
+        name: `background-wake-${row.name}`,
         mockEnvironment: {},
-        promptUpdates: hermesBackgroundStart({
-          toolCallId: "tc-tests",
-          processId: TESTS_PROC,
-          notify: true,
-        }),
-        afterTurn: ({ session, providerThread }) =>
-          session.awaitBackgroundTasks!({
-            providerThread,
-            taskIds: [TESTS_PROC],
-            awaited: true,
-          }).pipe(Effect.asVoid, Effect.orDie),
+        promptUpdates: row.processIds.flatMap((processId) =>
+          hermesBackgroundStart({ toolCallId: `tc-${processId}`, processId, notify: true }),
+        ),
         idleUpdates: [
           {
             sessionUpdate: "agent_message_chunk",
@@ -930,11 +972,23 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
         },
         runContinuation: true,
       });
-      // Hermes's notice names no process, so the wake releases every mark.
+      assert.deepEqual((yield* Queue.take(offers)).notification, row.notification);
       const firstTerminal = events.findIndex((event) => event.type === "turn.terminal");
-      const rosters = providerThreadRosters(events.slice(firstTerminal + 1));
-      assert.lengthOf(rosters[0] ?? [], 1);
-      assert.deepEqual(rosters.slice(1), [[], []]);
+      assert.lengthOf(
+        providerThreadRosters(events.slice(0, firstTerminal)).at(-1) ?? [],
+        row.processIds.length,
+      );
+      const afterRoot = events
+        .slice(firstTerminal + 1)
+        .flatMap((event) =>
+          event.type === "provider_thread.updated" ? [event.providerThread] : [],
+        );
+      // The release lands between runs, on a thread the root run settled idle.
+      assert.equal(afterRoot[0]?.status, "idle");
+      assert.deepEqual(
+        afterRoot.map((providerThread) => providerThread.pendingBackgroundTasks ?? []),
+        afterRoot.map(() => []),
+      );
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 });

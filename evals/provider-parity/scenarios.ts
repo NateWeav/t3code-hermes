@@ -28,11 +28,6 @@ export interface ParityScenario {
   readonly hermes: Applicability;
   /** Capability paths (`group.flag`) a passing run demonstrates. */
   readonly exercises?: ReadonlyArray<string>;
-  /**
-   * Every reference assertion checks its own provider's identity, wire frames or item shapes, so no
-   * Hermes run can pass one. Full credit needs those checks moved to the reference's assertProviderDetails.
-   */
-  readonly providerBound?: true;
 }
 
 const applicable = { kind: "applicable" } as const;
@@ -181,7 +176,8 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
     exercises: ["subagents.supportsSubagents", "subagents.emitsSubagentLifecycle"],
   },
   { name: "subagent_continue", facet: "subagents", hermes: applicable },
-  { name: "subagent_v2", facet: "subagents", hermes: applicable, providerBound: true },
+  // Not provider-bound: Codex's agent-path title, provider thread and token counts are in its details.
+  { name: "subagent_v2", facet: "subagents", hermes: applicable },
   {
     name: "subagent_v2_approval",
     facet: "subagents",

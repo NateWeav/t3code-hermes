@@ -1,5 +1,5 @@
 import { assert } from "@effect/vitest";
-import type { ProviderReplayTranscript } from "@t3tools/contracts";
+import type { OrchestrationV2ThreadProjection, ProviderReplayTranscript } from "@t3tools/contracts";
 
 import type { OrchestratorV2ScenarioResult } from "../../OrchestratorScenario.ts";
 import {
@@ -8,10 +8,14 @@ import {
   assertSemanticProjectionIntegrity,
   assertUserMessagesInclude,
   projectionFor,
-  SUBAGENT_CONTINUE_CHILD_PROMPT,
   SUBAGENT_CONTINUE_PARENT_PROMPT,
   SUBAGENT_CONTINUE_PROMPT,
 } from "../shared.ts";
+
+/** The follow-up the parent sent its finished subagent: the child thread's second user message. */
+export function continuationPrompt(child: OrchestrationV2ThreadProjection): string | undefined {
+  return child.turnItems.flatMap((item) => (item.type === "user_message" ? [item.text] : []))[1];
+}
 
 /** The continued subagent's child thread. */
 export function continuedSubagentThread(
@@ -56,7 +60,8 @@ export function assertSubagentContinueOutput(
   const childProjection = result.projections.get(subagent.childThreadId);
   assert.isDefined(childProjection);
   assert.lengthOf(childProjection.runs, 0);
-  assertUserMessagesInclude(childProjection, [subagent.prompt, SUBAGENT_CONTINUE_CHILD_PROMPT]);
+  assertUserMessagesInclude(childProjection, [subagent.prompt]);
+  assert.isDefined(continuationPrompt(childProjection), "the subagent reopens on a follow-up");
   assert.isTrue(
     childProjection.turnItems.some(
       (item) => item.type === "assistant_message" && item.text === "initial subagent response",

@@ -546,7 +546,7 @@ const recordScenario = Effect.fn("recordHermesScenario")(function* (fixtureName:
             ...input,
             protocolLogging: tee.attachRuntime(),
             hermesSettings: settings,
-            environment: hermesSpawnEnvironment(environment, runtimePolicy.runtimeMode),
+            environment: hermesSpawnEnvironment(environment, runtimePolicy),
             childProcessSpawner,
           }),
       });

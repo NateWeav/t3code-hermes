@@ -5,6 +5,8 @@ import * as EffectAcpErrors from "effect-acp/errors";
 import {
   hermesApprovalOptions,
   readHermesCompressReply,
+  hermesApprovalPosture,
+  hermesFollowsApprovalPosture,
   applyHermesAcpModelSelection,
   buildHermesAcpSpawnInput,
   HERMES_BUILT_IN_SLASH_COMMANDS,
@@ -63,68 +65,101 @@ describe("buildHermesAcpSpawnInput", () => {
   });
 });
 
+describe("hermesApprovalPosture", () => {
+  it("asks whenever T3's policy asks, as Claude's permission mode does", () => {
+    const granular = { granular: { rules: true, sandbox_approval: true } };
+    expect(hermesApprovalPosture({ runtimeMode: "full-access" })).toBe("dontAsk");
+    expect(hermesApprovalPosture({ runtimeMode: "auto" })).toBe("dontAsk");
+    expect(hermesApprovalPosture({ runtimeMode: "auto-accept-edits" })).toBe("acceptEdits");
+    expect(hermesApprovalPosture({ runtimeMode: "approval-required" })).toBe("ask");
+    expect(
+      hermesApprovalPosture({ runtimeMode: "full-access", approvalPolicy: "on-request" }),
+    ).toBe("ask");
+    expect(hermesApprovalPosture({ runtimeMode: "full-access", approvalPolicy: granular })).toBe(
+      "ask",
+    );
+    expect(
+      hermesApprovalPosture({
+        runtimeMode: "full-access",
+        approvalPolicy: "never",
+        sandboxPolicy: { type: "workspaceWrite" },
+      }),
+    ).toBe("dontAsk");
+    expect(
+      hermesApprovalPosture({
+        runtimeMode: "full-access",
+        approvalPolicy: "never",
+        sandboxPolicy: { type: "readOnly" },
+      }),
+    ).toBe("ask");
+  });
+});
+
+describe("hermesFollowsApprovalPosture", () => {
+  it("follows T3's policy only on a Hermes that shows an edit it runs unasked", () => {
+    const initialize = (agentCapabilities: Record<string, unknown>) => ({
+      protocolVersion: 1,
+      agentCapabilities,
+    });
+    expect(hermesFollowsApprovalPosture(initialize({ _meta: { command_approval: true } }))).toBe(
+      true,
+    );
+    expect(hermesFollowsApprovalPosture(initialize({ loadSession: true }))).toBe(false);
+  });
+});
+
 describe("resolveHermesSessionModeId", () => {
+  // Hermes's session/new reply carries both; `setMode` writes the option.
   const modeState = {
-    currentModeId: "ask",
+    currentModeId: "default",
     availableModes: [
-      { id: "ask", name: "Ask", description: "Confirm every edit" },
-      { id: "auto", name: "Auto", description: "Apply edits without asking" },
+      { id: "default", name: "Default" },
+      { id: "accept_edits", name: "Accept Edits" },
+      { id: "dont_ask", name: "Don't Ask" },
     ],
   };
-
-  it("selects the autonomous mode for permissive runtime modes", () => {
-    expect(resolveHermesSessionModeId({ runtimeMode: "full-access", modeState })).toBe("auto");
-    expect(resolveHermesSessionModeId({ runtimeMode: "auto-accept-edits", modeState })).toBe(
-      "auto",
-    );
+  const editApprovalPolicy = (currentValue: string) => ({
+    id: "edit_approval_policy",
+    name: "Edits",
+    category: "mode" as const,
+    type: "select" as const,
+    currentValue,
+    options: [
+      { value: "ask", name: "Default" },
+      { value: "workspace_session", name: "Accept Edits" },
+      { value: "session", name: "Don't Ask" },
+    ],
   });
 
-  it("maps each runtime mode onto Hermes's edit-approval modes", () => {
-    const hermesModeState = {
-      currentModeId: "default",
-      availableModes: [
-        { id: "default", name: "Default", description: "Ask before edits." },
-        {
-          id: "accept_edits",
-          name: "Accept Edits",
-          description: "Auto-allow workspace and /tmp edits; still asks for sensitive paths.",
-        },
-        {
-          id: "dont_ask",
-          name: "Don't Ask",
-          description: "Auto-allow file edits for this session except sensitive paths.",
-        },
-      ],
-    };
-    expect(
-      resolveHermesSessionModeId({ runtimeMode: "full-access", modeState: hermesModeState }),
-    ).toBe("dont_ask");
-    expect(resolveHermesSessionModeId({ runtimeMode: "auto", modeState: hermesModeState })).toBe(
-      "dont_ask",
+  it("writes the edit_approval_policy value, not the modes id", () => {
+    const configOptions = [editApprovalPolicy("ask")];
+    expect(resolveHermesSessionModeId({ posture: "dontAsk", configOptions, modeState })).toBe(
+      "session",
+    );
+    expect(resolveHermesSessionModeId({ posture: "acceptEdits", configOptions, modeState })).toBe(
+      "workspace_session",
     );
     expect(
-      resolveHermesSessionModeId({ runtimeMode: "auto-accept-edits", modeState: hermesModeState }),
-    ).toBe("accept_edits");
-    expect(
-      resolveHermesSessionModeId({ runtimeMode: "approval-required", modeState: hermesModeState }),
-    ).toBeUndefined();
-  });
-
-  it("stays put when the requested mode is already active", () => {
-    expect(
-      resolveHermesSessionModeId({ runtimeMode: "approval-required", modeState }),
-    ).toBeUndefined();
-  });
-
-  it("returns nothing when the agent advertises no usable modes", () => {
-    expect(
-      resolveHermesSessionModeId({ runtimeMode: "full-access", modeState: undefined }),
+      resolveHermesSessionModeId({ posture: "ask", configOptions, modeState }),
     ).toBeUndefined();
     expect(
       resolveHermesSessionModeId({
-        runtimeMode: "full-access",
-        modeState: { currentModeId: "only", availableModes: [] },
+        posture: "ask",
+        configOptions: [editApprovalPolicy("session")],
+        modeState,
       }),
+    ).toBe("ask");
+  });
+
+  it("falls back to the modes ids, and leaves a Hermes without either alone", () => {
+    expect(resolveHermesSessionModeId({ posture: "dontAsk", configOptions: [], modeState })).toBe(
+      "dont_ask",
+    );
+    expect(
+      resolveHermesSessionModeId({ posture: "ask", configOptions: [], modeState }),
+    ).toBeUndefined();
+    expect(
+      resolveHermesSessionModeId({ posture: "dontAsk", configOptions: [], modeState: undefined }),
     ).toBeUndefined();
   });
 });
@@ -475,6 +510,30 @@ describe("makeHermesEditApprovalCards", () => {
     const done = write("toolu_1", "completed", "✅ write_file completed");
     expect(cards.normalizeToolCall(done, "sess-1").data.content).toEqual([diff]);
     expect(cards.normalizeToolCall(done, "sess-2").data.content).toEqual([otherDiff]);
+  });
+
+  it("keeps the diff an unasked write showed when it started, after an approved one", () => {
+    const cards = makeHermesEditApprovalCards();
+    const startedDiff = { ...diff, newText: "started text" };
+    const started = (toolCallId: string) => ({
+      toolCallId,
+      kind: "edit",
+      status: "pending" as const,
+      data: { locations: [{ path: "notes.txt" }], content: [startedDiff] },
+    });
+    const unasked = started("toolu_4");
+    expect(cards.normalizeToolCall(unasked, "sess-1")).toBe(unasked);
+    expect(
+      cards.normalizeToolCall(write("toolu_4", "completed", "✅ write_file completed"), "sess-1")
+        .data.content,
+    ).toEqual([startedDiff]);
+
+    cards.normalizeToolCall(started("toolu_5"), "sess-1");
+    cards.onPermissionRequest(approval);
+    expect(
+      cards.normalizeToolCall(write("toolu_5", "completed", "✅ write_file completed"), "sess-1")
+        .data.content,
+    ).toEqual([diff]);
   });
 
   it("drops only the status update that closes a permission card", () => {

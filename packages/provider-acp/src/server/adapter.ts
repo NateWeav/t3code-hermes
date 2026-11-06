@@ -6405,10 +6405,12 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           return true;
         });
 
-        // A background child that ends after its root settled is what wakes the agent next.
+        // A background child that ends after its root settled is what wakes the agent next. A nested
+        // one reports to the subagent that launched it, never to the agent.
         const recordCarryoverSubagentWake = Effect.fnUntraced(function* (
           update: AcpAdapterV2SubagentUpdate,
         ) {
+          if (update.parentNativeTaskId) return;
           const match = (yield* Ref.get(carryoverSubagents))?.subagents.find(
             (subagent) =>
               (subagent.task.nativeTaskRef?.nativeId ?? String(subagent.task.id)) ===

@@ -797,6 +797,7 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
           rawOutput: { hermesDelegation },
         }) as const;
       const dispatched = { status: "dispatched", mode: "background", count: 1, goals: [goal] };
+      const offers = yield* Queue.unbounded<ProviderContinuationRequest>();
       const { events } = yield* runMockTurn({
         name: "delegate-nested-after-turn",
         mockEnvironment: {},
@@ -841,7 +842,9 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
           progress({ ...child, event: "subagent.complete", status: "completed", summary: "Hello" }),
           { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Hello" } },
         ],
-        continuationRequests: { offer: () => Effect.void },
+        continuationRequests: {
+          offer: (request) => Queue.offer(offers, request).pipe(Effect.asVoid),
+        },
         runContinuation: true,
       });
       const latest = new Map<string, OrchestrationV2Subagent>();
@@ -882,6 +885,12 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
       );
       assert.isAbove(firstNested, 0);
       assert.isAbove(followUp, firstNested);
+      // The gateway wakes the agent for its own child; the grandchild reported to that child.
+      assert.deepEqual((yield* Queue.take(offers)).notification, {
+        source: { kind: "subagent", childThreadId: parent.childThreadId! },
+        outcome: "completed",
+        summary: `Subagent "${goal}" finished`,
+      });
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 

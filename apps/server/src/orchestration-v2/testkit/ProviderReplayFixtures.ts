@@ -32,6 +32,7 @@ const DRIVERS_WITH_REPLAY_FIXTURE_FILES = new Set([
   "cursor",
   "fx",
   "grok",
+  "hermes",
   "kiro",
   "muse",
   "opencode",
@@ -133,11 +134,17 @@ const runFixtureProvider = Effect.fn("runOrchestratorReplayFixture")(function* <
     driver: input.driver.driver,
     modelSelection: input.driver.modelSelection,
   }).pipe(Effect.provide(IdAllocator.layer), provideDeterministicTestRuntime);
+  const gateLabels = input.driver.replayGateLabels ?? {};
   const scenario = {
     name: `${input.fixtureName}/${input.driver.driver}`,
     transcript,
     commands: materialized.commands,
-    steps: materialized.steps,
+    steps: materialized.steps.map((step) =>
+      (step.type === "release_replay_gate" || step.type === "release_replay_gate_after_waiting") &&
+      gateLabels[step.label] !== undefined
+        ? { ...step, label: gateLabels[step.label]! }
+        : step,
+    ),
     projectionThreadIds: materialized.projectionThreadIds,
     runtimePolicyOverride: {
       ...input.driver.runtimePolicyOverride,
@@ -151,6 +158,7 @@ const runFixtureProvider = Effect.fn("runOrchestratorReplayFixture")(function* <
     input.driver.runContinuationWorker === true ? { runContinuationWorker: true } : {},
   ).pipe(provideDeterministicTestRuntime);
   input.driver.assertOutput(result, transcript);
+  input.driver.assertProviderDetails?.(result, transcript);
   assertProviderNativeSubagentRootTurns(result);
   const expectedAbsentWorkspacePaths = input.driver.expectedAbsentWorkspacePaths;
   if (expectedAbsentWorkspacePaths !== undefined) {

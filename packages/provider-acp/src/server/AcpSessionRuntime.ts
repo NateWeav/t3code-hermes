@@ -160,6 +160,26 @@ export interface AcpSessionRuntimeOptions {
   readonly customModels?: ReadonlyArray<string>;
 }
 
+/**
+ * The options a runtime launched ahead of its session takes from the session that adopts it.
+ * Everything else is fixed when the process spawns.
+ */
+export type AcpSessionRuntimeBinding = Pick<
+  AcpSessionRuntimeOptions,
+  | "cwd"
+  | "resumeSessionId"
+  | "mcpServers"
+  | "acpMcpServers"
+  | "httpMcpServers"
+  | "interruptPromptOnCancel"
+  | "clientCapabilities"
+  | "clientInfo"
+  | "requestLogger"
+  | "onTermination"
+  | "onOutgoingResponseFailure"
+  | "onOutgoingResponse"
+>;
+
 export interface AcpSessionRequestLogEvent {
   readonly method: string;
   readonly payload: unknown;
@@ -1125,6 +1145,10 @@ export class AcpSessionRuntime extends Context.Service<
       EffectAcpErrors.AcpError
     >;
     readonly authenticate?: (methodId: string) => Effect.Effect<void, EffectAcpErrors.AcpError>;
+    /** Hands a live runtime that has sent no request yet to a session; fails once it has. */
+    readonly bind?: (
+      binding: AcpSessionRuntimeBinding,
+    ) => Effect.Effect<void, EffectAcpErrors.AcpError>;
     readonly start: () => Effect.Effect<AcpSessionRuntimeStartResult, EffectAcpErrors.AcpError>;
     readonly getEvents: () => Stream.Stream<AcpSessionRuntimeEvent, never>;
     readonly drainEvents: Effect.Effect<void>;
@@ -1292,6 +1316,7 @@ export const make = Effect.fn("AcpSessionRuntime.make")(function* (
   const activePromptRef = yield* Ref.make<Option.Option<AcpActivePrompt>>(Option.none());
   const assistantUpdatesOpenRef = yield* Ref.make(true);
   const sessionLoadGateRef = yield* Ref.make<Option.Option<SessionLoadGate>>(Option.none());
+  let binding: AcpSessionRuntimeBinding = options;
 
   const ensureConnected = Effect.gen(function* () {
     const error = yield* Ref.get(terminationErrorRef);
@@ -1349,7 +1374,7 @@ export const make = Effect.fn("AcpSessionRuntime.make")(function* (
   });
 
   const logRequest = (event: AcpSessionRequestLogEvent) =>
-    options.requestLogger ? options.requestLogger(event) : Effect.void;
+    binding.requestLogger ? binding.requestLogger(event) : Effect.void;
 
   const runLoggedRequest = <A>(
     method: string,
@@ -1683,15 +1708,14 @@ export const make = Effect.fn("AcpSessionRuntime.make")(function* (
       ...(options.onIncomingRequest ? { onIncomingRequest: options.onIncomingRequest } : {}),
       onTermination: (error) =>
         recordTermination(error).pipe(
-          Effect.andThen(options.onTermination?.(error) ?? Effect.void),
+          Effect.andThen(binding.onTermination?.(error) ?? Effect.void),
           Effect.ensuring(
             Scope.close(runtimeScope, Exit.fail(error)).pipe(Effect.forkDetach, Effect.asVoid),
           ),
         ),
-      ...(options.onOutgoingResponseFailure
-        ? { onOutgoingResponseFailure: options.onOutgoingResponseFailure }
-        : {}),
-      ...(options.onOutgoingResponse ? { onOutgoingResponse: options.onOutgoingResponse } : {}),
+      onOutgoingResponseFailure: (requestId, error) =>
+        binding.onOutgoingResponseFailure?.(requestId, error) ?? Effect.void,
+      onOutgoingResponse: (requestId) => binding.onOutgoingResponse?.(requestId) ?? Effect.void,
     }),
   ).pipe(Effect.provideService(Scope.Scope, runtimeScope));
 
@@ -1799,21 +1823,22 @@ export const make = Effect.fn("AcpSessionRuntime.make")(function* (
     runtimeScope,
     Ref.set(stoppingRef, true).pipe(Effect.andThen(Deferred.succeed(runtimeClosed, undefined))),
   );
-  const initializeClientCapabilities = {
-    fs: {
-      readTextFile: false,
-      writeTextFile: false,
-      ...options.clientCapabilities?.fs,
-    },
-    terminal: options.clientCapabilities?.terminal ?? false,
-    // ACP v1 agents send session notices only to clients that advertise them; v2 needs no capability.
-    session: { ...options.clientCapabilities?.session, notices: {} },
-    ...(options.clientCapabilities?.auth ? { auth: options.clientCapabilities.auth } : {}),
-    ...(options.clientCapabilities?.elicitation
-      ? { elicitation: options.clientCapabilities.elicitation }
-      : {}),
-    ...(options.clientCapabilities?._meta ? { _meta: options.clientCapabilities._meta } : {}),
-  } satisfies NonNullable<EffectAcpSchema.InitializeRequest["clientCapabilities"]>;
+  const initializeClientCapabilities = (
+    capabilities: AcpSessionRuntimeOptions["clientCapabilities"],
+  ) =>
+    ({
+      fs: {
+        readTextFile: false,
+        writeTextFile: false,
+        ...capabilities?.fs,
+      },
+      terminal: capabilities?.terminal ?? false,
+      // ACP v1 agents send session notices only to clients that advertise them; v2 needs no capability.
+      session: { ...capabilities?.session, notices: {} },
+      ...(capabilities?.auth ? { auth: capabilities.auth } : {}),
+      ...(capabilities?.elicitation ? { elicitation: capabilities.elicitation } : {}),
+      ...(capabilities?._meta ? { _meta: capabilities._meta } : {}),
+    }) satisfies NonNullable<EffectAcpSchema.InitializeRequest["clientCapabilities"]>;
 
   const getStartedState = Effect.gen(function* () {
     yield* ensureConnected;
@@ -2098,8 +2123,8 @@ export const make = Effect.fn("AcpSessionRuntime.make")(function* (
   const initializeOnce = Effect.gen(function* () {
     const initializePayload = {
       protocolVersion: 2,
-      clientCapabilities: initializeClientCapabilities,
-      clientInfo: options.clientInfo,
+      clientCapabilities: initializeClientCapabilities(binding.clientCapabilities),
+      clientInfo: binding.clientInfo,
       ...(options.initializeMeta === undefined ? {} : { _meta: options.initializeMeta }),
     } satisfies EffectAcpSchema.InitializeRequest;
 
@@ -2150,15 +2175,15 @@ export const make = Effect.fn("AcpSessionRuntime.make")(function* (
     activationOptions?: AcpSessionActivationOptions,
   ): ReadonlyArray<EffectAcpSchema.McpServer> => {
     const mcpCapabilities = initializeResult.agentCapabilities?.mcpCapabilities;
-    const acpServers = activationOptions?.acpMcpServers ?? options.acpMcpServers ?? [];
+    const acpServers = activationOptions?.acpMcpServers ?? binding.acpMcpServers ?? [];
     if (mcpCapabilities?.acp === true && acpServers.length > 0) {
       return acpServers;
     }
-    const httpServers = activationOptions?.httpMcpServers ?? options.httpMcpServers ?? [];
+    const httpServers = activationOptions?.httpMcpServers ?? binding.httpMcpServers ?? [];
     if (mcpCapabilities?.http === true && httpServers.length > 0) {
       return httpServers;
     }
-    return activationOptions?.mcpServers ?? options.mcpServers ?? [];
+    return activationOptions?.mcpServers ?? binding.mcpServers ?? [];
   };
 
   const sessionSetupFields = (initializeResult: EffectAcpSchema.InitializeResponse) => {
@@ -2227,15 +2252,15 @@ export const make = Effect.fn("AcpSessionRuntime.make")(function* (
         | EffectAcpSchema.NewSessionResponse
         | EffectAcpSchema.ResumeSessionResponse;
       const additionalDirectories = sessionSetupFields(initializeResult);
-      if (options.resumeSessionId) {
-        sessionId = options.resumeSessionId;
+      if (binding.resumeSessionId) {
+        sessionId = binding.resumeSessionId;
         if (
           initializeResult.agentCapabilities?.loadSession === true &&
           options.resumeMethod !== "resume"
         ) {
           const loadPayload = {
             sessionId,
-            cwd: options.cwd,
+            cwd: binding.cwd,
             ...additionalDirectories,
             mcpServers: sessionMcpServers(initializeResult),
           } satisfies EffectAcpSchema.LoadSessionRequest;
@@ -2243,7 +2268,7 @@ export const make = Effect.fn("AcpSessionRuntime.make")(function* (
         } else if (initializeResult.agentCapabilities?.sessionCapabilities?.resume != null) {
           const resumePayload = {
             sessionId,
-            cwd: options.cwd,
+            cwd: binding.cwd,
             ...additionalDirectories,
             mcpServers: sessionMcpServers(initializeResult),
           } satisfies EffectAcpSchema.ResumeSessionRequest;
@@ -2260,7 +2285,7 @@ export const make = Effect.fn("AcpSessionRuntime.make")(function* (
         }
       } else {
         const createPayload = {
-          cwd: options.cwd,
+          cwd: binding.cwd,
           mcpServers: sessionMcpServers(initializeResult),
           ...additionalDirectories,
         } satisfies EffectAcpSchema.NewSessionRequest;
@@ -2384,7 +2409,7 @@ export const make = Effect.fn("AcpSessionRuntime.make")(function* (
       ...(options.cancelMeta === undefined ? {} : { _meta: options.cancelMeta }),
     } satisfies EffectAcpSchema.CancelNotification;
     if (options.cancelBehavior !== "wait-for-prompt") {
-      if (options.interruptPromptOnCancel === false) {
+      if (binding.interruptPromptOnCancel === false) {
         return yield* acp.agent.cancel(cancelPayload);
       }
       if (Option.isSome(activePrompt)) {
@@ -2450,6 +2475,22 @@ export const make = Effect.fn("AcpSessionRuntime.make")(function* (
         ),
         Effect.asVoid,
       ),
+    bind: (next) =>
+      ensureConnected.pipe(
+        Effect.andThen(Ref.get(initializeStateRef)),
+        Effect.flatMap((state) => {
+          if (state._tag !== "NotStarted") {
+            return Effect.fail(
+              new EffectAcpErrors.AcpTransportError({
+                detail: "An ACP runtime binds to a session only before its first request.",
+                cause: undefined,
+              }),
+            );
+          }
+          binding = next;
+          return Effect.void;
+        }),
+      ),
     start: () => start,
     getEvents: () => Stream.fromQueue(eventQueue),
     drainEvents,
@@ -2463,7 +2504,7 @@ export const make = Effect.fn("AcpSessionRuntime.make")(function* (
         Effect.flatMap((started) => {
           const requestPayload = {
             sessionId,
-            cwd: options.cwd,
+            cwd: binding.cwd,
             ...sessionSetupFields(started.initializeResult),
             mcpServers: sessionMcpServers(started.initializeResult, activationOptions),
           } satisfies EffectAcpSchema.LoadSessionRequest;
@@ -2476,7 +2517,7 @@ export const make = Effect.fn("AcpSessionRuntime.make")(function* (
         Effect.flatMap((started) => {
           const requestPayload = {
             sessionId,
-            cwd: options.cwd,
+            cwd: binding.cwd,
             ...sessionSetupFields(started.initializeResult),
             mcpServers: sessionMcpServers(started.initializeResult, activationOptions),
           } satisfies EffectAcpSchema.ResumeSessionRequest;
@@ -2493,7 +2534,7 @@ export const make = Effect.fn("AcpSessionRuntime.make")(function* (
         Effect.flatMap((started) => {
           const requestPayload = {
             sessionId,
-            cwd: options.cwd,
+            cwd: binding.cwd,
             ...sessionSetupFields(started.initializeResult),
             mcpServers: sessionMcpServers(started.initializeResult, activationOptions),
             ...(meta === undefined ? {} : { _meta: meta }),
@@ -2508,7 +2549,7 @@ export const make = Effect.fn("AcpSessionRuntime.make")(function* (
       ),
     listSessions: (cursor) => {
       const requestPayload = {
-        cwd: options.cwd,
+        cwd: binding.cwd,
         ...(cursor === undefined ? {} : { cursor }),
       } satisfies EffectAcpSchema.ListSessionsRequest;
       return initialize.pipe(

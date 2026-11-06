@@ -504,6 +504,44 @@ describe("AcpSessionRuntime", () => {
     );
   });
 
+  it.effect("opens the session a runtime launched ahead of it was bound to", () => {
+    const launchRequests: Array<AcpSessionRuntime.AcpSessionRequestLogEvent> = [];
+    const sessionRequests: Array<AcpSessionRuntime.AcpSessionRequestLogEvent> = [];
+    return Effect.gen(function* () {
+      const runtime = yield* AcpSessionRuntime.make({
+        ...mockRuntimeOptions,
+        requestLogger: (event) => Effect.sync(() => launchRequests.push(event)),
+      });
+      const sessionCwd = NodeOS.tmpdir();
+      const mcpServers = [
+        {
+          name: "t3-code",
+          command: "/usr/bin/node",
+          args: [],
+          env: [{ name: "T3_ACP_MCP_AUTHORIZATION", value: "Bearer thread-token" }],
+        },
+      ];
+      yield* runtime.bind!({
+        cwd: sessionCwd,
+        mcpServers,
+        clientInfo: { name: "t3-test", version: "0.0.0" },
+        requestLogger: (event) => Effect.sync(() => sessionRequests.push(event)),
+      });
+      yield* runtime.start();
+
+      expect(launchRequests).toEqual([]);
+      expect(
+        sessionRequests.find(
+          (event) => event.method === "session/new" && event.status === "started",
+        )?.payload,
+      ).toMatchObject({ cwd: sessionCwd, mcpServers });
+      const rebound = yield* Effect.exit(
+        runtime.bind!({ cwd: process.cwd(), clientInfo: mockRuntimeOptions.clientInfo }),
+      );
+      expect(Exit.isFailure(rebound)).toBe(true);
+    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
+  });
+
   it.effect("supports v2 session deletion and secret-safe provider management", () => {
     const requestEvents: Array<AcpSessionRuntime.AcpSessionRequestLogEvent> = [];
     return Effect.gen(function* () {

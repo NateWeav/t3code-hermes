@@ -579,20 +579,19 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 
-  it.effect(
-    "writes a delegated child's answer into its thread when it finishes after the turn",
-    () =>
-      Effect.gen(function* () {
-        const toolCallId = "toolu_delegate_after_turn";
-        const goal = "Reply with exactly: Hello";
+  it.effect("writes a late delegated child's answer into its thread and names it on the wake", () =>
+    Effect.gen(function* () {
+      // Each call is its own background unit; the second child is still working at the wake.
+      const delegation = (key: string, goal: string) => {
+        const toolCallId = `toolu_delegate_${key}`;
         const child = {
           goal,
-          subagent_id: "sa-0-after",
-          child_session_id: "20261105_231056_after",
+          subagent_id: `sa-0-${key}`,
+          child_session_id: `20261105_231056_${key}`,
           task_index: 0,
           task_count: 1,
           depth: 0,
-          delegation_id: "deleg_after",
+          delegation_id: `deleg_${key}`,
         };
         const progress = (hermesDelegation: Record<string, unknown>) =>
           ({
@@ -602,60 +601,88 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
             rawOutput: { hermesDelegation: { ...child, ...hermesDelegation } },
           }) as const;
         const dispatched = { status: "dispatched", mode: "background", count: 1, goals: [goal] };
-        const { events } = yield* runMockTurn({
-          name: "delegate-after-turn",
-          mockEnvironment: {},
-          promptUpdates: [
-            {
-              sessionUpdate: "tool_call",
-              toolCallId,
-              title: `delegate_task: 1 tasks: ${goal}`,
-              kind: "execute",
-              rawInput: { action: "spawn", tasks: [{ goal }] },
-              content: [
-                {
-                  type: "content",
-                  content: { type: "text", text: `Delegating 1 tasks\n\n1. ${goal}` },
-                },
-              ],
-            },
-            progress({ event: "subagent.start", text: goal }),
-            {
-              sessionUpdate: "tool_call_update",
-              toolCallId,
-              kind: "execute",
-              status: "completed",
-              rawOutput: dispatched,
-              content: [
-                { type: "content", content: { type: "text", text: JSON.stringify(dispatched) } },
-              ],
-            },
-            {
-              sessionUpdate: "agent_message_chunk",
-              content: { type: "text", text: "It is running in the background." },
-            },
-          ],
-          // The child ends after the parent's prompt settled, then the gateway hands its result back.
-          idleUpdates: [
-            progress({ event: "subagent.complete", status: "completed", summary: "Hello" }),
-            { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Hello" } },
-          ],
-          continuationRequests: { offer: () => Effect.void },
-          runContinuation: true,
-        });
-        const subagent = events.findLast((event) => event.type === "subagent.updated");
-        if (subagent?.type !== "subagent.updated") throw new Error("no subagent was projected");
-        assert.equal(subagent.subagent.status, "completed");
-        assert.equal(subagent.subagent.result, "Hello");
-        const childReplies = events.flatMap((event) =>
-          event.type === "message.updated" &&
-          event.message.threadId === subagent.subagent.childThreadId &&
-          event.message.role === "assistant"
-            ? [event.message.text]
-            : [],
-        );
-        assert.deepEqual(childReplies, ["Hello"]);
-      }).pipe(Effect.provide(testLayer), Effect.scoped),
+        const launch: ReadonlyArray<EffectAcpSchema.SessionUpdate> = [
+          {
+            sessionUpdate: "tool_call",
+            toolCallId,
+            title: `delegate_task: 1 tasks: ${goal}`,
+            kind: "execute",
+            rawInput: { action: "spawn", tasks: [{ goal }] },
+            content: [
+              {
+                type: "content",
+                content: { type: "text", text: `Delegating 1 tasks\n\n1. ${goal}` },
+              },
+            ],
+          },
+          progress({ event: "subagent.start", text: goal }),
+          {
+            sessionUpdate: "tool_call_update",
+            toolCallId,
+            kind: "execute",
+            status: "completed",
+            rawOutput: dispatched,
+            content: [
+              { type: "content", content: { type: "text", text: JSON.stringify(dispatched) } },
+            ],
+          },
+        ];
+        return { launch, progress };
+      };
+      const goal = "Reply with exactly: Hello";
+      const done = delegation("after", goal);
+      const working = delegation("working", "Run sleep 60, then reply with exactly: Later");
+      const offers = yield* Queue.unbounded<ProviderContinuationRequest>();
+      const { events } = yield* runMockTurn({
+        name: "delegate-after-turn",
+        mockEnvironment: {},
+        promptUpdates: [
+          ...done.launch,
+          ...working.launch,
+          {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "They are running in the background." },
+          },
+        ],
+        // The child ends after the parent's prompt settled, then the gateway hands its result back.
+        idleUpdates: [
+          done.progress({ event: "subagent.complete", status: "completed", summary: "Hello" }),
+          { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Hello" } },
+        ],
+        continuationRequests: {
+          offer: (request) => Queue.offer(offers, request).pipe(Effect.asVoid),
+        },
+        // The wake's run ends on its quiet window, though the other child still works.
+        runContinuation: true,
+      });
+      const subagents = new Map(
+        events.flatMap((event) =>
+          event.type === "subagent.updated" ? [[event.subagent.prompt, event.subagent]] : [],
+        ),
+      );
+      const subagent = subagents.get(goal);
+      if (subagent === undefined) throw new Error("no subagent was projected");
+      assert.equal(subagent.status, "completed");
+      assert.equal(subagent.result, "Hello");
+      assert.equal(
+        subagents.get("Run sleep 60, then reply with exactly: Later")?.status,
+        "running",
+      );
+      // The gateway turn that hands the result back names the child that woke it.
+      assert.deepEqual((yield* Queue.take(offers)).notification, {
+        source: { kind: "subagent", childThreadId: subagent.childThreadId! },
+        outcome: "completed",
+        summary: `Subagent "${goal}" finished`,
+      });
+      const childReplies = events.flatMap((event) =>
+        event.type === "message.updated" &&
+        event.message.threadId === subagent.childThreadId &&
+        event.message.role === "assistant"
+          ? [event.message.text]
+          : [],
+      );
+      assert.deepEqual(childReplies, ["Hello"]);
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 
   it.effect(

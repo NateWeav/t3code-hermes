@@ -419,7 +419,8 @@ It builds on `acp-delegation-progress`, whose viewer file it changes; apply that
   `<provider>:<model>` when several providers list it. Anything else is a tool error that lists what
   the profile can run, never a child on a guessed endpoint. The parent's own provider keeps its
   endpoint and key; another provider brings its own, resolved as `delegation.provider` is.
-  `delegation.model` in `config.yaml` stays the default a task can override. A managed scope
+  `delegation.model` in `config.yaml` stays the default a task can override. A task naming neither
+  runs on its launcher's model, so a nested subagent inherits its owner's. A managed scope
   (`/etc/hermes/config.yaml`) that pins `delegation.model`, `delegation.provider` or
   `delegation.base_url` wins: it is the administrator's policy, so `delegate_task` stops offering
   `model` and refuses a task that names one. Only the default delegation backend offers it, since
@@ -435,7 +436,7 @@ It builds on `acp-delegation-progress`, whose viewer file it changes; apply that
   call, and T3 Code maps it back to the original subagent by `subagent_id`.
 
 Restart the Hermes gateway after applying it: `delegate_task` runs there. Verified against
-hermes-agent `ca4360692055` (`main`, 2026-11-06), alone after `acp-delegation-progress` and after
+hermes-agent `90d6b98fd86d` (`main`, 2026-11-06), alone after `acp-delegation-progress` and after
 all the other patches. Run the patch's `tests/gateway/test_delegation_task_model.py` and
 `tests/acp_adapter/test_gateway_delegation_continue.py` (which reuses the progress patch's
 `test_gateway_delegation_progress.py`) in a scratch checkout, as for `acp-delegation-progress`.

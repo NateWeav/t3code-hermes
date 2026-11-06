@@ -29,7 +29,7 @@ custom_providers:
     base_url: <Anthropic-compatible endpoint>
     key_env: CLIPROXYAPI_API_KEY
     model: claude-haiku-5-5
-    # The lifecycle twin runs one subagent on the second model.
+    # The lifecycle and nested-model twins run a subagent on the second model.
     models: { claude-haiku-5-5: {}, claude-haiku-4-5-20251001: {} }
     discover_models: false
     api_mode: anthropic_messages

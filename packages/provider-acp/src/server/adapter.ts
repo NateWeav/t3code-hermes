@@ -5687,7 +5687,8 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                   if (!acpSubagentStatusIsTerminal(subagentUpdate.status)) {
                     continue;
                   }
-                  subagentEnded = true;
+                  // A nested child's end goes to its launcher, never to the agent.
+                  if (!subagentUpdate.parentNativeTaskId) subagentEnded = true;
                   // Flavors with end notices name the child from the notice instead.
                   if (flavor.extractSubagentEndNotice === undefined) {
                     yield* recordCarryoverSubagentWake(subagentUpdate);
@@ -6675,10 +6676,12 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           return true;
         });
 
-        // A background child that ends after its root settled is what wakes the agent next.
+        // A background child that ends after its root settled is what wakes the agent next. A nested
+        // one reports to the subagent that launched it, never to the agent.
         const recordCarryoverSubagentWake = Effect.fnUntraced(function* (
           update: AcpAdapterV2SubagentUpdate,
         ) {
+          if (update.parentNativeTaskId) return;
           const match = (yield* Ref.get(carryoverSubagents))?.subagents.find(
             (subagent) =>
               (subagent.task.nativeTaskRef?.nativeId ?? String(subagent.task.id)) ===

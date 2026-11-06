@@ -300,8 +300,18 @@ describe("Hermes delegate_task ACP boundary", () => {
       ),
     ).toMatchObject([
       { nativeTaskId: "tc-fixture-batch:task:0", status: "completed", result: "Hi" },
-      { nativeTaskId: "tc-fixture-batch:subagent:sa-1", status: "interrupted", prompt: "" },
-      { nativeTaskId: "tc-fixture-batch:subagent:sa-2", status: "interrupted", prompt: "" },
+      {
+        nativeTaskId: "tc-fixture-batch:subagent:sa-1",
+        parentNativeTaskId: "tc-fixture-batch:task:0",
+        status: "interrupted",
+        prompt: "",
+      },
+      {
+        nativeTaskId: "tc-fixture-batch:subagent:sa-2",
+        parentNativeTaskId: "tc-fixture-batch:subagent:sa-1",
+        status: "interrupted",
+        prompt: "",
+      },
     ]);
   });
 

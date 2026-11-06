@@ -3,6 +3,7 @@
 import {
   type ChatAttachment,
   type ModelSelection,
+  type OrchestrationV2AppThread,
   type OrchestrationV2ConversationMessage,
   type OrchestrationV2ExecutionNode,
   type OrchestrationV2PlanArtifact,
@@ -638,6 +639,8 @@ export interface AcpAdapterV2SubagentUpdate {
     | "interrupted"
     | "cancelled";
   readonly childSessionId: string | null;
+  /** The subagent that launched this one; absent for children of the turn itself. */
+  readonly parentNativeTaskId?: string | null;
   readonly result: string | null;
   /** Provider-named role and finished-child usage; flavors that never report them omit both. */
   readonly role?: string | null;
@@ -1640,11 +1643,14 @@ type AcpSubagentDetails = Pick<AcpAdapterV2SubagentUpdate, "role" | "usage">;
 interface ActiveAcpSubagent {
   task: OrchestrationV2Subagent;
   readonly childThreadId: ThreadId;
+  /** Subagents this one launches nest under its thread. */
+  readonly childAppThread: OrchestrationV2AppThread;
   readonly childRootNodeId: OrchestrationV2ExecutionNode["id"];
   readonly turnItemId: OrchestrationV2TurnItem["id"];
   turnItemOrdinal: number;
-  providerTurnId: OrchestrationV2ProviderTurn["id"];
-  readonly parentProviderThreadId: ProviderThreadId;
+  /** Null when the row sits in another subagent's thread, which has no provider turns. */
+  providerTurnId: OrchestrationV2ProviderTurn["id"] | null;
+  readonly parentProviderThreadId: ProviderThreadId | null;
   childSessionId: string | null;
   assistantText: string;
   readonly assistantMessages: Map<string, string>;
@@ -3289,6 +3295,129 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           }
         });
 
+        const emitSubagentPrompt = Effect.fnUntraced(function* (
+          subagent: ActiveAcpSubagent,
+          now: DateTime.Utc,
+        ) {
+          const nativeTaskId = subagent.task.nativeTaskRef?.nativeId ?? subagent.task.id;
+          const promptNativeItemId = `${nativeTaskId}:prompt`;
+          const promptArtifacts = makeSubagentConversationArtifacts({
+            senderThreadId: subagent.task.threadId,
+            messageId: providerMessageId(promptNativeItemId),
+            turnItemId: providerTurnItemId(promptNativeItemId),
+            threadId: subagent.childThreadId,
+            rootNodeId: subagent.childRootNodeId,
+            providerThreadId: null,
+            providerTurnId: null,
+            nativeItemRef: { driver, nativeId: promptNativeItemId, strength: "weak" },
+            role: "user",
+            text: subagent.task.prompt,
+            ordinal: 100,
+            now,
+          });
+          yield* emitProviderEvent({
+            type: "message.updated",
+            driver,
+            message: promptArtifacts.message,
+          });
+          yield* emitProviderEvent({
+            type: "turn_item.updated",
+            driver,
+            turnItem: promptArtifacts.turnItem,
+          });
+        });
+
+        /**
+         * A subagent another one launched opens in its launcher's thread, which has no runs or
+         * provider turns, so its row carries neither. Callers project its status.
+         */
+        const openNestedSubagent = Effect.fnUntraced(function* (
+          launcher: ActiveAcpSubagent,
+          update: AcpAdapterV2SubagentUpdate,
+        ) {
+          const now = yield* DateTime.now;
+          const nativeTaskId = update.nativeTaskId;
+          const nodeId = providerNodeId(nativeTaskId);
+          const providerInstanceId = launcher.task.providerInstanceId;
+          const childThreadId = idAllocator.derive.threadFromProviderThread({
+            driver,
+            providerInstanceId,
+            nativeThreadId: `${launcher.childThreadId}:task:${nativeTaskId}`,
+          });
+          const model = update.model?.trim() || null;
+          const subagent: ActiveAcpSubagent = {
+            task: {
+              id: nodeId,
+              threadId: launcher.childThreadId,
+              runId: null,
+              parentNodeId: launcher.childRootNodeId,
+              origin: "provider_native",
+              createdBy: "agent",
+              driver,
+              providerInstanceId,
+              providerThreadId: null,
+              childThreadId,
+              nativeTaskRef: { driver, nativeId: nativeTaskId, strength: "strong" },
+              prompt: update.prompt,
+              title: update.title,
+              model,
+              ...(update.role ? { role: update.role } : {}),
+              status: "pending",
+              result: null,
+              startedAt: now,
+              completedAt: null,
+              updatedAt: now,
+            },
+            childThreadId,
+            childAppThread: makeSubagentChildThread({
+              parentThread: launcher.childAppThread,
+              childThreadId,
+              parentNodeId: nodeId,
+              activeProviderThreadId: null,
+              providerInstanceId,
+              modelSelection: {
+                ...launcher.childAppThread.modelSelection,
+                ...(model ? { model } : {}),
+              },
+              title: subagentThreadTitle({
+                parentTitle: launcher.childAppThread.title,
+                title: update.title,
+                prompt: update.prompt,
+                ordinal: launcher.childItemOrdinals.size + 1,
+              }),
+              now,
+              createdBy: "agent",
+              creationSource: "provider",
+            }),
+            childRootNodeId: providerNodeId(`${nativeTaskId}:child-root`),
+            turnItemId: providerTurnItemId(nativeTaskId),
+            turnItemOrdinal: resolveSubagentChildOrdinal(launcher, nativeTaskId),
+            providerTurnId: null,
+            parentProviderThreadId: launcher.task.providerThreadId,
+            childSessionId: null,
+            assistantText: "",
+            assistantMessages: new Map(),
+            childItemOrdinals: new Map(),
+            nextChildOrdinal: 101,
+            terminalStatusProjected: false,
+            toolState: {
+              tools: new Map(),
+              toolUpdatesSkipped: new Map(),
+              toolStartedAt: new Map(),
+            },
+            toolSessionIds: new Map(),
+          };
+          // The row comes first: it is what lets a run whose root turn ended open the thread.
+          yield* emitProviderEvent({ type: "subagent.updated", driver, subagent: subagent.task });
+          yield* emitProviderEvent({
+            type: "app_thread.created",
+            driver,
+            appThread: subagent.childAppThread,
+          });
+          yield* emitSubagentPrompt(subagent, now);
+          return subagent;
+        });
+
         const emitSubagent = Effect.fnUntraced(function* (
           context: ActiveAcpTurn,
           reported: AcpAdapterV2SubagentUpdate,
@@ -3299,7 +3428,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               ? { ...reported, status: "interrupted" }
               : reported;
           // Hydration uses a new toolCallId but references the original child by subagent_id or task id.
-          const existing =
+          let existing =
             context.subagents.get(update.nativeTaskId) ??
             (update.childSessionId !== null
               ? context.subagentsBySessionId.get(update.childSessionId)
@@ -3326,6 +3455,12 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             if (isHydrationOnly || update.suppressNormalTool === false) {
               return;
             }
+          }
+          if (existing === undefined && update.parentNativeTaskId) {
+            // A nested subagent whose launcher is unknown drops rather than land on the root.
+            const launcher = context.subagents.get(update.parentNativeTaskId);
+            if (launcher === undefined) return;
+            existing = yield* openNestedSubagent(launcher, update);
           }
           const now = yield* DateTime.now;
           const nativeTaskId = existing?.task.nativeTaskRef?.nativeId ?? update.nativeTaskId;
@@ -3380,6 +3515,26 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           const subagent: ActiveAcpSubagent = existing ?? {
             task,
             childThreadId,
+            childAppThread: makeSubagentChildThread({
+              parentThread: context.input.appThread,
+              childThreadId,
+              parentNodeId: nodeId,
+              activeProviderThreadId: null,
+              providerInstanceId: context.input.modelSelection.instanceId,
+              modelSelection: {
+                ...context.input.modelSelection,
+                model: task.model ?? context.input.modelSelection.model,
+              },
+              title: subagentThreadTitle({
+                parentTitle: context.input.appThread.title,
+                title: update.title,
+                prompt: update.prompt,
+                ordinal: context.subagents.size + 1,
+              }),
+              now,
+              createdBy: "agent",
+              creationSource: "provider",
+            }),
             childRootNodeId,
             turnItemId,
             turnItemOrdinal,
@@ -3405,52 +3560,9 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             yield* emitProviderEvent({
               type: "app_thread.created",
               driver,
-              appThread: makeSubagentChildThread({
-                parentThread: context.input.appThread,
-                childThreadId,
-                parentNodeId: nodeId,
-                activeProviderThreadId: null,
-                providerInstanceId: context.input.modelSelection.instanceId,
-                modelSelection: {
-                  ...context.input.modelSelection,
-                  model: task.model ?? context.input.modelSelection.model,
-                },
-                title: subagentThreadTitle({
-                  parentTitle: context.input.appThread.title,
-                  title: update.title,
-                  prompt: update.prompt,
-                  ordinal: context.subagents.size,
-                }),
-                now,
-                createdBy: "agent",
-                creationSource: "provider",
-              }),
+              appThread: subagent.childAppThread,
             });
-            const promptNativeItemId = `${nativeTaskId}:prompt`;
-            const promptArtifacts = makeSubagentConversationArtifacts({
-              senderThreadId: context.input.threadId,
-              messageId: providerMessageId(promptNativeItemId),
-              turnItemId: providerTurnItemId(promptNativeItemId),
-              threadId: childThreadId,
-              rootNodeId: childRootNodeId,
-              providerThreadId: null,
-              providerTurnId: null,
-              nativeItemRef: { driver, nativeId: promptNativeItemId, strength: "weak" },
-              role: "user",
-              text: update.prompt,
-              ordinal: 100,
-              now,
-            });
-            yield* emitProviderEvent({
-              type: "message.updated",
-              driver,
-              message: promptArtifacts.message,
-            });
-            yield* emitProviderEvent({
-              type: "turn_item.updated",
-              driver,
-              turnItem: promptArtifacts.turnItem,
-            });
+            yield* emitSubagentPrompt(subagent, now);
           }
 
           const childSessionId = update.childSessionId;
@@ -3510,14 +3622,14 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             driver,
             node: {
               id: nodeId,
-              threadId: context.input.threadId,
+              threadId: subagent.task.threadId,
               runId: subagent.task.runId,
               parentNodeId: subagent.task.parentNodeId,
               rootNodeId: subagent.task.parentNodeId,
               kind: "subagent",
               status: taskStatus,
               countsForRun: false,
-              providerThreadId: context.input.providerThread.id,
+              providerThreadId: subagent.parentProviderThreadId,
               providerTurnId: subagent.providerTurnId,
               nativeItemRef,
               runtimeRequestId: null,
@@ -3553,10 +3665,10 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             driver,
             turnItem: {
               id: turnItemId,
-              threadId: context.input.threadId,
+              threadId: subagent.task.threadId,
               runId: subagent.task.runId,
               nodeId,
-              providerThreadId: context.input.providerThread.id,
+              providerThreadId: subagent.parentProviderThreadId,
               providerTurnId: subagent.providerTurnId,
               nativeItemRef,
               parentItemId: null,
@@ -5343,6 +5455,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                 if (event._tag !== "ToolCallUpdated") continue;
                 const toolCall = flavor.normalizeToolCall?.(event.toolCall) ?? event.toolCall;
                 for (const subagentUpdate of extractSubagentUpdates(toolCall) ?? []) {
+                  if (projectCarryover) yield* openCarryoverNestedSubagent(subagentUpdate);
                   if (!acpSubagentStatusIsTerminal(subagentUpdate.status)) {
                     continue;
                   }
@@ -6311,6 +6424,37 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             yield* projectCarryoverSubagentStatus(match, status, result, details);
           }
           return true;
+        });
+
+        /** A nested subagent can launch after its root turn settled, while its launcher carries over. */
+        const openCarryoverNestedSubagent = Effect.fnUntraced(function* (
+          update: AcpAdapterV2SubagentUpdate,
+        ) {
+          const carryover = yield* Ref.get(carryoverSubagents);
+          if (carryover === null || !update.parentNativeTaskId || update.prompt === "") return;
+          const nativeIdOf = (subagent: ActiveAcpSubagent) =>
+            subagent.task.nativeTaskRef?.nativeId ?? String(subagent.task.id);
+          if (
+            carryover.subagents.some((subagent) => nativeIdOf(subagent) === update.nativeTaskId)
+          ) {
+            return;
+          }
+          const launcher = carryover.subagents.find(
+            (subagent) => nativeIdOf(subagent) === update.parentNativeTaskId,
+          );
+          if (launcher === undefined) return;
+          const subagent = yield* openNestedSubagent(launcher, update);
+          yield* Ref.set(carryoverSubagents, {
+            ...carryover,
+            subagents: [...carryover.subagents, subagent],
+          });
+          // A terminal first report settles through the caller's carryover update.
+          yield* projectCarryoverSubagentStatus(
+            subagent,
+            acpSubagentStatusIsTerminal(update.status) ? "running" : update.status,
+            null,
+            update,
+          );
         });
 
         const finishSubagentFromNotice = Effect.fnUntraced(function* (notice: {

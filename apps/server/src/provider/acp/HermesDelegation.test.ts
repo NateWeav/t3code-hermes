@@ -233,16 +233,76 @@ describe("Hermes delegate_task ACP boundary", () => {
     ]);
   });
 
-  it("claims spinner frames and grandchildren without moving any child", () => {
+  it("claims spinner frames and grandchildren of unknown parents without moving any child", () => {
     const start = tool({ ...batch.start, rawInput: batch.args });
     for (const text of ["(¬‿¬) analyzing...", "(¬‿¬) analyzing...ಠ_ಠ deliberating..."]) {
       expect(updates(progress(start, { event: "subagent.thinking", task_index: 0, text }))).toEqual(
         [],
       );
     }
-    expect(updates(progress(start, { event: "subagent.start", task_index: 0, depth: 1 }))).toEqual(
-      [],
-    );
+    expect(
+      updates(
+        progress(start, {
+          event: "subagent.start",
+          task_index: 0,
+          depth: 1,
+          subagent_id: "sa-orphan",
+          parent_id: "sa-never-seen",
+          goal: "Orphan",
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("opens grandchildren under the subagent that launched them", () => {
+    const start = tool({ ...batch.start, rawInput: batch.args });
+    extract(start);
+    const child = { task_index: 0, depth: 0, subagent_id: "sa-0" };
+    const nested = (depth: number, id: string, parent: string, event: string) =>
+      progress(start, {
+        event,
+        task_index: 0,
+        depth,
+        subagent_id: id,
+        parent_id: parent,
+        goal: `Goal of ${id}`,
+        model: "claude-haiku-5-5",
+      });
+    expect(updates(progress(start, { ...child, event: "subagent.start" }))).toMatchObject([
+      { nativeTaskId: "tc-fixture-batch:task:0", status: "running" },
+    ]);
+    expect(updates(nested(1, "sa-1", "sa-0", "subagent.spawn_requested"))).toEqual([
+      expect.objectContaining({
+        nativeTaskId: "tc-fixture-batch:subagent:sa-1",
+        parentNativeTaskId: "tc-fixture-batch:task:0",
+        status: "pending",
+        title: "Goal of sa-1",
+        prompt: "Goal of sa-1",
+        model: "claude-haiku-5-5",
+      }),
+    ]);
+    expect(updates(nested(2, "sa-2", "sa-1", "subagent.start"))).toMatchObject([
+      {
+        nativeTaskId: "tc-fixture-batch:subagent:sa-2",
+        parentNativeTaskId: "tc-fixture-batch:subagent:sa-1",
+        status: "running",
+      },
+    ]);
+    // The child ends without its descendants reporting: they end with it rather than hold the turn.
+    expect(
+      updates(
+        progress(start, {
+          ...child,
+          event: "subagent.complete",
+          status: "completed",
+          summary: "Hi",
+        }),
+      ),
+    ).toMatchObject([
+      { nativeTaskId: "tc-fixture-batch:task:0", status: "completed", result: "Hi" },
+      { nativeTaskId: "tc-fixture-batch:subagent:sa-1", status: "interrupted", prompt: "" },
+      { nativeTaskId: "tc-fixture-batch:subagent:sa-2", status: "interrupted", prompt: "" },
+    ]);
   });
 
   it("names no goal for a child it never saw start, so it cannot open a row", () => {

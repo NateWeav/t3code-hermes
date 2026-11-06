@@ -515,7 +515,7 @@ export interface AcpAdapterV2Flavor {
     readonly afterTokenCount?: number;
   };
   readonly isProvisionalSubagentTool?: (toolCall: AcpToolCallState) => boolean;
-  readonly normalizeToolCall?: (toolCall: AcpToolCallState) => AcpToolCallState;
+  readonly normalizeToolCall?: (toolCall: AcpToolCallState, sessionId: string) => AcpToolCallState;
   readonly extractProposedPlanMarkdown?: (toolCall: AcpToolCallState) => string | undefined;
   /**
    * Agents without a native plan: Plan mode asks for a `<proposed_plan>` block in the reply,
@@ -1601,7 +1601,8 @@ export function acpPostSettleContinuationOfferEvidence(
     return parseSessionUpdateEvent(notification).events.some((event) => {
       if (event._tag !== "ToolCallUpdated") return false;
       // Grok monitor start ACKs say completed while the task is still running.
-      const toolCall = flavor.normalizeToolCall?.(event.toolCall) ?? event.toolCall;
+      const toolCall =
+        flavor.normalizeToolCall?.(event.toolCall, notification.sessionId) ?? event.toolCall;
       return toolCall.status === "completed" || toolCall.status === "failed";
     });
   }
@@ -2464,7 +2465,9 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             if (flavor.extractBackgroundTaskId === undefined) return;
             for (const event of parseSessionUpdateEvent(notification).events) {
               if (event._tag !== "ToolCallUpdated") continue;
-              const toolCall = flavor.normalizeToolCall?.(event.toolCall) ?? event.toolCall;
+              const toolCall =
+                flavor.normalizeToolCall?.(event.toolCall, notification.sessionId) ??
+                event.toolCall;
               const taskId = flavor.extractBackgroundTaskId(toolCall);
               if (taskId === undefined) continue;
               const status = toolStatus(toolCall.status);
@@ -4109,7 +4112,9 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           if (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") {
             for (const event of parseSessionUpdateEvent(notification).events) {
               if (event._tag === "ToolCallUpdated") {
-                const tool = flavor.normalizeToolCall?.(event.toolCall) ?? event.toolCall;
+                const tool =
+                  flavor.normalizeToolCall?.(event.toolCall, notification.sessionId) ??
+                  event.toolCall;
                 yield* projectSubagentTool(
                   subagent,
                   notification.sessionId,
@@ -4327,7 +4332,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           const previous = context.tools.get(incoming.toolCallId);
           const merged = mergeToolCallState(previous, incoming);
           yield* trackAwaitableBackgroundTasks(merged);
-          const normalized = flavor.normalizeToolCall?.(merged) ?? merged;
+          const normalized = flavor.normalizeToolCall?.(merged, context.nativeThreadId) ?? merged;
           const backgroundTaskId = flavor.extractBackgroundTaskId?.(normalized);
           const backgroundCommandTaskId =
             flavor.isBackgroundCommandTool?.(normalized) === true
@@ -5274,7 +5279,9 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             // Long-timeout get_command_or_subagent_output consumption ends with TaskOutput alone.
             for (const event of parseSessionUpdateEvent(notification).events) {
               if (event._tag !== "ToolCallUpdated") continue;
-              const toolCall = flavor.normalizeToolCall?.(event.toolCall) ?? event.toolCall;
+              const toolCall =
+                flavor.normalizeToolCall?.(event.toolCall, notification.sessionId) ??
+                event.toolCall;
               const proposedPlanMarkdown = flavor.extractProposedPlanMarkdown?.(toolCall);
               if (proposedPlanMarkdown !== undefined && proposedPlanMarkdown.length > 0) {
                 yield* captureProposedPlan({ planMarkdown: proposedPlanMarkdown });
@@ -5700,7 +5707,9 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             ) {
               for (const event of parseSessionUpdateEvent(notification).events) {
                 if (event._tag !== "ToolCallUpdated") continue;
-                const toolCall = flavor.normalizeToolCall?.(event.toolCall) ?? event.toolCall;
+                const toolCall =
+                  flavor.normalizeToolCall?.(event.toolCall, notification.sessionId) ??
+                  event.toolCall;
                 for (const subagentUpdate of extractSubagentUpdates(toolCall) ?? []) {
                   if (projectCarryover) yield* openCarryoverNestedSubagent(subagentUpdate);
                   if (!acpSubagentStatusIsTerminal(subagentUpdate.status)) {
@@ -5863,7 +5872,9 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                 subagent.task.nativeTaskRef?.nativeId ?? String(subagent.task.id);
               for (const event of parseSessionUpdateEvent(notification).events) {
                 if (event._tag !== "ToolCallUpdated") continue;
-                const toolCall = flavor.normalizeToolCall?.(event.toolCall) ?? event.toolCall;
+                const toolCall =
+                  flavor.normalizeToolCall?.(event.toolCall, notification.sessionId) ??
+                  event.toolCall;
                 const subagentUpdates = extractSubagentUpdates(toolCall);
                 if (subagentUpdates !== undefined) {
                   for (const subagentUpdate of subagentUpdates) {
@@ -6830,7 +6841,9 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           ) {
             for (const event of parseSessionUpdateEvent(notification).events) {
               if (event._tag !== "ToolCallUpdated") continue;
-              const toolCall = flavor.normalizeToolCall?.(event.toolCall) ?? event.toolCall;
+              const toolCall =
+                flavor.normalizeToolCall?.(event.toolCall, notification.sessionId) ??
+                event.toolCall;
               for (const subagentUpdate of extractSubagentUpdates(toolCall) ?? []) {
                 if (!acpSubagentStatusIsTerminal(subagentUpdate.status)) {
                   continue;

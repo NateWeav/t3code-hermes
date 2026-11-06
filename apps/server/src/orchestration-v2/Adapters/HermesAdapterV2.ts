@@ -363,13 +363,14 @@ export function makeHermesAcpAdapterFlavor(
       }
       return model;
     }),
-    normalizeToolCall: (toolCall) =>
+    normalizeToolCall: (toolCall, sessionId) =>
       editApprovalCards.normalizeToolCall(
         preserveHermesAgentActivityTitle(
           normalizeHermesWebSearchQuery(
             normalizeHermesTerminalResult(normalizeHermesT3McpToolCall(toolCall)),
           ),
         ),
+        sessionId,
       ),
     ...makeHermesDelegation(),
     extractAwaitableBackgroundTasks: extractHermesAwaitableBackgroundTasks,

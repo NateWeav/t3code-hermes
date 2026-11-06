@@ -21,6 +21,7 @@ import {
 import {
   extractMcpToolCallIdentity,
   parseSessionUpdateEvent,
+  type AcpToolCallState,
 } from "@t3tools/provider-acp/server/runtimeModel";
 
 describe("resolveHermesAcpBaseModelId", () => {
@@ -482,18 +483,33 @@ describe("makeHermesEditApprovalCards", () => {
 
   it("shows the approved diff on the write, once, and keeps a denied write's reason", () => {
     const cards = makeHermesEditApprovalCards();
+    const normalize = (toolCall: AcpToolCallState) => cards.normalizeToolCall(toolCall, "sess-1");
     cards.onPermissionRequest(approval);
-    const done = cards.normalizeToolCall(write("toolu_1", "completed", "✅ write_file completed"));
+    const done = normalize(write("toolu_1", "completed", "✅ write_file completed"));
     expect(done.data.content).toEqual([diff]);
-    expect(cards.normalizeToolCall(done).data.content).toEqual([diff]);
+    expect(normalize(done).data.content).toEqual([diff]);
 
     const unasked = write("toolu_2", "completed", "✅ write_file completed");
-    expect(cards.normalizeToolCall(unasked)).toBe(unasked);
+    expect(normalize(unasked)).toBe(unasked);
 
     cards.onPermissionRequest(approval);
     const denied = write("toolu_3", "failed", "Edit approval denied by ACP client");
-    expect(cards.normalizeToolCall(denied)).toBe(denied);
-    expect(cards.normalizeToolCall(unasked)).toBe(unasked);
+    expect(normalize(denied)).toBe(denied);
+    expect(normalize(unasked)).toBe(unasked);
+  });
+
+  it("keeps each session's diff for the same path", () => {
+    const cards = makeHermesEditApprovalCards();
+    const otherDiff = { ...diff, newText: "other session's text" };
+    cards.onPermissionRequest(approval);
+    cards.onPermissionRequest({
+      ...approval,
+      sessionId: "sess-2",
+      toolCall: { ...approval.toolCall, content: [otherDiff] },
+    });
+    const done = write("toolu_1", "completed", "✅ write_file completed");
+    expect(cards.normalizeToolCall(done, "sess-1").data.content).toEqual([diff]);
+    expect(cards.normalizeToolCall(done, "sess-2").data.content).toEqual([otherDiff]);
   });
 
   it("keeps the diff an unasked write showed when it started, after an approved one", () => {

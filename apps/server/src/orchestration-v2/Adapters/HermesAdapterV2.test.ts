@@ -447,7 +447,7 @@ describe("HermesAdapterV2 flavor", () => {
     }).events[0];
     if (event?._tag !== "ToolCallUpdated") throw new Error("expected a tool call");
     assert.notEqual(event.toolCall.title, "skill view (pr-review)");
-    assert.equal(flavor.normalizeToolCall?.(event.toolCall).title, "skill view (pr-review)");
+    assert.equal(flavor.normalizeToolCall?.(event.toolCall, "s").title, "skill view (pr-review)");
   });
 });
 

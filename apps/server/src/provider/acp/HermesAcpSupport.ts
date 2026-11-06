@@ -287,6 +287,8 @@ export function makeHermesEditApprovalCards() {
   const pendingByPath = new Map<string, EffectAcpSchema.ToolCallContent>();
   const startedByToolCallId = new Map<string, EffectAcpSchema.ToolCallContent>();
   const byToolCallId = new Map<string, EffectAcpSchema.ToolCallContent>();
+  // One instance serves every session and subagent of a provider instance.
+  const scoped = (sessionId: string, key: string) => `${sessionId}\0${key}`;
   const keep = (
     map: Map<string, EffectAcpSchema.ToolCallContent>,
     key: string,
@@ -305,19 +307,21 @@ export function makeHermesEditApprovalCards() {
       // `locations` carry the path as the model wrote it; the diff carries it resolved.
       const requestedPath = unknownRecord(unknownRecord(toolCall.rawInput)?.arguments)?.path;
       for (const path of new Set([diff.path, requestedPath])) {
-        if (typeof path === "string" && path.length > 0) keep(pendingByPath, path, diff);
+        if (typeof path === "string" && path.length > 0)
+          keep(pendingByPath, scoped(request.sessionId, path), diff);
       }
     },
-    normalizeToolCall: (toolCall: AcpToolCallState): AcpToolCallState => {
+    normalizeToolCall: (toolCall: AcpToolCallState, sessionId: string): AcpToolCallState => {
       if (toolCall.kind !== "edit") return toolCall;
+      const toolCallKey = scoped(sessionId, toolCall.toolCallId);
       const settled = toolCall.status === "completed" || toolCall.status === "failed";
       if (!settled) {
         const started = soleDiff(
           toolCall.data.content as ReadonlyArray<EffectAcpSchema.ToolCallContent> | undefined,
         );
-        if (started !== undefined) keep(startedByToolCallId, toolCall.toolCallId, started);
+        if (started !== undefined) keep(startedByToolCallId, toolCallKey, started);
       }
-      let diff = byToolCallId.get(toolCall.toolCallId);
+      let diff = byToolCallId.get(toolCallKey);
       if (diff === undefined && settled) {
         const locations = toolCall.data.locations;
         const path =
@@ -325,14 +329,14 @@ export function makeHermesEditApprovalCards() {
             ? unknownRecord(locations[0])?.path
             : undefined;
         diff =
-          (typeof path === "string" ? pendingByPath.get(path) : undefined) ??
-          startedByToolCallId.get(toolCall.toolCallId);
+          (typeof path === "string" ? pendingByPath.get(scoped(sessionId, path)) : undefined) ??
+          startedByToolCallId.get(toolCallKey);
         if (diff === undefined) return toolCall;
         for (const [key, pending] of pendingByPath) {
           if (pending === diff) pendingByPath.delete(key);
         }
-        startedByToolCallId.delete(toolCall.toolCallId);
-        keep(byToolCallId, toolCall.toolCallId, diff);
+        startedByToolCallId.delete(toolCallKey);
+        keep(byToolCallId, toolCallKey, diff);
       }
       // A denied or failed write keeps Hermes's reason; it wrote nothing.
       return diff === undefined || toolCall.status !== "completed"

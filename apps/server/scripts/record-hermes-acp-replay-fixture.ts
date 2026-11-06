@@ -468,16 +468,12 @@ const recordScenario = Effect.fn("recordHermesScenario")(function* (fixtureName:
         childProcessSpawner,
         selfInvocation: yield* resolveSelfInvocation(),
         // Production's runtime factory, with the protocol logger teeing raw lines.
-        makeRuntime: ({ runtimePolicy, processEnvironment, ...input }) =>
+        makeRuntime: ({ runtimePolicy, processEnvironment: _processEnvironment, ...input }) =>
           makeHermesAcpRuntime({
             ...input,
             protocolLogging: tee.attachRuntime(),
             hermesSettings: settings,
-            environment: hermesSpawnEnvironment(
-              environment,
-              runtimePolicy.runtimeMode,
-              processEnvironment,
-            ),
+            environment: hermesSpawnEnvironment(environment, runtimePolicy.runtimeMode),
             childProcessSpawner,
           }),
       });

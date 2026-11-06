@@ -26,6 +26,7 @@ import type * as EffectAcpProtocol from "effect-acp/protocol";
 import * as TestProviderHost from "@t3tools/provider-testing/TestProviderHost";
 import { ACP_PROTOCOL } from "@t3tools/provider-acp/server/adapter";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
 import { checkpointWorkspace } from "@t3tools/provider-testing/replayWorkspace";
@@ -176,7 +177,26 @@ function makeWireTee() {
     }
     return pending.size > 0;
   };
-  return { wire, attachRuntime, hasPendingPrompt };
+  // Background `delegate_task` children report through the delegation patch's per-child
+  // `hermesDelegation` events long after their parent's prompt is answered.
+  const delegations = () => {
+    const running = new Set<string>();
+    let seen = false;
+    for (const wireMessage of wire) {
+      if (wireMessage.direction !== "incoming") continue;
+      const params = wireMessage.message.params;
+      const update = isRecord(params) && isRecord(params.update) ? params.update : undefined;
+      const rawOutput = isRecord(update?.rawOutput) ? update.rawOutput : undefined;
+      const child = isRecord(rawOutput?.hermesDelegation) ? rawOutput.hermesDelegation : undefined;
+      if (child === undefined || typeof child.event !== "string") continue;
+      seen = true;
+      const key = `${String(update?.toolCallId)}:${String(child.subagent_id ?? child.task_index)}`;
+      if (child.event === "subagent.complete") running.delete(key);
+      else running.add(key);
+    }
+    return { seen, running: running.size > 0 };
+  };
+  return { wire, attachRuntime, hasPendingPrompt, delegations };
 }
 
 function frameLabel(kind: string, method: string, params: unknown): string {
@@ -464,6 +484,8 @@ const recordScenario = Effect.fn("recordHermesScenario")(function* (fixtureName:
         environment,
         childProcessSpawner,
         selfInvocation: yield* resolveSelfInvocation(),
+        // As in production, so turns the gateway runs on its own reach the thread.
+        continuationRequests: yield* ProviderContinuationRequests.ProviderContinuationRequests,
         // Production's runtime factory, with the protocol logger teeing raw lines.
         makeRuntime: ({ runtimePolicy, processEnvironment, ...input }) =>
           makeHermesAcpRuntime({
@@ -513,8 +535,10 @@ const recordScenario = Effect.fn("recordHermesScenario")(function* (fixtureName:
     ),
   );
 
-  // The session stays open until every prompt is answered and Hermes has been quiet for a few
-  // seconds, so the transcript holds everything replay emits, gateway follow-up turns included.
+  // The session stays open until every prompt is answered, every delegated child has finished,
+  // and Hermes has been quiet for a few seconds, so the transcript holds everything replay emits,
+  // gateway follow-up turns included. The turn that hands a delegation's results back streams
+  // only after a model call, so that wait is longer.
   let quietPolls = 0;
   let seenFrames = -1;
   const waitForHermesIdle = Effect.sleep("1 second").pipe(
@@ -522,7 +546,12 @@ const recordScenario = Effect.fn("recordHermesScenario")(function* (fixtureName:
       Effect.sync(() => {
         quietPolls = seenFrames === tee.wire.length ? quietPolls + 1 : 0;
         seenFrames = tee.wire.length;
-        return quietPolls >= 3 && !tee.hasPendingPrompt();
+        const delegations = tee.delegations();
+        return (
+          quietPolls >= (delegations.seen ? 10 : 3) &&
+          !delegations.running &&
+          !tee.hasPendingPrompt()
+        );
       }),
     ),
     Effect.repeat({ until: (idle) => idle }),

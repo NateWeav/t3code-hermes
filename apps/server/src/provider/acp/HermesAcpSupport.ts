@@ -460,6 +460,25 @@ export function hermesApprovalOptions(
   ];
 }
 
+/**
+ * Hermes answers `/compress` with its manual-compression summary ("Compressed: 12 → 5 messages",
+ * "Approx request size: ~41,200 → ~9,800 tokens"). A no-op, refused or aborted run removed nothing.
+ */
+export function readHermesCompressReply(text: string): {
+  readonly compacted: boolean;
+  readonly beforeTokenCount?: number;
+  readonly afterTokenCount?: number;
+} {
+  if (/^(?:No changes from compression|Compression refused|Compression aborted)\b/mu.test(text)) {
+    return { compacted: false };
+  }
+  const tokens = /^Approx request size: ~([\d,]+) → ~([\d,]+) tokens/mu.exec(text);
+  const count = (value: string) => Number(value.replaceAll(",", ""));
+  return tokens === null
+    ? { compacted: true }
+    : { compacted: true, beforeTokenCount: count(tokens[1]!), afterTokenCount: count(tokens[2]!) };
+}
+
 const isAcpRequestError = Schema.is(EffectAcpErrors.AcpRequestError);
 
 /** `hermes acp` answers a failed prompt with `Internal error` and puts its own reason in `data.details`. */

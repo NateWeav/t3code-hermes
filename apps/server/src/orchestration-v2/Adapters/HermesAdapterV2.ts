@@ -37,6 +37,7 @@ import {
   hermesPromptFailure,
   isHermesGatewayTurnLoss,
   makeHermesAcpRuntime,
+  makeHermesClarifyCallFilter,
   normalizeHermesT3McpToolCall,
   normalizeHermesTerminalResult,
   preserveHermesAgentActivityTitle,
@@ -243,6 +244,8 @@ export function makeHermesAcpAdapterFlavor(
       }
       return model;
     }),
+    // The clarify question shows as its user-input request, not also as a tool call.
+    ignoreSessionUpdate: makeHermesClarifyCallFilter(),
     normalizeToolCall: (toolCall) =>
       preserveHermesAgentActivityTitle(
         normalizeHermesTerminalResult(normalizeHermesT3McpToolCall(toolCall)),

@@ -246,6 +246,26 @@ patches. New `hermes acp` processes pick it up; restarting the gateway is not re
 patch's `tests/acp_adapter/test_gateway_launch_yolo_resume.py` in a scratch checkout, as for
 `acp-delegation-progress`.
 
+## `acp-editor-clarify`
+
+**Needed by:** Hermes asking a clarifying question that T3 Code shows as a question card with
+choices. Stock Hermes leaves its `clarify` tool out of ACP sessions (the `hermes-acp` toolset), so
+Hermes asks in its reply and the user answers with a new message. The gateway viewer can already
+answer `clarify` (as an `elicitation/create` form when the client advertises `elicitation.form`),
+but the tool policy never offered it.
+
+The patch has `hermes acp` tell the gateway, at `session.create`, that its editor answers forms
+(`editor.clarify`, sent only to a gateway that advertises `acp-editor-clarify-v1`). The gateway
+then adds `clarify` to that session's tools, and keeps it when it refreshes the session's tools
+from the profile. Editors without form elicitation get the stock toolset. `agent.disabled_toolsets:
+[clarify]` still turns it off. Only sessions created after the patch get the tool. T3 Code hides
+the `clarify` tool call itself, since the question already shows as its own card.
+
+Verified against hermes-agent `44ec783afd` (`main`, 2026-11-06), alone and after the other
+patches. Restart the Hermes gateway after applying it: the gateway decides the session's tools.
+Run the patch's `tests/acp_adapter/test_gateway_editor_clarify_toolset.py` in a scratch checkout,
+as for `acp-delegation-progress`.
+
 ## Retired
 
 **`acp-background-reports`** and **`acp-durable-completion-receipts`** hooked Hermes's in-process

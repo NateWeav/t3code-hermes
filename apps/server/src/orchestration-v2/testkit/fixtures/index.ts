@@ -14,7 +14,10 @@ import { claudeBackgroundSubagentLifecycleInput } from "./claude_background_suba
 import { assertClaudeBackgroundSubagentLifecycleOutput } from "./claude_background_subagent_lifecycle/output.ts";
 import { claudeBackgroundTaskInterruptInput } from "./claude_background_task_interrupt/input.ts";
 import { claudeBackgroundWakeBeforeQueuedPromptInput } from "./claude_background_wake_before_queued_prompt/input.ts";
-import { assertClaudeBackgroundWakeBeforeQueuedPromptOutput } from "./claude_background_wake_before_queued_prompt/output.ts";
+import {
+  assertBackgroundWakeBeforeQueuedPromptOutput,
+  assertClaudeBackgroundWakeBeforeQueuedPromptDetails,
+} from "./claude_background_wake_before_queued_prompt/output.ts";
 import { claudeBackgroundWakeBeforeQueuedPromptNoEchoInput } from "./claude_background_wake_before_queued_prompt_no_echo/input.ts";
 import { assertClaudeBackgroundWakeBeforeQueuedPromptNoEchoOutput } from "./claude_background_wake_before_queued_prompt_no_echo/output.ts";
 import {
@@ -86,6 +89,8 @@ import { hermesBackgroundSubagentAfterRootInput } from "./hermes_background_suba
 import { hermesBackgroundTaskAfterRootInput } from "./hermes_background_task_after_root/input.ts";
 import { hermesBackgroundTaskInterruptInput } from "./hermes_background_task_interrupt/input.ts";
 import { hermesBackgroundTaskWakeInput } from "./hermes_background_task_wake/input.ts";
+import { hermesBackgroundWakeBeforeQueuedPromptInput } from "./hermes_background_wake_before_queued_prompt/input.ts";
+import { assertHermesBackgroundWakeBeforeQueuedPromptDetails } from "./hermes_background_wake_before_queued_prompt/output.ts";
 import {
   assertHermesBackgroundTaskWakeDetails,
   assertHermesRosterListsBackgroundProcess,
@@ -357,7 +362,8 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         ),
         modelSelection: CLAUDE_MODEL_SELECTION,
         runContinuationWorker: true,
-        assertOutput: assertClaudeBackgroundWakeBeforeQueuedPromptOutput,
+        assertOutput: assertBackgroundWakeBeforeQueuedPromptOutput,
+        assertProviderDetails: assertClaudeBackgroundWakeBeforeQueuedPromptDetails,
       },
     ],
   },
@@ -791,6 +797,23 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         runContinuationWorker: true,
         assertOutput: assertBackgroundTaskWakeOutput,
         assertProviderDetails: assertHermesBackgroundTaskWakeDetails,
+      },
+    ],
+  },
+  {
+    name: "hermes_background_wake_before_queued_prompt",
+    buildInput: hermesBackgroundWakeBeforeQueuedPromptInput,
+    providers: [
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./hermes_background_wake_before_queued_prompt/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runContinuationWorker: true,
+        assertOutput: assertBackgroundWakeBeforeQueuedPromptOutput,
+        assertProviderDetails: assertHermesBackgroundWakeBeforeQueuedPromptDetails,
       },
     ],
   },

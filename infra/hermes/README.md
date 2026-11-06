@@ -403,6 +403,38 @@ after the other patches. Its `90d6b98fd8` version (`main`, 2026-11-06) is the sa
 applies only after them. Restart the Hermes gateway after applying it: the gate runs there. Run the
 patch's `tests/acp_adapter/test_gateway_command_approval.py` in a scratch checkout, as for
 `acp-delegation-progress`.
+## `acp-subagent-model-continue`
+
+**Needed by:** choosing a subagent's model, and sending a finished subagent a follow-up, as Claude's
+`Agent` model and `SendMessage` do. Stock `delegate_task` reserves `model` (children run on
+`delegation.model` or the parent's model), and its `list`/`steer`/`stop` reach only running children.
+It builds on `acp-delegation-progress`, whose viewer file it changes; apply that first.
+
+- **Per-task model.** Each task may name a `model`: an id from the profile's model picker, or
+  `<provider>:<model>` when several providers list it. Anything else is a tool error that lists what
+  the profile can run, never a child on a guessed endpoint. The parent's own provider keeps its
+  endpoint and key; another provider brings its own, resolved as `delegation.provider` is.
+  `delegation.model` in `config.yaml` stays the default a task can override. A task naming neither
+  runs on its launcher's model, so a nested subagent inherits its owner's. A managed scope
+  (`/etc/hermes/config.yaml`) that pins `delegation.model`, `delegation.provider` or
+  `delegation.base_url` wins: it is the administrator's policy, so `delegate_task` stops offering
+  `model` and refuses a task that names one. Only the default delegation backend offers it, since
+  another backend routes every task itself.
+- **Continue.** `delegate_task(action="continue", subagent_id, message)` runs a finished top-level
+  child again on its own session, with the same `subagent_id`, child session and stored
+  conversation. It goes through the spawn path, so the route is resolved again under the current
+  policy, the child runs in the background, and its new answer arrives as a completion message.
+  `list` shows the finished children that can be continued, and `steer`/`stop` on one point to
+  `continue`. Finished children are kept in the gateway's memory only (the last 64), so after a
+  gateway restart `continue` says the child is gone. A child is continued once at a time.
+- **Viewer.** A `continue` call takes over the child it names: the child's new run reports on that
+  call, and T3 Code maps it back to the original subagent by `subagent_id`.
+
+Restart the Hermes gateway after applying it: `delegate_task` runs there. Verified against
+hermes-agent `90d6b98fd86d` (`main`, 2026-11-06), alone after `acp-delegation-progress` and after
+all the other patches. Run the patch's `tests/gateway/test_delegation_task_model.py` and
+`tests/acp_adapter/test_gateway_delegation_continue.py` (which reuses the progress patch's
+`test_gateway_delegation_progress.py`) in a scratch checkout, as for `acp-delegation-progress`.
 
 ## Retired
 

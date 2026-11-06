@@ -11,7 +11,10 @@ import {
   assertClaudeBackgroundTaskAfterRootDetails,
 } from "./claude_background_task_after_root/output.ts";
 import { claudeBackgroundSubagentLifecycleInput } from "./claude_background_subagent_lifecycle/input.ts";
-import { assertClaudeBackgroundSubagentLifecycleOutput } from "./claude_background_subagent_lifecycle/output.ts";
+import {
+  assertBackgroundSubagentLifecycleOutput,
+  assertClaudeBackgroundSubagentLifecycleDetails,
+} from "./claude_background_subagent_lifecycle/output.ts";
 import { claudeBackgroundTaskInterruptInput } from "./claude_background_task_interrupt/input.ts";
 import { claudeBackgroundWakeBeforeQueuedPromptInput } from "./claude_background_wake_before_queued_prompt/input.ts";
 import {
@@ -57,7 +60,10 @@ import { assertClaudeLocalBashTaskOutput } from "./claude_local_bash_task/output
 import { claudeNestedBackgroundSubagentWakeInput } from "./claude_nested_background_subagent_wake/input.ts";
 import { assertClaudeNestedBackgroundSubagentWakeOutput } from "./claude_nested_background_subagent_wake/output.ts";
 import { claudeNestedSubagentModelInput } from "./claude_nested_subagent_model/input.ts";
-import { assertClaudeNestedSubagentModelOutput } from "./claude_nested_subagent_model/output.ts";
+import {
+  assertClaudeNestedSubagentModelDetails,
+  assertNestedSubagentModelOutput,
+} from "./claude_nested_subagent_model/output.ts";
 import { claudeMcpToolPresentationInput } from "./claude_mcp_tool_presentation/input.ts";
 import { assertClaudeMcpToolPresentationOutput } from "./claude_mcp_tool_presentation/output.ts";
 import { claudeResultIsErrorInput } from "./claude_result_is_error/input.ts";
@@ -97,6 +103,10 @@ import { assertGrokPromptErrorOutput } from "./grok_prompt_error/output.ts";
 import { grokSubagentLineageInput } from "./grok_subagent_lineage/input.ts";
 import { assertGrokSubagentLineageOutput } from "./grok_subagent_lineage/output.ts";
 import { hermesBackgroundSubagentAfterRootInput } from "./hermes_background_subagent_after_root/input.ts";
+import { hermesBackgroundSubagentLifecycleInput } from "./hermes_background_subagent_lifecycle/input.ts";
+import { assertHermesBackgroundSubagentLifecycleDetails } from "./hermes_background_subagent_lifecycle/output.ts";
+import { hermesNestedSubagentModelInput } from "./hermes_nested_subagent_model/input.ts";
+import { assertHermesNestedSubagentModelDetails } from "./hermes_nested_subagent_model/output.ts";
 import { hermesBackgroundTaskAfterRootInput } from "./hermes_background_task_after_root/input.ts";
 import { hermesBackgroundTaskInterruptInput } from "./hermes_background_task_interrupt/input.ts";
 import { hermesBackgroundTaskWakeInput } from "./hermes_background_task_wake/input.ts";
@@ -363,7 +373,8 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         ),
         modelSelection: CLAUDE_MODEL_SELECTION,
         runContinuationWorker: true,
-        assertOutput: assertClaudeBackgroundSubagentLifecycleOutput,
+        assertOutput: assertBackgroundSubagentLifecycleOutput,
+        assertProviderDetails: assertClaudeBackgroundSubagentLifecycleDetails,
       },
     ],
   },
@@ -587,7 +598,8 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
           import.meta.url,
         ),
         modelSelection: CLAUDE_MODEL_SELECTION,
-        assertOutput: assertClaudeNestedSubagentModelOutput,
+        assertOutput: assertNestedSubagentModelOutput,
+        assertProviderDetails: assertClaudeNestedSubagentModelDetails,
       },
     ],
   },
@@ -836,6 +848,41 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         modelSelection: HERMES_MODEL_SELECTION,
         runContinuationWorker: true,
         assertOutput: assertBackgroundSubagentAfterRootOutput,
+      },
+    ],
+  },
+  {
+    name: "hermes_background_subagent_lifecycle",
+    buildInput: hermesBackgroundSubagentLifecycleInput,
+    providers: [
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./hermes_background_subagent_lifecycle/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runContinuationWorker: true,
+        assertOutput: assertBackgroundSubagentLifecycleOutput,
+        assertProviderDetails: assertHermesBackgroundSubagentLifecycleDetails,
+      },
+    ],
+  },
+  {
+    name: "hermes_nested_subagent_model",
+    buildInput: hermesNestedSubagentModelInput,
+    providers: [
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./hermes_nested_subagent_model/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        // A gateway follow-up turn would surface as a second run and fail the one-run contract.
+        runContinuationWorker: true,
+        assertOutput: assertNestedSubagentModelOutput,
+        assertProviderDetails: assertHermesNestedSubagentModelDetails,
       },
     ],
   },

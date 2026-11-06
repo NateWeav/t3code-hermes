@@ -194,9 +194,12 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
   {
     name: "claude_nested_subagent_model",
     facet: "subagents",
-    hermes: twin(
-      "The prompt drives Claude's Agent tool with a per-subagent model. Hermes's delegate_task cannot pick one: `model` is a reserved task parameter, so children run on delegation.model or the parent's model.",
-    ),
+    hermes: {
+      kind: "twin",
+      reason:
+        "The prompt drives Claude's Agent tool. The Hermes twin names the outer task's model with delegate_task's per-task model (the subagent-model patch), and the outer subagent launches its own (the subagents-in-the-turn patch).",
+      twin: "hermes_nested_subagent_model",
+    },
   },
 
   // Background work that outlives the turn
@@ -235,9 +238,11 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
   {
     name: "claude_background_subagent_lifecycle",
     facet: "background",
-    hermes: twin(
-      `${CLAUDE_AGENT_TOOLS} It resumes Agent A after it finished and picks its model, and Hermes's delegate_task can do neither: it only lists, steers or stops running children, and has no per-task model.`,
-    ),
+    hermes: {
+      kind: "twin",
+      reason: `${CLAUDE_AGENT_TOOLS} The Hermes twin uses delegate_task's per-task model, stop and continue actions (the subagent-model and subagent-continue patches).`,
+      twin: "hermes_background_subagent_lifecycle",
+    },
   },
   {
     name: "claude_background_wake_before_queued_prompt",

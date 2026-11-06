@@ -249,6 +249,23 @@
           "file": "acp-command-approval/ca4360692055.patch"
         }
       ]
+    },
+    {
+      "id": "acp-subagent-model-continue",
+      "title": "Subagent models and follow-ups",
+      "neededFor": "Apply after Live subagent progress. Lets Hermes pick a subagent's model from the ones your profile lists, and send a finished subagent a follow-up. Without it, every subagent runs on the default model, and a finished one can't be asked anything more.",
+      "versions": [
+        {
+          "hermesCommit": "90d6b98fd86d20981ee06ddd5b7d93e4320f26a4",
+          "hermesCommitDate": "2026-11-06T07:12:42Z",
+          "file": "acp-subagent-model-continue/90d6b98fd86d.patch"
+        },
+        {
+          "hermesCommit": "ca4360692055bdb4df3a695c164646e528891da8",
+          "hermesCommitDate": "2026-11-06T04:01:15Z",
+          "file": "acp-subagent-model-continue/ca4360692055.patch"
+        }
+      ]
     }
   ]
 }

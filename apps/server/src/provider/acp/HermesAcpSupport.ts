@@ -550,13 +550,12 @@ function lostTurnRefusal(
 
 // The gateway's turn is outside T3's clock; a TestClock sleep would wait for an advance that never comes.
 const wallClock = Clock.Clock.defaultValue();
-const HERMES_BUSY_RESENDS = 60;
 
 /**
  * Hermes refuses `/compress` and other idle-only commands with `session_busy` while the gateway
  * finishes a turn of its own, such as a background job's wake, whose end ACP never reports. The
- * refusal admitted nothing, so the prompt is resent each `resendAfter` until that turn ends,
- * unless the turn was cancelled meanwhile.
+ * refusal admitted nothing, so the prompt is resent each `resendAfter` until the gateway is idle
+ * or the turn is stopped. Only a live gateway answers `session_busy`, so this needs no cap.
  */
 export function resendHermesPromptsRefusedBusy(
   runtime: AcpSessionRuntime.AcpSessionRuntime["Service"],
@@ -567,21 +566,17 @@ export function resendHermesPromptsRefusedBusy(
     payload: Parameters<typeof runtime.prompt>[0],
     options: Parameters<typeof runtime.prompt>[1],
     cancelsAtSend: number,
-    resends: number,
   ): ReturnType<typeof runtime.prompt> =>
     runtime.prompt(payload, options).pipe(
       Effect.catchIf(
-        (error) =>
-          resends > 0 &&
-          cancels === cancelsAtSend &&
-          hermesPromptErrorDetails(error) === "session_busy",
+        (error) => cancels === cancelsAtSend && hermesPromptErrorDetails(error) === "session_busy",
         (error) =>
           Effect.sleep(resendAfter).pipe(
             Effect.provideService(Clock.Clock, wallClock),
             Effect.andThen(
               Effect.suspend(() =>
                 cancels === cancelsAtSend
-                  ? send(payload, options, cancelsAtSend, resends - 1)
+                  ? send(payload, options, cancelsAtSend)
                   : Effect.fail(error),
               ),
             ),
@@ -594,8 +589,7 @@ export function resendHermesPromptsRefusedBusy(
       cancels += 1;
       return runtime.cancel;
     }),
-    prompt: (payload, options) =>
-      Effect.suspend(() => send(payload, options, cancels, HERMES_BUSY_RESENDS)),
+    prompt: (payload, options) => Effect.suspend(() => send(payload, options, cancels)),
   };
 }
 

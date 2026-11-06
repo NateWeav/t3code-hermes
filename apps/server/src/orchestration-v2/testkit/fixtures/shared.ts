@@ -1397,6 +1397,30 @@ export function assertReplayLabelPrefixCount(
   assert.equal(countReplayLabelsWithPrefix(transcript, prefix), expected);
 }
 
+/** An ACP transcript's requests per agent process: each method, or a slash-command prompt's text. */
+export function acpOutboundRequestsByProcess(
+  transcript: ProviderReplayTranscript,
+): ReadonlyArray<ReadonlyArray<string>> {
+  const processes: Array<Array<string>> = [[]];
+  for (const entry of transcript.entries) {
+    if (entry.type === "runtime_exit") {
+      processes.push([]);
+      continue;
+    }
+    if (entry.type !== "expect_outbound" || field(entry.frame, "kind") !== "request") continue;
+    const prompt = field(field(entry.frame, "params"), "prompt");
+    const text = Array.isArray(prompt) ? field(prompt[0], "text") : undefined;
+    processes
+      .at(-1)
+      ?.push(
+        typeof text === "string" && text.startsWith("/")
+          ? text
+          : String(field(entry.frame, "method")),
+      );
+  }
+  return processes.filter((requests) => requests.length > 0);
+}
+
 export function assertRuntimeRequestKinds(
   projection: OrchestrationV2ThreadProjection,
   expectedKinds: ReadonlyArray<string>,

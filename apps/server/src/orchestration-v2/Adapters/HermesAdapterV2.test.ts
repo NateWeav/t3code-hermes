@@ -2,6 +2,7 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import {
+  CheckpointId,
   HermesSettings,
   MessageId,
   NodeId,
@@ -1104,5 +1105,153 @@ describe.skipIf(windowsHost)("HermesAdapterV2 across a Hermes gateway restart", 
         assert.include(replies.at(-1) ?? "", "Picking up where we left off.");
         assert.notInclude(replies.join("\n"), "Discarded the lost turn");
       }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+});
+
+describe("Hermes rollback", () => {
+  it.effect("rewinds Hermes's own session by the user turns it kept after the target", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const mockAgentPath = yield* path.fromFileUrl(
+        new URL("../../../scripts/acp-mock-agent.ts", import.meta.url),
+      );
+      const dir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-hermes-rollback-" });
+      const binaryPath = path.join(dir, "hermes");
+      yield* fileSystem.writeFileString(
+        binaryPath,
+        `#!/bin/sh\nexec '${process.execPath}' '${mockAgentPath}' "$@"\n`,
+      );
+      yield* fileSystem.chmod(binaryPath, 0o755);
+      const settings = hermesSettings(binaryPath);
+      const environment = { ...process.env, HERMES_HOME: dir };
+      const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      type Runtime = AcpSessionRuntime.AcpSessionRuntime["Service"];
+      const spawned: Array<Array<string>> = [];
+      let sessionId: string | undefined;
+      const usage = { inputTokens: 1, outputTokens: 1, totalTokens: 2 };
+      const adapter = yield* makeHermesAdapterV2({
+        instanceId,
+        settings,
+        environment,
+        childProcessSpawner,
+        selfInvocation: yield* resolveSelfInvocation(),
+        makeRuntime: ({ runtimePolicy: _policy, ...runtimeInput }) =>
+          makeHermesAcpRuntime({
+            ...runtimeInput,
+            hermesSettings: settings,
+            environment,
+            childProcessSpawner,
+          }).pipe(
+            Effect.map((runtime): Runtime => {
+              const prompts: Array<string> = [];
+              spawned.push(prompts);
+              let deliver: Parameters<Runtime["handleSessionUpdate"]>[0] | undefined;
+              const say = (text: string) =>
+                deliver!({
+                  sessionId: sessionId!,
+                  update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } },
+                });
+              return {
+                ...runtime,
+                handleSessionUpdate: (handler) =>
+                  Effect.sync(() => {
+                    deliver = handler;
+                  }).pipe(Effect.andThen(runtime.handleSessionUpdate(handler))),
+                prompt: (payload) =>
+                  Effect.gen(function* () {
+                    sessionId ??= (yield* runtime.start()).sessionId;
+                    const text = promptText(payload);
+                    prompts.push(text);
+                    // The gateway answers its own commands without admitting a turn.
+                    if (text === "/undo 1") {
+                      yield* say("Undid 1 turn (2 message(s)).\nRemoved message: test prompt\n");
+                      return { stopReason: "end_turn" as const };
+                    }
+                    if (text.startsWith("/title")) {
+                      yield* say("Session title set: renamed\n");
+                      return { stopReason: "end_turn" as const };
+                    }
+                    yield* say("Done.");
+                    return { stopReason: "end_turn" as const, usage };
+                  }),
+              };
+            }),
+          ),
+      });
+      const threadId = ThreadId.make("hermes-v2-rollback");
+      const policy = runtimePolicy("approval-required");
+      const modelSelection = { instanceId, model: "hermes-4" };
+      const session = yield* adapter.openSession({
+        threadId,
+        providerSessionId: ProviderSessionId.make("hermes-v2-session-rollback"),
+        modelSelection,
+        runtimePolicy: policy,
+      });
+      const providerThread = yield* session.ensureThread({
+        threadId,
+        modelSelection,
+        runtimePolicy: policy,
+      });
+      const runTurn = (ordinal: number, text = "test prompt") =>
+        Effect.gen(function* () {
+          const input = turnInput({
+            threadId,
+            providerThread,
+            runtimePolicy: policy,
+            now: yield* DateTime.now,
+            model: modelSelection.model,
+            ordinal,
+          });
+          yield* session.startTurn({ ...input, message: { ...input.message, text } });
+          return Array.from(
+            yield* session.events.pipe(
+              Stream.takeUntil((event) => event.type === "turn.terminal"),
+              Stream.runCollect,
+            ),
+          );
+        });
+      const events = [
+        ...(yield* runTurn(1)),
+        ...(yield* runTurn(2, "/title renamed")),
+        ...(yield* runTurn(3)),
+      ];
+      const providerTurns = [
+        ...new Map(
+          events.flatMap((event) =>
+            event.type === "provider_turn.updated"
+              ? [[event.providerTurn.id, event.providerTurn] as const]
+              : [],
+          ),
+        ).values(),
+      ];
+      const [first] = providerTurns;
+      assert.isDefined(first);
+
+      const rolledBack = yield* session.rollbackThread({
+        providerThread,
+        providerThreadTurns: providerTurns,
+        target: {
+          type: "provider_turn",
+          checkpointId: CheckpointId.make("checkpoint-hermes-rollback"),
+          appRunOrdinal: 1,
+          providerTurn: first,
+        },
+      });
+      assert.deepEqual(rolledBack.providerThread.nativeThreadRef, providerThread.nativeThreadRef);
+      const after = yield* runTurn(4);
+
+      // `/title` kept no user turn in Hermes, so only turn 3 is undone, in the same process.
+      assert.equal(spawned.length, 1);
+      const prompts = spawned[0]!;
+      assert.equal(prompts.at(-2), "/undo 1");
+      assert.include(prompts.at(-1) ?? "", "<t3_code_instructions>");
+      const texts = after.flatMap((event) =>
+        event.type === "turn_item.updated" && event.turnItem.type === "assistant_message"
+          ? [event.turnItem.text]
+          : [],
+      );
+      assert.notInclude(texts.join("\n"), "Undid");
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 });

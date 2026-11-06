@@ -306,6 +306,8 @@ export function buildHermesAcpSpawnInput(
   };
 }
 
+const HERMES_SESSION_LOAD_REPLAY_IDLE_GAP = "90 seconds";
+
 export const makeHermesAcpRuntime = Effect.fn("HermesAcpSupport.makeHermesAcpRuntime")(function* (
   input: HermesAcpRuntimeInput,
 ): Effect.fn.Return<
@@ -324,6 +326,9 @@ export const makeHermesAcpRuntime = Effect.fn("HermesAcpSupport.makeHermesAcpRun
           );
   const build = Layer.build(
     AcpSessionRuntime.layer({
+      // Hermes always answers `session/load`, often seconds after replaying history. Treating a
+      // quiet replay as loaded would send `set_model` and the rollback rewind before the load.
+      sessionLoadReplayIdleGap: HERMES_SESSION_LOAD_REPLAY_IDLE_GAP,
       ...runtimeInput,
       ...(requestLogger === undefined ? {} : { requestLogger }),
       spawn: buildHermesAcpSpawnInput(input.hermesSettings, input.cwd, input.environment),

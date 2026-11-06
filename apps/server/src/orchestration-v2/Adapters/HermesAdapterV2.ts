@@ -156,6 +156,13 @@ export function makeHermesAcpAdapterFlavor(
     supportsImagePrompts: true,
     supportsCompaction: true,
     compactionCommand: "/compress",
+    // The gateway's `/undo N` (`session.mutate rewind`) drops the session's last N user turns. It
+    // answers its own slash commands, and a Stop before admission, with no usage: no user turn.
+    rewindSession: {
+      command: (userTurns) => `/undo ${userTurns}`,
+      confirmed: (reply, userTurns) => reply.startsWith(`Undid ${userTurns} turn`),
+      promptAddedUserTurn: (response) => response.usage != null,
+    },
     // The Hermes gateway runs a turn of its own when a background job finishes (`notify: true`) and
     // projects it to ACP viewers as session updates, with no `session/prompt` open. Without this
     // those frames were dropped, so the agent woke and worked while its thread showed nothing.

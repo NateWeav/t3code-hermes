@@ -36,6 +36,7 @@ import {
   extractHermesAwaitableBackgroundTasks,
   hermesApprovalPosture,
   type HermesApprovalPosture,
+  hermesFollowsApprovalPosture,
   hermesPromptFailure,
   isHermesGatewayTurnLoss,
   makeHermesAcpRuntime,
@@ -199,7 +200,9 @@ export function makeHermesAcpAdapterFlavor(
       startResult,
       modelSelection,
     }) {
-      const posture = postures.get(runtime);
+      const posture = hermesFollowsApprovalPosture(startResult.initializeResult)
+        ? postures.get(runtime)
+        : "ask";
       const modeId =
         posture === undefined
           ? undefined

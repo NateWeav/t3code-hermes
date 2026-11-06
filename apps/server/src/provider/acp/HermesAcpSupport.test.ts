@@ -5,6 +5,7 @@ import * as EffectAcpErrors from "effect-acp/errors";
 import {
   hermesApprovalOptions,
   hermesApprovalPosture,
+  hermesFollowsApprovalPosture,
   applyHermesAcpModelSelection,
   buildHermesAcpSpawnInput,
   HERMES_BUILT_IN_SLASH_COMMANDS,
@@ -89,6 +90,19 @@ describe("hermesApprovalPosture", () => {
         sandboxPolicy: { type: "readOnly" },
       }),
     ).toBe("ask");
+  });
+});
+
+describe("hermesFollowsApprovalPosture", () => {
+  it("follows T3's policy only on a Hermes that shows an edit it runs unasked", () => {
+    const initialize = (agentCapabilities: Record<string, unknown>) => ({
+      protocolVersion: 1,
+      agentCapabilities,
+    });
+    expect(hermesFollowsApprovalPosture(initialize({ _meta: { command_approval: true } }))).toBe(
+      true,
+    );
+    expect(hermesFollowsApprovalPosture(initialize({ loadSession: true }))).toBe(false);
   });
 });
 

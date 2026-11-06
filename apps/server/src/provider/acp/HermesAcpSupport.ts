@@ -38,6 +38,17 @@ export const HERMES_FALLBACK_MODEL_ID = "hermes-4";
 /** How much Hermes asks before it acts, as Claude's permission mode follows T3's policy. */
 export type HermesApprovalPosture = "ask" | "acceptEdits" | "dontAsk";
 
+/**
+ * Hermes with `acp-command-approval` asks before shell commands and shows an edit it runs unasked.
+ * Stock Hermes puts an edit's diff only on its approval request, so it stays in Default and T3's
+ * policy answers each edit.
+ */
+export function hermesFollowsApprovalPosture(
+  initializeResult: EffectAcpSchema.InitializeResponse,
+): boolean {
+  return unknownRecord(initializeResult.agentCapabilities?._meta)?.command_approval === true;
+}
+
 export function hermesApprovalPosture(
   policy: Pick<ProviderAdapterV2RuntimePolicy, "runtimeMode" | "approvalPolicy" | "sandboxPolicy">,
 ): HermesApprovalPosture {
@@ -229,7 +240,7 @@ const HERMES_EDIT_DIFFS_KEPT = 64;
 
 function soleDiff(
   content: ReadonlyArray<EffectAcpSchema.ToolCallContent> | null | undefined,
-): Extract<EffectAcpSchema.ToolCallContent, { type: "diff" }> | undefined {
+): Extract<EffectAcpSchema.ToolCallContent, { type: "diff"; path: string }> | undefined {
   const diffs = (content ?? []).filter((entry) => entry.type === "diff");
   const diff = diffs.length === 1 ? diffs[0] : undefined;
   return diff?.type === "diff" && "path" in diff ? diff : undefined;

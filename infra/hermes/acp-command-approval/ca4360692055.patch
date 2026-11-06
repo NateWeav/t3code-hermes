@@ -45,7 +45,7 @@ index c9ef49a000..43ef2958cd 100644
          tool_name = payload.get("tool_name") or payload.get("name") or "tool"
          call_id = payload["tool_call_id"]
 diff --git a/acp_adapter/gateway_server.py b/acp_adapter/gateway_server.py
-index ff78c7e0f3..37bf226858 100644
+index ff78c7e0f3..549927904f 100644
 --- a/acp_adapter/gateway_server.py
 +++ b/acp_adapter/gateway_server.py
 @@ -111,6 +111,8 @@ class GatewayACPAgent(GatewayReplyMixin, acp.Agent):
@@ -57,7 +57,7 @@ index ff78c7e0f3..37bf226858 100644
          from hermes_cli.gateway_mutations import PreparedMutations
          self._mutations = PreparedMutations()
          # Session -> title the editor was last shown (``session_info_update`` fires on a change).
-@@ -140,6 +142,8 @@ class GatewayACPAgent(GatewayReplyMixin, acp.Agent):
+@@ -140,12 +142,16 @@ class GatewayACPAgent(GatewayReplyMixin, acp.Agent):
      async def initialize(self, **kwargs):
          from hermes_cli import __version__
          from acp_adapter.auth import build_auth_methods
@@ -66,7 +66,16 @@ index ff78c7e0f3..37bf226858 100644
          return InitializeResponse(protocol_version=acp.PROTOCOL_VERSION,
              agent_info=Implementation(name="hermes-agent", version=__version__),
              agent_capabilities=AgentCapabilities(load_session=True,
-@@ -280,10 +284,13 @@ class GatewayACPAgent(GatewayReplyMixin, acp.Agent):
+                 prompt_capabilities=PromptCapabilities(image=True),
+                 session_capabilities=SessionCapabilities(fork=SessionForkCapabilities(), list=SessionListCapabilities(),
+-                                                         resume=SessionResumeCapabilities())),
++                                                         resume=SessionResumeCapabilities()),
++                # This viewer asks before commands for an editor that asks it to, and shows an unasked edit's diff.
++                field_meta={"command_approval": True}),
+             auth_methods=build_auth_methods())
+ 
+     async def authenticate(self, method_id, **kwargs):
+@@ -280,10 +286,13 @@ class GatewayACPAgent(GatewayReplyMixin, acp.Agent):
          flags = env_launch_flags()
          if flags.get("safe_mode") or flags.get("ignore_user_config"):
              flags.update(_bypass_route())
@@ -152,10 +161,10 @@ index b0f2182fa4..3dc228611a 100644
          reset_edit_approval_requester(token)
 diff --git a/tests/acp_adapter/test_gateway_command_approval.py b/tests/acp_adapter/test_gateway_command_approval.py
 new file mode 100644
-index 0000000000..51b667749a
+index 0000000000..91c784cb6a
 --- /dev/null
 +++ b/tests/acp_adapter/test_gateway_command_approval.py
-@@ -0,0 +1,179 @@
+@@ -0,0 +1,181 @@
 +"""An ACP editor that asks to approve every shell command, and an edit's diff when nothing asks, over a
 +real daemon and ``hermes acp``."""
 +import asyncio
@@ -332,7 +341,9 @@ index 0000000000..51b667749a
 +    agent._gateway = AsyncMock()
 +    agent._gateway.rpc.side_effect = rpc
 +    agent._session_fields = AsyncMock(return_value={})
-+    await agent.initialize(protocol_version=1, client_capabilities=SimpleNamespace(field_meta=meta))
++    reply = await agent.initialize(protocol_version=1, client_capabilities=SimpleNamespace(field_meta=meta))
++    # Advertised whatever the editor asked, so an editor knows Hermes can ask before commands.
++    assert reply.agent_capabilities.field_meta == {'command_approval': True}
 +    await agent.new_session(cwd=str(tmp_path))
 +    assert ('command_approval' in created[0]['editor']) is asks
 diff --git a/tools/approval.py b/tools/approval.py

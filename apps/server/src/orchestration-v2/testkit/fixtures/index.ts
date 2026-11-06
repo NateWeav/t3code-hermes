@@ -11,10 +11,16 @@ import {
   assertClaudeBackgroundTaskAfterRootDetails,
 } from "./claude_background_task_after_root/output.ts";
 import { claudeBackgroundSubagentLifecycleInput } from "./claude_background_subagent_lifecycle/input.ts";
-import { assertClaudeBackgroundSubagentLifecycleOutput } from "./claude_background_subagent_lifecycle/output.ts";
+import {
+  assertBackgroundSubagentLifecycleOutput,
+  assertClaudeBackgroundSubagentLifecycleDetails,
+} from "./claude_background_subagent_lifecycle/output.ts";
 import { claudeBackgroundTaskInterruptInput } from "./claude_background_task_interrupt/input.ts";
 import { claudeBackgroundWakeBeforeQueuedPromptInput } from "./claude_background_wake_before_queued_prompt/input.ts";
-import { assertClaudeBackgroundWakeBeforeQueuedPromptOutput } from "./claude_background_wake_before_queued_prompt/output.ts";
+import {
+  assertBackgroundWakeBeforeQueuedPromptOutput,
+  assertClaudeBackgroundWakeBeforeQueuedPromptDetails,
+} from "./claude_background_wake_before_queued_prompt/output.ts";
 import { claudeBackgroundWakeBeforeQueuedPromptNoEchoInput } from "./claude_background_wake_before_queued_prompt_no_echo/input.ts";
 import { assertClaudeBackgroundWakeBeforeQueuedPromptNoEchoOutput } from "./claude_background_wake_before_queued_prompt_no_echo/output.ts";
 import {
@@ -32,12 +38,23 @@ import {
   claudeCompactAfterPeerTurnInput,
   claudeCompactAfterPeerTurnNoEchoInput,
 } from "./claude_compact_after_peer_turn/input.ts";
-import { assertClaudeCompactAfterPeerTurnOutput } from "./claude_compact_after_peer_turn/output.ts";
+import {
+  assertClaudeCompactAfterPeerTurnDetails,
+  assertCompactAfterPeerTurnOutput,
+} from "./claude_compact_after_peer_turn/output.ts";
 import { assertClaudeCompactAfterPeerTurnNoEchoOutput } from "./claude_compact_after_peer_turn_no_echo/output.ts";
 import { claudeCompactAfterResumeWakeInput } from "./claude_compact_after_resume_wake/input.ts";
-import { assertClaudeCompactAfterResumeWakeOutput } from "./claude_compact_after_resume_wake/output.ts";
+import {
+  assertClaudeCompactAfterResumeWakeDetails,
+  assertCompactAfterResumeWakeOutput,
+  assertHermesCompactAfterResumeWakeDetails,
+} from "./claude_compact_after_resume_wake/output.ts";
 import { claudeIdleResumeInput } from "./claude_idle_resume/input.ts";
-import { assertClaudeIdleResumeOutput } from "./claude_idle_resume/output.ts";
+import { assertHermesIdleResumeSession } from "./claude_idle_resume/hermes_output.ts";
+import {
+  assertClaudeIdleResumeTokenLedger,
+  assertIdleResumeConversation,
+} from "./claude_idle_resume/output.ts";
 import { claudeLocalBashTaskInput } from "./claude_local_bash_task/input.ts";
 import { assertClaudeLocalBashTaskOutput } from "./claude_local_bash_task/output.ts";
 import { claudeNestedBackgroundSubagentWakeInput } from "./claude_nested_background_subagent_wake/input.ts";
@@ -46,7 +63,10 @@ import {
   assertNestedBackgroundSubagentWakeOutput,
 } from "./claude_nested_background_subagent_wake/output.ts";
 import { claudeNestedSubagentModelInput } from "./claude_nested_subagent_model/input.ts";
-import { assertClaudeNestedSubagentModelOutput } from "./claude_nested_subagent_model/output.ts";
+import {
+  assertClaudeNestedSubagentModelDetails,
+  assertNestedSubagentModelOutput,
+} from "./claude_nested_subagent_model/output.ts";
 import { claudeMcpToolPresentationInput } from "./claude_mcp_tool_presentation/input.ts";
 import { assertClaudeMcpToolPresentationOutput } from "./claude_mcp_tool_presentation/output.ts";
 import { claudeResultIsErrorInput } from "./claude_result_is_error/input.ts";
@@ -86,19 +106,27 @@ import { assertGrokPromptErrorOutput } from "./grok_prompt_error/output.ts";
 import { grokSubagentLineageInput } from "./grok_subagent_lineage/input.ts";
 import { assertGrokSubagentLineageOutput } from "./grok_subagent_lineage/output.ts";
 import { hermesBackgroundSubagentAfterRootInput } from "./hermes_background_subagent_after_root/input.ts";
+import { hermesBackgroundSubagentLifecycleInput } from "./hermes_background_subagent_lifecycle/input.ts";
+import { assertHermesBackgroundSubagentLifecycleDetails } from "./hermes_background_subagent_lifecycle/output.ts";
+import { hermesNestedSubagentModelInput } from "./hermes_nested_subagent_model/input.ts";
+import { assertHermesNestedSubagentModelDetails } from "./hermes_nested_subagent_model/output.ts";
 import { hermesNestedBackgroundSubagentWakeInput } from "./hermes_nested_background_subagent_wake/input.ts";
 import { hermesBackgroundTaskAfterRootInput } from "./hermes_background_task_after_root/input.ts";
 import { hermesBackgroundTaskInterruptInput } from "./hermes_background_task_interrupt/input.ts";
 import { hermesBackgroundTaskWakeInput } from "./hermes_background_task_wake/input.ts";
+import { hermesBackgroundWakeBeforeQueuedPromptInput } from "./hermes_background_wake_before_queued_prompt/input.ts";
+import { assertHermesBackgroundWakeBeforeQueuedPromptDetails } from "./hermes_background_wake_before_queued_prompt/output.ts";
 import {
   assertHermesBackgroundTaskWakeDetails,
   assertHermesRosterListsBackgroundProcess,
 } from "./hermes_background_task_wake/output.ts";
-import { assertClaudeMessageSteeringOutput } from "./message_steering/claude_output.ts";
-import { assertMessageSteeringOutput } from "./message_steering/codex_output.ts";
+import { assertClaudeMessageSteeringDetails } from "./message_steering/claude_output.ts";
+import { assertCodexMessageSteeringDetails } from "./message_steering/codex_output.ts";
 import { assertCursorMessageSteeringOutput } from "./message_steering/cursor_output.ts";
 import { assertGrokMessageSteeringOutput } from "./message_steering/grok_output.ts";
+import { assertHermesMessageSteeringDetails } from "./message_steering/hermes_output.ts";
 import { messageSteeringInput } from "./message_steering/input.ts";
+import { assertMessageSteeringOutput } from "./message_steering/output.ts";
 import { assertPiMessageSteeringOutput } from "./message_steering/pi_output.ts";
 import { MUSE_PERMISSION_DECLINED_FILE, musePermissionInput } from "./muse_permission/input.ts";
 import { assertMusePermissionOutput } from "./muse_permission/output.ts";
@@ -157,11 +185,18 @@ import { openCode2ToolCallInput } from "./opencode2_tool_call/input.ts";
 import { assertOpenCode2ToolCallOutput } from "./opencode2_tool_call/output.ts";
 import { assertOpenCodeSubagentOutput } from "./opencode_subagent/output.ts";
 import {
-  assertCodexPlanQuestionsOutput,
+  assertCodexPlanQuestionsDetails,
   assertPlanQuestionsOutput,
+  assertSchemaFlexibilityQuestionId,
 } from "./plan_questions/codex_output.ts";
 import { assertOpenCodePlanQuestionsOutput } from "./plan_questions/opencode_output.ts";
 import { planQuestionsInput } from "./plan_questions/input.ts";
+import { hermesPlanQuestionsInput } from "./hermes_plan_questions/input.ts";
+import { hermesTodoListInput } from "./hermes_todo_list/input.ts";
+import { hermesCompressNoopInput } from "./hermes_compress_noop/input.ts";
+import { assertHermesCompressNoopOutput } from "./hermes_compress_noop/output.ts";
+import { hermesCompactAfterPeerTurnInput } from "./hermes_compact_after_peer_turn/input.ts";
+import { hermesCompactAfterResumeWakeInput } from "./hermes_compact_after_resume_wake/input.ts";
 import { assertProposedPlanOutput } from "./proposed_plan/codex_output.ts";
 import { assertProposedPlanCursorOutput } from "./proposed_plan/cursor_output.ts";
 import { proposedPlanInput } from "./proposed_plan/input.ts";
@@ -202,18 +237,29 @@ import { assertClaudeThreadRollbackOutput } from "./thread_rollback/claude_outpu
 import { assertThreadRollbackOutput } from "./thread_rollback/codex_output.ts";
 import { threadRollbackInput } from "./thread_rollback/input.ts";
 import { assertPiThreadRollbackOutput } from "./thread_rollback/pi_output.ts";
-import { assertThreadRollbackAfterRestartOutput } from "./thread_rollback_after_restart/codex_output.ts";
+import { assertCodexResumeBeforeRevert } from "./thread_rollback_after_restart/codex_output.ts";
+import { assertHermesLoadBeforeUndo } from "./thread_rollback_after_restart/hermes_output.ts";
 import { threadRollbackAfterRestartInput } from "./thread_rollback_after_restart/input.ts";
 import { threadRollbackAfterStopInput } from "./thread_rollback_after_stop/input.ts";
 import { assertPiThreadRollbackAfterStopOutput } from "./thread_rollback_after_stop/pi_output.ts";
-import { assertThreadRollbackToStoppedTurnOutput } from "./thread_rollback_to_stopped_turn/codex_output.ts";
+import {
+  assertCodexThreadRevert,
+  assertRollbackToStoppedTurnConversation,
+} from "./thread_rollback_to_stopped_turn/codex_output.ts";
+import { assertHermesUndoInPlace } from "./thread_rollback_to_stopped_turn/hermes_output.ts";
 import { threadRollbackToStoppedTurnInput } from "./thread_rollback_to_stopped_turn/input.ts";
 import { assertTodoListOutput } from "./todo_list/codex_output.ts";
 import { assertTodoListCursorOutput } from "./todo_list/cursor_output.ts";
 import { assertTodoListGrokOutput } from "./todo_list/grok_output.ts";
 import { todoListInput } from "./todo_list/input.ts";
+import {
+  HERMES_TOOL_CALL_DENIED_WRITE_TARGET,
+  hermesToolCallDeniedWriteInput,
+} from "./hermes_tool_call_denied_write/input.ts";
+import { assertHermesToolCallDeniedWriteDetails } from "./hermes_tool_call_denied_write/output.ts";
 import { assertToolCallDeniedWriteClaudeOutput } from "./tool_call_denied_write/claude_output.ts";
 import { assertToolCallDeniedWriteFxOutput } from "./tool_call_denied_write/fx_output.ts";
+import { assertToolCallDeniedWriteOutput } from "./tool_call_denied_write/output.ts";
 import {
   DENIED_WRITE_POLICY,
   TOOL_CALL_DENIED_WRITE_TARGET,
@@ -252,7 +298,6 @@ import { fxEarlyStopInput } from "./fx_early_stop/input.ts";
 import { assertFxEarlyStopOutput } from "./fx_early_stop/fx_output.ts";
 import { fxSubagentInput } from "./fx_subagent/input.ts";
 import { assertFxSubagentOutput } from "./fx_subagent/fx_output.ts";
-import { assertTurnInterruptMidToolClaudeOutput } from "./turn_interrupt_mid_tool/claude_output.ts";
 import { assertTurnInterruptMidToolCodexOutput } from "./turn_interrupt_mid_tool/codex_output.ts";
 import { assertTurnInterruptMidToolCursorOutput } from "./turn_interrupt_mid_tool/cursor_output.ts";
 import {
@@ -260,12 +305,14 @@ import {
   turnInterruptMidToolKiroInput,
 } from "./turn_interrupt_mid_tool/input.ts";
 import { assertTurnInterruptMidToolKiroOutput } from "./turn_interrupt_mid_tool/kiro_output.ts";
+import { assertTurnInterruptMidToolOutput } from "./turn_interrupt_mid_tool/output.ts";
 import { assertTurnInterruptMidToolPiOutput } from "./turn_interrupt_mid_tool/pi_output.ts";
-import { assertTurnInterruptRestartClaudeOutput } from "./turn_interrupt_restart/claude_output.ts";
 import { turnInterruptRestartInput } from "./turn_interrupt_restart/input.ts";
+import { assertTurnInterruptRestartOutput } from "./turn_interrupt_restart/output.ts";
 import { assertClaudeWebSearchOutput } from "./web_search/claude_output.ts";
 import { assertWebSearchOutput } from "./web_search/codex_output.ts";
 import { webSearchInput } from "./web_search/input.ts";
+import { assertProviderNeutralWebSearchOutput } from "./web_search/output.ts";
 import {
   ACP_REGISTRY_MODEL_SELECTION,
   CLAUDE_MODEL_SELECTION,
@@ -332,7 +379,8 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         ),
         modelSelection: CLAUDE_MODEL_SELECTION,
         runContinuationWorker: true,
-        assertOutput: assertClaudeBackgroundSubagentLifecycleOutput,
+        assertOutput: assertBackgroundSubagentLifecycleOutput,
+        assertProviderDetails: assertClaudeBackgroundSubagentLifecycleDetails,
       },
     ],
   },
@@ -365,7 +413,8 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         ),
         modelSelection: CLAUDE_MODEL_SELECTION,
         runContinuationWorker: true,
-        assertOutput: assertClaudeBackgroundWakeBeforeQueuedPromptOutput,
+        assertOutput: assertBackgroundWakeBeforeQueuedPromptOutput,
+        assertProviderDetails: assertClaudeBackgroundWakeBeforeQueuedPromptDetails,
       },
     ],
   },
@@ -397,7 +446,37 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         ),
         modelSelection: CLAUDE_MODEL_SELECTION,
         runContinuationWorker: true,
-        assertOutput: assertClaudeCompactAfterResumeWakeOutput,
+        assertOutput: assertCompactAfterResumeWakeOutput,
+        assertProviderDetails: assertClaudeCompactAfterResumeWakeDetails,
+      },
+    ],
+  },
+  {
+    name: "hermes_compact_after_resume_wake",
+    buildInput: hermesCompactAfterResumeWakeInput,
+    providers: [
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./hermes_compact_after_resume_wake/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runContinuationWorker: true,
+        assertOutput: assertCompactAfterResumeWakeOutput,
+        assertProviderDetails: assertHermesCompactAfterResumeWakeDetails,
+      },
+    ],
+  },
+  {
+    name: "hermes_compress_noop",
+    buildInput: hermesCompressNoopInput,
+    providers: [
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL("./hermes_compress_noop/hermes_transcript.ndjson", import.meta.url),
+        modelSelection: HERMES_MODEL_SELECTION,
+        assertOutput: assertHermesCompressNoopOutput,
       },
     ],
   },
@@ -413,7 +492,24 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         ),
         modelSelection: CLAUDE_MODEL_SELECTION,
         runContinuationWorker: true,
-        assertOutput: assertClaudeCompactAfterPeerTurnOutput,
+        assertOutput: assertCompactAfterPeerTurnOutput,
+        assertProviderDetails: assertClaudeCompactAfterPeerTurnDetails,
+      },
+    ],
+  },
+  {
+    name: "hermes_compact_after_peer_turn",
+    buildInput: hermesCompactAfterPeerTurnInput,
+    providers: [
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./hermes_compact_after_peer_turn/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runContinuationWorker: true,
+        assertOutput: assertCompactAfterPeerTurnOutput,
       },
     ],
   },
@@ -509,7 +605,8 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
           import.meta.url,
         ),
         modelSelection: CLAUDE_MODEL_SELECTION,
-        assertOutput: assertClaudeNestedSubagentModelOutput,
+        assertOutput: assertNestedSubagentModelOutput,
+        assertProviderDetails: assertClaudeNestedSubagentModelDetails,
       },
     ],
   },
@@ -536,7 +633,15 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         driver: ProviderDriverKind.make("claudeAgent"),
         transcriptFile: new URL("./claude_idle_resume/claude_transcript.ndjson", import.meta.url),
         modelSelection: CLAUDE_MODEL_SELECTION,
-        assertOutput: assertClaudeIdleResumeOutput,
+        assertOutput: assertIdleResumeConversation,
+        assertProviderDetails: assertClaudeIdleResumeTokenLedger,
+      },
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL("./claude_idle_resume/hermes_transcript.ndjson", import.meta.url),
+        modelSelection: HERMES_MODEL_SELECTION,
+        assertOutput: assertIdleResumeConversation,
+        assertProviderDetails: assertHermesIdleResumeSession,
       },
     ],
   },
@@ -754,6 +859,41 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
     ],
   },
   {
+    name: "hermes_background_subagent_lifecycle",
+    buildInput: hermesBackgroundSubagentLifecycleInput,
+    providers: [
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./hermes_background_subagent_lifecycle/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runContinuationWorker: true,
+        assertOutput: assertBackgroundSubagentLifecycleOutput,
+        assertProviderDetails: assertHermesBackgroundSubagentLifecycleDetails,
+      },
+    ],
+  },
+  {
+    name: "hermes_nested_subagent_model",
+    buildInput: hermesNestedSubagentModelInput,
+    providers: [
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./hermes_nested_subagent_model/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        // A gateway follow-up turn would surface as a second run and fail the one-run contract.
+        runContinuationWorker: true,
+        assertOutput: assertNestedSubagentModelOutput,
+        assertProviderDetails: assertHermesNestedSubagentModelDetails,
+      },
+    ],
+  },
+  {
     name: "hermes_nested_background_subagent_wake",
     buildInput: hermesNestedBackgroundSubagentWakeInput,
     providers: [
@@ -816,6 +956,23 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         runContinuationWorker: true,
         assertOutput: assertBackgroundTaskWakeOutput,
         assertProviderDetails: assertHermesBackgroundTaskWakeDetails,
+      },
+    ],
+  },
+  {
+    name: "hermes_background_wake_before_queued_prompt",
+    buildInput: hermesBackgroundWakeBeforeQueuedPromptInput,
+    providers: [
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./hermes_background_wake_before_queued_prompt/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runContinuationWorker: true,
+        assertOutput: assertBackgroundWakeBeforeQueuedPromptOutput,
+        assertProviderDetails: assertHermesBackgroundWakeBeforeQueuedPromptDetails,
       },
     ],
   },
@@ -886,6 +1043,7 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         modelSelection: ACP_REGISTRY_MODEL_SELECTION,
         runtimePolicyOverride: READ_ONLY_NEVER_POLICY,
         assertOutput: assertPlanQuestionsOutput,
+        assertProviderDetails: assertSchemaFlexibilityQuestionId,
       },
     ],
   },
@@ -1001,7 +1159,8 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         modelSelection: CLAUDE_MODEL_SELECTION,
         runtimePolicyOverride: DENIED_WRITE_POLICY,
         expectedAbsentWorkspacePaths: [TOOL_CALL_DENIED_WRITE_TARGET],
-        assertOutput: assertToolCallDeniedWriteClaudeOutput,
+        assertOutput: assertToolCallDeniedWriteOutput,
+        assertProviderDetails: assertToolCallDeniedWriteClaudeOutput,
       },
       {
         driver: ProviderDriverKind.make("fx"),
@@ -1010,6 +1169,24 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         runtimePolicyOverride: DENIED_WRITE_POLICY,
         expectedAbsentWorkspacePaths: [TOOL_CALL_DENIED_WRITE_TARGET],
         assertOutput: assertToolCallDeniedWriteFxOutput,
+      },
+    ],
+  },
+  {
+    name: "hermes_tool_call_denied_write",
+    buildInput: hermesToolCallDeniedWriteInput,
+    providers: [
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./hermes_tool_call_denied_write/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runtimePolicyOverride: DENIED_WRITE_POLICY,
+        expectedAbsentWorkspacePaths: [HERMES_TOOL_CALL_DENIED_WRITE_TARGET],
+        assertOutput: assertToolCallDeniedWriteOutput,
+        assertProviderDetails: assertHermesToolCallDeniedWriteDetails,
       },
     ],
   },
@@ -1112,6 +1289,16 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         runtimePolicyOverride: READ_ONLY_ON_REQUEST_POLICY,
         assertOutput: assertToolCallReadOnlyOnRequestOutput,
       },
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./tool_call_read_only_on_request/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runtimePolicyOverride: READ_ONLY_ON_REQUEST_POLICY,
+        assertOutput: assertToolCallReadOnlyOnRequestOutput,
+      },
     ],
   },
   {
@@ -1163,7 +1350,8 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         // gpt-6 uses shell writes; gpt-5.6-terra triggers this fixture's apply_patch approval.
         modelSelection: { ...CODEX_MODEL_SELECTION, model: "gpt-5.6-terra" },
         runtimePolicyOverride: RESTRICTED_GRANULAR_POLICY,
-        assertOutput: assertToolCallRestrictedGranularOutput,
+        assertOutput: assertToolCallReadOnlyOnRequestOutput,
+        assertProviderDetails: assertToolCallRestrictedGranularOutput,
       },
       {
         driver: ProviderDriverKind.make("claudeAgent"),
@@ -1173,7 +1361,18 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         ),
         modelSelection: CLAUDE_MODEL_SELECTION,
         runtimePolicyOverride: RESTRICTED_GRANULAR_POLICY,
-        assertOutput: assertToolCallRestrictedGranularClaudeOutput,
+        assertOutput: assertToolCallReadOnlyOnRequestOutput,
+        assertProviderDetails: assertToolCallRestrictedGranularClaudeOutput,
+      },
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./tool_call_restricted_granular/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runtimePolicyOverride: RESTRICTED_GRANULAR_POLICY,
+        assertOutput: assertToolCallReadOnlyOnRequestOutput,
       },
     ],
   },
@@ -1763,6 +1962,16 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         modelSelection: CODEX_MODEL_SELECTION,
         assertOutput: assertQueuedCancelledWhileActiveOutput,
       },
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./queued_cancelled_while_active/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        replayGateLabels: { "turn/completed": "response:session/prompt" },
+        modelSelection: HERMES_MODEL_SELECTION,
+        assertOutput: assertQueuedCancelledWhileActiveOutput,
+      },
     ],
   },
   {
@@ -1852,6 +2061,19 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
     ],
   },
   {
+    name: "hermes_todo_list",
+    buildInput: hermesTodoListInput,
+    providers: [
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL("./hermes_todo_list/hermes_transcript.ndjson", import.meta.url),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runtimePolicyOverride: READ_ONLY_NEVER_POLICY,
+        assertOutput: assertTodoListOutput,
+      },
+    ],
+  },
+  {
     name: "web_search",
     buildInput: webSearchInput,
     providers: [
@@ -1859,13 +2081,21 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         driver: ProviderDriverKind.make("codex"),
         transcriptFile: new URL("./web_search/codex_transcript.ndjson", import.meta.url),
         modelSelection: CODEX_MODEL_SELECTION,
-        assertOutput: assertWebSearchOutput,
+        assertOutput: assertProviderNeutralWebSearchOutput,
+        assertProviderDetails: assertWebSearchOutput,
       },
       {
         driver: ProviderDriverKind.make("claudeAgent"),
         transcriptFile: new URL("./web_search/claude_transcript.ndjson", import.meta.url),
         modelSelection: CLAUDE_MODEL_SELECTION,
-        assertOutput: assertClaudeWebSearchOutput,
+        assertOutput: assertProviderNeutralWebSearchOutput,
+        assertProviderDetails: assertClaudeWebSearchOutput,
+      },
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL("./web_search/hermes_transcript.ndjson", import.meta.url),
+        modelSelection: HERMES_MODEL_SELECTION,
+        assertOutput: assertProviderNeutralWebSearchOutput,
       },
     ],
   },
@@ -1878,7 +2108,8 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         transcriptFile: new URL("./plan_questions/codex_transcript.ndjson", import.meta.url),
         modelSelection: CODEX_MODEL_SELECTION,
         runtimePolicyOverride: READ_ONLY_NEVER_POLICY,
-        assertOutput: assertCodexPlanQuestionsOutput,
+        assertOutput: assertPlanQuestionsOutput,
+        assertProviderDetails: assertCodexPlanQuestionsDetails,
       },
       {
         driver: ProviderDriverKind.make("grok"),
@@ -1886,6 +2117,7 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         modelSelection: GROK_MODEL_SELECTION,
         runtimePolicyOverride: READ_ONLY_NEVER_POLICY,
         assertOutput: assertPlanQuestionsOutput,
+        assertProviderDetails: assertSchemaFlexibilityQuestionId,
       },
       {
         driver: ProviderDriverKind.make("opencode"),
@@ -1893,6 +2125,22 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         modelSelection: OPENCODE_MODEL_SELECTION,
         runtimePolicyOverride: READ_ONLY_NEVER_POLICY,
         assertOutput: assertOpenCodePlanQuestionsOutput,
+      },
+    ],
+  },
+  {
+    name: "hermes_plan_questions",
+    buildInput: hermesPlanQuestionsInput,
+    providers: [
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./hermes_plan_questions/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runtimePolicyOverride: READ_ONLY_NEVER_POLICY,
+        assertOutput: assertPlanQuestionsOutput,
       },
     ],
   },
@@ -1914,6 +2162,13 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         runtimePolicyOverride: READ_ONLY_NEVER_POLICY,
         assertOutput: assertProposedPlanCursorOutput,
       },
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL("./proposed_plan/hermes_transcript.ndjson", import.meta.url),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runtimePolicyOverride: READ_ONLY_NEVER_POLICY,
+        assertOutput: assertProposedPlanOutput,
+      },
     ],
   },
   {
@@ -1925,12 +2180,14 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         transcriptFile: new URL("./message_steering/codex_transcript.ndjson", import.meta.url),
         modelSelection: CODEX_MODEL_SELECTION,
         assertOutput: assertMessageSteeringOutput,
+        assertProviderDetails: assertCodexMessageSteeringDetails,
       },
       {
         driver: ProviderDriverKind.make("claudeAgent"),
         transcriptFile: new URL("./message_steering/claude_transcript.ndjson", import.meta.url),
         modelSelection: CLAUDE_MODEL_SELECTION,
-        assertOutput: assertClaudeMessageSteeringOutput,
+        assertOutput: assertMessageSteeringOutput,
+        assertProviderDetails: assertClaudeMessageSteeringDetails,
       },
       {
         driver: ProviderDriverKind.make("cursor"),
@@ -1961,6 +2218,13 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         transcriptFile: new URL("./message_steering/pi_transcript.ndjson", import.meta.url),
         modelSelection: PI_MODEL_SELECTION,
         assertOutput: assertPiMessageSteeringOutput,
+      },
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL("./message_steering/hermes_transcript.ndjson", import.meta.url),
+        modelSelection: HERMES_MODEL_SELECTION,
+        assertOutput: assertMessageSteeringOutput,
+        assertProviderDetails: assertHermesMessageSteeringDetails,
       },
     ],
   },
@@ -2023,6 +2287,13 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         modelSelection: MUSE_MODEL_SELECTION,
         assertOutput: assertMuseTurnInterruptOutput,
       },
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL("./turn_interrupt/hermes_transcript.ndjson", import.meta.url),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runtimePolicyOverride: WORKSPACE_NEVER_POLICY,
+        assertOutput: assertTurnInterruptOutput,
+      },
     ],
   },
   {
@@ -2073,6 +2344,16 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         modelSelection: CLAUDE_MODEL_SELECTION,
         assertOutput: assertCommandOutputStreamingOutput,
       },
+      {
+        // Recorded with the `acp-terminal-output` Hermes patch applied.
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./command_output_streaming/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        assertOutput: assertCommandOutputStreamingOutput,
+      },
     ],
   },
   {
@@ -2097,7 +2378,7 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         ),
         modelSelection: CLAUDE_MODEL_SELECTION,
         runtimePolicyOverride: WORKSPACE_NEVER_POLICY,
-        assertOutput: assertTurnInterruptMidToolClaudeOutput,
+        assertOutput: assertTurnInterruptMidToolOutput,
       },
       {
         driver: ProviderDriverKind.make("cursor"),
@@ -2114,6 +2395,16 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         transcriptFile: new URL("./turn_interrupt_mid_tool/pi_transcript.ndjson", import.meta.url),
         modelSelection: PI_MODEL_SELECTION,
         assertOutput: assertTurnInterruptMidToolPiOutput,
+      },
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./turn_interrupt_mid_tool/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runtimePolicyOverride: WORKSPACE_NEVER_POLICY,
+        assertOutput: assertTurnInterruptMidToolOutput,
       },
     ],
   },
@@ -2144,7 +2435,17 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         ),
         modelSelection: CLAUDE_MODEL_SELECTION,
         runtimePolicyOverride: WORKSPACE_NEVER_POLICY,
-        assertOutput: assertTurnInterruptRestartClaudeOutput,
+        assertOutput: assertTurnInterruptRestartOutput,
+      },
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./turn_interrupt_restart/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runtimePolicyOverride: WORKSPACE_NEVER_POLICY,
+        assertOutput: assertTurnInterruptRestartOutput,
       },
     ],
   },
@@ -2170,6 +2471,12 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         modelSelection: PI_MODEL_SELECTION,
         assertOutput: assertPiThreadRollbackOutput,
       },
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL("./thread_rollback/hermes_transcript.ndjson", import.meta.url),
+        modelSelection: HERMES_MODEL_SELECTION,
+        assertOutput: assertThreadRollbackOutput,
+      },
     ],
   },
   {
@@ -2183,7 +2490,18 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
           import.meta.url,
         ),
         modelSelection: CODEX_MODEL_SELECTION,
-        assertOutput: assertThreadRollbackAfterRestartOutput,
+        assertOutput: assertThreadRollbackOutput,
+        assertProviderDetails: assertCodexResumeBeforeRevert,
+      },
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./thread_rollback_after_restart/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        assertOutput: assertThreadRollbackOutput,
+        assertProviderDetails: assertHermesLoadBeforeUndo,
       },
     ],
   },
@@ -2214,7 +2532,19 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         ),
         modelSelection: CODEX_MODEL_SELECTION,
         runtimePolicyOverride: WORKSPACE_NEVER_POLICY,
-        assertOutput: assertThreadRollbackToStoppedTurnOutput,
+        assertOutput: assertRollbackToStoppedTurnConversation,
+        assertProviderDetails: assertCodexThreadRevert,
+      },
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./thread_rollback_to_stopped_turn/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runtimePolicyOverride: WORKSPACE_NEVER_POLICY,
+        assertOutput: assertRollbackToStoppedTurnConversation,
+        assertProviderDetails: assertHermesUndoInPlace,
       },
     ],
   },

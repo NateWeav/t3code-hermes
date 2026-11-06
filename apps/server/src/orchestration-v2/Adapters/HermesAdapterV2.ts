@@ -4,11 +4,14 @@
  * processes read from the agent's own tool results for `t3_background_wait`.
  */
 import {
+  DEFAULT_PROVIDER_INTERACTION_MODE,
+  DEFAULT_RUNTIME_MODE,
   HermesSettings,
   ProviderDriverKind,
   type OrchestrationV2ProviderCapabilities,
   type RuntimeMode,
 } from "@t3tools/contracts";
+import { AgentScope, AgentScopeThreadId } from "@t3tools/shared/AgentScope";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { resolveSelfInvocation, type SelfInvocation } from "@t3tools/shared/nodeRuntime";
 import * as SecureRandom from "effect/crypto/SecureRandom";
@@ -20,6 +23,7 @@ import * as Semaphore from "effect/Semaphore";
 import { ChildProcessSpawner } from "effect/process";
 
 import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
+import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import {
   HERMES_FAST_MODE_CONFIG_ID,
   resolveHermesFastModeSelection,
@@ -34,16 +38,28 @@ import {
   hermesApprovalOptions,
   discardLostHermesTurnsOnPrompt,
   extractHermesAwaitableBackgroundTasks,
+  hermesApprovalPosture,
+  type HermesApprovalPosture,
+  hermesFollowsApprovalPosture,
   hermesPromptFailure,
+  hermesSteering,
+  hideHermesStopNotices,
   isHermesGatewayTurnLoss,
+  isHermesUnpromptedTurnUpdate,
   makeHermesAcpRuntime,
+  makeHermesClarifyCallFilter,
+  makeHermesEditApprovalCards,
   normalizeHermesT3McpToolCall,
   normalizeHermesTerminalResult,
+  normalizeHermesWebSearchQuery,
   preserveHermesAgentActivityTitle,
+  readHermesCompressReply,
+  resendHermesPromptsRefusedBusy,
   resolveHermesAcpBaseModelId,
   resolveHermesSessionModeId,
 } from "../../provider/acp/HermesAcpSupport.ts";
 import { makeHermesDelegation } from "../../provider/acp/HermesDelegation.ts";
+import * as HermesSpareRuntime from "../../provider/acp/HermesSpareRuntime.ts";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
@@ -75,6 +91,11 @@ export const HermesProviderCapabilitiesV2 = {
     supportsSubagents: true,
     emitsSubagentLifecycle: true,
   },
+  streaming: {
+    ...AcpProviderCapabilitiesV2.streaming,
+    // With the `acp-terminal-output` patch; stock Hermes sends a command's output whole when it ends.
+    streamsToolOutput: true,
+  },
   approvals: {
     ...AcpProviderCapabilitiesV2.approvals,
     approvalsCanOriginateFromSubagents: true,
@@ -97,22 +118,31 @@ export interface HermesAdapterV2Options {
   readonly makeRuntime?: AcpAdapterV2Flavor["makeRuntime"];
   readonly assertComplete?: AcpAdapterV2Flavor["assertComplete"];
   readonly testHooks?: Parameters<typeof makeAcpAdapterV2>[0]["testHooks"];
+  /** Keep a `hermes acp` booting for the next session to adopt. */
+  readonly spareRuntime?: boolean;
 }
 
+type HermesLaunchPolicy = Pick<
+  ProviderAdapter.ProviderAdapterV2RuntimePolicy,
+  "runtimeMode" | "approvalPolicy" | "sandboxPolicy"
+>;
+
+const hermesLaunchesYolo = (policy: HermesLaunchPolicy) =>
+  policy.runtimeMode === "full-access" && hermesApprovalPosture(policy) === "dontAsk";
+
 /**
- * Full access also has to reach Hermes subagents, which deny dangerous
- * commands unless YOLO is on. A reopened session follows this flag only with
- * the `acp-launch-yolo-resume` patch; stock Hermes reads it at creation.
+ * Full access turns on YOLO, which subagents need for dangerous commands, unless an approval policy
+ * still asks; a reopened session follows it only with the `acp-launch-yolo-resume` patch. Thread
+ * MCP credentials go in `session/new`, never here: Hermes's shared gateway inherits the environment
+ * of the viewer that started it.
  */
 export function hermesSpawnEnvironment(
   environment: NodeJS.ProcessEnv,
-  runtimeMode: RuntimeMode,
-  processEnvironment?: NodeJS.ProcessEnv,
+  runtimePolicy: HermesLaunchPolicy,
 ): NodeJS.ProcessEnv {
   return {
     ...environment,
-    ...processEnvironment,
-    ...(runtimeMode === "full-access" ? { HERMES_YOLO_MODE: "1" } : {}),
+    ...(hermesLaunchesYolo(runtimePolicy) ? { HERMES_YOLO_MODE: "1" } : {}),
   };
 }
 
@@ -129,74 +159,146 @@ interface HermesFlavorServices {
   readonly path: Path.Path;
 }
 
+function hermesRuntimeLauncher(options: HermesAdapterV2Options): AcpAdapterV2Flavor["makeRuntime"] {
+  return (
+    options.makeRuntime ??
+    (({ runtimePolicy, processEnvironment: _processEnvironment, ...runtimeInput }) =>
+      makeHermesAcpRuntime({
+        ...runtimeInput,
+        hermesSettings: options.settings,
+        environment: hermesSpawnEnvironment(options.environment, runtimePolicy),
+        childProcessSpawner: options.childProcessSpawner,
+      }))
+  );
+}
+
+/** What a spare launches with; the adopting session binds its own before the first request. */
+function hermesSpareRuntimeInput(runtimeMode: RuntimeMode): AcpAdapterV2RuntimeInput {
+  return {
+    cwd: process.cwd(),
+    runtimePolicy: { runtimeMode, interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE, cwd: null },
+    mcpServers: [],
+    clientCapabilities: undefined,
+    clientInfo: { name: "t3-code", version: "0.0.0" },
+    protocolLogging: { logIncoming: false, logOutgoing: false },
+    onTermination: () => Effect.void,
+  };
+}
+
 export function makeHermesAcpAdapterFlavor(
-  options: HermesAdapterV2Options & HermesFlavorServices,
+  options: HermesAdapterV2Options &
+    HermesFlavorServices & { readonly spares?: HermesSpareRuntime.HermesSpareRuntimes },
 ): AcpAdapterV2Flavor {
   // Hermes reads reasoning effort from one `config.yaml` per profile, so
   // concurrent sessions serialize the write and the rebuild that reads it.
   const reasoningConfigPermit = Semaphore.makeUnsafe(1);
-  // Per live process: the runtime mode it launched with (a mode change reopens
+  // Per live process: how much it asks under the policy it launched with (a mode change reopens
   // the session) and the reasoning level its agent was last built with.
-  const runtimeModes = new WeakMap<AcpSessionRuntime.AcpSessionRuntime["Service"], RuntimeMode>();
+  const postures = new WeakMap<
+    AcpSessionRuntime.AcpSessionRuntime["Service"],
+    HermesApprovalPosture
+  >();
   const builtReasoningLevels = new WeakMap<
     AcpSessionRuntime.AcpSessionRuntime["Service"],
     HermesReasoningLevel | null
   >();
   const sentFastModes = new WeakMap<AcpSessionRuntime.AcpSessionRuntime["Service"], boolean>();
-
-  const spawnRuntime = (input: AcpAdapterV2RuntimeInput) => {
-    const { runtimePolicy, processEnvironment, ...runtimeInput } = input;
-    return makeHermesAcpRuntime({
-      ...runtimeInput,
-      hermesSettings: options.settings,
-      environment: hermesSpawnEnvironment(
-        options.environment,
-        runtimePolicy.runtimeMode,
-        processEnvironment,
-      ),
-      childProcessSpawner: options.childProcessSpawner,
-    });
-  };
+  const editApprovalCards = makeHermesEditApprovalCards();
+  const ignoreClarifyCall = makeHermesClarifyCallFilter();
+  const launchRuntime = hermesRuntimeLauncher(options);
+  const adoptOrLaunchRuntime = Effect.fn("HermesAdapterV2.makeRuntime")(function* (
+    input: AcpAdapterV2RuntimeInput,
+  ) {
+    const {
+      runtimePolicy,
+      processEnvironment: _processEnvironment,
+      protocolLogging,
+      ...binding
+    } = input;
+    // A spare's protocol logging was fixed when it spawned.
+    const spare =
+      options.spares === undefined ||
+      protocolLogging.logIncoming === true ||
+      protocolLogging.logOutgoing === true ||
+      // A spare launched for its runtime mode alone; a policy that changes YOLO launches its own.
+      hermesLaunchesYolo(runtimePolicy) !==
+        hermesLaunchesYolo({ runtimeMode: runtimePolicy.runtimeMode })
+        ? undefined
+        : yield* options.spares.adopt(runtimePolicy.runtimeMode, binding);
+    return spare ?? (yield* launchRuntime(input));
+  });
 
   return {
     driver: HERMES_PROVIDER,
     runtimeHarness: "Hermes",
     capabilities: HermesProviderCapabilitiesV2,
-    clientCapabilitiesMeta: HERMES_DELEGATION_META,
     // Hermes takes image blocks whatever its handshake advertises.
     supportsImagePrompts: true,
+    // Hermes with `acp-terminal-output` streams a running command's output as `_meta.terminal_output`,
+    // and with `acp-command-approval` a session that asks before edits asks before every shell command.
+    clientCapabilitiesMeta: {
+      ...HERMES_DELEGATION_META,
+      terminal_output: true,
+      command_approval: true,
+    },
     supportsCompaction: true,
     compactionCommand: "/compress",
+    // The gateway's `/undo N` (`session.mutate rewind`) drops the session's last N user turns. It
+    // answers its own slash commands, and a Stop before admission, with no usage: no user turn.
+    rewindSession: {
+      command: (userTurns) => `/undo ${userTurns}`,
+      confirmed: (reply, userTurns) => reply.startsWith(`Undid ${userTurns} turn`),
+      promptAddedUserTurn: (response) => response.usage != null,
+    },
+    readCompactionReply: readHermesCompressReply,
+    // Hermes has no plan mode of its own, so Plan mode's plan arrives as a reply block.
+    proposedPlanBlocks: true,
     // The Hermes gateway runs a turn of its own when a background job finishes (`notify: true`) and
     // projects it to ACP viewers as session updates, with no `session/prompt` open. Without this
     // those frames were dropped, so the agent woke and worked while its thread showed nothing.
     enablePostSettleContinuation: true,
+    isUnpromptedTurnUpdate: isHermesUnpromptedTurnUpdate,
     resolveModelId: (selection) => resolveHermesAcpBaseModelId(selection.model),
     approvalOptions: hermesApprovalOptions,
+    onPermissionRequest: editApprovalCards.onPermissionRequest,
+    // The clarify question shows as its user-input request, not also as a tool call. Its filter
+    // tracks every update, so it runs first.
+    ignoreSessionUpdate: (notification) =>
+      ignoreClarifyCall(notification) || editApprovalCards.ignoreSessionUpdate(notification),
     promptFailure: hermesPromptFailure,
     restartRuntimeAfterPromptFailure: isHermesGatewayTurnLoss,
     makeRuntime: (input) =>
-      (options.makeRuntime ?? spawnRuntime)(input).pipe(
-        Effect.map(discardLostHermesTurnsOnPrompt),
+      adoptOrLaunchRuntime(input).pipe(
+        Effect.map((runtime) =>
+          hideHermesStopNotices(
+            resendHermesPromptsRefusedBusy(discardLostHermesTurnsOnPrompt(runtime)),
+          ),
+        ),
         Effect.tap((runtime) =>
-          Effect.sync(() => runtimeModes.set(runtime, input.runtimePolicy.runtimeMode)),
+          Effect.sync(() => postures.set(runtime, hermesApprovalPosture(input.runtimePolicy))),
         ),
       ),
     /**
      * Hermes builds its agent from `config.yaml`, so the level is written first and an unchanged
-     * model is re-sent when only the level moved. Edit-approval modes are best-effort since T3's
-     * permission policy enforces approvals. Fast mode is re-pinned per turn.
+     * model is re-sent when only the level moved. The session's mode follows T3's policy; T3's
+     * permission policy still answers every request. Fast mode is re-pinned per turn.
      */
     applyModelSelection: Effect.fn("HermesAdapterV2.applyModelSelection")(function* ({
       runtime,
       startResult,
       modelSelection,
     }) {
-      const runtimeMode = runtimeModes.get(runtime);
+      const posture = hermesFollowsApprovalPosture(startResult.initializeResult)
+        ? postures.get(runtime)
+        : "ask";
       const modeId =
-        runtimeMode === undefined
+        posture === undefined
           ? undefined
-          : resolveHermesSessionModeId({ runtimeMode, modeState: yield* runtime.getModeState });
+          : resolveHermesSessionModeId({
+              posture,
+              configOptions: yield* runtime.getConfigOptions,
+              modeState: yield* runtime.getModeState,
+            });
       if (modeId !== undefined) {
         yield* runtime
           .setMode(modeId)
@@ -251,12 +353,19 @@ export function makeHermesAcpAdapterFlavor(
       }
       return model;
     }),
-    normalizeToolCall: (toolCall) =>
-      preserveHermesAgentActivityTitle(
-        normalizeHermesTerminalResult(normalizeHermesT3McpToolCall(toolCall)),
+    normalizeToolCall: (toolCall, sessionId) =>
+      editApprovalCards.normalizeToolCall(
+        preserveHermesAgentActivityTitle(
+          normalizeHermesWebSearchQuery(
+            normalizeHermesTerminalResult(normalizeHermesT3McpToolCall(toolCall)),
+          ),
+        ),
+        sessionId,
       ),
     ...makeHermesDelegation(),
     extractAwaitableBackgroundTasks: extractHermesAwaitableBackgroundTasks,
+    // Patched Hermes steers the running turn; stock Hermes steers by restarting it.
+    steering: hermesSteering,
     ...(options.assertComplete === undefined ? {} : { assertComplete: options.assertComplete }),
   };
 }
@@ -268,9 +377,35 @@ export const makeHermesAdapterV2 = Effect.fn("makeHermesAdapterV2")(function* (
     fileSystem: yield* FileSystem.FileSystem,
     path: yield* Path.Path,
   };
+  const launchRuntime = hermesRuntimeLauncher(options);
+  const random = yield* SecureRandom.SecureRandom;
+  const agentScope = yield* AgentScope;
+  const spares =
+    options.spareRuntime === true
+      ? yield* HermesSpareRuntime.make({
+          launch: (runtimeMode) =>
+            launchRuntime(hermesSpareRuntimeInput(runtimeMode)).pipe(
+              Effect.provideService(SecureRandom.SecureRandom, random),
+              Effect.provideService(
+                ChildProcessSpawner.ChildProcessSpawner,
+                options.childProcessSpawner,
+              ),
+              Effect.provideService(AgentScope, agentScope),
+              // Replenishing forks from an adopting session; its thread must not own the spare.
+              Effect.provideService(AgentScopeThreadId, undefined),
+            ),
+          initialRuntimeMode: DEFAULT_RUNTIME_MODE,
+          // As long as an idle session keeps its own process.
+          idleTimeout: "30 minutes",
+        })
+      : undefined;
   return yield* makeAcpAdapterV2({
     instanceId: options.instanceId,
-    flavor: makeHermesAcpAdapterFlavor({ ...options, ...services }),
+    flavor: makeHermesAcpAdapterFlavor({
+      ...options,
+      ...services,
+      ...(spares === undefined ? {} : { spares }),
+    }),
     selfInvocation: options.selfInvocation,
     ...(options.nativeLogging === undefined ? {} : { nativeLogging: options.nativeLogging }),
     ...(options.continuationRequests === undefined
@@ -308,6 +443,7 @@ export const HermesAdapterV2Driver: ProviderAdapterDriver<
         environment: yield* mergeProviderInstanceEnvironment(input.environment, hostEnvironment),
         childProcessSpawner: yield* ChildProcessSpawner.ChildProcessSpawner,
         selfInvocation: yield* resolveSelfInvocation(),
+        spareRuntime: input.enabled,
         continuationRequests: yield* ProviderContinuationRequests.ProviderContinuationRequests,
         nativeLogging: (threadId) =>
           makeNativeLogger({

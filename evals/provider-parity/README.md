@@ -29,12 +29,15 @@ custom_providers:
     base_url: <Anthropic-compatible endpoint>
     key_env: CLIPROXYAPI_API_KEY
     model: claude-haiku-5-5
-    models: { claude-haiku-5-5: {} }
+    # The lifecycle and nested-model twins run a subagent on the second model.
+    models: { claude-haiku-5-5: {}, claude-haiku-4-5-20251001: {} }
     discover_models: false
     api_mode: anthropic_messages
 ```
 
-Put `CLIPROXYAPI_API_KEY=...` in `~/.hermes-bench/.env` (mode 600). Keep the provider name: committed fixtures pin the model id `custom:cliproxyapi-claude:claude-haiku-5-5`. The recorder refuses `~/.hermes` and its profiles. A new home builds its own Python environment on first launch, which can outlast a recorder run; if Hermes then reports that no dependency environment is committed, run `HERMES_HOME=<home> hermes pm repair` once.
+Put `CLIPROXYAPI_API_KEY=...` in `~/.hermes-bench/.env` (mode 600). Keep the provider name: committed fixtures pin the model id `custom:cliproxyapi-claude:claude-haiku-5-5`. A subagent can run only on a model the profile lists, so keep both. The recorder refuses `~/.hermes` and its profiles. A new home builds its own Python environment on first launch, which can outlast a recorder run; if Hermes then reports that no dependency environment is committed, run `HERMES_HOME=<home> hermes pm repair` once.
+
+Hermes layers a machine-wide `/etc/hermes/config.yaml` over every home, so live and stack runs point `HERMES_MANAGED_DIR` at an empty directory in the benchmark home. A gateway that is already running keeps the environment it started with, so stop it once (`HERMES_HOME=~/.hermes-bench hermes gateway stop`).
 
 ## Run it
 
@@ -68,6 +71,6 @@ Rules that keep the number honest:
 - A Hermes-only assertion scores half; say why in the PR.
 - Changing a classification in `scenarios.ts` needs a reason in the entry.
 
-Scenarios marked `providerBound` (`message_steering`, `turn_interrupt_mid_tool`, `turn_interrupt_restart`, `subagent_v2`, `web_search`) have only reference assertions that check their own provider's identity, wire frames or item shapes. Hermes reaches half credit there with its own assertion, and full credit once the reference's wire checks move to its `assertProviderDetails`, leaving an `assertOutput` that Hermes can share.
+Scenarios marked `providerBound` (`subagent_v2`) have only reference assertions that check their own provider's identity, wire frames or item shapes. Hermes reaches half credit there with its own assertion, and full credit once the reference's wire checks move to its `assertProviderDetails`, leaving an `assertOutput` that Hermes can share.
 
 `run.test.ts` tests the grader and runs in CI.

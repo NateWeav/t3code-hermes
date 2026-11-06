@@ -3,7 +3,8 @@
 Hermes has its own subagent tool. Unless the Live subagent progress patch is applied, T3 Code cannot
 see when one of those subagents finishes, so an agent can end its turn waiting for a result that
 never arrives. T3 Code's own subagents always report back, show as child threads, and can run any
-model you have set up.
+model you have set up. With the Subagent models and follow-ups patch as well, Hermes's own subagents
+can run on any model your Hermes profile lists, and take a follow-up after they finish.
 
 To make Hermes agents use only T3 Code subagents, turn on **Use T3 Code subagents only** under
 Settings → Providers → Hermes. It is off by default.
@@ -14,7 +15,7 @@ Stock Hermes runs every one of its subagents in the background: the agent ends i
 answer arrives in a later one. With the **Subagents in the turn** patch (see
 [Hermes patches](./hermes-patches.md)), the agent waits for its subagents and answers in the same
 turn, unless it chooses to run them in the background. Its subagents can also launch their own, up
-to three levels deep. Stopping the turn stops subagents it is waiting for. The patch applies to
+to three levels deep; one given no model runs on the model of the subagent that launched it. Stopping the turn stops subagents it is waiting for. The patch applies to
 conversations started after it is applied and the Hermes gateway restarts.
 
 ## Approvals from subagents

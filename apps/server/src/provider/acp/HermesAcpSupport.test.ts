@@ -4,18 +4,24 @@ import * as EffectAcpErrors from "effect-acp/errors";
 
 import {
   hermesApprovalOptions,
+  readHermesCompressReply,
+  hermesApprovalPosture,
+  hermesFollowsApprovalPosture,
   applyHermesAcpModelSelection,
   buildHermesAcpSpawnInput,
   HERMES_BUILT_IN_SLASH_COMMANDS,
+  makeHermesEditApprovalCards,
   resolveHermesAcpBaseModelId,
   normalizeHermesT3McpToolCall,
   normalizeHermesTerminalResult,
+  normalizeHermesWebSearchQuery,
   preserveHermesAgentActivityTitle,
   resolveHermesSessionModeId,
 } from "./HermesAcpSupport.ts";
 import {
   extractMcpToolCallIdentity,
   parseSessionUpdateEvent,
+  type AcpToolCallState,
 } from "@t3tools/provider-acp/server/runtimeModel";
 
 describe("resolveHermesAcpBaseModelId", () => {
@@ -59,68 +65,101 @@ describe("buildHermesAcpSpawnInput", () => {
   });
 });
 
+describe("hermesApprovalPosture", () => {
+  it("asks whenever T3's policy asks, as Claude's permission mode does", () => {
+    const granular = { granular: { rules: true, sandbox_approval: true } };
+    expect(hermesApprovalPosture({ runtimeMode: "full-access" })).toBe("dontAsk");
+    expect(hermesApprovalPosture({ runtimeMode: "auto" })).toBe("dontAsk");
+    expect(hermesApprovalPosture({ runtimeMode: "auto-accept-edits" })).toBe("acceptEdits");
+    expect(hermesApprovalPosture({ runtimeMode: "approval-required" })).toBe("ask");
+    expect(
+      hermesApprovalPosture({ runtimeMode: "full-access", approvalPolicy: "on-request" }),
+    ).toBe("ask");
+    expect(hermesApprovalPosture({ runtimeMode: "full-access", approvalPolicy: granular })).toBe(
+      "ask",
+    );
+    expect(
+      hermesApprovalPosture({
+        runtimeMode: "full-access",
+        approvalPolicy: "never",
+        sandboxPolicy: { type: "workspaceWrite" },
+      }),
+    ).toBe("dontAsk");
+    expect(
+      hermesApprovalPosture({
+        runtimeMode: "full-access",
+        approvalPolicy: "never",
+        sandboxPolicy: { type: "readOnly" },
+      }),
+    ).toBe("ask");
+  });
+});
+
+describe("hermesFollowsApprovalPosture", () => {
+  it("follows T3's policy only on a Hermes that shows an edit it runs unasked", () => {
+    const initialize = (agentCapabilities: Record<string, unknown>) => ({
+      protocolVersion: 1,
+      agentCapabilities,
+    });
+    expect(hermesFollowsApprovalPosture(initialize({ _meta: { command_approval: true } }))).toBe(
+      true,
+    );
+    expect(hermesFollowsApprovalPosture(initialize({ loadSession: true }))).toBe(false);
+  });
+});
+
 describe("resolveHermesSessionModeId", () => {
+  // Hermes's session/new reply carries both; `setMode` writes the option.
   const modeState = {
-    currentModeId: "ask",
+    currentModeId: "default",
     availableModes: [
-      { id: "ask", name: "Ask", description: "Confirm every edit" },
-      { id: "auto", name: "Auto", description: "Apply edits without asking" },
+      { id: "default", name: "Default" },
+      { id: "accept_edits", name: "Accept Edits" },
+      { id: "dont_ask", name: "Don't Ask" },
     ],
   };
-
-  it("selects the autonomous mode for permissive runtime modes", () => {
-    expect(resolveHermesSessionModeId({ runtimeMode: "full-access", modeState })).toBe("auto");
-    expect(resolveHermesSessionModeId({ runtimeMode: "auto-accept-edits", modeState })).toBe(
-      "auto",
-    );
+  const editApprovalPolicy = (currentValue: string) => ({
+    id: "edit_approval_policy",
+    name: "Edits",
+    category: "mode" as const,
+    type: "select" as const,
+    currentValue,
+    options: [
+      { value: "ask", name: "Default" },
+      { value: "workspace_session", name: "Accept Edits" },
+      { value: "session", name: "Don't Ask" },
+    ],
   });
 
-  it("maps each runtime mode onto Hermes's edit-approval modes", () => {
-    const hermesModeState = {
-      currentModeId: "default",
-      availableModes: [
-        { id: "default", name: "Default", description: "Ask before edits." },
-        {
-          id: "accept_edits",
-          name: "Accept Edits",
-          description: "Auto-allow workspace and /tmp edits; still asks for sensitive paths.",
-        },
-        {
-          id: "dont_ask",
-          name: "Don't Ask",
-          description: "Auto-allow file edits for this session except sensitive paths.",
-        },
-      ],
-    };
-    expect(
-      resolveHermesSessionModeId({ runtimeMode: "full-access", modeState: hermesModeState }),
-    ).toBe("dont_ask");
-    expect(resolveHermesSessionModeId({ runtimeMode: "auto", modeState: hermesModeState })).toBe(
-      "dont_ask",
+  it("writes the edit_approval_policy value, not the modes id", () => {
+    const configOptions = [editApprovalPolicy("ask")];
+    expect(resolveHermesSessionModeId({ posture: "dontAsk", configOptions, modeState })).toBe(
+      "session",
+    );
+    expect(resolveHermesSessionModeId({ posture: "acceptEdits", configOptions, modeState })).toBe(
+      "workspace_session",
     );
     expect(
-      resolveHermesSessionModeId({ runtimeMode: "auto-accept-edits", modeState: hermesModeState }),
-    ).toBe("accept_edits");
-    expect(
-      resolveHermesSessionModeId({ runtimeMode: "approval-required", modeState: hermesModeState }),
-    ).toBeUndefined();
-  });
-
-  it("stays put when the requested mode is already active", () => {
-    expect(
-      resolveHermesSessionModeId({ runtimeMode: "approval-required", modeState }),
-    ).toBeUndefined();
-  });
-
-  it("returns nothing when the agent advertises no usable modes", () => {
-    expect(
-      resolveHermesSessionModeId({ runtimeMode: "full-access", modeState: undefined }),
+      resolveHermesSessionModeId({ posture: "ask", configOptions, modeState }),
     ).toBeUndefined();
     expect(
       resolveHermesSessionModeId({
-        runtimeMode: "full-access",
-        modeState: { currentModeId: "only", availableModes: [] },
+        posture: "ask",
+        configOptions: [editApprovalPolicy("session")],
+        modeState,
       }),
+    ).toBe("ask");
+  });
+
+  it("falls back to the modes ids, and leaves a Hermes without either alone", () => {
+    expect(resolveHermesSessionModeId({ posture: "dontAsk", configOptions: [], modeState })).toBe(
+      "dont_ask",
+    );
+    expect(
+      resolveHermesSessionModeId({ posture: "ask", configOptions: [], modeState }),
+    ).toBeUndefined();
+    expect(
+      resolveHermesSessionModeId({ posture: "dontAsk", configOptions: [], modeState: undefined }),
     ).toBeUndefined();
   });
 });
@@ -367,6 +406,13 @@ describe("normalizeHermesTerminalResult", () => {
     expect(normalized.data.rawOutput).toEqual({ exitCode: 1 });
   });
 
+  it("drops a running call's echo of its command, which is not output", () => {
+    const running = { ...completedTerminal("$ git status"), status: "inProgress" as const };
+    const normalized = normalizeHermesTerminalResult(running);
+    expect(normalized.data.content).toBeUndefined();
+    expect(normalized.command).toBe("git status");
+  });
+
   it("leaves failure text, in-flight calls, and other tools untouched", () => {
     const failure = completedTerminal("terminal failed: command timed out", "failed");
     expect(normalizeHermesTerminalResult(failure)).toBe(failure);
@@ -379,6 +425,130 @@ describe("normalizeHermesTerminalResult", () => {
 
     const edit = { ...completedTerminal("terminal result\n- **output:** x"), kind: "edit" };
     expect(normalizeHermesTerminalResult(edit)).toBe(edit);
+  });
+});
+
+describe("normalizeHermesWebSearchQuery", () => {
+  const search = (text: string, kind = "fetch") => ({
+    toolCallId: "toolu_1",
+    kind,
+    status: "pending" as const,
+    data: { content: [{ type: "content" as const, content: { type: "text" as const, text } }] },
+  });
+
+  it("reads the whole query from Hermes's start text", () => {
+    expect(
+      normalizeHermesWebSearchQuery(search("Searching the web for: FIFA World Cup ticket pricing"))
+        .data.rawInput,
+    ).toEqual({ query: "FIFA World Cup ticket pricing" });
+  });
+
+  it("leaves results, other fetches and tools that name their input alone", () => {
+    for (const toolCall of [
+      search("Web results: 5"),
+      search("Searching the web for: x", "read"),
+      { ...search("Searching the web for: x"), data: { rawInput: { query: "y" } } },
+    ]) {
+      expect(normalizeHermesWebSearchQuery(toolCall)).toBe(toolCall);
+    }
+  });
+});
+
+describe("makeHermesEditApprovalCards", () => {
+  const diff = {
+    type: "diff" as const,
+    path: "/repo/notes.txt",
+    oldText: null,
+    newText: "approved text",
+  };
+  const approval = {
+    sessionId: "sess-1",
+    options: [{ kind: "allow_once" as const, name: "Allow once", optionId: "allow_once" }],
+    toolCall: {
+      toolCallId: "edit-approval-1",
+      kind: "edit" as const,
+      content: [diff],
+      rawInput: { tool: "write_file", arguments: { path: "notes.txt", content: "approved text" } },
+    },
+  };
+  const write = (toolCallId: string, status: "completed" | "failed", text: string) => ({
+    toolCallId,
+    kind: "edit",
+    status,
+    data: {
+      locations: [{ path: "notes.txt" }],
+      content: [{ type: "content" as const, content: { type: "text" as const, text } }],
+    },
+  });
+
+  it("shows the approved diff on the write, once, and keeps a denied write's reason", () => {
+    const cards = makeHermesEditApprovalCards();
+    const normalize = (toolCall: AcpToolCallState) => cards.normalizeToolCall(toolCall, "sess-1");
+    cards.onPermissionRequest(approval);
+    const done = normalize(write("toolu_1", "completed", "✅ write_file completed"));
+    expect(done.data.content).toEqual([diff]);
+    expect(normalize(done).data.content).toEqual([diff]);
+
+    const unasked = write("toolu_2", "completed", "✅ write_file completed");
+    expect(normalize(unasked)).toBe(unasked);
+
+    cards.onPermissionRequest(approval);
+    const denied = write("toolu_3", "failed", "Edit approval denied by ACP client");
+    expect(normalize(denied)).toBe(denied);
+    expect(normalize(unasked)).toBe(unasked);
+  });
+
+  it("keeps each session's diff for the same path", () => {
+    const cards = makeHermesEditApprovalCards();
+    const otherDiff = { ...diff, newText: "other session's text" };
+    cards.onPermissionRequest(approval);
+    cards.onPermissionRequest({
+      ...approval,
+      sessionId: "sess-2",
+      toolCall: { ...approval.toolCall, content: [otherDiff] },
+    });
+    const done = write("toolu_1", "completed", "✅ write_file completed");
+    expect(cards.normalizeToolCall(done, "sess-1").data.content).toEqual([diff]);
+    expect(cards.normalizeToolCall(done, "sess-2").data.content).toEqual([otherDiff]);
+  });
+
+  it("keeps the diff an unasked write showed when it started, after an approved one", () => {
+    const cards = makeHermesEditApprovalCards();
+    const startedDiff = { ...diff, newText: "started text" };
+    const started = (toolCallId: string) => ({
+      toolCallId,
+      kind: "edit",
+      status: "pending" as const,
+      data: { locations: [{ path: "notes.txt" }], content: [startedDiff] },
+    });
+    const unasked = started("toolu_4");
+    expect(cards.normalizeToolCall(unasked, "sess-1")).toBe(unasked);
+    expect(
+      cards.normalizeToolCall(write("toolu_4", "completed", "✅ write_file completed"), "sess-1")
+        .data.content,
+    ).toEqual([startedDiff]);
+
+    cards.normalizeToolCall(started("toolu_5"), "sess-1");
+    cards.onPermissionRequest(approval);
+    expect(
+      cards.normalizeToolCall(write("toolu_5", "completed", "✅ write_file completed"), "sess-1")
+        .data.content,
+    ).toEqual([diff]);
+  });
+
+  it("drops only the status update that closes a permission card", () => {
+    const { ignoreSessionUpdate } = makeHermesEditApprovalCards();
+    const update = (toolCallId: string) => ({
+      sessionId: "sess-1",
+      update: {
+        sessionUpdate: "tool_call_update" as const,
+        toolCallId,
+        status: "completed" as const,
+      },
+    });
+    expect(ignoreSessionUpdate(update("edit-approval-1"))).toBe(true);
+    expect(ignoreSessionUpdate(update("perm-check-12"))).toBe(true);
+    expect(ignoreSessionUpdate(update("toolu_1"))).toBe(false);
   });
 });
 
@@ -406,6 +576,28 @@ describe("preserveHermesAgentActivityTitle", () => {
   it("leaves other tools on their shared summary", () => {
     const toolCall = parsed("read_file: src/app.ts", "read");
     expect(preserveHermesAgentActivityTitle(toolCall)).toBe(toolCall);
+  });
+});
+
+describe("readHermesCompressReply", () => {
+  it("counts only a compression that removed messages, with its token estimate", () => {
+    expect(
+      [
+        "Compressed: 31 → 6 messages\nApprox request size: ~24,310 → ~3,904 tokens",
+        "Compressed with fallback: 31 → 9 messages\nApprox request size: ~24,310 → ~6,120 tokens\nSummary generation failed; Hermes used limited fallback context and removed 22 message(s).",
+        "Context compressed.",
+        "No changes from compression: 2 messages\nApprox request size: ~11,452 tokens (unchanged)\n",
+        "Compression refused (summary would grow the conversation): 8 messages preserved",
+        "Compression aborted: 8 messages preserved\nSummary generation failed; no messages were removed.",
+      ].map(readHermesCompressReply),
+    ).toEqual([
+      { compacted: true, beforeTokenCount: 24310, afterTokenCount: 3904 },
+      { compacted: true, beforeTokenCount: 24310, afterTokenCount: 6120 },
+      { compacted: true },
+      { compacted: false },
+      { compacted: false },
+      { compacted: false },
+    ]);
   });
 });
 

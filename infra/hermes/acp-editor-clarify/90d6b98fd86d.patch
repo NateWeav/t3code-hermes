@@ -1,0 +1,167 @@
+diff --git a/acp_adapter/gateway_server.py b/acp_adapter/gateway_server.py
+index 4da6454493..1adcaed863 100644
+--- a/acp_adapter/gateway_server.py
++++ b/acp_adapter/gateway_server.py
+@@ -305,10 +305,13 @@ class GatewayACPAgent(GatewayReplyMixin, acp.Agent):
+         flags = env_launch_flags()
+         if flags.get("safe_mode") or flags.get("ignore_user_config"):
+             flags.update(_bypass_route())
++        editor = {"mcp_servers": [s.model_dump(by_alias=True) for s in mcp_servers or []],
++                  "edit_approval_policy": "ask"}
++        if self._form_elicitation and "acp-editor-clarify-v1" in descriptor.get("capabilities", []):
++            # This editor answers clarify as a form (``_answer_clarify``), so the session may ask.
++            editor["clarify"] = True
+         snapshot = await client.rpc("session.create", request_id=uuid.uuid4().hex,
+-            source="acp", cwd=_translate_acp_cwd(cwd),
+-            editor={"mcp_servers": [s.model_dump(by_alias=True) for s in mcp_servers or []],
+-                    "edit_approval_policy": "ask"}, **flags,
++            source="acp", cwd=_translate_acp_cwd(cwd), editor=editor, **flags,
+             **delegation_create_fields(self._delegation, descriptor))
+         session_id = snapshot["session_id"]
+         await self._adopt(session_id, snapshot)
+diff --git a/gateway/session_controls.py b/gateway/session_controls.py
+index 3e4a89ad89..9deddea7c1 100644
+--- a/gateway/session_controls.py
++++ b/gateway/session_controls.py
+@@ -551,7 +551,7 @@ class AuthorityConnection:
+         return {'instance_id': self.authority.instance_id, 'profile_id': self.authority.profile_id,
+                 'authority_epoch': self.authority.epoch,
+                 'capabilities': ['durable-admission-v1', 'event-replay-v1', 'local-cli-create-v1', 'acp-editor-policy-v1',
+-                                 'acp-session-mcp-v1', 'clarify-batch-v1'],
++                                 'acp-session-mcp-v1', 'clarify-batch-v1', 'acp-editor-clarify-v1'],
+                 'session_create': {'sources': sorted(SURFACES),
+                                    'parameters': sorted(CREATE_FIELDS | {'title'})},
+                 # Main's ``gateway.ready.skin``: the canonical client's own ready carries it.
+diff --git a/gateway/session_local_editor.py b/gateway/session_local_editor.py
+index b0f2182fa4..e89b0d681b 100644
+--- a/gateway/session_local_editor.py
++++ b/gateway/session_local_editor.py
+@@ -20,13 +20,16 @@ def validate_editor(source, editor):
+     if not isinstance(editor, dict):
+         raise RuntimeStoreError('invalid_params', field='editor',
+                                 detail=f'must be a mapping, got {type(editor).__name__}')
+-    unknown = sorted(set(editor) - {'mcp_servers', 'edit_approval_policy'})
++    unknown = sorted(set(editor) - {'mcp_servers', 'edit_approval_policy', 'clarify'})
+     if unknown:
+         raise RuntimeStoreError('invalid_params', field=f'editor.{unknown[0]}',
+                                 detail='unknown editor key')
+     if editor.get('edit_approval_policy', 'ask') != 'ask':
+         raise RuntimeStoreError('invalid_params', field='editor.edit_approval_policy',
+                                 detail="must be 'ask': every edit is approved one at a time")
++    if not isinstance(editor.get('clarify', False), bool):
++        raise RuntimeStoreError('invalid_params', field='editor.clarify',
++                                detail=f'must be a boolean, got {type(editor.get("clarify")).__name__}')
+     if not isinstance(editor.get('mcp_servers', []), list):
+         raise RuntimeStoreError('invalid_params', field='editor.mcp_servers',
+                                 detail=f'must be a list, got {type(editor.get("mcp_servers")).__name__}')
+diff --git a/gateway/session_policy.py b/gateway/session_policy.py
+index 9141455b8f..2fdadd4b33 100644
+--- a/gateway/session_policy.py
++++ b/gateway/session_policy.py
+@@ -262,7 +262,9 @@ class LocalSessionPolicy:
+             return self.toolsets
+         # The workspace decision is the creation-time one: a project file the agent writes mid-session must
+         # not switch this conversation's toolsets (prompt cache). Only a profile change (``focus`` off) does.
+-        return tuple(sorted(_resolve_toolsets({}, config, self.source, self.safe_mode, self.coding_posture)))
++        editor = json.loads(self.request_json).get('editor')
++        return tuple(sorted(_resolve_toolsets({'editor': editor}, config, self.source, self.safe_mode,
++                                              self.coding_posture)))
+ 
+     def current_reasoning_config(self, runner, session_key=None):
+         """The next turn's reasoning: a typed session /reasoning (the messaging handler's override), else
+@@ -708,6 +710,11 @@ def _resolve_toolsets(params, config, source, safe_mode, coding_posture=False, b
+         disabled = set(parse_config_string_list((config.get('agent') or {}).get('disabled_toolsets')))
+         surface = set(CLIENT_SURFACE_TOOLSETS) if source == 'gui' else {'project'}
+         enabled |= surface - (disabled - {'desktop_ui'})
++    if explicit is None and source == 'acp' and (params.get('editor') or {}).get('clarify') is True:
++        # hermes-acp leaves clarify out for editors that cannot answer it; this editor said it can.
++        from agent.skill_utils import parse_config_string_list
++        if 'clarify' not in parse_config_string_list((config.get('agent') or {}).get('disabled_toolsets')):
++            enabled.add('clarify')
+     if safe_mode:
+         # Plugin toolsets are user customizations; the safe worker never imports them.
+         from hermes_cli.tools_config import _get_plugin_toolset_keys
+diff --git a/gateway/session_policy_refresh.py b/gateway/session_policy_refresh.py
+index c39d4ec40c..94dd4224b1 100644
+--- a/gateway/session_policy_refresh.py
++++ b/gateway/session_policy_refresh.py
+@@ -64,7 +64,8 @@ def _settings(policy, config, live, picked):
+     if 'toolsets' not in request and policy.editor_mcp_json is None:
+         keys.append('disabled_toolsets')
+         _follow(config, live, 'platform_toolsets')
+-        toolsets = tuple(sorted(_resolve_toolsets({}, live, policy.source, policy.safe_mode, policy.coding_posture)))
++        toolsets = tuple(sorted(_resolve_toolsets({'editor': request.get('editor')}, live, policy.source,
++                                                  policy.safe_mode, policy.coding_posture)))
+     for key in keys:
+         _follow(agent, live_agent, key)
+     if agent or 'agent' in config:
+diff --git a/tests/acp_adapter/test_gateway_editor_clarify_toolset.py b/tests/acp_adapter/test_gateway_editor_clarify_toolset.py
+new file mode 100644
+index 0000000000..e50f1a6986
+--- /dev/null
++++ b/tests/acp_adapter/test_gateway_editor_clarify_toolset.py
+@@ -0,0 +1,64 @@
++"""An ACP session offers clarify to an editor that can answer it as a form, and to no other.
++
++Real gateway daemon, real ``hermes acp`` stdio process (``acp_adapter.entry``, the ``GatewayACPAgent``
++viewer), loopback model that calls the real clarify tool and records the tools each request offered.
++``hermes-acp`` leaves clarify out; a session that an editor advertising ``elicitation.form`` creates
++gets it, and the editor's answer reaches the model. ``agent.disabled_toolsets: [clarify]`` still
++turns it off.
++"""
++import asyncio
++import io
++import json
++import time
++
++import pytest
++
++from tests.acp_adapter.test_gateway_sessions import editor
++from tests.gateway.fixtures.authority_clarify_peer import ModelPeer as ClarifyPeer
++
++
++class OfferRecordingPeer(ClarifyPeer):
++    def do_POST(self):
++        raw = self.rfile.read(int(self.headers['Content-Length']))
++        tools = json.loads(raw).get('tools') or []
++        self.server.offered.append({tool['function']['name'] for tool in tools})
++        self.rfile = io.BytesIO(raw)
++        super().do_POST()
++
++
++@pytest.mark.platforms("linux")
++@pytest.mark.asyncio
++@pytest.mark.parametrize("daemon, form, offered", [
++    ({}, True, True),
++    ({}, False, False),
++    ({"agent": {"disabled_toolsets": ["clarify"]}}, True, False),
++], indirect=["daemon"], ids=["form-elicitation", "no-elicitation", "form-but-disabled"])
++async def test_new_acp_session_offers_clarify_to_a_form_editor(daemon, tmp_path, model_peer, form, offered):
++    model_peer.RequestHandlerClass = OfferRecordingPeer
++    model_peer.offered = []
++    async with editor(daemon, tmp_path) as acp:
++        capabilities = {"elicitation": {"form": {}}} if form else {}
++        assert "result" in await acp.rpc("initialize", protocolVersion=1, clientCapabilities=capabilities)
++        sid = (await acp.rpc("session/new", cwd=str(tmp_path), mcpServers=[]))["result"]["sessionId"]
++        turn = asyncio.create_task(acp.rpc("session/prompt", sessionId=sid,
++                                           prompt=[{"type": "text", "text": "Ask my color"}]))
++        if offered:
++            deadline = time.monotonic() + 30
++            while not any(f.get("method") == "elicitation/create" for f in acp.frames):
++                assert not turn.done(), turn.result()
++                assert time.monotonic() < deadline, "no elicitation/create reached the editor"
++                await asyncio.sleep(.05)
++            request = next(f for f in acp.frames if f.get("method") == "elicitation/create")
++            assert request["params"]["message"].startswith("Pick a color")
++            acp.process.stdin.write(json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": {
++                "action": "accept", "content": {"answer": "green"}}}).encode() + b"\n")
++            await acp.process.stdin.drain()
++        reply = await asyncio.wait_for(turn, 40)
++        assert reply.get("result", {}).get("stopReason") == "end_turn", reply
++    turns = [tools for tools in model_peer.offered if tools]  # auxiliary calls offer no tools
++    assert turns and all(("clarify" in tools) == offered for tools in turns), turns
++    asked = [f for f in acp.frames if f.get("method") in ("elicitation/create", "session/request_permission")]
++    assert len(asked) == (1 if offered else 0), asked
++    if offered:
++        tool_results = [m for messages in model_peer.requests for m in messages if m["role"] == "tool"]
++        assert any("green" in json.dumps(m) for m in tool_results), tool_results

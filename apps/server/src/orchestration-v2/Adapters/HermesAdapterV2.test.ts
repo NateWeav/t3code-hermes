@@ -158,6 +158,11 @@ const runMockTurn = (input: {
    */
   readonly promptUpdates?: ReadonlyArray<EffectAcpSchema.SessionUpdate>;
   /**
+   * Updates of a gateway turn the first prompt's request carries ahead of the prompt's own turn,
+   * stamped as the `acp-unprompted-turns` patch stamps them.
+   */
+  readonly unpromptedPromptUpdates?: ReadonlyArray<EffectAcpSchema.SessionUpdate>;
+  /**
    * Session updates delivered after the first turn ends, with no prompt open: what the Hermes
    * gateway projects when it runs a turn of its own for a finished background job.
    */
@@ -171,6 +176,8 @@ const runMockTurn = (input: {
   }) => Effect.Effect<void>;
   /** Session updates a second, user-sent prompt delivers, run after `afterTurn`. */
   readonly followUpPromptUpdates?: ReadonlyArray<EffectAcpSchema.SessionUpdate>;
+  /** As `unpromptedPromptUpdates`, for the second prompt. */
+  readonly unpromptedFollowUpUpdates?: ReadonlyArray<EffectAcpSchema.SessionUpdate>;
 }) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
@@ -197,6 +204,10 @@ const runMockTurn = (input: {
     };
     const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const promptUpdates = [input.promptUpdates, input.followUpPromptUpdates];
+    const unpromptedPromptUpdates = [
+      input.unpromptedPromptUpdates,
+      input.unpromptedFollowUpUpdates,
+    ];
     const idleUpdates = input.idleUpdates;
     let sessionIdSeen: string | undefined;
     type Runtime = AcpSessionRuntime.AcpSessionRuntime["Service"];
@@ -205,7 +216,9 @@ const runMockTurn = (input: {
       instanceId,
       settings,
       environment,
-      ...(input.promptUpdates === undefined && idleUpdates === undefined
+      ...(input.promptUpdates === undefined &&
+      input.unpromptedPromptUpdates === undefined &&
+      idleUpdates === undefined
         ? {}
         : {
             makeRuntime: ({ runtimePolicy: _policy, ...runtimeInput }) =>
@@ -225,6 +238,12 @@ const runMockTurn = (input: {
                     Effect.gen(function* () {
                       const { sessionId } = yield* runtime.start();
                       sessionIdSeen = sessionId;
+                      for (const update of unpromptedPromptUpdates.shift() ?? [])
+                        yield* deliver!({
+                          sessionId,
+                          update,
+                          _meta: { hermes: { unprompted: true } },
+                        });
                       for (const update of promptUpdates.shift() ?? [])
                         yield* deliver!({ sessionId, update });
                       return { stopReason: "end_turn" as const };
@@ -541,7 +560,14 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 
-  it.effect("offers a wake run for a turn the Hermes gateway runs after the prompt settled", () =>
+  const wakeReply: ReadonlyArray<EffectAcpSchema.SessionUpdate> = [
+    { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "The merge landed." } },
+  ];
+  it.effect.each([
+    { when: "after the prompt settled", idleUpdates: wakeReply },
+    // The gateway runs a wake queued ahead of the prompt inside the prompt's request.
+    { when: "ahead of a queued prompt's own turn", unpromptedPromptUpdates: wakeReply },
+  ])("offers a wake run for a turn the Hermes gateway runs $when", (wake) =>
     Effect.gen(function* () {
       const offers = yield* Queue.unbounded<ProviderContinuationRequest>();
       const { events } = yield* runMockTurn({
@@ -550,12 +576,7 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
         promptUpdates: [
           { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Queued." } },
         ],
-        idleUpdates: [
-          {
-            sessionUpdate: "agent_message_chunk",
-            content: { type: "text", text: "The merge landed." },
-          },
-        ],
+        ...wake,
         continuationRequests: {
           offer: (request) => Queue.offer(offers, request).pipe(Effect.asVoid),
         },
@@ -563,126 +584,145 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
       });
       // A flavor without post-settle continuation drops these frames: the agent works, the thread stays blank.
       assert.equal(yield* Queue.size(offers), 1);
-      const wakeEvents = events.slice(
-        events.findIndex((event) => event.type === "turn.terminal") + 1,
-      );
-      assert.isTrue(
-        wakeEvents.some(
-          (event) =>
-            event.type === "message.updated" &&
-            event.message.role === "assistant" &&
-            event.message.text.includes("The merge landed."),
-        ),
-      );
-      const wakeTerminal = wakeEvents.at(-1);
+      const promptTerminalIndex = events.findIndex((event) => event.type === "turn.terminal");
+      const replies = (from: number, to?: number) => [
+        ...new Map(
+          events
+            .slice(from, to)
+            .flatMap((event) =>
+              event.type === "message.updated" && event.message.role === "assistant"
+                ? [[event.message.id, event.message.text.trim()] as const]
+                : [],
+            ),
+        ).values(),
+      ];
+      assert.deepEqual(replies(0, promptTerminalIndex), ["Queued."]);
+      assert.deepEqual(replies(promptTerminalIndex + 1), ["The merge landed."]);
+      const wakeTerminal = events.at(-1);
       assert.equal(wakeTerminal?.type === "turn.terminal" && wakeTerminal.status, "completed");
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 
-  it.effect("writes a late delegated child's answer into its thread and names it on the wake", () =>
-    Effect.gen(function* () {
-      // Each call is its own background unit; the second child is still working at the wake.
-      const delegation = (key: string, goal: string) => {
-        const toolCallId = `toolu_delegate_${key}`;
-        const child = {
-          goal,
-          subagent_id: `sa-0-${key}`,
-          child_session_id: `20261105_231056_${key}`,
-          task_index: 0,
-          task_count: 1,
-          depth: 0,
-          delegation_id: `deleg_${key}`,
-        };
-        const progress = (hermesDelegation: Record<string, unknown>) =>
-          ({
-            sessionUpdate: "tool_call_update",
-            toolCallId,
-            status: "in_progress",
-            rawOutput: { hermesDelegation: { ...child, ...hermesDelegation } },
-          }) as const;
-        const dispatched = { status: "dispatched", mode: "background", count: 1, goals: [goal] };
-        const launch: ReadonlyArray<EffectAcpSchema.SessionUpdate> = [
+  // Each call is its own background unit; the second child is still working at the wake.
+  const delegation = (key: string, goal: string) => {
+    const toolCallId = `toolu_delegate_${key}`;
+    const child = {
+      goal,
+      subagent_id: `sa-0-${key}`,
+      child_session_id: `20261105_231056_${key}`,
+      task_index: 0,
+      task_count: 1,
+      depth: 0,
+      delegation_id: `deleg_${key}`,
+    };
+    const progress = (hermesDelegation: Record<string, unknown>) =>
+      ({
+        sessionUpdate: "tool_call_update",
+        toolCallId,
+        status: "in_progress",
+        rawOutput: { hermesDelegation: { ...child, ...hermesDelegation } },
+      }) as const;
+    const dispatched = { status: "dispatched", mode: "background", count: 1, goals: [goal] };
+    const launch: ReadonlyArray<EffectAcpSchema.SessionUpdate> = [
+      {
+        sessionUpdate: "tool_call",
+        toolCallId,
+        title: `delegate_task: 1 tasks: ${goal}`,
+        kind: "execute",
+        rawInput: { action: "spawn", tasks: [{ goal }] },
+        content: [
           {
-            sessionUpdate: "tool_call",
-            toolCallId,
-            title: `delegate_task: 1 tasks: ${goal}`,
-            kind: "execute",
-            rawInput: { action: "spawn", tasks: [{ goal }] },
-            content: [
-              {
-                type: "content",
-                content: { type: "text", text: `Delegating 1 tasks\n\n1. ${goal}` },
-              },
-            ],
-          },
-          progress({ event: "subagent.start", text: goal }),
-          {
-            sessionUpdate: "tool_call_update",
-            toolCallId,
-            kind: "execute",
-            status: "completed",
-            rawOutput: dispatched,
-            content: [
-              { type: "content", content: { type: "text", text: JSON.stringify(dispatched) } },
-            ],
-          },
-        ];
-        return { launch, progress };
-      };
-      const goal = "Reply with exactly: Hello";
-      const done = delegation("after", goal);
-      const working = delegation("working", "Run sleep 60, then reply with exactly: Later");
-      const offers = yield* Queue.unbounded<ProviderContinuationRequest>();
-      const { events } = yield* runMockTurn({
-        name: "delegate-after-turn",
-        mockEnvironment: {},
-        promptUpdates: [
-          ...done.launch,
-          ...working.launch,
-          {
-            sessionUpdate: "agent_message_chunk",
-            content: { type: "text", text: "They are running in the background." },
+            type: "content",
+            content: { type: "text", text: `Delegating 1 tasks\n\n1. ${goal}` },
           },
         ],
-        // The child ends after the parent's prompt settled, then the gateway hands its result back.
-        idleUpdates: [
-          done.progress({ event: "subagent.complete", status: "completed", summary: "Hello" }),
-          { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Hello" } },
-        ],
-        continuationRequests: {
-          offer: (request) => Queue.offer(offers, request).pipe(Effect.asVoid),
-        },
-        // The wake's run ends on its quiet window, though the other child still works.
-        runContinuation: true,
-      });
-      const subagents = new Map(
-        events.flatMap((event) =>
-          event.type === "subagent.updated" ? [[event.subagent.prompt, event.subagent]] : [],
-        ),
-      );
-      const subagent = subagents.get(goal);
-      if (subagent === undefined) throw new Error("no subagent was projected");
-      assert.equal(subagent.status, "completed");
-      assert.equal(subagent.result, "Hello");
-      assert.equal(
-        subagents.get("Run sleep 60, then reply with exactly: Later")?.status,
-        "running",
-      );
-      // The gateway turn that hands the result back names the child that woke it.
-      assert.deepEqual((yield* Queue.take(offers)).notification, {
-        source: { kind: "subagent", childThreadId: subagent.childThreadId! },
-        outcome: "completed",
-        summary: `Subagent "${goal}" finished`,
-      });
-      const childReplies = events.flatMap((event) =>
-        event.type === "message.updated" &&
-        event.message.threadId === subagent.childThreadId &&
-        event.message.role === "assistant"
-          ? [event.message.text]
-          : [],
-      );
-      assert.deepEqual(childReplies, ["Hello"]);
-    }).pipe(Effect.provide(testLayer), Effect.scoped),
+      },
+      progress({ event: "subagent.start", text: goal }),
+      {
+        sessionUpdate: "tool_call_update",
+        toolCallId,
+        kind: "execute",
+        status: "completed",
+        rawOutput: dispatched,
+        content: [{ type: "content", content: { type: "text", text: JSON.stringify(dispatched) } }],
+      },
+    ];
+    return { launch, progress };
+  };
+  const helloGoal = "Reply with exactly: Hello";
+  const hello = delegation("after", helloGoal);
+  const working = delegation("working", "Run sleep 60, then reply with exactly: Later");
+  const helloEnds = hello.progress({
+    event: "subagent.complete",
+    status: "completed",
+    summary: "Hello",
+  });
+  const launched: ReadonlyArray<EffectAcpSchema.SessionUpdate> = [
+    { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Both launched." } },
+  ];
+  const helloWake: ReadonlyArray<EffectAcpSchema.SessionUpdate> = [
+    { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Hello" } },
+  ];
+  it.effect.each([
+    {
+      when: "after the parent's prompt settled",
+      promptUpdates: [...hello.launch, ...working.launch, ...launched],
+      // Then the gateway hands its result back in a turn of its own.
+      idleUpdates: [helloEnds, ...helloWake],
+    },
+    {
+      when: "while a prompt was open, its wake ahead of the next prompt",
+      promptUpdates: [...hello.launch, ...working.launch, helloEnds, ...launched],
+      followUpPromptUpdates: [
+        { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Noted." } },
+      ],
+      unpromptedFollowUpUpdates: helloWake,
+    },
+  ] satisfies ReadonlyArray<
+    { readonly when: string } & Partial<Parameters<typeof runMockTurn>[0]>
+  >)(
+    "writes a delegated child's answer into its thread and names it on the wake when it ends $when",
+    ({ when: _when, ...updates }) =>
+      Effect.gen(function* () {
+        const offers = yield* Queue.unbounded<ProviderContinuationRequest>();
+        const { events } = yield* runMockTurn({
+          name: "delegate-wake",
+          mockEnvironment: {},
+          ...updates,
+          continuationRequests: {
+            offer: (request) => Queue.offer(offers, request).pipe(Effect.asVoid),
+          },
+          // The wake's run ends on its quiet window, though the other child still works.
+          runContinuation: true,
+        });
+        const subagents = new Map(
+          events.flatMap((event) =>
+            event.type === "subagent.updated" ? [[event.subagent.prompt, event.subagent]] : [],
+          ),
+        );
+        const subagent = subagents.get(helloGoal);
+        if (subagent === undefined) throw new Error("no subagent was projected");
+        assert.equal(subagent.status, "completed");
+        assert.equal(subagent.result, "Hello");
+        assert.equal(
+          subagents.get("Run sleep 60, then reply with exactly: Later")?.status,
+          "running",
+        );
+        // The gateway turn that hands the result back names the child that woke it.
+        assert.deepEqual((yield* Queue.take(offers)).notification, {
+          source: { kind: "subagent", childThreadId: subagent.childThreadId! },
+          outcome: "completed",
+          summary: `Subagent "${helloGoal}" finished`,
+        });
+        const childReplies = events.flatMap((event) =>
+          event.type === "message.updated" &&
+          event.message.threadId === subagent.childThreadId &&
+          event.message.role === "assistant"
+            ? [event.message.text]
+            : [],
+        );
+        assert.deepEqual(childReplies, ["Hello"]);
+      }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 
   it.effect(

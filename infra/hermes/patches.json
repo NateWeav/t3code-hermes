@@ -152,6 +152,18 @@
           "file": "acp-launch-yolo-resume/5b32cfc23007.patch"
         }
       ]
+    },
+    {
+      "id": "acp-unprompted-turns",
+      "title": "Wakes as their own runs",
+      "neededFor": "A background wake shown as a run of its own. Without it, when a message is queued behind a turn Hermes runs for a finished background job or subagent, T3 shows that turn's reply inside the queued message's reply.",
+      "versions": [
+        {
+          "hermesCommit": "ca4360692055bdb4df3a695c164646e528891da8",
+          "hermesCommitDate": "2026-11-06T04:01:15Z",
+          "file": "acp-unprompted-turns/ca4360692055.patch"
+        }
+      ]
     }
   ]
 }

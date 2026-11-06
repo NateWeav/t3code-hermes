@@ -25,6 +25,8 @@ export interface HermesSubagentUpdate {
   readonly result: string | null;
   readonly role: string | null;
   readonly usage: OrchestrationV2SubagentUsage | null;
+  /** Ends a background child, whose result the gateway hands the agent in a turn of its own. */
+  readonly wakesAgent?: boolean;
 }
 
 type Child = {
@@ -280,21 +282,27 @@ const REMEMBERED_LAUNCHES = 256;
  */
 export function makeHermesSubagentExtractor() {
   const launches = new Map<string, ReadonlyArray<Child>>();
+  const dispatched = new Set<string>();
   return (tool: AcpToolCallState): ReadonlyArray<HermesSubagentUpdate> | undefined => {
     let children = launches.get(tool.toolCallId);
     if (children === undefined && isHermesDelegation(tool)) {
       children = startChildren(tool);
       launches.set(tool.toolCallId, children);
-      if (launches.size > REMEMBERED_LAUNCHES) launches.delete(launches.keys().next().value!);
+      if (launches.size > REMEMBERED_LAUNCHES) {
+        const oldest = launches.keys().next().value!;
+        launches.delete(oldest);
+        dispatched.delete(oldest);
+      }
     }
     if (children === undefined && !isHermesDelegationProgress(tool)) return undefined;
-    return delegationUpdates(tool, children ?? []);
+    return delegationUpdates(tool, children ?? [], dispatched);
   };
 }
 
 function delegationUpdates(
   tool: AcpToolCallState,
   children: ReadonlyArray<Child>,
+  dispatched: Set<string>,
 ): ReadonlyArray<HermesSubagentUpdate> {
   const output = record(tool.data.rawOutput);
   const progress = record(output.hermesDelegation);
@@ -306,13 +314,14 @@ function delegationUpdates(
     const content = contentText(tool);
     // Stock clips fallback JSON at 5,000 characters. The dispatch header
     // precedes the potentially long goals; clipping is not a child failure.
-    const dispatched =
+    const backgrounded =
       output.status === "dispatched" ||
       record(content).status === "dispatched" ||
       /^\{\s*"status"\s*:\s*"dispatched"\s*,\s*"mode"\s*:\s*"background"/.test(content);
-    if (dispatched) {
+    if (backgrounded) {
       // The patch (which also fills rawInput) reports each child's end later.
       const live = tool.data.rawInput !== undefined;
+      if (live) dispatched.add(id);
       return children.map((child) =>
         childUpdate(
           id,
@@ -372,7 +381,8 @@ function delegationUpdates(
       return [];
     }
     if (progress.event === "subagent.complete") {
-      return [resultUpdate(id, childAt(index), index, progress)];
+      const update = resultUpdate(id, childAt(index), index, progress);
+      return [dispatched.has(id) ? { ...update, wakesAgent: true } : update];
     }
     return [
       childUpdate(

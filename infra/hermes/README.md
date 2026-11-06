@@ -246,6 +246,24 @@ patches. New `hermes acp` processes pick it up; restarting the gateway is not re
 patch's `tests/acp_adapter/test_gateway_launch_yolo_resume.py` in a scratch checkout, as for
 `acp-delegation-progress`.
 
+## `acp-unprompted-turns`
+
+**Needed by:** a background wake shown as a run of its own. When a background job or subagent
+finishes, the gateway runs a turn of its own to hand the result back. If the user's next message is
+already queued behind that turn, the gateway runs the wake first, inside the message's ACP request,
+and stock `hermes acp` projects both turns into that request with nothing marking where one ends.
+T3 Code then showed the wake's reply as part of the queued message's reply.
+
+The patch stamps each update of a turn this `hermes acp` did not submit with
+`_meta.hermes.unprompted: true`. It knows its own turns by their admission, or, before the submit's
+receipt arrives, by the `input_id` their pending row names. T3 Code shows stamped updates as a run
+of their own; without the patch, the wake's reply stays in the queued message's run.
+
+Verified against hermes-agent `ca43606920` (`main`, 2026-11-06), alone and after the other patches.
+The change is in `hermes acp` only, so new `hermes acp` processes pick it up; restarting the gateway
+is not required. Run the patch's `tests/acp_adapter/test_gateway_unprompted_turn.py` in a scratch
+checkout, as for `acp-delegation-progress`.
+
 ## Retired
 
 **`acp-background-reports`** and **`acp-durable-completion-receipts`** hooked Hermes's in-process

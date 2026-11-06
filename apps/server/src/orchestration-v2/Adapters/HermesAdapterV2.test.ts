@@ -2,6 +2,7 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import {
+  CheckpointId,
   HermesSettings,
   MessageId,
   NodeId,
@@ -20,7 +21,10 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 import { resolveSelfInvocation } from "@t3tools/shared/nodeRuntime";
 import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
@@ -38,7 +42,9 @@ import { parseSessionUpdateEvent } from "@t3tools/provider-acp/server/runtimeMod
 import type * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 import {
   discardLostHermesTurnsOnPrompt,
+  hideHermesStopNotices,
   makeHermesAcpRuntime,
+  resendHermesPromptsRefusedBusy,
 } from "../../provider/acp/HermesAcpSupport.ts";
 import delegationFixture from "../../provider/acp/fixtures/hermes-delegation.json" with { type: "json" };
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
@@ -145,6 +151,11 @@ function turnInput(input: {
  * Runs one turn against the mock ACP agent behind a stand-in `hermes` binary,
  * so the real spawn path (`hermes acp`, environment) is exercised.
  */
+/** A permission request the scripted prompt raises; the turn answers it with Allow once. */
+type MockPermission = {
+  readonly permission: Omit<EffectAcpSchema.RequestPermissionRequest, "sessionId">;
+};
+
 const runMockTurn = (input: {
   readonly name: string;
   readonly mockEnvironment: Record<string, string>;
@@ -156,7 +167,12 @@ const runMockTurn = (input: {
    * Session updates the prompt delivers instead of the mock's own reply, for
    * Hermes's ACP v1 shapes (`tool_call`) the v2 mock cannot send.
    */
-  readonly promptUpdates?: ReadonlyArray<EffectAcpSchema.SessionUpdate>;
+  readonly promptUpdates?: ReadonlyArray<EffectAcpSchema.SessionUpdate | MockPermission>;
+  /**
+   * Updates of a gateway turn the first prompt's request carries ahead of the prompt's own turn,
+   * stamped as the `acp-unprompted-turns` patch stamps them.
+   */
+  readonly unpromptedPromptUpdates?: ReadonlyArray<EffectAcpSchema.SessionUpdate>;
   /**
    * Session updates delivered after the first turn ends, with no prompt open: what the Hermes
    * gateway projects when it runs a turn of its own for a finished background job.
@@ -171,6 +187,8 @@ const runMockTurn = (input: {
   }) => Effect.Effect<void>;
   /** Session updates a second, user-sent prompt delivers, run after `afterTurn`. */
   readonly followUpPromptUpdates?: ReadonlyArray<EffectAcpSchema.SessionUpdate>;
+  /** As `unpromptedPromptUpdates`, for the second prompt. */
+  readonly unpromptedFollowUpUpdates?: ReadonlyArray<EffectAcpSchema.SessionUpdate>;
 }) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
@@ -197,15 +215,22 @@ const runMockTurn = (input: {
     };
     const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const promptUpdates = [input.promptUpdates, input.followUpPromptUpdates];
+    const unpromptedPromptUpdates = [
+      input.unpromptedPromptUpdates,
+      input.unpromptedFollowUpUpdates,
+    ];
     const idleUpdates = input.idleUpdates;
     let sessionIdSeen: string | undefined;
     type Runtime = AcpSessionRuntime.AcpSessionRuntime["Service"];
     let deliver: Parameters<Runtime["handleSessionUpdate"]>[0] | undefined;
+    let permit: Parameters<Runtime["handleRequestPermission"]>[0] | undefined;
     const adapter = yield* makeHermesAdapterV2({
       instanceId,
       settings,
       environment,
-      ...(input.promptUpdates === undefined && idleUpdates === undefined
+      ...(input.promptUpdates === undefined &&
+      input.unpromptedPromptUpdates === undefined &&
+      idleUpdates === undefined
         ? {}
         : {
             makeRuntime: ({ runtimePolicy: _policy, ...runtimeInput }) =>
@@ -221,12 +246,35 @@ const runMockTurn = (input: {
                     Effect.sync(() => {
                       deliver = handler;
                     }).pipe(Effect.andThen(runtime.handleSessionUpdate(handler))),
+                  handleRequestPermission: (handler) =>
+                    Effect.sync(() => {
+                      permit = handler;
+                    }).pipe(Effect.andThen(runtime.handleRequestPermission(handler))),
                   prompt: () =>
                     Effect.gen(function* () {
                       const { sessionId } = yield* runtime.start();
                       sessionIdSeen = sessionId;
-                      for (const update of promptUpdates.shift() ?? [])
-                        yield* deliver!({ sessionId, update });
+                      for (const update of unpromptedPromptUpdates.shift() ?? [])
+                        yield* deliver!({
+                          sessionId,
+                          update,
+                          _meta: { hermes: { unprompted: true } },
+                        });
+                      for (const [index, update] of (promptUpdates.shift() ?? []).entries()) {
+                        if (!("permission" in update)) {
+                          yield* deliver!({ sessionId, update });
+                          continue;
+                        }
+                        const requestId = `mock-permission-${index}`;
+                        yield* permit!(
+                          { sessionId, ...update.permission },
+                          { requestId, method: "session/request_permission" },
+                        );
+                        // The transport acknowledges each response it writes; this harness writes none.
+                        if (runtimeInput.onOutgoingResponse !== undefined) {
+                          yield* runtimeInput.onOutgoingResponse(requestId);
+                        }
+                      }
                       return { stopReason: "end_turn" as const };
                     }),
                 })),
@@ -267,6 +315,13 @@ const runMockTurn = (input: {
       }),
     );
     const untilTerminal = session.events.pipe(
+      Stream.tap((event) =>
+        event.type === "runtime_request.updated" && event.runtimeRequest.status === "pending"
+          ? session
+              .respondToRuntimeRequest({ requestId: event.runtimeRequest.id, decision: "accept" })
+              .pipe(Effect.orDie, Effect.forkScoped)
+          : Effect.void,
+      ),
       Stream.takeUntil((event) => event.type === "turn.terminal"),
       Stream.runCollect,
     );
@@ -329,7 +384,7 @@ describe("HermesAdapterV2 flavor", () => {
     assert.isTrue(flavor.supportsImagePrompts);
     assert.isTrue(HermesProviderCapabilitiesV2.subagents.supportsSubagents);
     assert.isTrue(HermesProviderCapabilitiesV2.sessions.supportsModelSwitchInSession);
-    // Steering interrupts and re-prompts, like every ACP flavor.
+    // Stock Hermes steers by interrupt and re-prompt; a patched one negotiates native steering.
     assert.isFalse(HermesProviderCapabilitiesV2.turns.supportsActiveSteering);
   });
 
@@ -345,7 +400,7 @@ describe("HermesAdapterV2 flavor", () => {
   });
 
   it("asks Hermes to approve every shell command", () => {
-    assert.deepEqual(flavor.clientCapabilitiesMeta, { command_approval: true });
+    assert.equal(flavor.clientCapabilitiesMeta?.command_approval, true);
   });
 
   it("runs a read-only command under a read-only sandbox only when Hermes shows all of it", () => {
@@ -391,7 +446,7 @@ describe("HermesAdapterV2 flavor", () => {
     }).events[0];
     if (event?._tag !== "ToolCallUpdated") throw new Error("expected a tool call");
     assert.notEqual(event.toolCall.title, "skill view (pr-review)");
-    assert.equal(flavor.normalizeToolCall?.(event.toolCall).title, "skill view (pr-review)");
+    assert.equal(flavor.normalizeToolCall?.(event.toolCall, "s").title, "skill view (pr-review)");
   });
 });
 
@@ -523,6 +578,154 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 
+  it.effect("nests a grandchild's row and thread under the child that launched it", () =>
+    Effect.gen(function* () {
+      const batch = delegationFixture.cases.find((item) => item.name === "batch")!;
+      const toolCallId = batch.start.toolCallId;
+      const progress = (hermesDelegation: Record<string, unknown>) =>
+        ({
+          sessionUpdate: "tool_call_update",
+          toolCallId,
+          status: "in_progress",
+          rawOutput: { hermesDelegation },
+        }) as const;
+      const child = { task_index: 0, depth: 0, subagent_id: "sa-0" };
+      const grandchild = {
+        task_index: 0,
+        depth: 1,
+        subagent_id: "sa-0-0",
+        parent_id: "sa-0",
+        goal: "Reply with exactly: Hello",
+      };
+      const { threadId, events } = yield* runMockTurn({
+        name: "nested-delegation",
+        mockEnvironment: {},
+        promptUpdates: [
+          { ...batch.start, rawInput: batch.args } as EffectAcpSchema.SessionUpdate,
+          progress({ ...child, event: "subagent.start" }),
+          progress({ ...grandchild, event: "subagent.spawn_requested" }),
+          progress({
+            ...grandchild,
+            event: "subagent.complete",
+            status: "completed",
+            summary: "Hello",
+          }),
+          progress({ ...child, event: "subagent.complete", status: "completed", summary: "Hello" }),
+          { ...batch.complete, rawOutput: batch.result } as EffectAcpSchema.SessionUpdate,
+        ],
+      });
+      const latest = new Map<string, OrchestrationV2Subagent>();
+      for (const event of events) {
+        if (event.type === "subagent.updated")
+          latest.set(String(event.subagent.id), event.subagent);
+      }
+      const parent = [...latest.values()].find((subagent) => subagent.title === "Inspect routing");
+      const nested = [...latest.values()].find(
+        (subagent) => subagent.title === "Reply with exactly: Hello",
+      );
+      assert.isDefined(parent);
+      assert.isDefined(nested);
+      assert.equal(nested.threadId, parent.childThreadId);
+      assert.isNull(nested.runId);
+      assert.equal(nested.status, "completed");
+      assert.equal(nested.result, "Hello");
+      const nestedThread = events.find(
+        (event) =>
+          event.type === "app_thread.created" && event.appThread.id === nested.childThreadId,
+      );
+      if (nestedThread?.type !== "app_thread.created") throw new Error("no nested thread");
+      assert.deepEqual(nestedThread.appThread.lineage, {
+        parentThreadId: parent.childThreadId,
+        relationshipToParent: "subagent",
+        rootThreadId: threadId,
+      });
+      const rows = events.flatMap((event) =>
+        event.type === "turn_item.updated" && event.turnItem.type === "subagent"
+          ? [[event.turnItem.threadId, event.turnItem.title] as const]
+          : [],
+      );
+      assert.isTrue(
+        rows.some(([thread, title]) => thread === parent.childThreadId && title === nested.title),
+      );
+      assert.isFalse(rows.some(([thread, title]) => thread === threadId && title === nested.title));
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+
+  // Hermes asks on the parent's session for a subagent running inside the parent's turn, and names it.
+  it.effect.each([
+    { asker: "child", subagentId: "sa-0" },
+    { asker: "grandchild", subagentId: "sa-0-0" },
+  ] as const)("hangs a $asker's approval off its subagent row in the parent's thread", (row) =>
+    Effect.gen(function* () {
+      const batch = delegationFixture.cases.find((item) => item.name === "batch")!;
+      const toolCallId = batch.start.toolCallId;
+      const progress = (hermesDelegation: Record<string, unknown>) =>
+        ({
+          sessionUpdate: "tool_call_update",
+          toolCallId,
+          status: "in_progress",
+          rawOutput: { hermesDelegation },
+        }) as const;
+      const child = { task_index: 0, depth: 0, subagent_id: "sa-0" };
+      const grandchild = {
+        task_index: 0,
+        depth: 1,
+        subagent_id: "sa-0-0",
+        parent_id: "sa-0",
+        goal: "Run rm -rf build",
+      };
+      const { threadId, events } = yield* runMockTurn({
+        name: `subagent-approval-${row.asker}`,
+        mockEnvironment: {},
+        promptUpdates: [
+          { ...batch.start, rawInput: batch.args } as EffectAcpSchema.SessionUpdate,
+          progress({ ...child, event: "subagent.start" }),
+          progress({ ...grandchild, event: "subagent.spawn_requested" }),
+          {
+            permission: {
+              toolCall: {
+                toolCallId: "perm-check-1",
+                title: "recursive delete: rm -rf build",
+                kind: "execute",
+                status: "pending",
+                rawInput: { command: "rm -rf build", description: "recursive delete" },
+              },
+              options: [
+                { optionId: "allow_once", name: "Allow once", kind: "allow_once" },
+                { optionId: "deny", name: "Deny", kind: "reject_once" },
+              ],
+              _meta: { hermes: { subagent: { subagentId: row.subagentId, toolCallId } } },
+            },
+          },
+          progress({
+            ...grandchild,
+            event: "subagent.complete",
+            status: "completed",
+            summary: "ok",
+          }),
+          progress({ ...child, event: "subagent.complete", status: "completed", summary: "ok" }),
+          { ...batch.complete, rawOutput: batch.result } as EffectAcpSchema.SessionUpdate,
+        ],
+      });
+      const launched = events.find(
+        (event) => event.type === "subagent.updated" && event.subagent.title === "Inspect routing",
+      );
+      if (launched?.type !== "subagent.updated") throw new Error("no top-level subagent");
+      const approval = events.findLast(
+        (event) => event.type === "node.updated" && event.node.kind === "approval_request",
+      );
+      if (approval?.type !== "node.updated") throw new Error("no approval node");
+      assert.equal(approval.node.threadId, threadId);
+      assert.equal(approval.node.parentNodeId, launched.subagent.id);
+      const items = events.flatMap((event) =>
+        event.type === "turn_item.updated" && event.turnItem.type === "approval_request"
+          ? [event.turnItem.threadId]
+          : [],
+      );
+      assert.deepEqual([...new Set(items)], [threadId]);
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+
   it.effect("shows Hermes's T3 tool calls as T3's, with the ids its summary dropped", () =>
     Effect.gen(function* () {
       // Hermes's gateway reports the call under a per-session server name, starts it with no
@@ -579,7 +782,14 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 
-  it.effect("offers a wake run for a turn the Hermes gateway runs after the prompt settled", () =>
+  const wakeReply: ReadonlyArray<EffectAcpSchema.SessionUpdate> = [
+    { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "The merge landed." } },
+  ];
+  it.effect.each([
+    { when: "after the prompt settled", idleUpdates: wakeReply },
+    // The gateway runs a wake queued ahead of the prompt inside the prompt's request.
+    { when: "ahead of a queued prompt's own turn", unpromptedPromptUpdates: wakeReply },
+  ])("offers a wake run for a turn the Hermes gateway runs $when", (wake) =>
     Effect.gen(function* () {
       const offers = yield* Queue.unbounded<ProviderContinuationRequest>();
       const { events } = yield* runMockTurn({
@@ -588,12 +798,7 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
         promptUpdates: [
           { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Queued." } },
         ],
-        idleUpdates: [
-          {
-            sessionUpdate: "agent_message_chunk",
-            content: { type: "text", text: "The merge landed." },
-          },
-        ],
+        ...wake,
         continuationRequests: {
           offer: (request) => Queue.offer(offers, request).pipe(Effect.asVoid),
         },
@@ -601,95 +806,609 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
       });
       // A flavor without post-settle continuation drops these frames: the agent works, the thread stays blank.
       assert.equal(yield* Queue.size(offers), 1);
-      const wakeEvents = events.slice(
-        events.findIndex((event) => event.type === "turn.terminal") + 1,
-      );
-      assert.isTrue(
-        wakeEvents.some(
-          (event) =>
-            event.type === "message.updated" &&
-            event.message.role === "assistant" &&
-            event.message.text.includes("The merge landed."),
-        ),
-      );
-      const wakeTerminal = wakeEvents.at(-1);
+      const promptTerminalIndex = events.findIndex((event) => event.type === "turn.terminal");
+      const replies = (from: number, to?: number) => [
+        ...new Map(
+          events
+            .slice(from, to)
+            .flatMap((event) =>
+              event.type === "message.updated" && event.message.role === "assistant"
+                ? [[event.message.id, event.message.text.trim()] as const]
+                : [],
+            ),
+        ).values(),
+      ];
+      assert.deepEqual(replies(0, promptTerminalIndex), ["Queued."]);
+      assert.deepEqual(replies(promptTerminalIndex + 1), ["The merge landed."]);
+      const wakeTerminal = events.at(-1);
       assert.equal(wakeTerminal?.type === "turn.terminal" && wakeTerminal.status, "completed");
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 
-  it.effect("holds on a notifying background command the agent marks until it sees it end", () =>
+  // Each call is its own background unit; the second child is still working at the wake.
+  const delegation = (key: string, goal: string) => {
+    const toolCallId = `toolu_delegate_${key}`;
+    const child = {
+      goal,
+      subagent_id: `sa-0-${key}`,
+      child_session_id: `20261105_231056_${key}`,
+      task_index: 0,
+      task_count: 1,
+      depth: 0,
+      delegation_id: `deleg_${key}`,
+    };
+    const progress = (hermesDelegation: Record<string, unknown>) =>
+      ({
+        sessionUpdate: "tool_call_update",
+        toolCallId,
+        status: "in_progress",
+        rawOutput: { hermesDelegation: { ...child, ...hermesDelegation } },
+      }) as const;
+    const dispatched = { status: "dispatched", mode: "background", count: 1, goals: [goal] };
+    const launch: ReadonlyArray<EffectAcpSchema.SessionUpdate> = [
+      {
+        sessionUpdate: "tool_call",
+        toolCallId,
+        title: `delegate_task: 1 tasks: ${goal}`,
+        kind: "execute",
+        rawInput: { action: "spawn", tasks: [{ goal }] },
+        content: [
+          {
+            type: "content",
+            content: { type: "text", text: `Delegating 1 tasks\n\n1. ${goal}` },
+          },
+        ],
+      },
+      progress({ event: "subagent.start", text: goal }),
+      {
+        sessionUpdate: "tool_call_update",
+        toolCallId,
+        kind: "execute",
+        status: "completed",
+        rawOutput: dispatched,
+        content: [{ type: "content", content: { type: "text", text: JSON.stringify(dispatched) } }],
+      },
+    ];
+    return { launch, progress };
+  };
+  const helloGoal = "Reply with exactly: Hello";
+  const hello = delegation("after", helloGoal);
+  const working = delegation("working", "Run sleep 60, then reply with exactly: Later");
+  const helloEnds = hello.progress({
+    event: "subagent.complete",
+    status: "completed",
+    summary: "Hello",
+  });
+  const launched: ReadonlyArray<EffectAcpSchema.SessionUpdate> = [
+    { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Both launched." } },
+  ];
+  const helloWake: ReadonlyArray<EffectAcpSchema.SessionUpdate> = [
+    { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Hello" } },
+  ];
+  it.effect.each([
+    {
+      when: "after the parent's prompt settled",
+      promptUpdates: [...hello.launch, ...working.launch, ...launched],
+      // Then the gateway hands its result back in a turn of its own.
+      idleUpdates: [helloEnds, ...helloWake],
+    },
+    {
+      when: "while a prompt was open, its wake ahead of the next prompt",
+      promptUpdates: [...hello.launch, ...working.launch, helloEnds, ...launched],
+      followUpPromptUpdates: [
+        { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Noted." } },
+      ],
+      unpromptedFollowUpUpdates: helloWake,
+    },
+  ] satisfies ReadonlyArray<
+    { readonly when: string } & Partial<Parameters<typeof runMockTurn>[0]>
+  >)(
+    "writes a delegated child's answer into its thread and names it on the wake when it ends $when",
+    ({ when: _when, ...updates }) =>
+      Effect.gen(function* () {
+        const offers = yield* Queue.unbounded<ProviderContinuationRequest>();
+        const { events } = yield* runMockTurn({
+          name: "delegate-wake",
+          mockEnvironment: {},
+          ...updates,
+          continuationRequests: {
+            offer: (request) => Queue.offer(offers, request).pipe(Effect.asVoid),
+          },
+          // The wake's run ends on its quiet window, though the other child still works.
+          runContinuation: true,
+        });
+        const subagents = new Map(
+          events.flatMap((event) =>
+            event.type === "subagent.updated" ? [[event.subagent.prompt, event.subagent]] : [],
+          ),
+        );
+        const subagent = subagents.get(helloGoal);
+        if (subagent === undefined) throw new Error("no subagent was projected");
+        assert.equal(subagent.status, "completed");
+        assert.equal(subagent.result, "Hello");
+        assert.equal(
+          subagents.get("Run sleep 60, then reply with exactly: Later")?.status,
+          "running",
+        );
+        // The gateway turn that hands the result back names the child that woke it.
+        assert.deepEqual((yield* Queue.take(offers)).notification, {
+          source: { kind: "subagent", childThreadId: subagent.childThreadId! },
+          outcome: "completed",
+          summary: `Subagent "${helloGoal}" finished`,
+        });
+        const childReplies = events.flatMap((event) =>
+          event.type === "message.updated" &&
+          event.message.threadId === subagent.childThreadId &&
+          event.message.role === "assistant"
+            ? [event.message.text]
+            : [],
+        );
+        assert.deepEqual(childReplies, ["Hello"]);
+      }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+
+  it.effect("nests a grandchild a background child launches after the turn settled", () =>
     Effect.gen(function* () {
-      let matched: ReadonlyArray<string> = [];
+      const toolCallId = "toolu_delegate_nested_after_turn";
+      const goal = "Spawn one subagent that replies Hello";
+      const child = {
+        goal,
+        subagent_id: "sa-0-nested",
+        task_index: 0,
+        task_count: 1,
+        depth: 0,
+      };
+      const grandchild = {
+        goal: "Reply with exactly: Hello",
+        subagent_id: "sa-0-grand",
+        parent_id: "sa-0-nested",
+        task_index: 0,
+        task_count: 1,
+        depth: 1,
+      };
+      const progress = (hermesDelegation: Record<string, unknown>) =>
+        ({
+          sessionUpdate: "tool_call_update",
+          toolCallId,
+          status: "in_progress",
+          rawOutput: { hermesDelegation },
+        }) as const;
+      const dispatched = { status: "dispatched", mode: "background", count: 1, goals: [goal] };
+      const offers = yield* Queue.unbounded<ProviderContinuationRequest>();
       const { events } = yield* runMockTurn({
-        name: "background-wait-exit",
+        name: "delegate-nested-after-turn",
         mockEnvironment: {},
         promptUpdates: [
-          ...hermesBackgroundStart({ toolCallId: "tc-tests", processId: TESTS_PROC, notify: true }),
-          // No completion wake is armed, so nothing could release a hold on it.
-          ...hermesBackgroundStart({ toolCallId: "tc-dev", processId: DEV_PROC, notify: false }),
-        ],
-        afterTurn: ({ session, providerThread }) =>
-          Effect.gen(function* () {
-            ({ matched } = yield* session.awaitBackgroundTasks!({
-              providerThread,
-              taskIds: [TESTS_PROC, DEV_PROC],
-              awaited: true,
-            }));
-          }).pipe(Effect.orDie),
-        followUpPromptUpdates: [
           {
             sessionUpdate: "tool_call",
-            toolCallId: "tc-wait",
-            title: "process_manage: wait aaaa1111",
-            kind: "other",
-            // Hermes takes any unique prefix, and its `wait` result omits the id.
-            rawInput: { action: "wait", session_id: "aaaa1111" },
-          },
-          {
-            sessionUpdate: "tool_call_update",
-            toolCallId: "tc-wait",
-            kind: "other",
-            status: "completed",
+            toolCallId,
+            title: `delegate_task: 1 tasks: ${goal}`,
+            kind: "execute",
+            rawInput: { action: "spawn", tasks: [{ goal, role: "orchestrator" }] },
             content: [
               {
                 type: "content",
-                content: {
-                  type: "text",
-                  text: "process_manage result\n- **status:** exited\n- **exit_code:** 0",
-                },
+                content: { type: "text", text: `Delegating 1 tasks\n\n1. ${goal}` },
               },
             ],
           },
+          progress({ ...child, event: "subagent.start" }),
+          {
+            sessionUpdate: "tool_call_update",
+            toolCallId,
+            kind: "execute",
+            status: "completed",
+            rawOutput: dispatched,
+            content: [
+              { type: "content", content: { type: "text", text: JSON.stringify(dispatched) } },
+            ],
+          },
+          {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "It is running in the background." },
+          },
         ],
+        idleUpdates: [
+          progress({ ...grandchild, event: "subagent.spawn_requested" }),
+          progress({
+            ...grandchild,
+            event: "subagent.complete",
+            status: "completed",
+            summary: "Hello",
+          }),
+          progress({ ...child, event: "subagent.complete", status: "completed", summary: "Hello" }),
+          { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Hello" } },
+        ],
+        continuationRequests: {
+          offer: (request) => Queue.offer(offers, request).pipe(Effect.asVoid),
+        },
+        runContinuation: true,
       });
-      assert.deepEqual(matched, [TESTS_PROC]);
-      const rosters = providerThreadRosters(events);
-      const held = rosters.find((roster) => roster.length > 0);
-      assert.deepEqual(held, [
-        { taskId: TESTS_PROC, kind: "command", awaited: true, description: "pnpm test" },
-      ]);
-      assert.isTrue(backgroundWorkHoldsCompletion(held ?? []));
-      assert.deepEqual(rosters.at(-1), []);
+      const latest = new Map<string, OrchestrationV2Subagent>();
+      for (const event of events) {
+        if (event.type === "subagent.updated")
+          latest.set(String(event.subagent.id), event.subagent);
+      }
+      const parent = [...latest.values()].find((subagent) => subagent.title === goal);
+      const nested = [...latest.values()].find((subagent) => subagent.title === grandchild.goal);
+      assert.isDefined(parent);
+      assert.isDefined(nested);
+      assert.equal(nested.threadId, parent.childThreadId);
+      assert.equal(nested.status, "completed");
+      assert.equal(parent.status, "completed");
+      const nestedRow = events.findLast(
+        (event) => event.type === "turn_item.updated" && event.turnItem.nodeId === nested.id,
+      );
+      if (nestedRow?.type !== "turn_item.updated") throw new Error("no nested row");
+      assert.equal(nestedRow.turnItem.threadId, parent.childThreadId);
+      assert.equal(nestedRow.turnItem.status, "completed");
+      const nestedReplies = events.flatMap((event) =>
+        event.type === "message.updated" &&
+        event.message.threadId === nested.childThreadId &&
+        event.message.role === "assistant"
+          ? [event.message.text]
+          : [],
+      );
+      assert.deepEqual(nestedReplies, ["Hello"]);
+      // The grandchild shows while it runs, not only once the gateway's follow-up turn starts.
+      const firstNested = events.findIndex(
+        (event) => event.type === "subagent.updated" && event.subagent.id === nested.id,
+      );
+      const followUp = events.findIndex(
+        (event, index) =>
+          index > firstNested &&
+          event.type === "provider_turn.updated" &&
+          event.providerTurn.status === "running",
+      );
+      assert.isAbove(firstNested, 0);
+      assert.isAbove(followUp, firstNested);
+      // The gateway wakes the agent for its own child; the grandchild reported to that child.
+      assert.deepEqual((yield* Queue.take(offers)).notification, {
+        source: { kind: "subagent", childThreadId: parent.childThreadId! },
+        outcome: "completed",
+        summary: `Subagent "${goal}" finished`,
+      });
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 
-  it.effect("releases the marks when Hermes wakes the agent", () =>
+  it.effect("reopens a finished child that a later run continues, in its own thread", () =>
+    Effect.gen(function* () {
+      const goal = "Reply with exactly: A_FIRST";
+      const followUp = "Reply with exactly: A_SECOND";
+      const child = {
+        goal,
+        subagent_id: "sa-0-a",
+        child_session_id: "20261106_101500_a",
+        task_index: 0,
+        task_count: 1,
+        depth: 0,
+      };
+      const progress = (toolCallId: string, hermesDelegation: Record<string, unknown>) =>
+        ({
+          sessionUpdate: "tool_call_update",
+          toolCallId,
+          status: "in_progress",
+          rawOutput: { hermesDelegation: { ...child, ...hermesDelegation } },
+        }) as const;
+      const call = (
+        toolCallId: string,
+        rawInput: Record<string, unknown>,
+      ): ReadonlyArray<EffectAcpSchema.SessionUpdate> => {
+        const dispatched = { status: "dispatched", mode: "background", subagent_ids: ["sa-0-a"] };
+        return [
+          {
+            sessionUpdate: "tool_call",
+            toolCallId,
+            title: "delegate_task",
+            kind: "execute",
+            rawInput,
+          },
+          progress(toolCallId, { event: "subagent.spawn_requested", model: "claude-haiku-4-5" }),
+          {
+            sessionUpdate: "tool_call_update",
+            toolCallId,
+            kind: "execute",
+            status: "completed",
+            rawOutput: dispatched,
+          },
+          // The background worker begins.
+          progress(toolCallId, { event: "subagent.start" }),
+        ];
+      };
+      const offers = yield* Queue.unbounded<ProviderContinuationRequest>();
+      const { threadId, events } = yield* runMockTurn({
+        name: "delegate-continue",
+        mockEnvironment: {},
+        promptUpdates: [
+          ...call("toolu_spawn", { tasks: [{ goal, model: "claude-haiku-4-5" }] }),
+          progress("toolu_spawn", {
+            event: "subagent.complete",
+            status: "completed",
+            summary: "A_FIRST",
+          }),
+        ],
+        // A later run sends the finished child a follow-up; it answers after that run settled.
+        followUpPromptUpdates: [
+          ...call("toolu_continue", {
+            action: "continue",
+            subagent_id: "sa-0-a",
+            message: followUp,
+          }),
+          { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "RESUMED" } },
+        ],
+        idleUpdates: [
+          progress("toolu_continue", {
+            event: "subagent.complete",
+            status: "completed",
+            summary: "A_SECOND",
+          }),
+          // The gateway's own turn hands the new answer back.
+          {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "A_RESUME_REPORTED" },
+          },
+        ],
+        continuationRequests: {
+          offer: (request) => Queue.offer(offers, request).pipe(Effect.asVoid),
+        },
+        runContinuation: true,
+      });
+      const updates = events.flatMap((event) =>
+        event.type === "subagent.updated" ? [event.subagent] : [],
+      );
+      assert.deepEqual([...new Set(updates.map((subagent) => subagent.id))].length, 1);
+      const statuses = updates.map((subagent) => subagent.status);
+      const firstCompleted = statuses.indexOf("completed");
+      assert.isAtLeast(firstCompleted, 0);
+      assert.isAbove(statuses.lastIndexOf("running"), firstCompleted);
+      const subagent = updates.at(-1)!;
+      assert.equal(subagent.status, "completed");
+      assert.equal(subagent.result, "A_SECOND");
+      assert.equal(subagent.model, "claude-haiku-4-5");
+      assert.equal(
+        subagent.runId,
+        RunId.make(`run:${threadId}:2`),
+        "the subagent moves to the run that continued it",
+      );
+      assert.deepEqual((yield* Queue.take(offers)).notification, {
+        source: { kind: "subagent", childThreadId: subagent.childThreadId! },
+        outcome: "completed",
+        summary: `Subagent "${goal}" finished`,
+      });
+      const childMessages = new Map(
+        events.flatMap((event) =>
+          event.type === "message.updated" && event.message.threadId === subagent.childThreadId
+            ? [[event.message.id, `${event.message.role}:${event.message.text}`]]
+            : [],
+        ),
+      );
+      assert.deepEqual(
+        [...childMessages.values()],
+        [`user:${goal}`, "assistant:A_FIRST", `user:${followUp}`, "assistant:A_SECOND"],
+      );
+      const childThread = events.find(
+        (event) =>
+          event.type === "app_thread.created" && event.appThread.id === subagent.childThreadId,
+      );
+      assert.equal(
+        childThread?.type === "app_thread.created" && childThread.appThread.modelSelection.model,
+        "claude-haiku-4-5",
+      );
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+
+  it.effect("nests a grandchild a background child launches after the turn settled", () =>
+    Effect.gen(function* () {
+      const toolCallId = "toolu_delegate_nested_after_turn";
+      const goal = "Spawn one subagent that replies Hello";
+      const child = {
+        goal,
+        subagent_id: "sa-0-nested",
+        task_index: 0,
+        task_count: 1,
+        depth: 0,
+      };
+      const grandchild = {
+        goal: "Reply with exactly: Hello",
+        subagent_id: "sa-0-grand",
+        parent_id: "sa-0-nested",
+        task_index: 0,
+        task_count: 1,
+        depth: 1,
+      };
+      const progress = (hermesDelegation: Record<string, unknown>) =>
+        ({
+          sessionUpdate: "tool_call_update",
+          toolCallId,
+          status: "in_progress",
+          rawOutput: { hermesDelegation },
+        }) as const;
+      const dispatched = { status: "dispatched", mode: "background", count: 1, goals: [goal] };
+      const offers = yield* Queue.unbounded<ProviderContinuationRequest>();
+      const { events } = yield* runMockTurn({
+        name: "delegate-nested-after-turn",
+        mockEnvironment: {},
+        promptUpdates: [
+          {
+            sessionUpdate: "tool_call",
+            toolCallId,
+            title: `delegate_task: 1 tasks: ${goal}`,
+            kind: "execute",
+            rawInput: { action: "spawn", tasks: [{ goal, role: "orchestrator" }] },
+            content: [
+              {
+                type: "content",
+                content: { type: "text", text: `Delegating 1 tasks\n\n1. ${goal}` },
+              },
+            ],
+          },
+          progress({ ...child, event: "subagent.start" }),
+          {
+            sessionUpdate: "tool_call_update",
+            toolCallId,
+            kind: "execute",
+            status: "completed",
+            rawOutput: dispatched,
+            content: [
+              { type: "content", content: { type: "text", text: JSON.stringify(dispatched) } },
+            ],
+          },
+          {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "It is running in the background." },
+          },
+        ],
+        idleUpdates: [
+          progress({ ...grandchild, event: "subagent.spawn_requested" }),
+          progress({
+            ...grandchild,
+            event: "subagent.complete",
+            status: "completed",
+            summary: "Hello",
+          }),
+          progress({ ...child, event: "subagent.complete", status: "completed", summary: "Hello" }),
+          { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Hello" } },
+        ],
+        continuationRequests: {
+          offer: (request) => Queue.offer(offers, request).pipe(Effect.asVoid),
+        },
+        runContinuation: true,
+      });
+      const latest = new Map<string, OrchestrationV2Subagent>();
+      for (const event of events) {
+        if (event.type === "subagent.updated")
+          latest.set(String(event.subagent.id), event.subagent);
+      }
+      const parent = [...latest.values()].find((subagent) => subagent.title === goal);
+      const nested = [...latest.values()].find((subagent) => subagent.title === grandchild.goal);
+      assert.isDefined(parent);
+      assert.isDefined(nested);
+      assert.equal(nested.threadId, parent.childThreadId);
+      assert.equal(nested.status, "completed");
+      assert.equal(parent.status, "completed");
+      const nestedRow = events.findLast(
+        (event) => event.type === "turn_item.updated" && event.turnItem.nodeId === nested.id,
+      );
+      if (nestedRow?.type !== "turn_item.updated") throw new Error("no nested row");
+      assert.equal(nestedRow.turnItem.threadId, parent.childThreadId);
+      assert.equal(nestedRow.turnItem.status, "completed");
+      const nestedReplies = events.flatMap((event) =>
+        event.type === "message.updated" &&
+        event.message.threadId === nested.childThreadId &&
+        event.message.role === "assistant"
+          ? [event.message.text]
+          : [],
+      );
+      assert.deepEqual(nestedReplies, ["Hello"]);
+      // The grandchild shows while it runs, not only once the gateway's follow-up turn starts.
+      const firstNested = events.findIndex(
+        (event) => event.type === "subagent.updated" && event.subagent.id === nested.id,
+      );
+      const followUp = events.findIndex(
+        (event, index) =>
+          index > firstNested &&
+          event.type === "provider_turn.updated" &&
+          event.providerTurn.status === "running",
+      );
+      assert.isAbove(firstNested, 0);
+      assert.isAbove(followUp, firstNested);
+      // The grandchild's end goes back to the child; only the child's end wakes the agent.
+      assert.deepEqual((yield* Queue.take(offers)).notification, {
+        source: { kind: "subagent", childThreadId: parent.childThreadId! },
+        outcome: "completed",
+        summary: `Subagent "${goal}" finished`,
+      });
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+
+  it.effect(
+    "lists the commands that will wake Hermes and holds the marked ones until they end",
+    () =>
+      Effect.gen(function* () {
+        let matched: ReadonlyArray<string> = [];
+        const { events } = yield* runMockTurn({
+          name: "background-wait-exit",
+          mockEnvironment: {},
+          promptUpdates: [
+            ...hermesBackgroundStart({
+              toolCallId: "tc-tests",
+              processId: TESTS_PROC,
+              notify: true,
+            }),
+            // No completion wake is armed, so nothing could release a hold on it.
+            ...hermesBackgroundStart({ toolCallId: "tc-dev", processId: DEV_PROC, notify: false }),
+          ],
+          afterTurn: ({ session, providerThread }) =>
+            Effect.gen(function* () {
+              ({ matched } = yield* session.awaitBackgroundTasks!({
+                providerThread,
+                taskIds: [TESTS_PROC, DEV_PROC],
+                awaited: true,
+              }));
+            }).pipe(Effect.orDie),
+          followUpPromptUpdates: [
+            {
+              sessionUpdate: "tool_call",
+              toolCallId: "tc-wait",
+              title: "process_manage: wait aaaa1111",
+              kind: "other",
+              // Hermes takes any unique prefix, and its `wait` result omits the id.
+              rawInput: { action: "wait", session_id: "aaaa1111" },
+            },
+            {
+              sessionUpdate: "tool_call_update",
+              toolCallId: "tc-wait",
+              kind: "other",
+              status: "completed",
+              content: [
+                {
+                  type: "content",
+                  content: {
+                    type: "text",
+                    text: "process_manage result\n- **status:** exited\n- **exit_code:** 0",
+                  },
+                },
+              ],
+            },
+          ],
+        });
+        assert.deepEqual(matched, [TESTS_PROC]);
+        const rosters = providerThreadRosters(events);
+        const listed = rosters.find((roster) => roster.length > 0);
+        assert.deepEqual(listed, [
+          { taskId: TESTS_PROC, kind: "command", description: "pnpm test" },
+        ]);
+        assert.isFalse(backgroundWorkHoldsCompletion(listed ?? []));
+        const held = rosters.find((roster) => roster.some((task) => task.awaited === true));
+        assert.deepEqual(held, [
+          { taskId: TESTS_PROC, kind: "command", awaited: true, description: "pnpm test" },
+        ]);
+        assert.isTrue(backgroundWorkHoldsCompletion(held ?? []));
+        assert.deepEqual(rosters.at(-1), []);
+      }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+
+  // Hermes's wake names no process: it releases every listed one, and names a lone one.
+  it.effect.each([
+    {
+      name: "one",
+      processIds: [TESTS_PROC],
+      notification: {
+        source: { kind: "command" },
+        outcome: "unknown",
+        summary: 'Command "pnpm test" finished',
+      },
+    },
+    { name: "two", processIds: [TESTS_PROC, DEV_PROC], notification: undefined },
+  ] as const)("releases $name listed command(s) when Hermes wakes the agent", (row) =>
     Effect.gen(function* () {
       const offers = yield* Queue.unbounded<ProviderContinuationRequest>();
       const { events } = yield* runMockTurn({
-        name: "background-wait-wake",
+        name: `background-wake-${row.name}`,
         mockEnvironment: {},
-        promptUpdates: hermesBackgroundStart({
-          toolCallId: "tc-tests",
-          processId: TESTS_PROC,
-          notify: true,
-        }),
-        afterTurn: ({ session, providerThread }) =>
-          session.awaitBackgroundTasks!({
-            providerThread,
-            taskIds: [TESTS_PROC],
-            awaited: true,
-          }).pipe(Effect.asVoid, Effect.orDie),
+        promptUpdates: row.processIds.flatMap((processId) =>
+          hermesBackgroundStart({ toolCallId: `tc-${processId}`, processId, notify: true }),
+        ),
         idleUpdates: [
           {
             sessionUpdate: "agent_message_chunk",
@@ -701,11 +1420,70 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
         },
         runContinuation: true,
       });
-      // Hermes's notice names no process, so the wake releases every mark.
+      assert.deepEqual((yield* Queue.take(offers)).notification, row.notification);
       const firstTerminal = events.findIndex((event) => event.type === "turn.terminal");
-      const rosters = providerThreadRosters(events.slice(firstTerminal + 1));
-      assert.lengthOf(rosters[0] ?? [], 1);
-      assert.deepEqual(rosters.slice(1), [[], []]);
+      assert.lengthOf(
+        providerThreadRosters(events.slice(0, firstTerminal)).at(-1) ?? [],
+        row.processIds.length,
+      );
+      const afterRoot = events
+        .slice(firstTerminal + 1)
+        .flatMap((event) =>
+          event.type === "provider_thread.updated" ? [event.providerThread] : [],
+        );
+      // The release lands between runs, on a thread the root run settled idle.
+      assert.equal(afterRoot[0]?.status, "idle");
+      assert.deepEqual(
+        afterRoot.map((providerThread) => providerThread.pendingBackgroundTasks ?? []),
+        afterRoot.map(() => []),
+      );
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+
+  it.effect("keeps a running command listed when a background subagent wakes Hermes", () =>
+    Effect.gen(function* () {
+      const dispatched = delegationFixture.cases.find((item) => item.name === "dispatched")!;
+      const offers = yield* Queue.unbounded<ProviderContinuationRequest>();
+      const { events } = yield* runMockTurn({
+        name: "background-wake-subagent",
+        mockEnvironment: {},
+        promptUpdates: [
+          ...hermesBackgroundStart({ toolCallId: "tc-tests", processId: TESTS_PROC, notify: true }),
+          { ...dispatched.start, rawInput: dispatched.args } as EffectAcpSchema.SessionUpdate,
+          { ...dispatched.complete, rawOutput: dispatched.result } as EffectAcpSchema.SessionUpdate,
+        ],
+        idleUpdates: [
+          {
+            sessionUpdate: "tool_call_update",
+            toolCallId: dispatched.start.toolCallId,
+            status: "in_progress",
+            rawOutput: {
+              hermesDelegation: {
+                event: "subagent.complete",
+                subagent_id: "sa-0-test1234",
+                delegation_id: "deleg_test1234",
+                task_index: 0,
+                status: "completed",
+                summary: "Parser reviewed.",
+              },
+            },
+          },
+          {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "The review is in." },
+          },
+        ],
+        continuationRequests: {
+          offer: (request) => Queue.offer(offers, request).pipe(Effect.asVoid),
+        },
+        runContinuation: true,
+      });
+      assert.notDeepInclude((yield* Queue.take(offers)).notification ?? {}, {
+        source: { kind: "command" },
+      });
+      assert.deepEqual(providerThreadRosters(events).at(-1), [
+        { taskId: TESTS_PROC, kind: "command", description: "pnpm test" },
+      ]);
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 });
@@ -769,6 +1547,155 @@ const lostTurnRefusal = (state: string) =>
   `unknown_execution: do not resend accepted input; a turn in this session was lost when the gateway restarted and its outcome is unknown (${state}). Send \`/discard lost-1\` here (or \`hermes sessions discard s\` in a terminal), then continue.`;
 const promptText = (payload: { readonly prompt: ReadonlyArray<EffectAcpSchema.ContentBlock> }) =>
   payload.prompt.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("\n");
+
+/**
+ * One running turn against the mock agent, whose handshake and `_hermes/steer` answer are
+ * Hermes's: `steered` undefined is stock Hermes (no `_meta.hermes.steer`). The prompt runs
+ * until `settle` completes.
+ */
+const openSteeringTurn = (steered: boolean | undefined) =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const mockAgentPath = yield* path.fromFileUrl(
+      new URL("../../../scripts/acp-mock-agent.ts", import.meta.url),
+    );
+    const dir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-hermes-v2-steer-" });
+    const binaryPath = path.join(dir, "hermes");
+    yield* fileSystem.writeFileString(
+      binaryPath,
+      `#!/bin/sh\nexec '${process.execPath}' '${mockAgentPath}' "$@"\n`,
+    );
+    yield* fileSystem.chmod(binaryPath, 0o755);
+    const settings = hermesSettings(binaryPath);
+    const environment = { ...process.env, HERMES_HOME: dir, T3_ACP_MODEL_IDS: "hermes-4:Hermes 4" };
+    const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const steers: Array<unknown> = [];
+    const settle = yield* Deferred.make<void>();
+    type Runtime = AcpSessionRuntime.AcpSessionRuntime["Service"];
+    const adapter = yield* makeHermesAdapterV2({
+      instanceId,
+      settings,
+      environment,
+      childProcessSpawner,
+      selfInvocation: yield* resolveSelfInvocation(),
+      makeRuntime: ({ runtimePolicy: _policy, ...runtimeInput }) =>
+        makeHermesAcpRuntime({
+          ...runtimeInput,
+          hermesSettings: settings,
+          environment,
+          childProcessSpawner,
+        }).pipe(
+          Effect.map((runtime): Runtime => ({
+            ...runtime,
+            start: () =>
+              runtime.start().pipe(
+                Effect.map((started) =>
+                  steered === undefined
+                    ? started
+                    : {
+                        ...started,
+                        initializeResult: {
+                          ...started.initializeResult,
+                          agentCapabilities: {
+                            ...started.initializeResult.agentCapabilities,
+                            _meta: { hermes: { steer: true } },
+                          },
+                        },
+                      },
+                ),
+              ),
+            request: (method, payload) =>
+              method === "_hermes/steer"
+                ? Effect.sync(() => steers.push(payload)).pipe(Effect.as({ steered }))
+                : runtime.request(method, payload),
+            prompt: (request) =>
+              Deferred.await(settle).pipe(Effect.andThen(runtime.prompt(request))),
+          })),
+        ),
+    });
+    const threadId = ThreadId.make("hermes-v2-steer");
+    const policy = runtimePolicy("approval-required");
+    const modelSelection = { instanceId, model: "hermes-4" };
+    const session = yield* adapter.openSession({
+      threadId,
+      providerSessionId: ProviderSessionId.make("hermes-v2-session-steer"),
+      modelSelection,
+      runtimePolicy: policy,
+    });
+    const providerThread = yield* session.ensureThread({
+      threadId,
+      modelSelection,
+      runtimePolicy: policy,
+    });
+    const turn = turnInput({
+      threadId,
+      providerThread,
+      runtimePolicy: policy,
+      now: yield* DateTime.now,
+      model: modelSelection.model,
+    });
+    const running = yield* session.events.pipe(
+      Stream.filter(
+        (event) =>
+          event.type === "provider_turn.updated" && event.providerTurn.status === "running",
+      ),
+      Stream.take(1),
+      Stream.runHead,
+      Effect.forkScoped,
+    );
+    yield* session.startTurn(turn);
+    const started = yield* Fiber.join(running);
+    if (started._tag === "None" || started.value.type !== "provider_turn.updated") {
+      return yield* Effect.die("the turn never started");
+    }
+    const steer = session.steerTurn({
+      threadId,
+      runId: turn.runId,
+      providerThread,
+      providerTurnId: started.value.providerTurn.id,
+      message: { ...turn.message, messageId: MessageId.make("message:steer"), text: "also this" },
+    });
+    return { session, steer, steers, settle };
+  });
+
+describe.skipIf(windowsHost)("Hermes active steering", () => {
+  it.effect("steers the running turn natively once Hermes says it reads every steer it took", () =>
+    Effect.gen(function* () {
+      const { session, steer, steers, settle } = yield* openSteeringTurn(true);
+      assert.isTrue(session.providerSession.capabilities.turns.supportsActiveSteering);
+      assert.isFalse(session.providerSession.capabilities.turns.activeSteeringAcceptsAttachments);
+      // Accepted while the prompt still runs: there is no delivery report to wait for.
+      yield* steer;
+      assert.deepEqual(steers, [{ sessionId: "mock-session-1", text: "also this" }]);
+      yield* Deferred.succeed(settle, undefined);
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+
+  it.effect("fails a steer Hermes refused once the turn settles, so it becomes the next turn", () =>
+    Effect.gen(function* () {
+      const { steer, settle } = yield* openSteeringTurn(false);
+      const refused = yield* Effect.forkScoped(Effect.exit(steer));
+      yield* Deferred.succeed(settle, undefined);
+      const exit = yield* Fiber.join(refused);
+      assert.isTrue(Exit.isFailure(exit));
+      assert.include(JSON.stringify(exit), "refused the steering message as it ended");
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+
+  it.effect("keeps restart steering against a Hermes without the steering patch", () =>
+    Effect.gen(function* () {
+      const { session, steer, steers, settle } = yield* openSteeringTurn(undefined);
+      assert.isFalse(session.providerSession.capabilities.turns.supportsActiveSteering);
+      assert.isTrue(session.providerSession.capabilities.turns.supportsSteeringByInterruptRestart);
+      const exit = yield* Effect.exit(steer);
+      assert.isTrue(Exit.isFailure(exit));
+      assert.include(JSON.stringify(exit), "ProviderAdapterSteerRunUnsupportedError");
+      assert.deepEqual(steers, []);
+      yield* Deferred.succeed(settle, undefined);
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+});
 
 describe("Hermes prompts blocked by a lost gateway turn", () => {
   type Runtime = AcpSessionRuntime.AcpSessionRuntime["Service"];
@@ -883,6 +1810,97 @@ describe("Hermes prompts blocked by a lost gateway turn", () => {
       "Hermes: admitted_turn_failed",
     );
   });
+});
+
+describe("Hermes stop notices", () => {
+  type Runtime = AcpSessionRuntime.AcpSessionRuntime["Service"];
+
+  it.effect("hides Hermes's stop notices after a Stop, never the agent's own text", () =>
+    Effect.gen(function* () {
+      const shown: Array<string> = [];
+      let deliver: Parameters<Runtime["handleSessionUpdate"]>[0] = () => Effect.void;
+      const runtime = hideHermesStopNotices({
+        prompt: () => Effect.succeed({ stopReason: "end_turn" as const }),
+        cancel: Effect.void,
+        handleSessionUpdate: (handler: Parameters<Runtime["handleSessionUpdate"]>[0]) =>
+          Effect.sync(() => {
+            deliver = handler;
+          }),
+      } as unknown as Runtime);
+      yield* runtime.handleSessionUpdate((notification) =>
+        Effect.sync(() => {
+          const update = notification.update;
+          if (update.sessionUpdate === "agent_message_chunk" && update.content.type === "text") {
+            shown.push(update.content.text);
+          }
+        }),
+      );
+      const say = (text: string) =>
+        deliver({
+          sessionId: "s",
+          update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } },
+        });
+      const notStarted = "Stopped before this turn started. Your message was not processed.";
+      yield* runtime.prompt({ prompt: [{ type: "text", text: "quote it" }] });
+      yield* say(notStarted);
+      yield* runtime.cancel;
+      yield* say(notStarted);
+      yield* say("\n\nOperation interrupted: handling API error (RateLimitError: slow down).");
+      yield* runtime.prompt({ prompt: [{ type: "text", text: "again" }] });
+      yield* say("Operation interrupted: the agent's own words");
+      assert.deepEqual(shown, [notStarted, "Operation interrupted: the agent's own words"]);
+    }),
+  );
+});
+
+describe("Hermes prompts refused while the gateway finishes its own turn", () => {
+  type Runtime = AcpSessionRuntime.AcpSessionRuntime["Service"];
+  const busyRuntime = (refuse: (sent: ReadonlyArray<string>) => Effect.Effect<boolean>) => {
+    const sent: Array<string> = [];
+    const runtime: Runtime = resendHermesPromptsRefusedBusy(
+      {
+        prompt: ((payload) =>
+          Effect.suspend(() => {
+            sent.push(promptText(payload));
+            return refuse(sent).pipe(
+              Effect.flatMap((busy) =>
+                busy
+                  ? Effect.fail(hermesPromptError("session_busy"))
+                  : Effect.succeed({ stopReason: "end_turn" as const }),
+              ),
+            );
+          })) satisfies Runtime["prompt"],
+        cancel: Effect.void,
+      } as unknown as Runtime,
+      "0 millis",
+    );
+    return { runtime, sent };
+  };
+  const compress = { prompt: [{ type: "text" as const, text: "/compress" }] };
+
+  it.effect("resends a command Hermes refused until its own turn ends, however long it runs", () =>
+    Effect.gen(function* () {
+      const refusals = 100;
+      const { runtime, sent } = busyRuntime((sent) => Effect.succeed(sent.length <= refusals));
+      const result = yield* runtime.prompt(compress);
+      assert.equal(result.stopReason, "end_turn");
+      assert.deepEqual(
+        sent,
+        Array.from({ length: refusals + 1 }, () => "/compress"),
+      );
+    }),
+  );
+
+  it.effect("does not resend a refused command after the turn is stopped", () =>
+    Effect.gen(function* () {
+      let stop: Effect.Effect<void> = Effect.void;
+      const { runtime, sent } = busyRuntime(() => stop.pipe(Effect.as(true)));
+      stop = runtime.cancel.pipe(Effect.orDie);
+      const exit = yield* Effect.exit(runtime.prompt(compress));
+      assert.isTrue(exit._tag === "Failure");
+      assert.deepEqual(sent, ["/compress"]);
+    }),
+  );
 });
 
 describe.skipIf(windowsHost)("HermesAdapterV2 across a Hermes gateway restart", () => {
@@ -1021,5 +2039,182 @@ describe.skipIf(windowsHost)("HermesAdapterV2 across a Hermes gateway restart", 
         assert.include(replies.at(-1) ?? "", "Picking up where we left off.");
         assert.notInclude(replies.join("\n"), "Discarded the lost turn");
       }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+});
+
+describe("Hermes rollback", () => {
+  it.effect("rewinds Hermes's own session by the user turns it kept after the target", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const mockAgentPath = yield* path.fromFileUrl(
+        new URL("../../../scripts/acp-mock-agent.ts", import.meta.url),
+      );
+      const dir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-hermes-rollback-" });
+      const binaryPath = path.join(dir, "hermes");
+      yield* fileSystem.writeFileString(
+        binaryPath,
+        `#!/bin/sh\nexec '${process.execPath}' '${mockAgentPath}' "$@"\n`,
+      );
+      yield* fileSystem.chmod(binaryPath, 0o755);
+      const settings = hermesSettings(binaryPath);
+      const environment = { ...process.env, HERMES_HOME: dir };
+      const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      type Runtime = AcpSessionRuntime.AcpSessionRuntime["Service"];
+      const spawned: Array<Array<string>> = [];
+      let sessionId: string | undefined;
+      const usage = { inputTokens: 1, outputTokens: 1, totalTokens: 2 };
+      const adapter = yield* makeHermesAdapterV2({
+        instanceId,
+        settings,
+        environment,
+        childProcessSpawner,
+        selfInvocation: yield* resolveSelfInvocation(),
+        makeRuntime: ({ runtimePolicy: _policy, ...runtimeInput }) =>
+          makeHermesAcpRuntime({
+            ...runtimeInput,
+            hermesSettings: settings,
+            environment,
+            childProcessSpawner,
+          }).pipe(
+            Effect.map((runtime): Runtime => {
+              const prompts: Array<string> = [];
+              spawned.push(prompts);
+              let deliver: Parameters<Runtime["handleSessionUpdate"]>[0] | undefined;
+              const say = (text: string) =>
+                deliver!({
+                  sessionId: sessionId!,
+                  update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } },
+                });
+              return {
+                ...runtime,
+                handleSessionUpdate: (handler) =>
+                  Effect.sync(() => {
+                    deliver = handler;
+                  }).pipe(Effect.andThen(runtime.handleSessionUpdate(handler))),
+                prompt: (payload) =>
+                  Effect.gen(function* () {
+                    sessionId ??= (yield* runtime.start()).sessionId;
+                    const text = promptText(payload);
+                    prompts.push(text);
+                    // The gateway answers its own commands without admitting a turn.
+                    if (text === "/undo 1") {
+                      yield* say("Undid 1 turn (2 message(s)).\nRemoved message: test prompt\n");
+                      return { stopReason: "end_turn" as const };
+                    }
+                    if (text.startsWith("/title")) {
+                      yield* say("Session title set: renamed\n");
+                      return { stopReason: "end_turn" as const };
+                    }
+                    yield* say("Done.");
+                    return { stopReason: "end_turn" as const, usage };
+                  }),
+              };
+            }),
+          ),
+      });
+      const threadId = ThreadId.make("hermes-v2-rollback");
+      const policy = runtimePolicy("approval-required");
+      const modelSelection = { instanceId, model: "hermes-4" };
+      const session = yield* adapter.openSession({
+        threadId,
+        providerSessionId: ProviderSessionId.make("hermes-v2-session-rollback"),
+        modelSelection,
+        runtimePolicy: policy,
+      });
+      const providerThread = yield* session.ensureThread({
+        threadId,
+        modelSelection,
+        runtimePolicy: policy,
+      });
+      const runTurn = (ordinal: number, text = "test prompt") =>
+        Effect.gen(function* () {
+          const input = turnInput({
+            threadId,
+            providerThread,
+            runtimePolicy: policy,
+            now: yield* DateTime.now,
+            model: modelSelection.model,
+            ordinal,
+          });
+          yield* session.startTurn({ ...input, message: { ...input.message, text } });
+          return Array.from(
+            yield* session.events.pipe(
+              Stream.takeUntil((event) => event.type === "turn.terminal"),
+              Stream.runCollect,
+            ),
+          );
+        });
+      const events = [
+        ...(yield* runTurn(1)),
+        ...(yield* runTurn(2, "/title renamed")),
+        ...(yield* runTurn(3)),
+      ];
+      const providerTurns = [
+        ...new Map(
+          events.flatMap((event) =>
+            event.type === "provider_turn.updated"
+              ? [[event.providerTurn.id, event.providerTurn] as const]
+              : [],
+          ),
+        ).values(),
+      ];
+      const [first] = providerTurns;
+      assert.isDefined(first);
+
+      const rolledBack = yield* session.rollbackThread({
+        providerThread,
+        providerThreadTurns: providerTurns,
+        target: {
+          type: "provider_turn",
+          checkpointId: CheckpointId.make("checkpoint-hermes-rollback"),
+          appRunOrdinal: 1,
+          providerTurn: first,
+        },
+      });
+      assert.deepEqual(rolledBack.providerThread.nativeThreadRef, providerThread.nativeThreadRef);
+      const after = yield* runTurn(4);
+
+      // `/title` kept no user turn in Hermes, so only turn 3 is undone, in the same process.
+      assert.equal(spawned.length, 1);
+      const prompts = spawned[0]!;
+      assert.equal(prompts.at(-2), "/undo 1");
+      assert.include(prompts.at(-1) ?? "", "<t3_code_instructions>");
+      const texts = after.flatMap((event) =>
+        event.type === "turn_item.updated" && event.turnItem.type === "assistant_message"
+          ? [event.turnItem.text]
+          : [],
+      );
+      assert.notInclude(texts.join("\n"), "Undid");
+
+      // Rolling back past only a gateway-answered turn sends no `/undo` but still forgets it.
+      const lastProviderTurn = (turnEvents: ReadonlyArray<(typeof events)[number]>) =>
+        turnEvents.findLast((event) => event.type === "provider_turn.updated")?.providerTurn;
+      const kept = lastProviderTurn(after);
+      const titled = lastProviderTurn(yield* runTurn(5, "/title again"));
+      assert.isDefined(kept);
+      assert.isDefined(titled);
+      const beforeSecondRollback = yield* session.readThreadSnapshot({ providerThread });
+      assert.include(
+        beforeSecondRollback.providerTurns.map((turn) => turn.id),
+        titled.id,
+      );
+      yield* session.rollbackThread({
+        providerThread,
+        providerThreadTurns: beforeSecondRollback.providerTurns,
+        target: {
+          type: "provider_turn",
+          checkpointId: CheckpointId.make("checkpoint-hermes-rollback-title"),
+          appRunOrdinal: 4,
+          providerTurn: kept,
+        },
+      });
+      assert.equal(prompts.at(-1), "/title again");
+      const afterSecondRollback = yield* session.readThreadSnapshot({ providerThread });
+      assert.sameMembers(
+        afterSecondRollback.providerTurns.map((turn) => turn.id),
+        [first.id, kept.id],
+      );
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 });

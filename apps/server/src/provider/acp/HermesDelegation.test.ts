@@ -8,7 +8,7 @@ import {
   parseSessionUpdateEvent,
   type AcpToolCallState,
 } from "@t3tools/provider-acp/server/runtimeModel";
-import { makeHermesSubagentExtractor } from "./HermesDelegation.ts";
+import { makeHermesDelegation } from "./HermesDelegation.ts";
 import fixture from "./fixtures/hermes-delegation.json" with { type: "json" };
 import olderFixture from "./fixtures/hermes-delegation-08b140d1.json" with { type: "json" };
 
@@ -43,10 +43,11 @@ function progress(start: AcpToolCallState | undefined, value: Record<string, unk
   );
 }
 
-let extract = makeHermesSubagentExtractor();
+let delegation = makeHermesDelegation();
 beforeEach(() => {
-  extract = makeHermesSubagentExtractor();
+  delegation = makeHermesDelegation();
 });
+const extract = (toolCall: AcpToolCallState) => delegation.extractSubagentUpdates(toolCall);
 const updates = (toolCall: AcpToolCallState) => extract(toolCall)!;
 /** A launch the adapter has already seen start. */
 const launch = (update: unknown) => {
@@ -72,7 +73,9 @@ describe("Hermes delegate_task ACP boundary", () => {
     (pinned) => {
       for (const scenario of pinned.cases) {
         expect(
-          makeHermesSubagentExtractor()(tool(scenario.start))!.map((update) => update.title),
+          makeHermesDelegation()
+            .extractSubagentUpdates(tool(scenario.start))!
+            .map((update) => update.title),
         ).toEqual(
           scenario.name === "batch"
             ? ["Inspect routing", "Run tests"]
@@ -233,16 +236,86 @@ describe("Hermes delegate_task ACP boundary", () => {
     ]);
   });
 
-  it("claims spinner frames and grandchildren without moving any child", () => {
+  it("claims spinner frames and grandchildren of unknown parents without moving any child", () => {
     const start = tool({ ...batch.start, rawInput: batch.args });
     for (const text of ["(¬‿¬) analyzing...", "(¬‿¬) analyzing...ಠ_ಠ deliberating..."]) {
       expect(updates(progress(start, { event: "subagent.thinking", task_index: 0, text }))).toEqual(
         [],
       );
     }
-    expect(updates(progress(start, { event: "subagent.start", task_index: 0, depth: 1 }))).toEqual(
-      [],
-    );
+    expect(
+      updates(
+        progress(start, {
+          event: "subagent.start",
+          task_index: 0,
+          depth: 1,
+          subagent_id: "sa-orphan",
+          parent_id: "sa-never-seen",
+          goal: "Orphan",
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("opens grandchildren under the subagent that launched them", () => {
+    const start = tool({ ...batch.start, rawInput: batch.args });
+    extract(start);
+    const child = { task_index: 0, depth: 0, subagent_id: "sa-0" };
+    const nested = (depth: number, id: string, parent: string, event: string) =>
+      progress(start, {
+        event,
+        task_index: 0,
+        depth,
+        subagent_id: id,
+        parent_id: parent,
+        goal: `Goal of ${id}`,
+        model: "claude-haiku-5-5",
+      });
+    expect(updates(progress(start, { ...child, event: "subagent.start" }))).toMatchObject([
+      { nativeTaskId: "tc-fixture-batch:task:0", status: "running" },
+    ]);
+    expect(updates(nested(1, "sa-1", "sa-0", "subagent.spawn_requested"))).toEqual([
+      expect.objectContaining({
+        nativeTaskId: "tc-fixture-batch:subagent:sa-1",
+        parentNativeTaskId: "tc-fixture-batch:task:0",
+        status: "running",
+        title: "Goal of sa-1",
+        prompt: "Goal of sa-1",
+        model: "claude-haiku-5-5",
+      }),
+    ]);
+    expect(updates(nested(2, "sa-2", "sa-1", "subagent.start"))).toMatchObject([
+      {
+        nativeTaskId: "tc-fixture-batch:subagent:sa-2",
+        parentNativeTaskId: "tc-fixture-batch:subagent:sa-1",
+        status: "running",
+      },
+    ]);
+    // The child ends without its descendants reporting: they end with it rather than hold the turn.
+    expect(
+      updates(
+        progress(start, {
+          ...child,
+          event: "subagent.complete",
+          status: "completed",
+          summary: "Hi",
+        }),
+      ),
+    ).toMatchObject([
+      { nativeTaskId: "tc-fixture-batch:task:0", status: "completed", result: "Hi" },
+      {
+        nativeTaskId: "tc-fixture-batch:subagent:sa-1",
+        parentNativeTaskId: "tc-fixture-batch:task:0",
+        status: "interrupted",
+        prompt: "",
+      },
+      {
+        nativeTaskId: "tc-fixture-batch:subagent:sa-2",
+        parentNativeTaskId: "tc-fixture-batch:subagent:sa-1",
+        status: "interrupted",
+        prompt: "",
+      },
+    ]);
   });
 
   it("names no goal for a child it never saw start, so it cannot open a row", () => {
@@ -270,7 +343,7 @@ describe("Hermes delegate_task ACP boundary", () => {
     // After the turn settles the adapter sees the raw update without the start,
     // and a restarted server has not seen the launch at all.
     expect(
-      makeHermesSubagentExtractor()(
+      makeHermesDelegation().extractSubagentUpdates(
         progress(undefined, {
           event: "subagent.complete",
           task_index: 0,
@@ -315,23 +388,27 @@ describe("Hermes delegate_task ACP boundary", () => {
   it("keeps delegate controls and unrelated commands out of the roster", () => {
     for (const action of ["list", "steer", "stop"]) {
       expect(
-        makeHermesSubagentExtractor()(
+        makeHermesDelegation().extractSubagentUpdates(
           tool({ ...batch.start, title: "delegate task", rawInput: { action } }),
         ),
       ).toBeUndefined();
     }
     expect(
-      makeHermesSubagentExtractor()(tool({ ...batch.start, title: "delegate task", content: [] })),
+      makeHermesDelegation().extractSubagentUpdates(
+        tool({ ...batch.start, title: "delegate task", content: [] }),
+      ),
     ).toBeUndefined();
     // Stock controls share the delegate_task title prefix; only spawns name a goal.
     for (const title of ["delegate_task: list", "delegate_task: stop sa-0-test1234"]) {
       const content = [{ type: "content", content: { type: "text", text: "Delegating task" } }];
       expect(
-        makeHermesSubagentExtractor()(tool({ ...batch.start, title, content })),
+        makeHermesDelegation().extractSubagentUpdates(tool({ ...batch.start, title, content })),
       ).toBeUndefined();
     }
     expect(
-      makeHermesSubagentExtractor()(tool({ ...batch.start, title: "terminal: echo hello" })),
+      makeHermesDelegation().extractSubagentUpdates(
+        tool({ ...batch.start, title: "terminal: echo hello" }),
+      ),
     ).toBeUndefined();
   });
 

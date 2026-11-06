@@ -176,7 +176,8 @@ only when the gateway lists that field, so an older gateway is never sent it. In
   `delegation.orchestrator_enabled: false`, which still makes every child a leaf.
 
 Both settings freeze into the session when it is created, so only sessions created after the patch
-is applied and the gateway restarts get them. The patch's
+is applied and the gateway restarts get them. Verified against hermes-agent `6b21d0564d` (`main`,
+2026-11-06), alone and after the other patches. The patch's
 `tests/acp_adapter/test_gateway_editor_delegation.py` drives a real gateway daemon and a real
 `hermes acp` process against a loopback model, covering foreground and background calls, a stock
 editor, each depth case, and a stop during a foreground call. Run it in a scratch checkout, as for

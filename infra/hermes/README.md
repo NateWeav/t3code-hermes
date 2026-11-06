@@ -330,6 +330,34 @@ tool. The patch's `tests/acp_adapter/test_gateway_terminal_output.py` runs a rea
 the terminal tool, the gateway turn's progress callback and `GatewayACPAgent`; run it in a scratch
 checkout, as for `acp-delegation-progress`.
 
+## `acp-active-steering`
+
+**Needed by:** steering a running Hermes turn. A message sent while Claude Code or Codex works
+reaches the turn they are running; without this patch T3 Code stops the Hermes turn and starts it
+again with the message. Stock Hermes has `/steer` (`session.steer`), but a turn reads a steer only
+after a tool batch, so a turn that makes no tool call never sees it and the gateway runs the text as
+a later turn of its own. A viewer is never told whether a steer landed, and a `/steer` sent before
+the turn starts becomes an ordinary queued prompt.
+
+- A turn reads a steer at its next model call, tools or not: a steer pending when the model answers
+  becomes a user message after that answer, and the turn goes on to answer it. When nothing is
+  pending then, the turn stops taking steers, so one sent later is refused and its sender sends it as
+  the next prompt instead of it waiting unread for some later turn. The next turn takes steers again,
+  and the classic CLI queues a refused `/steer` as the next prompt.
+- `hermes acp` advertises `_meta.hermes.steer` and serves `_hermes/steer`. It steers the turn the
+  editor's running prompt started, waiting for that turn to start when the steer overtook it, and
+  answers `{"steered": true}` once the turn holds the text, `false` when no turn of the editor's took
+  it. Unlike `/steer`, it sends no chat text.
+
+T3 Code steers a patched Hermes natively and sends a refused steer as the next turn; without the
+patch it keeps interrupt-and-restart steering. Verified against hermes-agent `ca43606920` (`main`,
+2026-11-06), alone and after the other patches. Restart the Hermes gateway after applying it: the
+gateway runs the turns that read steers. The patch's `tests/acp_adapter/test_gateway_active_steer.py`
+drives a real gateway daemon and a real `hermes acp` process with a loopback model: a steer sent right
+after its prompt reaches that turn, which makes no tool call, and one sent after the turn ended is
+refused. Run it with `tests/agent/test_steer.py` in a scratch checkout, as for
+`acp-delegation-progress`.
+
 ## Retired
 
 **`acp-background-reports`** and **`acp-durable-completion-receipts`** hooked Hermes's in-process

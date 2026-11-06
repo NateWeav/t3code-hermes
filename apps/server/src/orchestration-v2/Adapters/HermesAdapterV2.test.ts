@@ -21,7 +21,10 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 import { resolveSelfInvocation } from "@t3tools/shared/nodeRuntime";
 import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
@@ -332,7 +335,7 @@ describe("HermesAdapterV2 flavor", () => {
     assert.isTrue(flavor.supportsImagePrompts);
     assert.isTrue(HermesProviderCapabilitiesV2.subagents.supportsSubagents);
     assert.isTrue(HermesProviderCapabilitiesV2.sessions.supportsModelSwitchInSession);
-    // Steering interrupts and re-prompts, like every ACP flavor.
+    // Stock Hermes steers by interrupt and re-prompt; a patched one negotiates native steering.
     assert.isFalse(HermesProviderCapabilitiesV2.turns.supportsActiveSteering);
   });
 
@@ -1102,6 +1105,155 @@ const lostTurnRefusal = (state: string) =>
   `unknown_execution: do not resend accepted input; a turn in this session was lost when the gateway restarted and its outcome is unknown (${state}). Send \`/discard lost-1\` here (or \`hermes sessions discard s\` in a terminal), then continue.`;
 const promptText = (payload: { readonly prompt: ReadonlyArray<EffectAcpSchema.ContentBlock> }) =>
   payload.prompt.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("\n");
+
+/**
+ * One running turn against the mock agent, whose handshake and `_hermes/steer` answer are
+ * Hermes's: `steered` undefined is stock Hermes (no `_meta.hermes.steer`). The prompt runs
+ * until `settle` completes.
+ */
+const openSteeringTurn = (steered: boolean | undefined) =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const mockAgentPath = yield* path.fromFileUrl(
+      new URL("../../../scripts/acp-mock-agent.ts", import.meta.url),
+    );
+    const dir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-hermes-v2-steer-" });
+    const binaryPath = path.join(dir, "hermes");
+    yield* fileSystem.writeFileString(
+      binaryPath,
+      `#!/bin/sh\nexec '${process.execPath}' '${mockAgentPath}' "$@"\n`,
+    );
+    yield* fileSystem.chmod(binaryPath, 0o755);
+    const settings = hermesSettings(binaryPath);
+    const environment = { ...process.env, HERMES_HOME: dir, T3_ACP_MODEL_IDS: "hermes-4:Hermes 4" };
+    const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const steers: Array<unknown> = [];
+    const settle = yield* Deferred.make<void>();
+    type Runtime = AcpSessionRuntime.AcpSessionRuntime["Service"];
+    const adapter = yield* makeHermesAdapterV2({
+      instanceId,
+      settings,
+      environment,
+      childProcessSpawner,
+      selfInvocation: yield* resolveSelfInvocation(),
+      makeRuntime: ({ runtimePolicy: _policy, ...runtimeInput }) =>
+        makeHermesAcpRuntime({
+          ...runtimeInput,
+          hermesSettings: settings,
+          environment,
+          childProcessSpawner,
+        }).pipe(
+          Effect.map((runtime): Runtime => ({
+            ...runtime,
+            start: () =>
+              runtime.start().pipe(
+                Effect.map((started) =>
+                  steered === undefined
+                    ? started
+                    : {
+                        ...started,
+                        initializeResult: {
+                          ...started.initializeResult,
+                          agentCapabilities: {
+                            ...started.initializeResult.agentCapabilities,
+                            _meta: { hermes: { steer: true } },
+                          },
+                        },
+                      },
+                ),
+              ),
+            request: (method, payload) =>
+              method === "_hermes/steer"
+                ? Effect.sync(() => steers.push(payload)).pipe(Effect.as({ steered }))
+                : runtime.request(method, payload),
+            prompt: (request) =>
+              Deferred.await(settle).pipe(Effect.andThen(runtime.prompt(request))),
+          })),
+        ),
+    });
+    const threadId = ThreadId.make("hermes-v2-steer");
+    const policy = runtimePolicy("approval-required");
+    const modelSelection = { instanceId, model: "hermes-4" };
+    const session = yield* adapter.openSession({
+      threadId,
+      providerSessionId: ProviderSessionId.make("hermes-v2-session-steer"),
+      modelSelection,
+      runtimePolicy: policy,
+    });
+    const providerThread = yield* session.ensureThread({
+      threadId,
+      modelSelection,
+      runtimePolicy: policy,
+    });
+    const turn = turnInput({
+      threadId,
+      providerThread,
+      runtimePolicy: policy,
+      now: yield* DateTime.now,
+      model: modelSelection.model,
+    });
+    const running = yield* session.events.pipe(
+      Stream.filter(
+        (event) =>
+          event.type === "provider_turn.updated" && event.providerTurn.status === "running",
+      ),
+      Stream.take(1),
+      Stream.runHead,
+      Effect.forkScoped,
+    );
+    yield* session.startTurn(turn);
+    const started = yield* Fiber.join(running);
+    if (started._tag === "None" || started.value.type !== "provider_turn.updated") {
+      return yield* Effect.die("the turn never started");
+    }
+    const steer = session.steerTurn({
+      threadId,
+      runId: turn.runId,
+      providerThread,
+      providerTurnId: started.value.providerTurn.id,
+      message: { ...turn.message, messageId: MessageId.make("message:steer"), text: "also this" },
+    });
+    return { session, steer, steers, settle };
+  });
+
+describe.skipIf(windowsHost)("Hermes active steering", () => {
+  it.effect("steers the running turn natively once Hermes says it reads every steer it took", () =>
+    Effect.gen(function* () {
+      const { session, steer, steers, settle } = yield* openSteeringTurn(true);
+      assert.isTrue(session.providerSession.capabilities.turns.supportsActiveSteering);
+      assert.isFalse(session.providerSession.capabilities.turns.activeSteeringAcceptsAttachments);
+      // Accepted while the prompt still runs: there is no delivery report to wait for.
+      yield* steer;
+      assert.deepEqual(steers, [{ sessionId: "mock-session-1", text: "also this" }]);
+      yield* Deferred.succeed(settle, undefined);
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+
+  it.effect("fails a steer Hermes refused once the turn settles, so it becomes the next turn", () =>
+    Effect.gen(function* () {
+      const { steer, settle } = yield* openSteeringTurn(false);
+      const refused = yield* Effect.forkScoped(Effect.exit(steer));
+      yield* Deferred.succeed(settle, undefined);
+      const exit = yield* Fiber.join(refused);
+      assert.isTrue(Exit.isFailure(exit));
+      assert.include(JSON.stringify(exit), "refused the steering message as it ended");
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+
+  it.effect("keeps restart steering against a Hermes without the steering patch", () =>
+    Effect.gen(function* () {
+      const { session, steer, steers, settle } = yield* openSteeringTurn(undefined);
+      assert.isFalse(session.providerSession.capabilities.turns.supportsActiveSteering);
+      assert.isTrue(session.providerSession.capabilities.turns.supportsSteeringByInterruptRestart);
+      const exit = yield* Effect.exit(steer);
+      assert.isTrue(Exit.isFailure(exit));
+      assert.include(JSON.stringify(exit), "ProviderAdapterSteerRunUnsupportedError");
+      assert.deepEqual(steers, []);
+      yield* Deferred.succeed(settle, undefined);
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+});
 
 describe("Hermes prompts blocked by a lost gateway turn", () => {
   type Runtime = AcpSessionRuntime.AcpSessionRuntime["Service"];

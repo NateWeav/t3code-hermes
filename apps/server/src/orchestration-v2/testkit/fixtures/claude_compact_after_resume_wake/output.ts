@@ -33,9 +33,16 @@ export function assertHermesCompactAfterResumeWakeDetails(
   const requests = transcript.entries.flatMap((entry) =>
     entry.type === "expect_outbound" && entry.label?.startsWith("request:") ? [entry.label] : [],
   );
+  // With `acp-command-approval`, T3 puts the new Full access session in Don't Ask once.
   assert.deepEqual(
     requests.filter((label) => label !== "request:session/prompt"),
-    ["request:initialize", "request:session/new", "request:initialize", "request:session/load"],
+    [
+      "request:initialize",
+      "request:session/new",
+      "request:session/set_config_option",
+      "request:initialize",
+      "request:session/load",
+    ],
   );
 }
 

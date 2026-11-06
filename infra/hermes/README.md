@@ -270,7 +270,9 @@ Default, and its policy answers each edit.
 
 Only sessions created after the patch is applied ask before commands; an existing thread keeps
 Hermes's own rule. Verified against hermes-agent `ca43606920` (`main`, 2026-11-06), alone and
-after the other patches. Restart the Hermes gateway after applying it: the gate runs there. Run the
+after the other patches. Its `90d6b98fd8` version (`main`, 2026-11-06) is the same change on top of
+`acp-editor-delegation`, `acp-editor-clarify`, `acp-terminal-output` and `acp-active-steering`, and
+applies only after them. Restart the Hermes gateway after applying it: the gate runs there. Run the
 patch's `tests/acp_adapter/test_gateway_command_approval.py` in a scratch checkout, as for
 `acp-delegation-progress`.
 

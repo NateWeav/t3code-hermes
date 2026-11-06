@@ -159,6 +159,11 @@
       "neededFor": "Approval before each shell command in Supervised and Auto-accept edits threads, as Claude Code asks before each Bash command. Without it, Hermes asks only before file edits and commands it flags as dangerous, and a file edit Hermes runs without asking shows no diff.",
       "versions": [
         {
+          "hermesCommit": "90d6b98fd86d20981ee06ddd5b7d93e4320f26a4",
+          "hermesCommitDate": "2026-11-06T07:12:42Z",
+          "file": "acp-command-approval/90d6b98fd86d.patch"
+        },
+        {
           "hermesCommit": "ca4360692055bdb4df3a695c164646e528891da8",
           "hermesCommitDate": "2026-11-06T04:01:15Z",
           "file": "acp-command-approval/ca4360692055.patch"

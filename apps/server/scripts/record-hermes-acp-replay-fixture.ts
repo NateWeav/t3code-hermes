@@ -510,16 +510,12 @@ const recordScenario = Effect.fn("recordHermesScenario")(function* (fixtureName:
         // As in production, so turns the gateway runs on its own reach the thread.
         continuationRequests: yield* ProviderContinuationRequests.ProviderContinuationRequests,
         // Production's runtime factory, with the protocol logger teeing raw lines.
-        makeRuntime: ({ runtimePolicy, processEnvironment, ...input }) =>
+        makeRuntime: ({ runtimePolicy, processEnvironment: _processEnvironment, ...input }) =>
           makeHermesAcpRuntime({
             ...input,
             protocolLogging: tee.attachRuntime(),
             hermesSettings: settings,
-            environment: hermesSpawnEnvironment(
-              environment,
-              runtimePolicy.runtimeMode,
-              processEnvironment,
-            ),
+            environment: hermesSpawnEnvironment(environment, runtimePolicy.runtimeMode),
             childProcessSpawner,
           }),
       });

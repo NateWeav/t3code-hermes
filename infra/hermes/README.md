@@ -299,6 +299,35 @@ patches. Its `90d6b98fd8` version (`main`, 2026-11-06) is the same change on top
 Restart the Hermes gateway after applying it: the gateway decides the session's tools.
 Run the patch's `tests/acp_adapter/test_gateway_editor_clarify_toolset.py` in a scratch checkout,
 as for `acp-delegation-progress`.
+## `acp-terminal-output`
+
+**Needed by:** a Hermes shell command's output while it runs. Stock Hermes projects only a tool's
+start and its result to ACP viewers, so a command's card stays empty until it finishes.
+
+ACP v1 has no update that appends to a tool call (`content` replaces the card), so the patch uses
+the convention codex-acp and claude-agent-acp use for an editor that advertises
+`clientCapabilities._meta.terminal_output: true`, as T3 Code and Zed do: `tool_call_update`
+frames carrying `_meta.terminal_output` (`terminal_id`, `data`), then `_meta.terminal_exit`. Zed
+creates the terminal only from a `tool_call`, so before a call's first output the patch announces
+the call again (editors upsert it) with `_meta.terminal_info` and a `terminal` content block. A
+client without the capability sees no change. The result still arrives as the call's content when
+it completes and replaces the live view.
+
+A foreground `terminal` command's drained output is teed, as the gateway's new `tool.output`
+event, to the running call's viewers: at most four batches a second, whole lines only, newest 8 KiB
+of a flood, with the result's own secret redaction. Colour is kept unless an escape sequence split
+a secret, and the shell wrapper's marker lines are cut. Streaming stops for the rest of a command
+once its output shows `PRIVATE KEY` (any PEM, OpenSSH or PGP private-key header), since a key spans
+lines. Turns run by a managed worker
+(bypass sessions, or `gateway.managed_workers`) do not stream yet.
+
+Verified against hermes-agent `53a6ced422` (`main`, 2026-11-06), alone and after the other patches.
+Its `90d6b98fd8` version (`main`, 2026-11-06) is the same change on top of `acp-editor-delegation`
+and `acp-editor-clarify`, and applies only after them.
+Restart the Hermes gateway and the T3 Code server after applying it: the gateway runs the terminal
+tool. The patch's `tests/acp_adapter/test_gateway_terminal_output.py` runs a real command through
+the terminal tool, the gateway turn's progress callback and `GatewayACPAgent`; run it in a scratch
+checkout, as for `acp-delegation-progress`.
 
 ## Retired
 

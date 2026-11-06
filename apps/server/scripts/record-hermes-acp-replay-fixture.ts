@@ -45,6 +45,7 @@ import {
   materializeFixtureInput,
   TOOL_CALL_READ_ONLY_WORKSPACE_ROOT,
 } from "../src/orchestration-v2/testkit/fixtures/shared.ts";
+import * as CommandOutputRecorder from "../src/orchestration-v2/testkit/CommandOutputRecorder.ts";
 import { runOrchestratorV2Scenario } from "../src/orchestration-v2/testkit/OrchestratorScenario.ts";
 import * as ProviderReplayHarness from "../src/orchestration-v2/testkit/ProviderReplayHarness.ts";
 import { makeHermesAcpRuntime } from "../src/provider/acp/HermesAcpSupport.ts";
@@ -614,9 +615,14 @@ const recordScenario = Effect.fn("recordHermesScenario")(function* (fixtureName:
     Effect.asVoid,
     Effect.provideService(Clock.Clock, wallClock),
   );
-  const exit = yield* runOrchestratorV2Scenario(scenario, {
-    afterSteps: waitForHermesIdle,
-    waitDeadlineMs: 5 * 60_000,
+  const exit = yield* Effect.gen(function* () {
+    const result = yield* runOrchestratorV2Scenario(scenario, {
+      afterSteps: waitForHermesIdle,
+      waitDeadlineMs: 5 * 60_000,
+    });
+    // Live command output bypasses the domain events the assertions otherwise read, as in replay.
+    const commandOutput = yield* CommandOutputRecorder.CommandOutputRecorder;
+    return { ...result, commandOutput: yield* commandOutput.snapshot };
   }).pipe(
     Effect.provide(
       ProviderReplayHarness.layerWithRegistry(

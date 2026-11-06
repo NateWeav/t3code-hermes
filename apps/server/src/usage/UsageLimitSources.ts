@@ -157,7 +157,7 @@ export const make = Effect.gen(function* () {
       const rejected = yield* Ref.get(rejectedRef);
       const configs = Object.entries(settings?.usageLimitSources ?? {}).flatMap(([id, config]) =>
         config.enabled &&
-        config.managementKey.length > 0 &&
+        config.managementKey !== "" &&
         !Equal.equals(rejected.get(id as UsageLimitSourceId)?.config, config)
           ? [config]
           : [],
@@ -165,9 +165,15 @@ export const make = Effect.gen(function* () {
       const resets = yield* Effect.forEach(
         configs,
         (config) =>
-          api
-            .modelResetAt(config, { provider, model: input.model })
-            .pipe(Effect.orElseSucceed(() => null)),
+          Effect.gen(function* () {
+            // The key may be a reference to a secret provider.
+            const managementKey = yield* readManagementKey(config);
+            if (managementKey.length === 0) return null;
+            return yield* api.modelResetAt(
+              { url: config.url, managementKey },
+              { provider, model: input.model },
+            );
+          }).pipe(Effect.orElseSucceed(() => null)),
         { concurrency: "unbounded" },
       );
       return resets.reduce<string | null>(

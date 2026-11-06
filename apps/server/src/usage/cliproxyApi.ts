@@ -522,10 +522,10 @@ export const makeCliproxyApi = Effect.gen(function* () {
   });
 
   const modelResetAt = Effect.fn("CliproxyApi.modelResetAt")(function* (
-    config: UsageLimitSourceConfig,
+    hub: CliproxyHub,
     input: { readonly provider: string; readonly model: string },
   ) {
-    const { files } = yield* decodeCooldownFiles(yield* management(config, "auth-files"));
+    const { files } = yield* decodeCooldownFiles(yield* management(hub, "auth-files"));
     return hubModelResetAt(files, { ...input, now: DateTime.toEpochMillis(yield* DateTime.now) });
   });
 

@@ -14,8 +14,8 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   SourceControlRepositoryError,
+  CoreWsRpcGroup,
   WS_METHODS,
-  WsRpcGroup,
   WsServerRefreshProvidersRpc,
   WsSubscribeServerConfigRpc,
   type OrchestrationV2StoredEvent,
@@ -1382,7 +1382,8 @@ it.effect("a publish whose push fails still refreshes the new remote", () =>
       Layer.mock(ServerEnvironment.ServerEnvironment)({}),
       Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
     );
-    const server = yield* RpcServer.makeNoSerialization(WsRpcGroup, {
+    // layerWsRpc serves the core group; the fork's Hermes RPCs are merged in ws.ts.
+    const server = yield* RpcServer.makeNoSerialization(CoreWsRpcGroup, {
       ...WS_RPC_SERVER_OPTIONS,
       onFromServer: (response) =>
         response._tag === "Exit" ? Queue.offer(exits, response.exit._tag) : Effect.void,

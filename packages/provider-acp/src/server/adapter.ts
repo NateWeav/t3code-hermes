@@ -616,6 +616,11 @@ export interface AcpAdapterV2SubagentUpdate {
   readonly role?: string | null;
   readonly usage?: OrchestrationV2SubagentUsage | null;
   readonly suppressNormalTool?: boolean;
+  /**
+   * A follow-up the agent sent this finished subagent (`id` names that send): the subagent reopens in the current
+   * run with `prompt` as its new message, even if it finished in an earlier one.
+   */
+  readonly continuation?: { readonly id: string; readonly prompt: string };
 }
 
 export interface AcpAdapterV2Options {
@@ -1600,7 +1605,12 @@ interface ActiveAcpSubagent {
   terminalStatusProjected: boolean;
   readonly toolState: Pick<ActiveAcpTurn, "tools" | "toolUpdatesSkipped" | "toolStartedAt">;
   readonly toolSessionIds: Map<string, string>;
+  /** The follow-up this subagent is answering, if any; each one gets its own answer in the child thread. */
+  continuationId: string | null;
 }
+
+/** Subagents a later run can still reopen with a follow-up, per session. */
+const REOPENABLE_SUBAGENTS = 256;
 
 interface AcpNativeChildSession {
   parentSessionId: string | null;
@@ -2231,6 +2241,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
         const stoppedRunQuarantine = yield* Ref.make(false);
         // Native subagents can outlive interrupts; carry lineage forward to finish their original turn items.
         const carryoverSubagents = yield* Ref.make<AcpCarryoverSubagents | null>(null);
+        const reopenableSubagents = new Map<string, ActiveAcpSubagent>();
         const handledBackgroundTaskIdsInActiveTurn = yield* Ref.make<ReadonlySet<string>>(
           new Set(),
         );
@@ -2987,7 +2998,9 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           messageId?: string | null,
         ) {
           if (text.length === 0 && mode === "append") return;
-          const nativeItemId = `${subagent.task.nativeTaskRef?.nativeId ?? subagent.task.id}:message:${messageId ?? "result"}`;
+          const resultKey =
+            subagent.continuationId === null ? "result" : `result:${subagent.continuationId}`;
+          const nativeItemId = `${subagent.task.nativeTaskRef?.nativeId ?? subagent.task.id}:message:${messageId ?? resultKey}`;
           const previous = subagent.assistantMessages.get(nativeItemId) ?? "";
           const messageText = mode === "replace" ? text : `${previous}${text}`;
           subagent.assistantMessages.set(nativeItemId, messageText);
@@ -3132,6 +3145,60 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           }
         });
 
+        // As Claude's resume does: the subagent moves to this run with the follow-up as its prompt, and the follow-up
+        // joins its thread, where its next answer follows.
+        const reopenSubagent = Effect.fnUntraced(function* (
+          context: ActiveAcpTurn,
+          subagent: ActiveAcpSubagent,
+          continuation: { readonly id: string; readonly prompt: string },
+        ) {
+          const nativeTaskId = subagent.task.nativeTaskRef?.nativeId ?? String(subagent.task.id);
+          const now = yield* DateTime.now;
+          subagent.continuationId = continuation.id;
+          subagent.providerTurnId = context.providerTurnId;
+          subagent.terminalStatusProjected = false;
+          subagent.assistantText = "";
+          subagent.task = {
+            ...subagent.task,
+            runId: context.input.runId,
+            prompt: continuation.prompt,
+            status: "running",
+            result: null,
+            startedAt: now,
+            completedAt: null,
+            updatedAt: now,
+          };
+          context.subagents.set(nativeTaskId, subagent);
+          if (subagent.childSessionId !== null) {
+            context.subagentsBySessionId.set(subagent.childSessionId, subagent);
+          }
+          const promptNativeItemId = `${nativeTaskId}:prompt:${continuation.id}`;
+          const promptArtifacts = makeSubagentConversationArtifacts({
+            senderThreadId: context.input.threadId,
+            messageId: providerMessageId(promptNativeItemId),
+            turnItemId: providerTurnItemId(promptNativeItemId),
+            threadId: subagent.childThreadId,
+            rootNodeId: subagent.childRootNodeId,
+            providerThreadId: subagent.task.providerThreadId,
+            providerTurnId: null,
+            nativeItemRef: { driver, nativeId: promptNativeItemId, strength: "weak" },
+            role: "user",
+            text: continuation.prompt,
+            ordinal: resolveSubagentChildOrdinal(subagent, promptNativeItemId),
+            now,
+          });
+          yield* emitProviderEvent({
+            type: "message.updated",
+            driver,
+            message: promptArtifacts.message,
+          });
+          yield* emitProviderEvent({
+            type: "turn_item.updated",
+            driver,
+            turnItem: promptArtifacts.turnItem,
+          });
+        });
+
         const emitSubagent = Effect.fnUntraced(function* (
           context: ActiveAcpTurn,
           reported: AcpAdapterV2SubagentUpdate,
@@ -3146,7 +3213,19 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             context.subagents.get(update.nativeTaskId) ??
             (update.childSessionId !== null
               ? context.subagentsBySessionId.get(update.childSessionId)
-              : undefined);
+              : undefined) ??
+            (update.continuation === undefined
+              ? undefined
+              : reopenableSubagents.get(update.nativeTaskId));
+          if (
+            existing !== undefined &&
+            update.continuation !== undefined &&
+            existing.continuationId !== update.continuation.id &&
+            acpSubagentStatusIsTerminal(existing.task.status) &&
+            !acpSubagentStatusIsTerminal(update.status)
+          ) {
+            yield* reopenSubagent(context, existing, update.continuation);
+          }
           const updateIsTerminal = acpSubagentStatusIsTerminal(update.status);
           if (
             existing !== undefined &&
@@ -3240,9 +3319,15 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               toolStartedAt: new Map(),
             },
             toolSessionIds: new Map(),
+            continuationId: null,
           };
           subagent.task = task;
           context.subagents.set(nativeTaskId, subagent);
+          reopenableSubagents.delete(nativeTaskId);
+          reopenableSubagents.set(nativeTaskId, subagent);
+          if (reopenableSubagents.size > REOPENABLE_SUBAGENTS) {
+            reopenableSubagents.delete(reopenableSubagents.keys().next().value!);
+          }
 
           if (existing === undefined) {
             yield* emitProviderEvent({

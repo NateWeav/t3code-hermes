@@ -25,6 +25,7 @@ export interface HermesSubagentUpdate {
   readonly result: string | null;
   readonly role: string | null;
   readonly usage: OrchestrationV2SubagentUsage | null;
+  readonly continuation?: { readonly id: string; readonly prompt: string };
 }
 
 type Child = {
@@ -273,23 +274,88 @@ function resultUpdate(
 /** Launches remembered at once; a call's children outlive its own updates. */
 const REMEMBERED_LAUNCHES = 256;
 
+type SpawnedTask = { readonly toolCallId: string; readonly index: number };
+
 /**
  * Subagent updates for a Hermes delegation call, or undefined when it isn't one; an empty array
  * claims the call without moving a child. Stock Hermes names children only in the start, so they're
- * remembered by call id.
+ * remembered by call id. A patched `delegate_task(action="continue")` reports the finished child it
+ * names on its own call; its frames update that child, matched by the `subagent_id` the spawn reported.
  */
 export function makeHermesSubagentExtractor() {
   const launches = new Map<string, ReadonlyArray<Child>>();
+  const spawnedTasks = new Map<string, SpawnedTask>();
+  // Continue calls by call id: frames after the run settled carry no rawInput.
+  const continuations = new Map<string, { readonly subagentId: string; readonly prompt: string }>();
+  const remember = <V>(map: Map<string, V>, key: string, value: V) => {
+    map.delete(key);
+    map.set(key, value);
+    if (map.size > REMEMBERED_LAUNCHES) map.delete(map.keys().next().value!);
+  };
   return (tool: AcpToolCallState): ReadonlyArray<HermesSubagentUpdate> | undefined => {
     let children = launches.get(tool.toolCallId);
     if (children === undefined && isHermesDelegation(tool)) {
       children = startChildren(tool);
-      launches.set(tool.toolCallId, children);
-      if (launches.size > REMEMBERED_LAUNCHES) launches.delete(launches.keys().next().value!);
+      remember(launches, tool.toolCallId, children);
+    }
+    const args = record(tool.data.rawInput);
+    const named = text(args.subagent_id);
+    const message = text(args.message);
+    if (args.action === "continue" && named !== undefined && message !== undefined) {
+      remember(continuations, tool.toolCallId, { subagentId: named, prompt: message });
+    }
+    const progress = record(record(tool.data.rawOutput).hermesDelegation);
+    const subagentId = text(progress.subagent_id);
+    const index = count(progress.task_index);
+    if (children !== undefined && subagentId !== undefined && index !== undefined) {
+      remember(spawnedTasks, subagentId, { toolCallId: tool.toolCallId, index });
+    }
+    const continued = continuations.get(tool.toolCallId);
+    if (children === undefined && continued !== undefined && subagentId === continued.subagentId) {
+      const spawned = spawnedTasks.get(subagentId);
+      if (spawned !== undefined) {
+        const continuation = { id: tool.toolCallId, prompt: continued.prompt };
+        return progressUpdates(spawned.toolCallId, launches.get(spawned.toolCallId) ?? [], {
+          ...progress,
+          task_index: spawned.index,
+        }).map((update) => ({ ...update, continuation }));
+      }
     }
     if (children === undefined && !isHermesDelegationProgress(tool)) return undefined;
     return delegationUpdates(tool, children ?? []);
   };
+}
+
+/** The update one patched child lifecycle event makes, reported on its parent call `id`. */
+function progressUpdates(
+  id: string,
+  children: ReadonlyArray<Child>,
+  progress: Record<string, unknown>,
+): ReadonlyArray<HermesSubagentUpdate> {
+  const index = count(progress.task_index);
+  const childAt = (at: number) => children.find((child) => child.index === at);
+  // Grandchildren report through the same call with a depth; only direct
+  // children are rows. Thinking ticks are spinner frames, not progress.
+  if (
+    index === undefined ||
+    !Number.isInteger(index) ||
+    (count(progress.depth) ?? 0) !== 0 ||
+    progress.event === "subagent.thinking"
+  ) {
+    return [];
+  }
+  if (progress.event === "subagent.complete") {
+    return [resultUpdate(id, childAt(index), index, progress)];
+  }
+  return [
+    childUpdate(
+      id,
+      childAt(index),
+      index,
+      progress.event === "subagent.spawn_requested" ? "pending" : "running",
+      { model: text(progress.model), role: resultRole(progress) },
+    ),
+  ];
 }
 
 function delegationUpdates(
@@ -360,29 +426,7 @@ function delegationUpdates(
   }
 
   if (typeof progress.event === "string") {
-    const index = count(progress.task_index);
-    // Grandchildren report through the same call with a depth; only direct
-    // children are rows. Thinking ticks are spinner frames, not progress.
-    if (
-      index === undefined ||
-      !Number.isInteger(index) ||
-      (count(progress.depth) ?? 0) !== 0 ||
-      progress.event === "subagent.thinking"
-    ) {
-      return [];
-    }
-    if (progress.event === "subagent.complete") {
-      return [resultUpdate(id, childAt(index), index, progress)];
-    }
-    return [
-      childUpdate(
-        id,
-        childAt(index),
-        index,
-        progress.event === "subagent.spawn_requested" ? "pending" : "running",
-        { model: text(progress.model), role: resultRole(progress) },
-      ),
-    ];
+    return progressUpdates(id, children, progress);
   }
 
   return children.map((child) => childUpdate(id, child, child.index, "running"));

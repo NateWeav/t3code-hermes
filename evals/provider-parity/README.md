@@ -63,10 +63,11 @@ One live sample of every scenario takes about 15 minutes. The stack suite takes 
 Rules that keep the number honest:
 
 - Never edit a reference assertion or its fixtures to let Hermes pass. Shared assertions must keep passing for every provider that uses them.
+- A variant's `assertOutput` is the user-visible contract that parity compares. Checks of one provider's wire frames, native ids or token ledgers go in that variant's `assertProviderDetails`, which replay also runs. Moving a reference's wire checks there keeps them, and lets other providers share the rest.
 - Fixtures come only from the recorder, never from hand edits.
 - A Hermes-only assertion scores half; say why in the PR.
 - Changing a classification in `scenarios.ts` needs a reason in the entry.
 
-Scenarios marked `providerBound` (`message_steering`, `turn_interrupt_mid_tool`, `turn_interrupt_restart`, `subagent_v2`, `subagent_v2_nested`, `web_search`) have only reference assertions that check their own provider's identity, wire frames or item shapes. Hermes reaches half credit there with its own assertion, and full credit once the scenario gets a provider-neutral assertion that every provider's fixture passes.
+Scenarios marked `providerBound` (`message_steering`, `turn_interrupt_mid_tool`, `turn_interrupt_restart`, `subagent_v2`, `subagent_v2_nested`, `web_search`) have only reference assertions that check their own provider's identity, wire frames or item shapes. Hermes reaches half credit there with its own assertion, and full credit once the reference's wire checks move to its `assertProviderDetails`, leaving an `assertOutput` that Hermes can share.
 
 `run.test.ts` tests the grader and runs in CI.

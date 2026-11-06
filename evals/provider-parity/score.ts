@@ -520,7 +520,7 @@ function rankNextSteps(
       switch (score.status) {
         case "missing":
           if (score.reason !== null && (score.live === null || score.live.passed === 0)) {
-            return `${score.reason} Write a provider-neutral assertion every provider's fixture passes and use it for the hermes variant.`;
+            return `${score.reason} Move the reference's wire checks to its assertProviderDetails and share the rest as assertOutput.`;
           }
           return score.live !== null && score.live.passed > 0
             ? `Passes live (${score.live.assertion} assertion) but has no committed fixture: record it and add a hermes variant using that assertion.`

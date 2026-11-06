@@ -342,10 +342,7 @@ const SETTINGS_SCREENS = {
     linking: "settings/hermes",
     // Hermes pins its tabs above internally scrolling lists, so a glass header
     // has no primary scroll view to inset and would sit on top of the tabs.
-    options: {
-      ...SHEET_SOLID_HEADER_OPTIONS,
-      title: "Hermes",
-    },
+    options: pageRoute({ title: "Hermes", header: "solid", itemStyle: "standard" }),
   }),
   SettingsAuth: createNativeStackScreen({
     screen: SettingsAuthRouteScreen,

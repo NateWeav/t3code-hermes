@@ -46,7 +46,6 @@ import { CodexDriver, type CodexDriverEnv } from "./Drivers/CodexDriver.ts";
 import * as ModelManifest from "./ModelManifest.ts";
 import * as AntigravityInstallation from "./AntigravityInstallation.ts";
 import { OpenCodeDriver } from "@t3tools/provider-opencode/server";
-import type { OpenCodeSettings } from "@t3tools/provider-opencode/settings";
 import * as OpenCodeRuntime from "@t3tools/provider-opencode/server/OpenCodeRuntime";
 import * as OpenCodeServerLedger from "@t3tools/provider-opencode/server/OpenCodeServerLedger";
 import * as ResetCreditCoordinator from "./resetCreditCoordinator.ts";

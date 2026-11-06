@@ -152,7 +152,7 @@ export class SpeechService extends Context.Service<
       timeout: SpeechModelUnloadTimeout,
     ) => Effect.Effect<EnvironmentSpeechStatus, SpeechError>;
   }
->()("t3/speech/SpeechService") {}
+>()("t3-hermes/speech/SpeechService") {}
 
 const UNLOAD_MILLISECONDS: Record<Exclude<SpeechModelUnloadTimeout, "never">, number> = {
   immediately: 0,

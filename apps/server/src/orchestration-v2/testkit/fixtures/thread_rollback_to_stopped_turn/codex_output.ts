@@ -15,11 +15,10 @@ import {
   TURN_INTERRUPT_MID_TOOL_PROMPT,
 } from "../shared.ts";
 
-export function assertThreadRollbackToStoppedTurnOutput(
-  result: OrchestratorV2ScenarioResult,
+export function assertCodexThreadRevert(
+  _result: OrchestratorV2ScenarioResult,
   transcript: ProviderReplayTranscript,
 ) {
-  assertRollbackToStoppedTurnConversation(result, transcript);
   const revert = transcript.entries.find(
     (entry) =>
       entry.type === "expect_outbound" &&

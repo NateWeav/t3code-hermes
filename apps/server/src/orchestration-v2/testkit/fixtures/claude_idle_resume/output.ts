@@ -10,11 +10,10 @@ import {
 } from "../shared.ts";
 import { CLAUDE_IDLE_RESUME_PROMPT_1, CLAUDE_IDLE_RESUME_PROMPT_2 } from "./input.ts";
 
-export function assertClaudeIdleResumeOutput(
+export function assertClaudeIdleResumeTokenLedger(
   result: OrchestratorV2ScenarioResult,
   transcript: ProviderReplayTranscript,
 ) {
-  assertIdleResumeConversation(result, transcript);
   const projection = projectionFor(result, transcript.scenario);
   // The resumed process's ledger starts at zero, so the first turn is not counted again.
   assert.deepEqual(

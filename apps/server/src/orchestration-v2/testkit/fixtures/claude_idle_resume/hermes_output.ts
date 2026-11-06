@@ -3,17 +3,12 @@ import type { ProviderReplayTranscript } from "@t3tools/contracts";
 
 import type { OrchestratorV2ScenarioResult } from "../../OrchestratorScenario.ts";
 import { acpOutboundRequestsByProcess } from "../shared.ts";
-import { assertIdleResumeConversation } from "./output.ts";
 
-/**
- * Hermes reports session-wide usage that T3 does not split per turn, so Claude's per-turn ledger
- * is not checked. The fresh process must load the same session before the second prompt.
- */
-export function assertHermesIdleResumeOutput(
-  result: OrchestratorV2ScenarioResult,
+/** The fresh Hermes process loads the same session before the second prompt. */
+export function assertHermesIdleResumeSession(
+  _result: OrchestratorV2ScenarioResult,
   transcript: ProviderReplayTranscript,
 ) {
-  assertIdleResumeConversation(result, transcript);
   const processes = acpOutboundRequestsByProcess(transcript);
   assert.lengthOf(processes, 2, "the idle release must end the first Hermes process");
   const resumed = processes[1] ?? [];

@@ -264,7 +264,9 @@ editor's place. Delegated subagents and side tasks cannot ask, so they keep Herm
 The gateway sends an edit's diff only on its approval request, so under Accept Edits or Don't Ask
 (Auto-accept edits and Full access in T3 Code) a write that runs unasked showed no diff. The
 patched viewer puts the change its arguments make on the write's card, as Hermes's in-process
-server did.
+server did, and says so in `agentCapabilities._meta.command_approval`. T3 Code sets the session's
+mode from its approval policy only when Hermes says so; with stock Hermes it leaves the session in
+Default, and its policy answers each edit.
 
 Only sessions created after the patch is applied ask before commands; an existing thread keeps
 Hermes's own rule. Verified against hermes-agent `ca43606920` (`main`, 2026-11-06), alone and

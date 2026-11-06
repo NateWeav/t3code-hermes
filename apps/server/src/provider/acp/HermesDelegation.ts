@@ -354,10 +354,8 @@ export function makeHermesDelegation() {
   return {
     /**
      * Subagent updates for a Hermes delegation call, or undefined when it isn't one; an empty array
-     * claims the call without moving a child. Stock Hermes names children only in the start, so
-     * they're remembered by call id. A patched `delegate_task(action="continue")` reports the finished
-     * child it names on its own call; its frames update that child, matched by the `subagent_id` the
-     * spawn reported.
+     * claims the call. Children are remembered by call id. A patched `delegate_task(action="continue")`
+     * call updates the finished child it names, matched by the `subagent_id` the spawn reported.
      */
     extractSubagentUpdates,
     /**

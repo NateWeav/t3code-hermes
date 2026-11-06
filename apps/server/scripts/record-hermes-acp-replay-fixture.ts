@@ -509,11 +509,17 @@ const recordScenario = Effect.fn("recordHermesScenario")(function* (fixtureName:
     // clock steps that order them, and waits for Hermes to idle. A Hermes input drops only its gates.
     steps:
       ownVariant === undefined && materialized.steps.some(isGate)
-        ? materialized.steps.filter((step) => step.type === "dispatch" || step.type === "advance_clock")
+        ? materialized.steps.filter(
+            (step) => step.type === "dispatch" || step.type === "advance_clock",
+          )
         : materialized.steps.flatMap((step) =>
             isGate(step)
               ? []
-              : [step.type === "finish_held_run" ? { ...step, type: "await_run_status" as const } : step],
+              : [
+                  step.type === "finish_held_run"
+                    ? { ...step, type: "await_run_status" as const }
+                    : step,
+                ],
           ),
     projectionThreadIds: materialized.projectionThreadIds,
     runtimePolicyOverride: { ...settingsVariant.runtimePolicyOverride, cwd: realWorkspace },

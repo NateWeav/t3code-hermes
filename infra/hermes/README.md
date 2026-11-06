@@ -325,6 +325,7 @@ patches. Its `90d6b98fd8` version (`main`, 2026-11-06) is the same change on top
 Restart the Hermes gateway after applying it: the gateway decides the session's tools.
 Run the patch's `tests/acp_adapter/test_gateway_editor_clarify_toolset.py` in a scratch checkout,
 as for `acp-delegation-progress`.
+
 ## `acp-terminal-output`
 
 **Needed by:** a Hermes shell command's output while it runs. Stock Hermes projects only a tool's
@@ -354,6 +355,7 @@ Restart the Hermes gateway and the T3 Code server after applying it: the gateway
 tool. The patch's `tests/acp_adapter/test_gateway_terminal_output.py` runs a real command through
 the terminal tool, the gateway turn's progress callback and `GatewayACPAgent`; run it in a scratch
 checkout, as for `acp-delegation-progress`.
+
 ## `acp-active-steering`
 
 **Needed by:** steering a running Hermes turn. A message sent while Claude Code or Codex works
@@ -381,6 +383,7 @@ drives a real gateway daemon and a real `hermes acp` process with a loopback mod
 after its prompt reaches that turn, which makes no tool call, and one sent after the turn ended is
 refused. Run it with `tests/agent/test_steer.py` in a scratch checkout, as for
 `acp-delegation-progress`.
+
 ## `acp-unprompted-turns`
 
 **Needed by:** a background wake shown as a run of its own. When a background job or subagent
@@ -400,6 +403,7 @@ and applies only after it.
 The change is in `hermes acp` only, so new `hermes acp` processes pick it up; restarting the gateway
 is not required. Run the patch's `tests/acp_adapter/test_gateway_unprompted_turn.py` in a scratch
 checkout, as for `acp-delegation-progress`.
+
 ## `acp-command-approval`
 
 **Needed by:** approval before each shell command in Supervised and Auto-accept edits threads, as
@@ -429,6 +433,7 @@ after the other patches. Its `90d6b98fd8` version (`main`, 2026-11-06) is the sa
 applies only after them. Restart the Hermes gateway after applying it: the gate runs there. Run the
 patch's `tests/acp_adapter/test_gateway_command_approval.py` in a scratch checkout, as for
 `acp-delegation-progress`.
+
 ## `acp-subagent-model-continue`
 
 **Needed by:** choosing a subagent's model, and sending a finished subagent a follow-up, as Claude's

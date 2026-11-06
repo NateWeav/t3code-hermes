@@ -419,6 +419,13 @@ export interface AcpAdapterV2Flavor {
   readonly approvalOptions?: (
     request: EffectAcpSchema.RequestPermissionRequest,
   ) => ReadonlyArray<ProviderApprovalOption>;
+  /**
+   * The subagent whose own tool raised a permission request on the parent's session, by native
+   * task id. The approval hangs off that subagent's row in the turn's thread, as Codex's do.
+   */
+  readonly permissionSubagentNativeTaskId?: (
+    request: EffectAcpSchema.RequestPermissionRequest,
+  ) => string | undefined;
   readonly onSessionEvent?: (
     event: AcpSessionRuntime.AcpSessionRuntimeEvent,
   ) => Effect.Effect<void>;
@@ -1735,6 +1742,22 @@ function acpSubagentStatusIsTerminal(status: OrchestrationV2Subagent["status"]):
 
 function acpSubagentStatusBlocksTurnSettlement(status: OrchestrationV2Subagent["status"]): boolean {
   return status === "running" || status === "pending";
+}
+
+/** The subagent row in the turn's own thread that `nativeTaskId` is, or that launched it. */
+function turnThreadSubagent(
+  context: ActiveAcpTurn,
+  nativeTaskId: string | undefined,
+): ActiveAcpSubagent | undefined {
+  let subagent = nativeTaskId === undefined ? undefined : context.subagents.get(nativeTaskId);
+  for (let hops = 0; subagent !== undefined && hops <= context.subagents.size; hops++) {
+    if (subagent.task.threadId === context.input.threadId) return subagent;
+    const launcherRoot = subagent.task.parentNodeId;
+    subagent = [...context.subagents.values()].find(
+      (candidate) => candidate.childRootNodeId === launcherRoot,
+    );
+  }
+  return undefined;
 }
 
 function acpSubagentHasPendingBackgroundWork(subagent: ActiveAcpSubagent): boolean {
@@ -6171,6 +6194,10 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           );
           const now = yield* DateTime.now;
           const nodeId = idAllocator.derive.approvalNode({ requestId });
+          const askingSubagent = turnThreadSubagent(
+            context,
+            flavor.permissionSubagentNativeTaskId?.(params),
+          );
           const requestKind = providerRequestKind(parsed.kind);
           const nativeItemRef = { driver, nativeId: nativeRequestId, strength: "weak" as const };
           const ordinal = yield* resolveItemOrdinal(
@@ -6195,7 +6222,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             id: nodeId,
             threadId: context.input.threadId,
             runId: context.input.runId,
-            parentNodeId: context.input.rootNodeId,
+            parentNodeId: askingSubagent?.task.id ?? context.input.rootNodeId,
             rootNodeId: context.input.rootNodeId,
             kind: "approval_request",
             status: "waiting",

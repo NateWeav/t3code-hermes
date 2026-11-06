@@ -266,6 +266,23 @@
           "file": "acp-subagent-model-continue/ca4360692055.patch"
         }
       ]
+    },
+    {
+      "id": "acp-subagent-approvals",
+      "title": "Subagent approvals",
+      "neededFor": "Approvals that show under the subagent that asked, as Codex's do. Without it, a subagent's approval reaches you as if its parent had asked.",
+      "versions": [
+        {
+          "hermesCommit": "90d6b98fd86d20981ee06ddd5b7d93e4320f26a4",
+          "hermesCommitDate": "2026-11-06T07:12:42Z",
+          "file": "acp-subagent-approvals/90d6b98fd86d.patch"
+        },
+        {
+          "hermesCommit": "ca4360692055bdb4df3a695c164646e528891da8",
+          "hermesCommitDate": "2026-11-06T04:01:15Z",
+          "file": "acp-subagent-approvals/ca4360692055.patch"
+        }
+      ]
     }
   ]
 }

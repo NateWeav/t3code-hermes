@@ -8,7 +8,7 @@ import {
   parseSessionUpdateEvent,
   type AcpToolCallState,
 } from "@t3tools/provider-acp/server/runtimeModel";
-import { makeHermesSubagentExtractor } from "./HermesDelegation.ts";
+import { makeHermesDelegation } from "./HermesDelegation.ts";
 import fixture from "./fixtures/hermes-delegation.json" with { type: "json" };
 import olderFixture from "./fixtures/hermes-delegation-08b140d1.json" with { type: "json" };
 
@@ -43,10 +43,11 @@ function progress(start: AcpToolCallState | undefined, value: Record<string, unk
   );
 }
 
-let extract = makeHermesSubagentExtractor();
+let delegation = makeHermesDelegation();
 beforeEach(() => {
-  extract = makeHermesSubagentExtractor();
+  delegation = makeHermesDelegation();
 });
+const extract = (toolCall: AcpToolCallState) => delegation.extractSubagentUpdates(toolCall);
 const updates = (toolCall: AcpToolCallState) => extract(toolCall)!;
 /** A launch the adapter has already seen start. */
 const launch = (update: unknown) => {
@@ -72,7 +73,9 @@ describe("Hermes delegate_task ACP boundary", () => {
     (pinned) => {
       for (const scenario of pinned.cases) {
         expect(
-          makeHermesSubagentExtractor()(tool(scenario.start))!.map((update) => update.title),
+          makeHermesDelegation()
+            .extractSubagentUpdates(tool(scenario.start))!
+            .map((update) => update.title),
         ).toEqual(
           scenario.name === "batch"
             ? ["Inspect routing", "Run tests"]
@@ -340,7 +343,7 @@ describe("Hermes delegate_task ACP boundary", () => {
     // After the turn settles the adapter sees the raw update without the start,
     // and a restarted server has not seen the launch at all.
     expect(
-      makeHermesSubagentExtractor()(
+      makeHermesDelegation().extractSubagentUpdates(
         progress(undefined, {
           event: "subagent.complete",
           task_index: 0,
@@ -385,23 +388,27 @@ describe("Hermes delegate_task ACP boundary", () => {
   it("keeps delegate controls and unrelated commands out of the roster", () => {
     for (const action of ["list", "steer", "stop"]) {
       expect(
-        makeHermesSubagentExtractor()(
+        makeHermesDelegation().extractSubagentUpdates(
           tool({ ...batch.start, title: "delegate task", rawInput: { action } }),
         ),
       ).toBeUndefined();
     }
     expect(
-      makeHermesSubagentExtractor()(tool({ ...batch.start, title: "delegate task", content: [] })),
+      makeHermesDelegation().extractSubagentUpdates(
+        tool({ ...batch.start, title: "delegate task", content: [] }),
+      ),
     ).toBeUndefined();
     // Stock controls share the delegate_task title prefix; only spawns name a goal.
     for (const title of ["delegate_task: list", "delegate_task: stop sa-0-test1234"]) {
       const content = [{ type: "content", content: { type: "text", text: "Delegating task" } }];
       expect(
-        makeHermesSubagentExtractor()(tool({ ...batch.start, title, content })),
+        makeHermesDelegation().extractSubagentUpdates(tool({ ...batch.start, title, content })),
       ).toBeUndefined();
     }
     expect(
-      makeHermesSubagentExtractor()(tool({ ...batch.start, title: "terminal: echo hello" })),
+      makeHermesDelegation().extractSubagentUpdates(
+        tool({ ...batch.start, title: "terminal: echo hello" }),
+      ),
     ).toBeUndefined();
   });
 

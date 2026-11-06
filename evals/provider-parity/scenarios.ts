@@ -195,7 +195,7 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
     name: "claude_nested_subagent_model",
     facet: "subagents",
     hermes: twin(
-      "The prompt drives Claude's Agent tool with a per-subagent model. Hermes's delegate_task cannot pick one: `model` is a reserved task parameter, so children run on delegation.model or the parent's model.",
+      "The prompt drives Claude's Agent tool, and the scenario is a subagent nested in a subagent that inherits its owner's model. With the subagent-model patch delegate_task takes a per-task model (the lifecycle twin shows it), but Hermes's default delegation.max_spawn_depth is 1, and both the delegation patch and T3 drop grandchild frames, so no twin can show the nesting.",
     ),
   },
 
@@ -235,9 +235,11 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
   {
     name: "claude_background_subagent_lifecycle",
     facet: "background",
-    hermes: twin(
-      `${CLAUDE_AGENT_TOOLS} It resumes Agent A after it finished and picks its model, and Hermes's delegate_task can do neither: it only lists, steers or stops running children, and has no per-task model.`,
-    ),
+    hermes: {
+      kind: "twin",
+      reason: `${CLAUDE_AGENT_TOOLS} The Hermes twin uses delegate_task's per-task model, stop and continue actions (the subagent-model and subagent-continue patches).`,
+      twin: "hermes_background_subagent_lifecycle",
+    },
   },
   {
     name: "claude_background_wake_before_queued_prompt",

@@ -927,6 +927,132 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 
+  it.effect("reopens a finished child that a later run continues, in its own thread", () =>
+    Effect.gen(function* () {
+      const goal = "Reply with exactly: A_FIRST";
+      const followUp = "Reply with exactly: A_SECOND";
+      const child = {
+        goal,
+        subagent_id: "sa-0-a",
+        child_session_id: "20261106_101500_a",
+        task_index: 0,
+        task_count: 1,
+        depth: 0,
+      };
+      const progress = (toolCallId: string, hermesDelegation: Record<string, unknown>) =>
+        ({
+          sessionUpdate: "tool_call_update",
+          toolCallId,
+          status: "in_progress",
+          rawOutput: { hermesDelegation: { ...child, ...hermesDelegation } },
+        }) as const;
+      const call = (
+        toolCallId: string,
+        rawInput: Record<string, unknown>,
+      ): ReadonlyArray<EffectAcpSchema.SessionUpdate> => {
+        const dispatched = { status: "dispatched", mode: "background", subagent_ids: ["sa-0-a"] };
+        return [
+          {
+            sessionUpdate: "tool_call",
+            toolCallId,
+            title: "delegate_task",
+            kind: "execute",
+            rawInput,
+          },
+          progress(toolCallId, { event: "subagent.spawn_requested", model: "claude-haiku-4-5" }),
+          {
+            sessionUpdate: "tool_call_update",
+            toolCallId,
+            kind: "execute",
+            status: "completed",
+            rawOutput: dispatched,
+          },
+          // The background worker begins.
+          progress(toolCallId, { event: "subagent.start" }),
+        ];
+      };
+      const offers = yield* Queue.unbounded<ProviderContinuationRequest>();
+      const { threadId, events } = yield* runMockTurn({
+        name: "delegate-continue",
+        mockEnvironment: {},
+        promptUpdates: [
+          ...call("toolu_spawn", { tasks: [{ goal, model: "claude-haiku-4-5" }] }),
+          progress("toolu_spawn", {
+            event: "subagent.complete",
+            status: "completed",
+            summary: "A_FIRST",
+          }),
+        ],
+        // A later run sends the finished child a follow-up; it answers after that run settled.
+        followUpPromptUpdates: [
+          ...call("toolu_continue", {
+            action: "continue",
+            subagent_id: "sa-0-a",
+            message: followUp,
+          }),
+          { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "RESUMED" } },
+        ],
+        idleUpdates: [
+          progress("toolu_continue", {
+            event: "subagent.complete",
+            status: "completed",
+            summary: "A_SECOND",
+          }),
+          // The gateway's own turn hands the new answer back.
+          {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "A_RESUME_REPORTED" },
+          },
+        ],
+        continuationRequests: {
+          offer: (request) => Queue.offer(offers, request).pipe(Effect.asVoid),
+        },
+        runContinuation: true,
+      });
+      const updates = events.flatMap((event) =>
+        event.type === "subagent.updated" ? [event.subagent] : [],
+      );
+      assert.deepEqual([...new Set(updates.map((subagent) => subagent.id))].length, 1);
+      const statuses = updates.map((subagent) => subagent.status);
+      const firstCompleted = statuses.indexOf("completed");
+      assert.isAtLeast(firstCompleted, 0);
+      assert.isAbove(statuses.lastIndexOf("running"), firstCompleted);
+      const subagent = updates.at(-1)!;
+      assert.equal(subagent.status, "completed");
+      assert.equal(subagent.result, "A_SECOND");
+      assert.equal(subagent.model, "claude-haiku-4-5");
+      assert.equal(
+        subagent.runId,
+        RunId.make(`run:${threadId}:2`),
+        "the subagent moves to the run that continued it",
+      );
+      assert.deepEqual((yield* Queue.take(offers)).notification, {
+        source: { kind: "subagent", childThreadId: subagent.childThreadId! },
+        outcome: "completed",
+        summary: `Subagent "${goal}" finished`,
+      });
+      const childMessages = new Map(
+        events.flatMap((event) =>
+          event.type === "message.updated" && event.message.threadId === subagent.childThreadId
+            ? [[event.message.id, `${event.message.role}:${event.message.text}`]]
+            : [],
+        ),
+      );
+      assert.deepEqual(
+        [...childMessages.values()],
+        [`user:${goal}`, "assistant:A_FIRST", `user:${followUp}`, "assistant:A_SECOND"],
+      );
+      const childThread = events.find(
+        (event) =>
+          event.type === "app_thread.created" && event.appThread.id === subagent.childThreadId,
+      );
+      assert.equal(
+        childThread?.type === "app_thread.created" && childThread.appThread.modelSelection.model,
+        "claude-haiku-4-5",
+      );
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+
   it.effect(
     "lists the commands that will wake Hermes and holds the marked ones until they end",
     () =>

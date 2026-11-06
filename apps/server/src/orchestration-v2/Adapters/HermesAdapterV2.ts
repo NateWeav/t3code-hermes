@@ -38,8 +38,10 @@ import {
   hideHermesStopNotices,
   isHermesGatewayTurnLoss,
   makeHermesAcpRuntime,
+  makeHermesEditApprovalCards,
   normalizeHermesT3McpToolCall,
   normalizeHermesTerminalResult,
+  normalizeHermesWebSearchQuery,
   preserveHermesAgentActivityTitle,
   resolveHermesAcpBaseModelId,
   resolveHermesSessionModeId,
@@ -75,6 +77,11 @@ export const HermesProviderCapabilitiesV2 = {
     ...AcpProviderCapabilitiesV2.subagents,
     supportsSubagents: true,
     emitsSubagentLifecycle: true,
+  },
+  streaming: {
+    ...AcpProviderCapabilitiesV2.streaming,
+    // The gateway projects only `tool.start` and `tool.complete`; a command's output arrives whole.
+    streamsToolOutput: false,
   },
   tools: {
     ...AcpProviderCapabilitiesV2.tools,
@@ -133,6 +140,7 @@ export function makeHermesAcpAdapterFlavor(
     HermesReasoningLevel | null
   >();
   const sentFastModes = new WeakMap<AcpSessionRuntime.AcpSessionRuntime["Service"], boolean>();
+  const editApprovalCards = makeHermesEditApprovalCards();
 
   const spawnRuntime = (input: AcpAdapterV2RuntimeInput) => {
     const { runtimePolicy, processEnvironment, ...runtimeInput } = input;
@@ -156,12 +164,21 @@ export function makeHermesAcpAdapterFlavor(
     supportsImagePrompts: true,
     supportsCompaction: true,
     compactionCommand: "/compress",
+    // The gateway's `/undo N` (`session.mutate rewind`) drops the session's last N user turns. It
+    // answers its own slash commands, and a Stop before admission, with no usage: no user turn.
+    rewindSession: {
+      command: (userTurns) => `/undo ${userTurns}`,
+      confirmed: (reply, userTurns) => reply.startsWith(`Undid ${userTurns} turn`),
+      promptAddedUserTurn: (response) => response.usage != null,
+    },
     // The Hermes gateway runs a turn of its own when a background job finishes (`notify: true`) and
     // projects it to ACP viewers as session updates, with no `session/prompt` open. Without this
     // those frames were dropped, so the agent woke and worked while its thread showed nothing.
     enablePostSettleContinuation: true,
     resolveModelId: (selection) => resolveHermesAcpBaseModelId(selection.model),
     approvalOptions: hermesApprovalOptions,
+    onPermissionRequest: editApprovalCards.onPermissionRequest,
+    ignoreSessionUpdate: editApprovalCards.ignoreSessionUpdate,
     promptFailure: hermesPromptFailure,
     restartRuntimeAfterPromptFailure: isHermesGatewayTurnLoss,
     makeRuntime: (input) =>
@@ -240,9 +257,14 @@ export function makeHermesAcpAdapterFlavor(
       }
       return model;
     }),
-    normalizeToolCall: (toolCall) =>
-      preserveHermesAgentActivityTitle(
-        normalizeHermesTerminalResult(normalizeHermesT3McpToolCall(toolCall)),
+    normalizeToolCall: (toolCall, sessionId) =>
+      editApprovalCards.normalizeToolCall(
+        preserveHermesAgentActivityTitle(
+          normalizeHermesWebSearchQuery(
+            normalizeHermesTerminalResult(normalizeHermesT3McpToolCall(toolCall)),
+          ),
+        ),
+        sessionId,
       ),
     extractSubagentUpdates: makeHermesSubagentExtractor(),
     extractAwaitableBackgroundTasks: extractHermesAwaitableBackgroundTasks,

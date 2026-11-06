@@ -2,6 +2,7 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import {
+  CheckpointId,
   HermesSettings,
   MessageId,
   NodeId,
@@ -354,7 +355,7 @@ describe("HermesAdapterV2 flavor", () => {
     }).events[0];
     if (event?._tag !== "ToolCallUpdated") throw new Error("expected a tool call");
     assert.notEqual(event.toolCall.title, "skill view (pr-review)");
-    assert.equal(flavor.normalizeToolCall?.(event.toolCall).title, "skill view (pr-review)");
+    assert.equal(flavor.normalizeToolCall?.(event.toolCall, "s").title, "skill view (pr-review)");
   });
 });
 
@@ -580,79 +581,94 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 
-  it.effect("holds on a notifying background command the agent marks until it sees it end", () =>
-    Effect.gen(function* () {
-      let matched: ReadonlyArray<string> = [];
-      const { events } = yield* runMockTurn({
-        name: "background-wait-exit",
-        mockEnvironment: {},
-        promptUpdates: [
-          ...hermesBackgroundStart({ toolCallId: "tc-tests", processId: TESTS_PROC, notify: true }),
-          // No completion wake is armed, so nothing could release a hold on it.
-          ...hermesBackgroundStart({ toolCallId: "tc-dev", processId: DEV_PROC, notify: false }),
-        ],
-        afterTurn: ({ session, providerThread }) =>
-          Effect.gen(function* () {
-            ({ matched } = yield* session.awaitBackgroundTasks!({
-              providerThread,
-              taskIds: [TESTS_PROC, DEV_PROC],
-              awaited: true,
-            }));
-          }).pipe(Effect.orDie),
-        followUpPromptUpdates: [
-          {
-            sessionUpdate: "tool_call",
-            toolCallId: "tc-wait",
-            title: "process_manage: wait aaaa1111",
-            kind: "other",
-            // Hermes takes any unique prefix, and its `wait` result omits the id.
-            rawInput: { action: "wait", session_id: "aaaa1111" },
-          },
-          {
-            sessionUpdate: "tool_call_update",
-            toolCallId: "tc-wait",
-            kind: "other",
-            status: "completed",
-            content: [
-              {
-                type: "content",
-                content: {
-                  type: "text",
-                  text: "process_manage result\n- **status:** exited\n- **exit_code:** 0",
+  it.effect(
+    "lists the commands that will wake Hermes and holds the marked ones until they end",
+    () =>
+      Effect.gen(function* () {
+        let matched: ReadonlyArray<string> = [];
+        const { events } = yield* runMockTurn({
+          name: "background-wait-exit",
+          mockEnvironment: {},
+          promptUpdates: [
+            ...hermesBackgroundStart({
+              toolCallId: "tc-tests",
+              processId: TESTS_PROC,
+              notify: true,
+            }),
+            // No completion wake is armed, so nothing could release a hold on it.
+            ...hermesBackgroundStart({ toolCallId: "tc-dev", processId: DEV_PROC, notify: false }),
+          ],
+          afterTurn: ({ session, providerThread }) =>
+            Effect.gen(function* () {
+              ({ matched } = yield* session.awaitBackgroundTasks!({
+                providerThread,
+                taskIds: [TESTS_PROC, DEV_PROC],
+                awaited: true,
+              }));
+            }).pipe(Effect.orDie),
+          followUpPromptUpdates: [
+            {
+              sessionUpdate: "tool_call",
+              toolCallId: "tc-wait",
+              title: "process_manage: wait aaaa1111",
+              kind: "other",
+              // Hermes takes any unique prefix, and its `wait` result omits the id.
+              rawInput: { action: "wait", session_id: "aaaa1111" },
+            },
+            {
+              sessionUpdate: "tool_call_update",
+              toolCallId: "tc-wait",
+              kind: "other",
+              status: "completed",
+              content: [
+                {
+                  type: "content",
+                  content: {
+                    type: "text",
+                    text: "process_manage result\n- **status:** exited\n- **exit_code:** 0",
+                  },
                 },
-              },
-            ],
-          },
-        ],
-      });
-      assert.deepEqual(matched, [TESTS_PROC]);
-      const rosters = providerThreadRosters(events);
-      const held = rosters.find((roster) => roster.length > 0);
-      assert.deepEqual(held, [
-        { taskId: TESTS_PROC, kind: "command", awaited: true, description: "pnpm test" },
-      ]);
-      assert.isTrue(backgroundWorkHoldsCompletion(held ?? []));
-      assert.deepEqual(rosters.at(-1), []);
-    }).pipe(Effect.provide(testLayer), Effect.scoped),
+              ],
+            },
+          ],
+        });
+        assert.deepEqual(matched, [TESTS_PROC]);
+        const rosters = providerThreadRosters(events);
+        const listed = rosters.find((roster) => roster.length > 0);
+        assert.deepEqual(listed, [
+          { taskId: TESTS_PROC, kind: "command", description: "pnpm test" },
+        ]);
+        assert.isFalse(backgroundWorkHoldsCompletion(listed ?? []));
+        const held = rosters.find((roster) => roster.some((task) => task.awaited === true));
+        assert.deepEqual(held, [
+          { taskId: TESTS_PROC, kind: "command", awaited: true, description: "pnpm test" },
+        ]);
+        assert.isTrue(backgroundWorkHoldsCompletion(held ?? []));
+        assert.deepEqual(rosters.at(-1), []);
+      }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 
-  it.effect("releases the marks when Hermes wakes the agent", () =>
+  // Hermes's wake names no process: it releases every listed one, and names a lone one.
+  it.effect.each([
+    {
+      name: "one",
+      processIds: [TESTS_PROC],
+      notification: {
+        source: { kind: "command" },
+        outcome: "unknown",
+        summary: 'Command "pnpm test" finished',
+      },
+    },
+    { name: "two", processIds: [TESTS_PROC, DEV_PROC], notification: undefined },
+  ] as const)("releases $name listed command(s) when Hermes wakes the agent", (row) =>
     Effect.gen(function* () {
       const offers = yield* Queue.unbounded<ProviderContinuationRequest>();
       const { events } = yield* runMockTurn({
-        name: "background-wait-wake",
+        name: `background-wake-${row.name}`,
         mockEnvironment: {},
-        promptUpdates: hermesBackgroundStart({
-          toolCallId: "tc-tests",
-          processId: TESTS_PROC,
-          notify: true,
-        }),
-        afterTurn: ({ session, providerThread }) =>
-          session.awaitBackgroundTasks!({
-            providerThread,
-            taskIds: [TESTS_PROC],
-            awaited: true,
-          }).pipe(Effect.asVoid, Effect.orDie),
+        promptUpdates: row.processIds.flatMap((processId) =>
+          hermesBackgroundStart({ toolCallId: `tc-${processId}`, processId, notify: true }),
+        ),
         idleUpdates: [
           {
             sessionUpdate: "agent_message_chunk",
@@ -664,11 +680,70 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
         },
         runContinuation: true,
       });
-      // Hermes's notice names no process, so the wake releases every mark.
+      assert.deepEqual((yield* Queue.take(offers)).notification, row.notification);
       const firstTerminal = events.findIndex((event) => event.type === "turn.terminal");
-      const rosters = providerThreadRosters(events.slice(firstTerminal + 1));
-      assert.lengthOf(rosters[0] ?? [], 1);
-      assert.deepEqual(rosters.slice(1), [[], []]);
+      assert.lengthOf(
+        providerThreadRosters(events.slice(0, firstTerminal)).at(-1) ?? [],
+        row.processIds.length,
+      );
+      const afterRoot = events
+        .slice(firstTerminal + 1)
+        .flatMap((event) =>
+          event.type === "provider_thread.updated" ? [event.providerThread] : [],
+        );
+      // The release lands between runs, on a thread the root run settled idle.
+      assert.equal(afterRoot[0]?.status, "idle");
+      assert.deepEqual(
+        afterRoot.map((providerThread) => providerThread.pendingBackgroundTasks ?? []),
+        afterRoot.map(() => []),
+      );
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+
+  it.effect("keeps a running command listed when a background subagent wakes Hermes", () =>
+    Effect.gen(function* () {
+      const dispatched = delegationFixture.cases.find((item) => item.name === "dispatched")!;
+      const offers = yield* Queue.unbounded<ProviderContinuationRequest>();
+      const { events } = yield* runMockTurn({
+        name: "background-wake-subagent",
+        mockEnvironment: {},
+        promptUpdates: [
+          ...hermesBackgroundStart({ toolCallId: "tc-tests", processId: TESTS_PROC, notify: true }),
+          { ...dispatched.start, rawInput: dispatched.args } as EffectAcpSchema.SessionUpdate,
+          { ...dispatched.complete, rawOutput: dispatched.result } as EffectAcpSchema.SessionUpdate,
+        ],
+        idleUpdates: [
+          {
+            sessionUpdate: "tool_call_update",
+            toolCallId: dispatched.start.toolCallId,
+            status: "in_progress",
+            rawOutput: {
+              hermesDelegation: {
+                event: "subagent.complete",
+                subagent_id: "sa-0-test1234",
+                delegation_id: "deleg_test1234",
+                task_index: 0,
+                status: "completed",
+                summary: "Parser reviewed.",
+              },
+            },
+          },
+          {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "The review is in." },
+          },
+        ],
+        continuationRequests: {
+          offer: (request) => Queue.offer(offers, request).pipe(Effect.asVoid),
+        },
+        runContinuation: true,
+      });
+      assert.notDeepInclude((yield* Queue.take(offers)).notification ?? {}, {
+        source: { kind: "command" },
+      });
+      assert.deepEqual(providerThreadRosters(events).at(-1), [
+        { taskId: TESTS_PROC, kind: "command", description: "pnpm test" },
+      ]);
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 });
@@ -1025,5 +1100,182 @@ describe.skipIf(windowsHost)("HermesAdapterV2 across a Hermes gateway restart", 
         assert.include(replies.at(-1) ?? "", "Picking up where we left off.");
         assert.notInclude(replies.join("\n"), "Discarded the lost turn");
       }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+});
+
+describe("Hermes rollback", () => {
+  it.effect("rewinds Hermes's own session by the user turns it kept after the target", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const mockAgentPath = yield* path.fromFileUrl(
+        new URL("../../../scripts/acp-mock-agent.ts", import.meta.url),
+      );
+      const dir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-hermes-rollback-" });
+      const binaryPath = path.join(dir, "hermes");
+      yield* fileSystem.writeFileString(
+        binaryPath,
+        `#!/bin/sh\nexec '${process.execPath}' '${mockAgentPath}' "$@"\n`,
+      );
+      yield* fileSystem.chmod(binaryPath, 0o755);
+      const settings = hermesSettings(binaryPath);
+      const environment = { ...process.env, HERMES_HOME: dir };
+      const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      type Runtime = AcpSessionRuntime.AcpSessionRuntime["Service"];
+      const spawned: Array<Array<string>> = [];
+      let sessionId: string | undefined;
+      const usage = { inputTokens: 1, outputTokens: 1, totalTokens: 2 };
+      const adapter = yield* makeHermesAdapterV2({
+        instanceId,
+        settings,
+        environment,
+        childProcessSpawner,
+        selfInvocation: yield* resolveSelfInvocation(),
+        makeRuntime: ({ runtimePolicy: _policy, ...runtimeInput }) =>
+          makeHermesAcpRuntime({
+            ...runtimeInput,
+            hermesSettings: settings,
+            environment,
+            childProcessSpawner,
+          }).pipe(
+            Effect.map((runtime): Runtime => {
+              const prompts: Array<string> = [];
+              spawned.push(prompts);
+              let deliver: Parameters<Runtime["handleSessionUpdate"]>[0] | undefined;
+              const say = (text: string) =>
+                deliver!({
+                  sessionId: sessionId!,
+                  update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } },
+                });
+              return {
+                ...runtime,
+                handleSessionUpdate: (handler) =>
+                  Effect.sync(() => {
+                    deliver = handler;
+                  }).pipe(Effect.andThen(runtime.handleSessionUpdate(handler))),
+                prompt: (payload) =>
+                  Effect.gen(function* () {
+                    sessionId ??= (yield* runtime.start()).sessionId;
+                    const text = promptText(payload);
+                    prompts.push(text);
+                    // The gateway answers its own commands without admitting a turn.
+                    if (text === "/undo 1") {
+                      yield* say("Undid 1 turn (2 message(s)).\nRemoved message: test prompt\n");
+                      return { stopReason: "end_turn" as const };
+                    }
+                    if (text.startsWith("/title")) {
+                      yield* say("Session title set: renamed\n");
+                      return { stopReason: "end_turn" as const };
+                    }
+                    yield* say("Done.");
+                    return { stopReason: "end_turn" as const, usage };
+                  }),
+              };
+            }),
+          ),
+      });
+      const threadId = ThreadId.make("hermes-v2-rollback");
+      const policy = runtimePolicy("approval-required");
+      const modelSelection = { instanceId, model: "hermes-4" };
+      const session = yield* adapter.openSession({
+        threadId,
+        providerSessionId: ProviderSessionId.make("hermes-v2-session-rollback"),
+        modelSelection,
+        runtimePolicy: policy,
+      });
+      const providerThread = yield* session.ensureThread({
+        threadId,
+        modelSelection,
+        runtimePolicy: policy,
+      });
+      const runTurn = (ordinal: number, text = "test prompt") =>
+        Effect.gen(function* () {
+          const input = turnInput({
+            threadId,
+            providerThread,
+            runtimePolicy: policy,
+            now: yield* DateTime.now,
+            model: modelSelection.model,
+            ordinal,
+          });
+          yield* session.startTurn({ ...input, message: { ...input.message, text } });
+          return Array.from(
+            yield* session.events.pipe(
+              Stream.takeUntil((event) => event.type === "turn.terminal"),
+              Stream.runCollect,
+            ),
+          );
+        });
+      const events = [
+        ...(yield* runTurn(1)),
+        ...(yield* runTurn(2, "/title renamed")),
+        ...(yield* runTurn(3)),
+      ];
+      const providerTurns = [
+        ...new Map(
+          events.flatMap((event) =>
+            event.type === "provider_turn.updated"
+              ? [[event.providerTurn.id, event.providerTurn] as const]
+              : [],
+          ),
+        ).values(),
+      ];
+      const [first] = providerTurns;
+      assert.isDefined(first);
+
+      const rolledBack = yield* session.rollbackThread({
+        providerThread,
+        providerThreadTurns: providerTurns,
+        target: {
+          type: "provider_turn",
+          checkpointId: CheckpointId.make("checkpoint-hermes-rollback"),
+          appRunOrdinal: 1,
+          providerTurn: first,
+        },
+      });
+      assert.deepEqual(rolledBack.providerThread.nativeThreadRef, providerThread.nativeThreadRef);
+      const after = yield* runTurn(4);
+
+      // `/title` kept no user turn in Hermes, so only turn 3 is undone, in the same process.
+      assert.equal(spawned.length, 1);
+      const prompts = spawned[0]!;
+      assert.equal(prompts.at(-2), "/undo 1");
+      assert.include(prompts.at(-1) ?? "", "<t3_code_instructions>");
+      const texts = after.flatMap((event) =>
+        event.type === "turn_item.updated" && event.turnItem.type === "assistant_message"
+          ? [event.turnItem.text]
+          : [],
+      );
+      assert.notInclude(texts.join("\n"), "Undid");
+
+      // Rolling back past only a gateway-answered turn sends no `/undo` but still forgets it.
+      const lastProviderTurn = (turnEvents: ReadonlyArray<(typeof events)[number]>) =>
+        turnEvents.findLast((event) => event.type === "provider_turn.updated")?.providerTurn;
+      const kept = lastProviderTurn(after);
+      const titled = lastProviderTurn(yield* runTurn(5, "/title again"));
+      assert.isDefined(kept);
+      assert.isDefined(titled);
+      const beforeSecondRollback = yield* session.readThreadSnapshot({ providerThread });
+      assert.include(
+        beforeSecondRollback.providerTurns.map((turn) => turn.id),
+        titled.id,
+      );
+      yield* session.rollbackThread({
+        providerThread,
+        providerThreadTurns: beforeSecondRollback.providerTurns,
+        target: {
+          type: "provider_turn",
+          checkpointId: CheckpointId.make("checkpoint-hermes-rollback-title"),
+          appRunOrdinal: 4,
+          providerTurn: kept,
+        },
+      });
+      assert.equal(prompts.at(-1), "/title again");
+      const afterSecondRollback = yield* session.readThreadSnapshot({ providerThread });
+      assert.sameMembers(
+        afterSecondRollback.providerTurns.map((turn) => turn.id),
+        [first.id, kept.id],
+      );
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 });

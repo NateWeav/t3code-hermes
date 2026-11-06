@@ -270,6 +270,7 @@ describe("buildScorecard", () => {
         { name: "shared", facet: "turns", hermes: { kind: "applicable" } },
         { name: "unrecorded", facet: "turns", hermes: { kind: "applicable" } },
         { name: "broken", facet: "turns", hermes: { kind: "applicable" } },
+        { name: "claude_only_tool", facet: "turns", hermes: { kind: "applicable" } },
       ],
       inventory,
       replay,
@@ -278,11 +279,12 @@ describe("buildScorecard", () => {
       field: null,
       createdAt: "2026-01-01T00:00:00.000Z",
     });
-    // One live sample says nothing about reliability, so only turns (1/3) is scored.
-    assert.deepEqual(card.headline, { parity: 33.3, facets: ["turns"] });
+    // One live sample says nothing about reliability, so only turns (1/4) is scored.
+    assert.deepEqual(card.headline, { parity: 25, facets: ["turns"] });
+    assert.deepEqual(card.claudeParity, { passed: 1, covered: 2 });
     assert.deepEqual(
       card.nextSteps.map((step) => step.scenario),
-      ["unrecorded", "broken"],
+      ["unrecorded", "broken", "claude_only_tool"],
     );
   });
 });

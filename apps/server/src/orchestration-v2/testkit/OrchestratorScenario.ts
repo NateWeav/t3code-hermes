@@ -226,7 +226,8 @@ const hasActiveRun = (projection: OrchestrationV2ThreadProjection) =>
 const SCENARIO_WAIT_ATTEMPTS = 10_000;
 // Iteration budgets burn through idle event-loop turns during async I/O; exhaust both iterations and wall-clock deadline.
 const SCENARIO_WAIT_DEADLINE_MS = 60_000;
-const scenarioWaitDeadline = () => performance.now() + SCENARIO_WAIT_DEADLINE_MS;
+const scenarioWaitDeadline = (deadlineMs = SCENARIO_WAIT_DEADLINE_MS) =>
+  performance.now() + deadlineMs;
 const scenarioWaitExhausted = (attemptsRemaining: number, deadlineAt: number) =>
   attemptsRemaining <= 0 && performance.now() >= deadlineAt;
 
@@ -260,6 +261,8 @@ export function runOrchestratorV2Scenario(
   options: {
     readonly replayGate?: ProviderReplayGate;
     readonly afterSteps?: Effect.Effect<void>;
+    /** Live recorders wait on real provider turns, which can outlast the replay wait deadline. */
+    readonly waitDeadlineMs?: number;
   } = {},
 ): Effect.Effect<
   OrchestratorV2ScenarioResult,
@@ -300,7 +303,7 @@ export function runOrchestratorV2Scenario(
       const waitForPendingRuntimeRequest = (
         threadId: ThreadId,
         attemptsRemaining = SCENARIO_WAIT_ATTEMPTS,
-        deadlineAt = scenarioWaitDeadline(),
+        deadlineAt = scenarioWaitDeadline(options.waitDeadlineMs),
       ): Effect.Effect<
         OrchestrationV2RuntimeRequest,
         Orchestrator.OrchestratorV2Error | OrchestratorV2ScenarioStepError,
@@ -326,7 +329,7 @@ export function runOrchestratorV2Scenario(
       const waitForThreadIdle = (
         threadId: ThreadId,
         attemptsRemaining = SCENARIO_WAIT_ATTEMPTS,
-        deadlineAt = scenarioWaitDeadline(),
+        deadlineAt = scenarioWaitDeadline(options.waitDeadlineMs),
       ): Effect.Effect<
         void,
         Orchestrator.OrchestratorV2Error | OrchestratorV2ScenarioStepError,
@@ -360,7 +363,7 @@ export function runOrchestratorV2Scenario(
       const waitForNoBackgroundWork = (
         threadId: ThreadId,
         attemptsRemaining = SCENARIO_WAIT_ATTEMPTS,
-        deadlineAt = scenarioWaitDeadline(),
+        deadlineAt = scenarioWaitDeadline(options.waitDeadlineMs),
       ): Effect.Effect<
         void,
         Orchestrator.OrchestratorV2Error | OrchestratorV2ScenarioStepError,
@@ -385,7 +388,7 @@ export function runOrchestratorV2Scenario(
         threadId: ThreadId,
         runId: OrchestrationV2Run["id"],
         attemptsRemaining = SCENARIO_WAIT_ATTEMPTS,
-        deadlineAt = scenarioWaitDeadline(),
+        deadlineAt = scenarioWaitDeadline(options.waitDeadlineMs),
       ): Effect.Effect<
         void,
         Orchestrator.OrchestratorV2Error | OrchestratorV2ScenarioStepError,
@@ -418,7 +421,7 @@ export function runOrchestratorV2Scenario(
         runId: OrchestrationV2Run["id"],
         status: OrchestrationV2Run["status"],
         attemptsRemaining = SCENARIO_WAIT_ATTEMPTS,
-        deadlineAt = scenarioWaitDeadline(),
+        deadlineAt = scenarioWaitDeadline(options.waitDeadlineMs),
       ): Effect.Effect<
         void,
         Orchestrator.OrchestratorV2Error | OrchestratorV2ScenarioStepError,
@@ -453,7 +456,7 @@ export function runOrchestratorV2Scenario(
         itemStatus: OrchestrationV2TurnItem["status"] | undefined,
         inSubagentThreads: boolean,
         attemptsRemaining = SCENARIO_WAIT_ATTEMPTS,
-        deadlineAt = scenarioWaitDeadline(),
+        deadlineAt = scenarioWaitDeadline(options.waitDeadlineMs),
       ): Effect.Effect<
         void,
         Orchestrator.OrchestratorV2Error | OrchestratorV2ScenarioStepError,

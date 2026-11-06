@@ -5,6 +5,7 @@
  *   node scripts/record-hermes-acp-replay-fixture.ts --hermes-home ~/.hermes-bench --scenario simple
  */
 import * as NodeChildProcess from "node:child_process";
+import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
@@ -18,6 +19,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { ChildProcessSpawner } from "effect/process";
@@ -26,6 +28,7 @@ import type * as EffectAcpProtocol from "effect-acp/protocol";
 import * as TestProviderHost from "@t3tools/provider-testing/TestProviderHost";
 import { ACP_PROTOCOL } from "@t3tools/provider-acp/server/adapter";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
 import { checkpointWorkspace } from "@t3tools/provider-testing/replayWorkspace";
@@ -104,8 +107,14 @@ function resolveBenchHermesHome(): string {
   return home;
 }
 
-/** Drops the agent harness's own model routing so the benchmark home's config decides. */
+/**
+ * Drops the agent harness's own model routing so the benchmark home's config decides. An empty
+ * managed scope keeps a machine-wide `/etc/hermes/config.yaml` overlay out too: it layers over
+ * every home, and a compression provider it pins that the benchmark home lacks aborts `/compress`.
+ */
 function benchEnvironment(hermesHome: string): NodeJS.ProcessEnv {
+  const noManagedScope = NodePath.join(hermesHome, "no-managed-scope");
+  NodeFS.mkdirSync(noManagedScope, { recursive: true });
   return {
     ...Object.fromEntries(
       Object.entries(process.env).filter(
@@ -114,6 +123,7 @@ function benchEnvironment(hermesHome: string): NodeJS.ProcessEnv {
       ),
     ),
     HERMES_HOME: hermesHome,
+    HERMES_MANAGED_DIR: noManagedScope,
   };
 }
 
@@ -185,7 +195,12 @@ function frameLabel(kind: string, method: string, params: unknown): string {
   return `${kind}:${method}${updateType}`;
 }
 
-/** Pairs JSON-RPC ids with their methods and emits the logical frames acp-replay-agent reads. */
+/**
+ * Pairs JSON-RPC ids with their methods and emits the logical frames acp-replay-agent reads. The
+ * first update Hermes sends after a turn settles with no prompt open, such as a background job's
+ * wake, is labelled `notification:session/update:unprompted-<n>`: replay sends it at once, so a
+ * fixture gates it on that label.
+ */
 function wireToEntries(wire: ReadonlyArray<WireMessage>): {
   readonly entries: Array<ProviderReplayEntry>;
   readonly droppedFrames: number;
@@ -194,10 +209,13 @@ function wireToEntries(wire: ReadonlyArray<WireMessage>): {
   const t3Requests = new Map<string, string>();
   const agentRequests = new Map<string, string>();
   let droppedFrames = 0;
+  let unprompted = 0;
+  let settledTurn = false;
   for (const wireMessage of wire) {
     if (wireMessage.direction === "respawn") {
       t3Requests.clear();
       agentRequests.clear();
+      settledTurn = false;
       entries.push({ type: "runtime_exit", status: "success" });
       continue;
     }
@@ -212,9 +230,19 @@ function wireToEntries(wire: ReadonlyArray<WireMessage>): {
         );
       }
       const kind = isRequest ? "request" : "notification";
+      const label = frameLabel(kind, message.method, message.params);
+      const opensBurst =
+        settledTurn &&
+        direction === "incoming" &&
+        message.method === "session/update" &&
+        ![...t3Requests.values()].includes("session/prompt");
+      if (opensBurst) {
+        settledTurn = false;
+        unprompted += 1;
+      }
       entries.push({
         type,
-        label: frameLabel(kind, message.method, message.params),
+        label: opensBurst ? `notification:session/update:unprompted-${unprompted}` : label,
         frame: {
           kind,
           method: message.method,
@@ -230,6 +258,7 @@ function wireToEntries(wire: ReadonlyArray<WireMessage>): {
       continue;
     }
     pending.delete(String(message.id));
+    if (direction === "incoming" && method === "session/prompt") settledTurn = true;
     entries.push({
       type,
       label: `response:${method}`,
@@ -439,19 +468,24 @@ const recordScenario = Effect.fn("recordHermesScenario")(function* (fixtureName:
     driver: HERMES_PROVIDER,
     modelSelection,
   }).pipe(Effect.provide(IdAllocator.layer), provideDeterministicTestRuntime);
+  const isGate = (step: (typeof materialized.steps)[number]) =>
+    step.type === "release_replay_gate" || step.type === "release_replay_gate_after_waiting";
   const scenario = {
     name: `${fixtureName}/hermes-record`,
     commands: materialized.commands,
-    // Gated fixtures pace replay with gates on the test clock. Live, Hermes and wall time pace
-    // themselves, so a fixture that gates records its dispatches only and waits for Hermes to idle.
-    steps: materialized.steps.some(
-      (step) =>
-        step.type === "release_replay_gate" || step.type === "release_replay_gate_after_waiting",
-    )
-      ? materialized.steps.filter((step) => step.type === "dispatch")
-      : materialized.steps.map((step) =>
-          step.type === "finish_held_run" ? { ...step, type: "await_run_status" as const } : step,
-        ),
+    // Gates pace replay on the test clock; live, Hermes and wall time pace themselves. A borrowed
+    // reference input's gates and waits follow that reference's frames, so it records its dispatches
+    // only and waits for Hermes to idle. A Hermes input drops its gates and keeps its waits.
+    steps:
+      ownVariant === undefined && materialized.steps.some(isGate)
+        ? materialized.steps.filter((step) => step.type === "dispatch")
+        : materialized.steps.flatMap((step) =>
+            isGate(step)
+              ? []
+              : step.type === "finish_held_run"
+                ? [{ ...step, type: "await_run_status" as const }]
+                : [step],
+          ),
     projectionThreadIds: materialized.projectionThreadIds,
     runtimePolicyOverride: { ...settingsVariant.runtimePolicyOverride, cwd: realWorkspace },
   };
@@ -461,12 +495,19 @@ const recordScenario = Effect.fn("recordHermesScenario")(function* (fixtureName:
   const layerRegistry = ProviderAdapterRegistry.layerFromAdaptersEffect(
     Effect.gen(function* () {
       const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      // Provided when the variant runs the continuation worker, as production always does.
+      const continuationRequests = yield* Effect.serviceOption(
+        ProviderContinuationRequests.ProviderContinuationRequests,
+      );
       const adapter = yield* makeHermesAdapterV2({
         instanceId: modelSelection.instanceId,
         settings,
         environment,
         childProcessSpawner,
         selfInvocation: yield* resolveSelfInvocation(),
+        ...(Option.isSome(continuationRequests)
+          ? { continuationRequests: continuationRequests.value }
+          : {}),
         // Production's runtime factory, with the protocol logger teeing raw lines.
         makeRuntime: ({ runtimePolicy, processEnvironment, ...input }) =>
           makeHermesAcpRuntime({
@@ -534,7 +575,10 @@ const recordScenario = Effect.fn("recordHermesScenario")(function* (fixtureName:
     Effect.asVoid,
     Effect.provideService(Clock.Clock, wallClock),
   );
-  const exit = yield* runOrchestratorV2Scenario(scenario, { afterSteps: waitForHermesIdle }).pipe(
+  const exit = yield* runOrchestratorV2Scenario(scenario, {
+    afterSteps: waitForHermesIdle,
+    waitDeadlineMs: 5 * 60_000,
+  }).pipe(
     Effect.provide(
       ProviderReplayHarness.layerWithRegistry(
         scenario,

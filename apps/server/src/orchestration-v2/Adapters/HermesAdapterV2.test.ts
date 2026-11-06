@@ -39,6 +39,7 @@ import type * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSession
 import {
   discardLostHermesTurnsOnPrompt,
   makeHermesAcpRuntime,
+  resendHermesPromptsRefusedBusy,
 } from "../../provider/acp/HermesAcpSupport.ts";
 import delegationFixture from "../../provider/acp/fixtures/hermes-delegation.json" with { type: "json" };
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
@@ -845,6 +846,52 @@ describe("Hermes prompts blocked by a lost gateway turn", () => {
       "Hermes: admitted_turn_failed",
     );
   });
+});
+
+describe("Hermes prompts refused while the gateway finishes its own turn", () => {
+  type Runtime = AcpSessionRuntime.AcpSessionRuntime["Service"];
+  const busyRuntime = (refuse: (sent: ReadonlyArray<string>) => Effect.Effect<boolean>) => {
+    const sent: Array<string> = [];
+    const runtime: Runtime = resendHermesPromptsRefusedBusy(
+      {
+        prompt: ((payload) =>
+          Effect.suspend(() => {
+            sent.push(promptText(payload));
+            return refuse(sent).pipe(
+              Effect.flatMap((busy) =>
+                busy
+                  ? Effect.fail(hermesPromptError("session_busy"))
+                  : Effect.succeed({ stopReason: "end_turn" as const }),
+              ),
+            );
+          })) satisfies Runtime["prompt"],
+        cancel: Effect.void,
+      } as unknown as Runtime,
+      "0 millis",
+    );
+    return { runtime, sent };
+  };
+  const compress = { prompt: [{ type: "text" as const, text: "/compress" }] };
+
+  it.effect("resends a command Hermes refused until its own turn ends", () =>
+    Effect.gen(function* () {
+      const { runtime, sent } = busyRuntime((sent) => Effect.succeed(sent.length < 3));
+      const result = yield* runtime.prompt(compress);
+      assert.equal(result.stopReason, "end_turn");
+      assert.deepEqual(sent, ["/compress", "/compress", "/compress"]);
+    }),
+  );
+
+  it.effect("does not resend a refused command after the turn is stopped", () =>
+    Effect.gen(function* () {
+      let stop: Effect.Effect<void> = Effect.void;
+      const { runtime, sent } = busyRuntime(() => stop.pipe(Effect.as(true)));
+      stop = runtime.cancel.pipe(Effect.orDie);
+      const exit = yield* Effect.exit(runtime.prompt(compress));
+      assert.isTrue(exit._tag === "Failure");
+      assert.deepEqual(sent, ["/compress"]);
+    }),
+  );
 });
 
 describe.skipIf(windowsHost)("HermesAdapterV2 across a Hermes gateway restart", () => {

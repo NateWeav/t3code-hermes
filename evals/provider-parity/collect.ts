@@ -223,6 +223,9 @@ export async function runStackSuite(input: {
   NodeFS.rmSync(dir, { recursive: true, force: true });
   NodeFS.mkdirSync(NodePath.join(home, "userdata"), { recursive: true });
   NodeFS.mkdirSync(project, { recursive: true });
+  // As the recorder does: a machine-wide `/etc/hermes` overlay must not reach the benchmark home.
+  const noManagedScope = NodePath.join(input.hermesHome, "no-managed-scope");
+  NodeFS.mkdirSync(noManagedScope, { recursive: true });
   NodeFS.writeFileSync(NodePath.join(project, "README.md"), "# Parity stack suite\n");
   for (const args of [
     ["init", "-q"],
@@ -242,7 +245,12 @@ export async function runStackSuite(input: {
               driver: provider.driver,
               enabled: true,
               ...(provider.driver === "hermes"
-                ? { environment: [{ name: "HERMES_HOME", value: input.hermesHome }] }
+                ? {
+                    environment: [
+                      { name: "HERMES_HOME", value: input.hermesHome },
+                      { name: "HERMES_MANAGED_DIR", value: noManagedScope },
+                    ],
+                  }
                 : {}),
             },
           ]),

@@ -283,6 +283,26 @@ export function makeHermesEditApprovalCards() {
   };
 }
 
+/**
+ * Hermes's `clarify` arrives twice: as a tool call titled `clarify: <question>`, and as the
+ * `elicitation/create` form T3 shows as the question. This drops the tool call's updates.
+ */
+export function makeHermesClarifyCallFilter() {
+  const clarifyCalls = new Set<string>();
+  return (notification: EffectAcpSchema.SessionNotification): boolean => {
+    const { update } = notification;
+    if (update.sessionUpdate !== "tool_call" && update.sessionUpdate !== "tool_call_update") {
+      return false;
+    }
+    const key = `${notification.sessionId}\n${update.toolCallId}`;
+    const title = typeof update.title === "string" ? update.title : "";
+    if (title === "clarify" || title.startsWith("clarify: ")) clarifyCalls.add(key);
+    else if (!clarifyCalls.has(key)) return false;
+    if (update.status === "completed" || update.status === "failed") clarifyCalls.delete(key);
+    return true;
+  };
+}
+
 /** The heading and first value of each `- **field:** value` line of a Hermes result summary. */
 function hermesResultSummary(
   toolCall: AcpToolCallState,

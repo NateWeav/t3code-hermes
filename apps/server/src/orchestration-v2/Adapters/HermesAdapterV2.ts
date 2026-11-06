@@ -41,6 +41,7 @@ import {
   hideHermesStopNotices,
   isHermesGatewayTurnLoss,
   makeHermesAcpRuntime,
+  makeHermesClarifyCallFilter,
   makeHermesEditApprovalCards,
   normalizeHermesT3McpToolCall,
   normalizeHermesTerminalResult,
@@ -182,6 +183,7 @@ export function makeHermesAcpAdapterFlavor(
   >();
   const sentFastModes = new WeakMap<AcpSessionRuntime.AcpSessionRuntime["Service"], boolean>();
   const editApprovalCards = makeHermesEditApprovalCards();
+  const ignoreClarifyCall = makeHermesClarifyCallFilter();
   const launchRuntime = hermesRuntimeLauncher(options);
   const adoptOrLaunchRuntime = Effect.fn("HermesAdapterV2.makeRuntime")(function* (
     input: AcpAdapterV2RuntimeInput,
@@ -228,7 +230,10 @@ export function makeHermesAcpAdapterFlavor(
     resolveModelId: (selection) => resolveHermesAcpBaseModelId(selection.model),
     approvalOptions: hermesApprovalOptions,
     onPermissionRequest: editApprovalCards.onPermissionRequest,
-    ignoreSessionUpdate: editApprovalCards.ignoreSessionUpdate,
+    // The clarify question shows as its user-input request, not also as a tool call. Its filter
+    // tracks every update, so it runs first.
+    ignoreSessionUpdate: (notification) =>
+      ignoreClarifyCall(notification) || editApprovalCards.ignoreSessionUpdate(notification),
     promptFailure: hermesPromptFailure,
     restartRuntimeAfterPromptFailure: isHermesGatewayTurnLoss,
     makeRuntime: (input) =>

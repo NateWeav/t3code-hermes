@@ -18,7 +18,8 @@ import {
   projectionFor,
 } from "../shared.ts";
 
-export function assertPlanQuestionsOutputBase(
+/** One user-input request the user answers, then the exact reply: what every provider shares. */
+export function assertPlanQuestionsOutput(
   result: OrchestratorV2ScenarioResult,
   transcript: ProviderReplayTranscript,
 ) {
@@ -33,6 +34,11 @@ export function assertPlanQuestionsOutputBase(
   assertRuntimeRequestKinds(projection, ["user_input"]);
   assertAllRuntimeRequestsResolved(projection);
   assertTurnItemTypes(projection, ["user_message", "user_input_request", "assistant_message"]);
+  // The question shows once, as the request; no tool card repeats it.
+  assert.notInclude(
+    projection.turnItems.map((item) => item.type),
+    "dynamic_tool",
+  );
   assertUserMessagesInclude(projection, [PLAN_QUESTIONS_PROMPT]);
   assertAssistantTextIncludes(projection, "plan questions fixture complete");
 }
@@ -48,18 +54,18 @@ function assertPlanQuestionId(
   assert.equal(requestItem?.questions[0]?.id, questionId);
 }
 
-export function assertPlanQuestionsOutput(
+/** The question id the Grok and ACP registry models chose. */
+export function assertSchemaFlexibilityQuestionId(
   result: OrchestratorV2ScenarioResult,
   transcript: ProviderReplayTranscript,
 ) {
-  assertPlanQuestionsOutputBase(result, transcript);
   assertPlanQuestionId(result, transcript, "schema_vs_ui_flexibility");
 }
 
-export function assertCodexPlanQuestionsOutput(
+/** The question id Codex's model chose for request_user_input. */
+export function assertCodexPlanQuestionsDetails(
   result: OrchestratorV2ScenarioResult,
   transcript: ProviderReplayTranscript,
 ) {
-  assertPlanQuestionsOutputBase(result, transcript);
   assertPlanQuestionId(result, transcript, "schema_preference");
 }

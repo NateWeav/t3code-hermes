@@ -161,7 +161,8 @@ export const PARITY_SCENARIOS: ReadonlyArray<ParityScenario> = [
     name: "plan_questions",
     facet: "planning",
     hermes: twin(
-      "The prompt names Codex's request_user_input tool; Hermes asks with clarify, which stock Hermes leaves out of ACP sessions.",
+      "The prompt names Codex's request_user_input tool; Hermes asks with clarify, which its ACP sessions offer once the acp-editor-clarify patch is applied.",
+      "hermes_plan_questions",
     ),
     exercises: ["planning.supportsStructuredQuestions"],
   },

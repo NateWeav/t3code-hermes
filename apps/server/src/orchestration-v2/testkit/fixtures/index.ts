@@ -224,7 +224,6 @@ import { fxEarlyStopInput } from "./fx_early_stop/input.ts";
 import { assertFxEarlyStopOutput } from "./fx_early_stop/fx_output.ts";
 import { fxSubagentInput } from "./fx_subagent/input.ts";
 import { assertFxSubagentOutput } from "./fx_subagent/fx_output.ts";
-import { assertTurnInterruptMidToolClaudeOutput } from "./turn_interrupt_mid_tool/claude_output.ts";
 import { assertTurnInterruptMidToolCodexOutput } from "./turn_interrupt_mid_tool/codex_output.ts";
 import { assertTurnInterruptMidToolCursorOutput } from "./turn_interrupt_mid_tool/cursor_output.ts";
 import {
@@ -232,9 +231,10 @@ import {
   turnInterruptMidToolKiroInput,
 } from "./turn_interrupt_mid_tool/input.ts";
 import { assertTurnInterruptMidToolKiroOutput } from "./turn_interrupt_mid_tool/kiro_output.ts";
+import { assertTurnInterruptMidToolOutput } from "./turn_interrupt_mid_tool/output.ts";
 import { assertTurnInterruptMidToolPiOutput } from "./turn_interrupt_mid_tool/pi_output.ts";
-import { assertTurnInterruptRestartClaudeOutput } from "./turn_interrupt_restart/claude_output.ts";
 import { turnInterruptRestartInput } from "./turn_interrupt_restart/input.ts";
+import { assertTurnInterruptRestartOutput } from "./turn_interrupt_restart/output.ts";
 import { assertClaudeWebSearchOutput } from "./web_search/claude_output.ts";
 import { assertWebSearchOutput } from "./web_search/codex_output.ts";
 import { webSearchInput } from "./web_search/input.ts";
@@ -1628,6 +1628,16 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         modelSelection: CODEX_MODEL_SELECTION,
         assertOutput: assertQueuedCancelledWhileActiveOutput,
       },
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./queued_cancelled_while_active/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        replayGateLabels: { "turn/completed": "response:session/prompt" },
+        modelSelection: HERMES_MODEL_SELECTION,
+        assertOutput: assertQueuedCancelledWhileActiveOutput,
+      },
     ],
   },
   {
@@ -1827,6 +1837,12 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         modelSelection: PI_MODEL_SELECTION,
         assertOutput: assertPiMessageSteeringOutput,
       },
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL("./message_steering/hermes_transcript.ndjson", import.meta.url),
+        modelSelection: HERMES_MODEL_SELECTION,
+        assertOutput: assertGrokMessageSteeringOutput,
+      },
     ],
   },
   {
@@ -1887,6 +1903,13 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         transcriptFile: new URL("./turn_interrupt/muse_transcript.ndjson", import.meta.url),
         modelSelection: MUSE_MODEL_SELECTION,
         assertOutput: assertMuseTurnInterruptOutput,
+      },
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL("./turn_interrupt/hermes_transcript.ndjson", import.meta.url),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runtimePolicyOverride: WORKSPACE_NEVER_POLICY,
+        assertOutput: assertTurnInterruptOutput,
       },
     ],
   },
@@ -1962,7 +1985,7 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         ),
         modelSelection: CLAUDE_MODEL_SELECTION,
         runtimePolicyOverride: WORKSPACE_NEVER_POLICY,
-        assertOutput: assertTurnInterruptMidToolClaudeOutput,
+        assertOutput: assertTurnInterruptMidToolOutput,
       },
       {
         driver: ProviderDriverKind.make("cursor"),
@@ -1979,6 +2002,16 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         transcriptFile: new URL("./turn_interrupt_mid_tool/pi_transcript.ndjson", import.meta.url),
         modelSelection: PI_MODEL_SELECTION,
         assertOutput: assertTurnInterruptMidToolPiOutput,
+      },
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./turn_interrupt_mid_tool/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runtimePolicyOverride: WORKSPACE_NEVER_POLICY,
+        assertOutput: assertTurnInterruptMidToolOutput,
       },
     ],
   },
@@ -2009,7 +2042,17 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         ),
         modelSelection: CLAUDE_MODEL_SELECTION,
         runtimePolicyOverride: WORKSPACE_NEVER_POLICY,
-        assertOutput: assertTurnInterruptRestartClaudeOutput,
+        assertOutput: assertTurnInterruptRestartOutput,
+      },
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./turn_interrupt_restart/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        runtimePolicyOverride: WORKSPACE_NEVER_POLICY,
+        assertOutput: assertTurnInterruptRestartOutput,
       },
     ],
   },

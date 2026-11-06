@@ -510,6 +510,41 @@ const HERMES_TURN_OUTPUT = new Set([
   "plan",
 ]);
 
+const HERMES_STOP_NOTICE =
+  /^(?:Operation interrupted\b|Stopped (?:before this turn started|waiting for another Hermes process on this session)\. Your message was not processed\.$)/u;
+
+/**
+ * Hermes answers a Stop with a status line as reply text, which its gateway calls cancellation
+ * metadata but filters only in part. T3 already shows the stop, so it drops them until the next prompt.
+ */
+export function hideHermesStopNotices(
+  runtime: AcpSessionRuntime.AcpSessionRuntime["Service"],
+): AcpSessionRuntime.AcpSessionRuntime["Service"] {
+  let stopped = false;
+  return {
+    ...runtime,
+    handleSessionUpdate: (handler) =>
+      runtime.handleSessionUpdate((notification) => {
+        const update = notification.update;
+        return stopped &&
+          update.sessionUpdate === "agent_message_chunk" &&
+          update.content.type === "text" &&
+          HERMES_STOP_NOTICE.test(update.content.text.trim())
+          ? Effect.void
+          : handler(notification);
+      }),
+    prompt: (payload, options) =>
+      Effect.suspend(() => {
+        stopped = false;
+        return runtime.prompt(payload, options);
+      }),
+    cancel: Effect.suspend(() => {
+      stopped = true;
+      return runtime.cancel;
+    }),
+  };
+}
+
 /** How Hermes refused a prompt because a turn lost in a gateway restart blocks the session. */
 function lostTurnRefusal(
   cause: unknown,

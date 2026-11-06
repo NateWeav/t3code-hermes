@@ -288,6 +288,8 @@ export interface ProviderOrchestratorReplayVariant {
   readonly transcriptFile: URL;
   readonly recordedScenario?: string;
   readonly transcriptEntriesThroughLabel?: string;
+  /** This transcript's label for a replay gate the shared input names by another protocol's label. */
+  readonly replayGateLabels?: Readonly<Record<string, string>>;
   readonly modelSelection: ModelSelection;
   readonly runtimePolicyOverride?: RuntimePolicyV2Override;
   readonly runContinuationWorker?: boolean;

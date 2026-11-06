@@ -4,6 +4,7 @@ import * as EffectAcpErrors from "effect-acp/errors";
 
 import {
   hermesApprovalOptions,
+  readHermesCompressReply,
   applyHermesAcpModelSelection,
   buildHermesAcpSpawnInput,
   HERMES_BUILT_IN_SLASH_COMMANDS,
@@ -406,6 +407,28 @@ describe("preserveHermesAgentActivityTitle", () => {
   it("leaves other tools on their shared summary", () => {
     const toolCall = parsed("read_file: src/app.ts", "read");
     expect(preserveHermesAgentActivityTitle(toolCall)).toBe(toolCall);
+  });
+});
+
+describe("readHermesCompressReply", () => {
+  it("counts only a compression that removed messages, with its token estimate", () => {
+    expect(
+      [
+        "Compressed: 31 → 6 messages\nApprox request size: ~24,310 → ~3,904 tokens",
+        "Compressed with fallback: 31 → 9 messages\nApprox request size: ~24,310 → ~6,120 tokens\nSummary generation failed; Hermes used limited fallback context and removed 22 message(s).",
+        "Context compressed.",
+        "No changes from compression: 2 messages\nApprox request size: ~11,452 tokens (unchanged)\n",
+        "Compression refused (summary would grow the conversation): 8 messages preserved",
+        "Compression aborted: 8 messages preserved\nSummary generation failed; no messages were removed.",
+      ].map(readHermesCompressReply),
+    ).toEqual([
+      { compacted: true, beforeTokenCount: 24310, afterTokenCount: 3904 },
+      { compacted: true, beforeTokenCount: 24310, afterTokenCount: 6120 },
+      { compacted: true },
+      { compacted: false },
+      { compacted: false },
+      { compacted: false },
+    ]);
   });
 });
 

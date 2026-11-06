@@ -81,6 +81,7 @@ import {
   mergeToolCallState,
   parsePermissionRequest,
   parseSessionUpdateEvent,
+  splitProposedPlanBlock,
   toolCallVisibleOutputChanged,
   withTrackedPermissionToolCall,
   type AcpPlanUpdate,
@@ -486,9 +487,23 @@ export interface AcpAdapterV2Flavor {
   ) => ReadonlyArray<AcpAdapterV2SubagentUpdate> | undefined;
   /** Prompt text `compactThread` sends. Defaults to `/compact`. */
   readonly compactionCommand?: string;
+  /**
+   * Reads the agent's reply to `compactionCommand`. Without it, every completed compaction command
+   * counts as compacted; with it, a reply that compacted nothing shows no compaction.
+   */
+  readonly readCompactionReply?: (text: string) => {
+    readonly compacted: boolean;
+    readonly beforeTokenCount?: number;
+    readonly afterTokenCount?: number;
+  };
   readonly isProvisionalSubagentTool?: (toolCall: AcpToolCallState) => boolean;
   readonly normalizeToolCall?: (toolCall: AcpToolCallState) => AcpToolCallState;
   readonly extractProposedPlanMarkdown?: (toolCall: AcpToolCallState) => string | undefined;
+  /**
+   * Agents without a native plan: Plan mode asks for a `<proposed_plan>` block in the reply,
+   * which shows as the plan instead of reply text.
+   */
+  readonly proposedPlanBlocks?: boolean;
   readonly extractBackgroundTaskId?: (toolCall: AcpToolCallState) => string | undefined;
   /** Distinguishes commands from monitors when lifecycle notifications omit their kind. */
   readonly isBackgroundCommandTool?: (toolCall: AcpToolCallState) => boolean;
@@ -1359,8 +1374,10 @@ interface ActiveTextSegment {
   readonly startedAt: DateTime.Utc;
   sourceMessageId: string | null;
   text: string;
-  // The running node and first text have been emitted.
+  // The segment's first emission has run.
   emitted: boolean;
+  // The running node and first text have been emitted; a reply that is only a plan block has neither.
+  nodeEmitted: boolean;
   // Text changed since the last emission; a delayed flush is scheduled.
   dirty: boolean;
 }
@@ -1422,6 +1439,8 @@ interface ActiveAcpTurn {
       readonly id: OrchestrationV2PlanArtifact["id"];
       readonly startedAt: DateTime.Utc;
       latest: OrchestrationV2PlanArtifact | null;
+      /** A plan block parsed from reply text has seen its closing tag. */
+      closed?: boolean;
     }
   >;
   interrupted: boolean;
@@ -2707,6 +2726,93 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             },
           });
         });
+        /** A `<proposed_plan>` block from reply text, as the actionable plan Codex's plan mode yields. */
+        const emitProposedPlanBlock = Effect.fnUntraced(function* (
+          context: ActiveAcpTurn,
+          replyNativeItemId: string,
+          block: { readonly markdown: string; readonly closed: boolean },
+        ) {
+          if (block.markdown.length === 0) return;
+          const nativeItemId = `${replyNativeItemId}:proposed-plan`;
+          const existing = context.plans.get(nativeItemId);
+          if (
+            existing?.latest?.kind === "proposed_plan" &&
+            existing.latest.markdown === block.markdown &&
+            existing.closed === block.closed
+          ) {
+            return;
+          }
+          const now = yield* DateTime.now;
+          const planState = existing ?? {
+            id: yield* idAllocator.allocate
+              .plan({ threadId: context.input.threadId, runId: context.input.runId, driver })
+              .pipe(Effect.orDie),
+            startedAt: now,
+            latest: null,
+          };
+          const ordinal = yield* resolveItemOrdinal(context, nativeItemId);
+          const nodeId = providerNodeId(nativeItemId);
+          const nativeItemRef = { driver, nativeId: nativeItemId, strength: "weak" as const };
+          const plan: OrchestrationV2PlanArtifact = {
+            id: planState.id,
+            threadId: context.input.threadId,
+            runId: context.input.runId,
+            nodeId,
+            kind: "proposed_plan",
+            status: "active",
+            markdown: block.markdown,
+          };
+          planState.latest = plan;
+          planState.closed = block.closed;
+          context.plans.set(nativeItemId, planState);
+          const status = block.closed ? "completed" : "running";
+          yield* emitProviderEvent({
+            type: "node.updated",
+            driver,
+            node: {
+              id: nodeId,
+              threadId: context.input.threadId,
+              runId: context.input.runId,
+              parentNodeId: context.input.rootNodeId,
+              rootNodeId: context.input.rootNodeId,
+              kind: "plan",
+              status,
+              countsForRun: false,
+              providerThreadId: context.input.providerThread.id,
+              providerTurnId: context.providerTurnId,
+              nativeItemRef,
+              runtimeRequestId: null,
+              checkpointScopeId: null,
+              startedAt: planState.startedAt,
+              completedAt: block.closed ? now : null,
+            },
+          });
+          yield* emitProviderEvent({ type: "plan.updated", driver, plan });
+          yield* emitProviderEvent({
+            type: "turn_item.updated",
+            driver,
+            turnItem: {
+              id: providerTurnItemId(nativeItemId),
+              threadId: context.input.threadId,
+              runId: context.input.runId,
+              nodeId,
+              providerThreadId: context.input.providerThread.id,
+              providerTurnId: context.providerTurnId,
+              nativeItemRef,
+              parentItemId: null,
+              ordinal,
+              status,
+              title: null,
+              startedAt: planState.startedAt,
+              completedAt: block.closed ? now : null,
+              updatedAt: now,
+              type: "proposed_plan",
+              planId: planState.id,
+              markdown: block.markdown,
+              streaming: !block.closed,
+            },
+          });
+        });
         const lastProposedPlanMarkdown = Effect.gen(function* () {
           const context = yield* Ref.get(activeTurn);
           const previous = yield* Ref.get(lastCapturedProposedPlan);
@@ -2755,15 +2861,25 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           const segment = stream.current;
           if (segment === null) return;
           if (flushOf !== undefined && (segment !== flushOf || !segment.dirty)) return;
-          // The node carries no text, so it changes only when the segment
-          // opens and when it completes.
-          const emitsNode = completed || !segment.emitted;
           segment.emitted = true;
           segment.dirty = false;
           // Read the text in the same step that clears `dirty`. Chunks keep
           // appending while this emission yields; each one marks the segment
           // dirty again and reaches the next flush or the close.
-          const text = segment.text;
+          const split =
+            kind === "assistant" &&
+            flavor.proposedPlanBlocks === true &&
+            context.input.runtimePolicy.interactionMode === "plan"
+              ? splitProposedPlanBlock(segment.text, completed)
+              : undefined;
+          const text = split?.reply ?? segment.text;
+          if (split?.plan !== undefined && !segment.nodeEmitted && text.trim().length === 0) {
+            return yield* emitProposedPlanBlock(context, segment.nativeItemId, split.plan);
+          }
+          // The node carries no text, so it changes only when the segment
+          // opens and when it completes.
+          const emitsNode = completed || !segment.nodeEmitted;
+          segment.nodeEmitted = true;
           const now = yield* DateTime.now;
           const ordinal = yield* resolveItemOrdinal(context, segment.nativeItemId);
           const nodeId = providerNodeId(segment.nativeItemId);
@@ -2869,6 +2985,9 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                   },
             );
             if (completed) yield* rememberSnapshotMessage(message);
+            if (split?.plan !== undefined) {
+              yield* emitProposedPlanBlock(context, segment.nativeItemId, split.plan);
+            }
             return;
           }
           yield* emitProviderEvent({
@@ -2964,6 +3083,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               sourceMessageId,
               text: "",
               emitted: false,
+              nodeEmitted: false,
               dirty: false,
             };
             stream.nextSegment += 1;
@@ -2994,6 +3114,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               sourceMessageId: messageId,
               text,
               emitted: false,
+              nodeEmitted: false,
               dirty: false,
             };
             stream.nextSegment += 1;
@@ -7718,6 +7839,13 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               terminalizeSubagents: directStopQuarantine,
             });
           }
+          const isCompactionTurn = isCompactionMessage(
+            context.input.message,
+            flavor.compactionCommand,
+          );
+          const compactionReply = isCompactionTurn
+            ? flavor.readCompactionReply?.(context.assistant.current?.text ?? "")
+            : undefined;
           yield* closeTextStreams(context);
           if (settledStatus !== "failed") {
             yield* emitProviderRetry(context, settledStatus);
@@ -7725,8 +7853,9 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           const now = yield* DateTime.now;
           if (
             (flavor.supportsCompaction === true || flavor.compactSession !== undefined) &&
-            isCompactionMessage(context.input.message, flavor.compactionCommand) &&
-            settledStatus === "completed"
+            isCompactionTurn &&
+            settledStatus === "completed" &&
+            compactionReply?.compacted !== false
           ) {
             const nativeItemId = `${context.nativeTurnId}:compaction`;
             yield* Ref.update(compactionMarkers, (current) => {
@@ -7754,6 +7883,12 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                 startedAt: context.startedAt,
                 completedAt: now,
                 updatedAt: now,
+                ...(compactionReply?.beforeTokenCount === undefined
+                  ? {}
+                  : { beforeTokenCount: compactionReply.beforeTokenCount }),
+                ...(compactionReply?.afterTokenCount === undefined
+                  ? {}
+                  : { afterTokenCount: compactionReply.afterTokenCount }),
               },
             });
           }
@@ -7903,6 +8038,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             browserTools: mcpSession?.browserToolsAvailable ?? false,
             hasDeviceTools: mcpSession?.capabilities?.has("device") === true,
             backgroundWait: flavor.extractAwaitableBackgroundTasks !== undefined,
+            proposedPlanBlock: flavor.proposedPlanBlocks === true,
           } satisfies T3AcpInstructionState;
           const previousInstructionState = (yield* Ref.get(promptInstructionStates)).get(sessionId);
           const compactionMarker = (yield* Ref.get(compactionMarkers)).get(sessionId);

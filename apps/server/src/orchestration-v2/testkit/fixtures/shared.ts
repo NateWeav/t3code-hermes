@@ -292,7 +292,13 @@ export interface ProviderOrchestratorReplayVariant {
   readonly runtimePolicyOverride?: RuntimePolicyV2Override;
   readonly runContinuationWorker?: boolean;
   readonly expectedAbsentWorkspacePaths?: ReadonlyArray<string>;
+  /** What the user sees; other providers' variants share it as the scenario's contract. */
   readonly assertOutput: (
+    result: OrchestratorV2ScenarioResult,
+    transcript: ProviderReplayTranscript,
+  ) => void;
+  /** This provider's wire details (frames, native ids, token ledgers), checked after `assertOutput`. */
+  readonly assertProviderDetails?: (
     result: OrchestratorV2ScenarioResult,
     transcript: ProviderReplayTranscript,
   ) => void;

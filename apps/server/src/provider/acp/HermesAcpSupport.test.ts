@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as EffectAcpErrors from "effect-acp/errors";
+import type * as EffectAcpSchema from "effect-acp/compat";
 
 import {
   hermesApprovalOptions,
@@ -9,6 +10,7 @@ import {
   hermesFollowsApprovalPosture,
   applyHermesAcpModelSelection,
   buildHermesAcpSpawnInput,
+  extractHermesClarifyForm,
   HERMES_BUILT_IN_SLASH_COMMANDS,
   makeHermesEditApprovalCards,
   resolveHermesAcpBaseModelId,
@@ -682,5 +684,55 @@ describe("normalizeHermesT3McpToolCall", () => {
     expect(extractMcpToolCallIdentity(github)).toMatchObject({ server: "editor_github_1a2b3c4d" });
     expect(github.status).toBe("pending");
     expect(started("read_file: src/app.ts").status).toBe("pending");
+  });
+});
+
+describe("extractHermesClarifyForm", () => {
+  type FormSchema = Extract<
+    EffectAcpSchema.CreateElicitationRequest,
+    { readonly mode: "form" }
+  >["requestedSchema"];
+  const clarify = (
+    answer: NonNullable<FormSchema["properties"]>[string],
+  ): EffectAcpSchema.CreateElicitationRequest => ({
+    sessionId: "session-1",
+    mode: "form",
+    message: "Which schema style?",
+    requestedSchema: { type: "object", properties: { answer }, required: ["answer"] },
+  });
+
+  it("offers Hermes's choices and accepts a typed answer outside them", () => {
+    const form = extractHermesClarifyForm(
+      clarify({ type: "string", enum: ["Strict schemas (Recommended)", "UI flexibility"] }),
+    );
+    expect(form?.questions).toEqual([
+      {
+        id: "answer",
+        header: "Question 1",
+        question: "Which schema style?",
+        options: [
+          {
+            label: "Strict schemas (Recommended)",
+            description: "Strict schemas (Recommended)",
+            value: "Strict schemas (Recommended)",
+          },
+          { label: "UI flexibility", description: "UI flexibility", value: "UI flexibility" },
+        ],
+      },
+    ]);
+    expect(form?.respond({ answer: "Strict schemas" })).toEqual({
+      action: "accept",
+      content: { answer: "Strict schemas" },
+    });
+    expect(form?.respond({})).toEqual({ action: "cancel" });
+  });
+
+  it("leaves free-text and multi-select forms to the shared parser", () => {
+    expect(extractHermesClarifyForm(clarify({ type: "string" }))).toBeUndefined();
+    expect(
+      extractHermesClarifyForm(
+        clarify({ type: "array", items: { type: "string", enum: ["a", "b"] } }),
+      ),
+    ).toBeUndefined();
   });
 });

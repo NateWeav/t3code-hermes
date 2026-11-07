@@ -39,6 +39,7 @@ import {
   hermesApprovalOptions,
   discardLostHermesTurnsOnPrompt,
   extractHermesAwaitableBackgroundTasks,
+  extractHermesClarifyForm,
   hermesApprovalPosture,
   type HermesApprovalPosture,
   hermesFollowsApprovalPosture,
@@ -374,6 +375,7 @@ export function makeHermesAcpAdapterFlavor(
       ),
     ...makeHermesDelegation(),
     extractAwaitableBackgroundTasks: extractHermesAwaitableBackgroundTasks,
+    extractElicitationForm: extractHermesClarifyForm,
     // Patched Hermes steers the running turn; stock Hermes steers by restarting it.
     steering: hermesSteering,
     ...(options.assertComplete === undefined ? {} : { assertComplete: options.assertComplete }),

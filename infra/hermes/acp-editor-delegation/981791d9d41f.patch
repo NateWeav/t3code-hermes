@@ -1,0 +1,611 @@
+diff --git a/acp_adapter/editor_delegation.py b/acp_adapter/editor_delegation.py
+new file mode 100644
+index 0000000000..2d79aa5eb7
+--- /dev/null
++++ b/acp_adapter/editor_delegation.py
+@@ -0,0 +1,33 @@
++"""The delegation settings an editor asks ``hermes acp`` for in ``initialize``.
++
++``clientCapabilities._meta.hermes.delegation``: ``foreground`` (the editor shows a delegation's children
++while the call runs, so its sessions' model may wait on them in the call) and ``maxSpawnDepth`` (how deep
++their subagents may nest). ``session.create`` carries them as ``delegation`` only to a gateway whose
++descriptor lists that field, so an owner still running older code is never sent one it would refuse.
++See ``tools/delegate_tool_session.py`` for what the owner does with them.
++"""
++from __future__ import annotations
++
++from typing import Any
++
++
++def requested_delegation(initialize_params: Any) -> dict:
++    capabilities = initialize_params.get("clientCapabilities") if isinstance(initialize_params, dict) else None
++    meta = capabilities.get("_meta") if isinstance(capabilities, dict) else None
++    hermes = meta.get("hermes") if isinstance(meta, dict) else None
++    asked = hermes.get("delegation") if isinstance(hermes, dict) else None
++    if not isinstance(asked, dict):
++        return {}
++    settings = {}
++    if asked.get("foreground") is True:
++        settings["foreground"] = True
++    depth = asked.get("maxSpawnDepth")
++    if type(depth) is int and depth >= 1:
++        settings["max_spawn_depth"] = depth
++    return settings
++
++
++def delegation_create_fields(requested: dict, descriptor: dict) -> dict:
++    """``session.create`` keyword arguments for *requested*, given the owner's ``runtime.describe``."""
++    parameters = (descriptor.get("session_create") or {}).get("parameters") or ()
++    return {"delegation": requested} if requested and "delegation" in parameters else {}
+diff --git a/acp_adapter/gateway_server.py b/acp_adapter/gateway_server.py
+index 5aa499e0d3..f6ff73a54c 100644
+--- a/acp_adapter/gateway_server.py
++++ b/acp_adapter/gateway_server.py
+@@ -113,6 +113,7 @@ class GatewayACPAgent(GatewayReplyMixin, acp.Agent):
+         # Editor-held compression-tip id -> logical session id (see ``_resume``).
+         self._aliases = {}
+         self._form_elicitation = False
++        self._delegation = {}  # the editor's ``_meta.hermes.delegation`` (acp_adapter/editor_delegation.py)
+         from hermes_cli.gateway_mutations import PreparedMutations
+         self._mutations = PreparedMutations()
+         # Session -> title the editor was last shown (``session_info_update`` fires on a change).
+@@ -138,6 +139,8 @@ class GatewayACPAgent(GatewayReplyMixin, acp.Agent):
+                 and message.get("method") == "initialize":
+             from acp_adapter.elicitation import client_supports_form_elicitation
+             self._form_elicitation = client_supports_form_elicitation(message.get("params"))
++            from acp_adapter.editor_delegation import requested_delegation
++            self._delegation = requested_delegation(message.get("params"))
+ 
+     async def initialize(self, **kwargs):
+         from hermes_cli import __version__
+@@ -276,6 +279,7 @@ class GatewayACPAgent(GatewayReplyMixin, acp.Agent):
+         if ("acp" not in descriptor.get("session_create", {}).get("sources", [])
+                 or "acp-editor-policy-v1" not in descriptor.get("capabilities", [])):
+             raise GatewayClientError("acp_policy_unavailable")
++        from acp_adapter.editor_delegation import delegation_create_fields
+         from hermes_cli.gateway_chat import env_launch_flags
+         # `hermes acp --yolo` / `--safe-mode` / ... reach this process as their env equivalents; the
+         # owner does not inherit them, so they freeze into this session's policy or not at all.
+@@ -285,7 +289,8 @@ class GatewayACPAgent(GatewayReplyMixin, acp.Agent):
+         snapshot = await client.rpc("session.create", request_id=uuid.uuid4().hex,
+             source="acp", cwd=_translate_acp_cwd(cwd),
+             editor={"mcp_servers": [s.model_dump(by_alias=True) for s in mcp_servers or []],
+-                    "edit_approval_policy": "ask"}, **flags)
++                    "edit_approval_policy": "ask"}, **flags,
++            **delegation_create_fields(self._delegation, descriptor))
+         session_id = snapshot["session_id"]
+         await self._adopt(session_id, snapshot)
+         if mcp_servers:
+diff --git a/apps/shared/src/gateway-contract.generated.ts b/apps/shared/src/gateway-contract.generated.ts
+index 4496c35435..4b1c4c3d40 100644
+--- a/apps/shared/src/gateway-contract.generated.ts
++++ b/apps/shared/src/gateway-contract.generated.ts
+@@ -5122,6 +5122,7 @@ export interface CanonicalCreateParams {
+   verbose?: boolean
+   client_env?: Record<string, string> | null
+   client?: CanonicalClientIdentity | null
++  delegation?: Record<string, unknown> | null
+ }
+ /** A client naming itself: ``name`` matches ``[a-z0-9][a-z0-9._-]{0,63}``, ``version`` is 1-64 printable ASCII without spaces. Attribution only (owners advertising ``session-client-v1``). */
+ export interface CanonicalClientIdentity {
+diff --git a/apps/shared/src/gateway-contract.openrpc.json b/apps/shared/src/gateway-contract.openrpc.json
+index 507aebc009..a795749823 100644
+--- a/apps/shared/src/gateway-contract.openrpc.json
++++ b/apps/shared/src/gateway-contract.openrpc.json
+@@ -8913,6 +8913,19 @@
+               }
+             ],
+             "default": null
++          },
++          "delegation": {
++            "anyOf": [
++              {
++                "additionalProperties": true,
++                "type": "object"
++              },
++              {
++                "type": "null"
++              }
++            ],
++            "default": null,
++            "title": "Delegation"
+           }
+         },
+         "title": "CanonicalCreateParams",
+diff --git a/gateway/session_execution.py b/gateway/session_execution.py
+index 5732fb60ab..94e5dd34f9 100644
+--- a/gateway/session_execution.py
++++ b/gateway/session_execution.py
+@@ -227,7 +227,8 @@ class GatewaySessionAgentMixin:
+             # read once, by the agent's first tool build, then carried by its delegate_task schema and pin.
+             inline = gateway_delegation_inline(
+                 ctx.user_config, platform_key, interim_enabled=ctx.interim_assistant_messages_enabled)
+-            with gateway_delegation_inline_scope(inline):
++            from tools.delegate_tool_session import session_delegation_scope
++            with gateway_delegation_inline_scope(inline), session_delegation_scope(runner, ctx.source):
+                 agent = self._build_fresh_agent(
+                     turn_route, platform_key, combined_ephemeral, max_iterations, reasoning_config, pr,
+                     skip_context_files,
+diff --git a/gateway/session_policy.py b/gateway/session_policy.py
+index be639243b2..c0b79a528f 100644
+--- a/gateway/session_policy.py
++++ b/gateway/session_policy.py
+@@ -17,7 +17,7 @@ CREATE_FIELDS = frozenset({'request_id', 'source', 'cwd', 'model', 'toolsets',
+                            'yolo', 'safe_mode', 'ignore_user_config',
+                            'skills', 'checkpoints', 'accept_hooks', 'pass_session_id', 'follow_profile_config',
+                            'service_tier', 'cwd_explicit', 'run_budget', 'verbose', 'row_cwd', 'client_env',
+-                           'client'})
++                           'client', 'delegation'})
+ # Sections a ``follow_profile_config`` session re-reads from the owning profile's CURRENT config each
+ # turn (main's Bot Chat row), credentials included: a frozen key never crosses a profile route change.
+ FOLLOW_SECTIONS = ('model', 'providers', 'custom_providers', 'fallback_providers', 'fallback_model', 'model_aliases',
+@@ -455,6 +455,8 @@ def build_policy(params, config, *, private_secrets=None, profile_terminal=True,
+         from gateway.session_client import client_problem
+         if problem := client_problem(params['client']):
+             _refuse('client', problem)
++    from tools.delegate_tool_session import validate_session_delegation
++    validate_session_delegation(params.get('delegation'))
+     launch_skills(params)
+     config = present_sections(json.loads(json.dumps(config)))
+     picked_route = {'model', 'provider', 'base_url'} & set(_without_auto_pick(params))
+diff --git a/run_agent.py b/run_agent.py
+index 60ae9e62bf..5900ac347b 100644
+--- a/run_agent.py
++++ b/run_agent.py
+@@ -1347,12 +1347,13 @@ class AIAgent(
+         # Top-level MODEL delegations run in the background (handle returned, results re-enter as messages),
+         # unless the session's delegate_task is the joined variant (one-shot, delegation.gateway_mode inline).
+         # An ORCHESTRATOR SUBAGENT (depth > 0) stays synchronous — it needs results in-turn and owns no gateway
+-        # session. The schema-level `background` param is intentionally ignored.
++        # session. The schema-level `background` param is ignored unless the session's delegate_task offers it.
++        from tools.delegate_tool import _model_background_value
+         return _delegate_task(
+             goal=function_args.get("goal"), context=function_args.get("context"),
+             tasks=_strip_model_hidden_task_fields(function_args.get("tasks")),
+             max_iterations=function_args.get("max_iterations"), role=function_args.get("role"),
+-            background=not (getattr(self, "_delegate_depth", 0) > 0), images=function_args.get("images"),
++            background=_model_background_value(function_args, self), images=function_args.get("images"),
+             action=function_args.get("action"),
+             subagent_id=function_args.get("subagent_id"), message=function_args.get("message"), parent_agent=self,
+         )
+diff --git a/tests/acp_adapter/test_gateway_editor_delegation.py b/tests/acp_adapter/test_gateway_editor_delegation.py
+new file mode 100644
+index 0000000000..627f697244
+--- /dev/null
++++ b/tests/acp_adapter/test_gateway_editor_delegation.py
+@@ -0,0 +1,202 @@
++"""An editor that asks for it gets foreground delegation and nested subagents in its ACP sessions.
++
++Real gateway daemon, real ``hermes acp`` stdio process (``acp_adapter.entry``, the ``GatewayACPAgent`` viewer),
++real parent and child ``AIAgent``s against a loopback model. The editor advertises
++``clientCapabilities._meta.hermes.delegation`` in ``initialize``; ``session.create`` carries it to the owner.
++Without it, a top-level ``delegate_task`` detaches as before and children are leaves (``max_spawn_depth: 1``).
++"""
++import asyncio
++from http.server import BaseHTTPRequestHandler
++import json
++import re
++import threading
++
++import pytest
++
++from tests.acp_adapter.test_gateway_sessions import editor
++from tests.waiting import async_wait_until
++
++NESTED_RULE = "Children can themselves delegate"
++
++
++def _text(content):
++    if isinstance(content, list):
++        return "".join(part.get("text", "") for part in content if isinstance(part, dict))
++    return content or ""
++
++
++class ScriptedModel(BaseHTTPRequestHandler):
++    """Agents told apart by the ``LEVEL<n>_TASK`` goal in their first user message (none: the root).
++
++    An agent offered ``delegate_task`` delegates one level down, to ``server.target`` at most; the deepest
++    answers ``LEAF_ANSWER``, and each launcher passes it up. Each request records its level and offered tools."""
++
++    def log_message(self, *args):
++        pass
++
++    def do_GET(self):
++        self.send_response(200)
++        self.send_header("Content-Type", "application/json")
++        self.end_headers()
++        self.wfile.write(json.dumps({"data": [{"id": "local-wire-stub", "object": "model"}]}).encode())
++
++    def do_POST(self):
++        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
++        messages = body.get("messages") or []
++        offered = {t["function"]["name"]: t["function"] for t in body.get("tools") or []}
++        asked = " ".join(_text(m.get("content")) for m in messages if m.get("role") == "user")
++        results = [_text(m.get("content")) for m in messages if m.get("role") == "tool"]
++        levels = [int(n) for n in re.findall(r"LEVEL(\d)_TASK", asked)]
++        level = "hang" if "HANG_TASK" in asked else max(levels, default=0)
++        if offered:  # auxiliary calls offer no tools
++            self.server.calls.append({"level": level, "offered": offered, "results": results})
++        call = None
++        if not offered:
++            reply = "ok"
++        elif level == "hang":
++            self.server.hanging.set()
++            self.server.release.wait(60)
++            reply = "HANG_ANSWER"
++        elif results:
++            reply = "ROOT_DONE" if level == 0 else f"L{level} saw " + (
++                "LEAF_ANSWER" if "LEAF_ANSWER" in results[-1] else "nothing")
++        elif level == 0:
++            call = self.server.root_call
++        elif "delegate_task" in offered and level < self.server.target:
++            call = {"tasks": [{"goal": f"LEVEL{level + 1}_TASK: delegate one level down if you can, then report"}]}
++        else:
++            reply = "LEAF_ANSWER"
++        message = {"role": "assistant", "content": reply} if call is None else {
++            "role": "assistant", "content": None, "tool_calls": [{
++                "index": 0, "id": f"call-{len(self.server.calls)}", "type": "function",
++                "function": {"name": "delegate_task", "arguments": json.dumps(call)}}]}
++        finish = "stop" if call is None else "tool_calls"
++        try:
++            self.send_response(200)
++            self.send_header("Content-Type", "text/event-stream" if body.get("stream") else "application/json")
++            self.end_headers()
++            base = {"id": "local", "model": "local-wire-stub", "created": 1}
++            if body.get("stream"):
++                for delta, end in [(message, None), ({}, finish)]:
++                    chunk = {**base, "object": "chat.completion.chunk",
++                             "choices": [{"index": 0, "delta": delta, "finish_reason": end}]}
++                    self.wfile.write(("data: " + json.dumps(chunk) + "\n\n").encode())
++                self.wfile.write(b"data: [DONE]\n\n")
++            else:
++                self.wfile.write(json.dumps({**base, "object": "chat.completion", "choices": [
++                    {"index": 0, "message": message, "finish_reason": finish}]}).encode())
++            self.wfile.flush()
++        except OSError:
++            pass  # an interrupted child hung up
++
++
++@pytest.fixture
++def scripted(model_peer):
++    model_peer.RequestHandlerClass = ScriptedModel
++    model_peer.calls, model_peer.hanging, model_peer.release = [], threading.Event(), threading.Event()
++    model_peer.target = 3
++    yield model_peer
++    model_peer.release.set()
++
++
++def _capabilities(delegation):
++    return {"_meta": {"hermes": {"delegation": delegation}}} if delegation is not None else {}
++
++
++async def _session(acp, tmp_path, delegation):
++    assert "result" in await acp.rpc("initialize", protocolVersion=1, clientCapabilities=_capabilities(delegation))
++    created = await acp.rpc("session/new", cwd=str(tmp_path), mcpServers=[])
++    assert "result" in created, created
++    return created["result"]["sessionId"]
++
++
++def _at(scripted, level):
++    return [call for call in scripted.calls if call["level"] == level]
++
++
++def _prompt(acp, sid, text="Please do the work"):
++    return asyncio.create_task(acp.rpc("session/prompt", sessionId=sid, prompt=[{"type": "text", "text": text}]))
++
++
++@pytest.mark.platforms("linux")
++@pytest.mark.asyncio
++@pytest.mark.parametrize("delegation, background, offered, joined", [
++    ({"foreground": True}, None, True, True),
++    ({"foreground": True}, True, True, False),
++    (None, None, False, False),
++    (None, False, False, False),
++], ids=["foreground-default", "foreground-picks-background", "stock", "stock-ignores-background-false"])
++async def test_an_editor_session_lets_the_model_wait_for_its_subagents(
++        daemon, tmp_path, scripted, delegation, background, offered, joined):
++    scripted.root_call = {"tasks": [{"goal": "LEVEL1_TASK: reply with one word"}],
++                          **({} if background is None else {"background": background})}
++    async with editor(daemon, tmp_path) as acp:
++        sid = await _session(acp, tmp_path, delegation)
++        reply = await asyncio.wait_for(_prompt(acp, sid), 60)
++        assert reply.get("result", {}).get("stopReason") == "end_turn", reply
++        await async_wait_until(lambda: _at(scripted, 1), 30, what="the child ran")
++    first, second = _at(scripted, 0)[:2]
++    delegate = first["offered"]["delegate_task"]
++    assert ("background" in delegate["parameters"]["properties"]) is offered
++    assert ("By default the call waits" in delegate["description"]) is offered
++    result = second["results"][-1]
++    if joined:
++        assert "LEAF_ANSWER" in result and '"dispatched"' not in result, result
++        chunks = [f for f in acp.frames if f.get("method") == "session/update"
++                  and f["params"]["update"].get("sessionUpdate") == "agent_message_chunk"]
++        assert "ROOT_DONE" in "".join(f["params"]["update"]["content"].get("text", "") for f in chunks)
++    else:
++        assert '"dispatched"' in result and "LEAF_ANSWER" not in result, result
++
++
++@pytest.mark.platforms("linux")
++@pytest.mark.asyncio
++@pytest.mark.parametrize("daemon, depth, deepest, profile_depth", [
++    ({}, 3, 3, False),
++    ({}, None, 1, False),
++    ({"delegation": {"orchestrator_enabled": False}}, 3, 1, False),
++    ({"delegation": {"max_spawn_depth": 2}}, 1, 2, True),
++], indirect=["daemon"], ids=["session-depth", "profile-default", "orchestrators-off", "profile-depth-is-a-floor"])
++async def test_an_editor_session_nests_to_the_depth_it_asked_for(
++        daemon, tmp_path, scripted, depth, deepest, profile_depth):
++    scripted.root_call = {"tasks": [{"goal": "LEVEL1_TASK: delegate one level down if you can, then report"}]}
++    delegation = {"foreground": True, **({} if depth is None else {"maxSpawnDepth": depth})}
++    async with editor(daemon, tmp_path) as acp:
++        sid = await _session(acp, tmp_path, delegation)
++        reply = await asyncio.wait_for(_prompt(acp, sid), 120)
++        assert reply.get("result", {}).get("stopReason") == "end_turn", reply
++    assert max(call["level"] for call in scripted.calls) == deepest
++    for level in range(deepest + 1):
++        offered = _at(scripted, level)[0]["offered"]
++        assert ("delegate_task" in offered) is (level < deepest), level
++        described = level < deepest and NESTED_RULE in offered["delegate_task"]["description"]
++        if level + 1 < deepest:  # a launcher whose children may delegate in turn is told so
++            assert described, level
++        elif not profile_depth:  # (a profile's own max_spawn_depth words every level, as stock does)
++            assert not described, level
++    assert "LEAF_ANSWER" in _at(scripted, 0)[-1]["results"][-1]
++
++
++@pytest.mark.platforms("linux")
++@pytest.mark.asyncio
++async def test_stopping_the_turn_stops_its_foreground_subagents(daemon, tmp_path, scripted):
++    scripted.root_call = {"tasks": [{"goal": "HANG_TASK: take your time"}]}
++    async with editor(daemon, tmp_path) as acp:
++        sid = await _session(acp, tmp_path, {"foreground": True})
++        turn = _prompt(acp, sid)
++        await async_wait_until(scripted.hanging.is_set, 30, what="the child's model call")
++        acp.process.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "session/cancel",
++                                            "params": {"sessionId": sid}}).encode() + b"\n")
++        await acp.process.stdin.drain()
++        reply = await asyncio.wait_for(turn, 30)
++        assert reply.get("result", {}).get("stopReason") == "cancelled", reply
++
++        def ended():
++            updates = [f["params"]["update"] for f in acp.frames if f.get("method") == "session/update"]
++            return next((u for u in updates if u.get("sessionUpdate") == "tool_call_update"
++                         and u.get("status") in ("completed", "failed")), None)
++
++        update = await async_wait_until(ended, 30, what="the delegate_task call to end")
++        results = (update.get("rawOutput") or {}).get("results") or []
++        assert [r.get("status") for r in results] == ["interrupted"], update  # its model call never returned
++    assert not [c for c in _at(scripted, 0) if c["results"]], "the parent must not answer after a stop"
+diff --git a/tools/delegate_tool.py b/tools/delegate_tool.py
+index c30ebcc04d..752fb52667 100644
+--- a/tools/delegate_tool.py
++++ b/tools/delegate_tool.py
+@@ -241,7 +241,8 @@ def _build_child_agent(
+     # Role is depth-derived: a child may delegate iff the kill switch is on and
+     # depth budget remains below max_spawn_depth. The `role` arg is ignored.
+     child_depth = getattr(parent_agent, "_delegate_depth", 0) + 1
+-    max_spawn = _get_max_spawn_depth()
++    from tools.delegate_tool_session import session_delegation, session_tool_schemas, spawn_depth_for
++    max_spawn = spawn_depth_for(parent_agent)
+     effective_role = "orchestrator" if _get_orchestrator_enabled() and child_depth < max_spawn else "leaf"
+ 
+     # One subagent_id shared by the progress callback, spawn_requested event and
+@@ -341,6 +342,8 @@ def _build_child_agent(
+     from agent.prompt_cache_scope import conversation_id
+     child._inherited_conversation_id = conversation_id(parent_agent)
+     child._subagent_id, child._parent_subagent_id = subagent_id, parent_subagent_id
++    child._session_delegation = session_delegation(parent_agent)  # its children nest to the session's depth
++    child.tools = session_tool_schemas(child, child.tools)
+     _apply_child_compression_cap(child, delegation_cfg)
+     # Ownership chain for action=list/steer/stop; weakref so a finished parent
+     # can be collected while a detached child record lingers in the registry.
+@@ -596,7 +599,8 @@ def delegate_task(
+     background = is_truthy_value(background, default=False) if background is not None else False
+ 
+     depth = getattr(parent_agent, "_delegate_depth", 0)
+-    max_spawn = _get_max_spawn_depth()
++    from tools.delegate_tool_session import spawn_depth_for
++    max_spawn = spawn_depth_for(parent_agent)
+     if depth >= max_spawn:
+         return tool_error(
+             f"Delegation depth limit reached (depth={depth}, max_spawn_depth={max_spawn}). Raise "
+@@ -919,8 +923,12 @@ def _model_background_value(args: dict, parent_agent=None) -> bool:
+     background — the model does not choose — for single tasks and fan-out batches alike (one async unit, one
+     consolidated result); an orchestrator subagent (depth > 0) is the exception since it needs its workers' results
+     within its own turn. The live path is ``run_agent._dispatch_delegate_task``; this mirrors it for the rare case
+-    the intercept is bypassed. Direct Python callers keep the synchronous default."""
+-    return not getattr(parent_agent, "_delegate_depth", 0) > 0
++    the intercept is bypassed. Direct Python callers keep the synchronous default. A session whose ``delegate_task``
++    offers ``background`` (``tools.delegate_tool_session``) lets the model choose, and waits by default."""
++    if getattr(parent_agent, "_delegate_depth", 0) > 0:
++        return False
++    from tools.delegate_tool_session import session_chooses_background
++    return is_truthy_value(args.get("background"), default=False) if session_chooses_background(parent_agent) else True
+ 
+ _MODEL_HIDDEN_TASK_FIELDS = {"acp_command", "acp_args"}
+ 
+diff --git a/tools/delegate_tool_session.py b/tools/delegate_tool_session.py
+new file mode 100644
+index 0000000000..d1b61cd554
+--- /dev/null
++++ b/tools/delegate_tool_session.py
+@@ -0,0 +1,150 @@
++"""Delegation settings a client negotiates for its session at ``session.create`` (``delegation``).
++
++``foreground``: the client shows a delegation's children while the call runs (``hermes acp`` for an editor
++that says so), so the session's ``delegate_task`` lets the model choose per call. ``background: false`` (the
++default) joins the children inside the call, as an orchestrator child or a one-shot run does, and the parent
++answers in the same turn; stopping the turn stops them. ``background: true`` detaches them as a stock gateway
++session always does. A profile with ``delegation.gateway_mode: inline`` keeps joining every call.
++
++``max_spawn_depth``: how deep this session's subagents may nest. It raises ``delegation.max_spawn_depth``,
++whose default of 1 keeps chat sessions flat, and never lowers it; ``delegation.orchestrator_enabled: false``
++still makes every child a leaf. Children carry the session's depth to their own children.
++
++Both freeze into the session's policy, and onto its agent at the first tool build, like
++``delegation.gateway_mode``: dispatch follows the ``delegate_task`` schema the session carries.
++"""
++
++from __future__ import annotations
++
++import json
++import re
++from contextlib import contextmanager
++from contextvars import ContextVar
++from typing import Any, Iterator, Optional
++
++_SESSION_DELEGATION: ContextVar[Optional[dict]] = ContextVar("hermes_session_delegation", default=None)
++
++_CHOICE_DELIVERY = (
++    "By default the call waits: the subagents run (in parallel when there are several) and their results return "
++    "in this tool call, so you can use them in this turn. Set `background: true` to run them in the background "
++    "instead: dispatch returns live transcript paths and results re-enter as a new message when subagents finish "
++    "({delivery}). Background results are delivered only BETWEEN your turns: finish whatever does not depend on "
++    "them, then give a one-line status and END YOUR TURN. Never wait or poll on transcripts, artifact files, or CI "
++    "for a background child. While background children run, `action` (list/steer/stop) controls them live.\n\n"
++)
++_BACKGROUND_PARAM = {
++    "type": "boolean",
++    "description": "Run the subagents in the background (true): the call returns at once and their results arrive "
++                   "after your turn ends. Default false: wait for them in this call.",
++}
++# The leaf rule as ``model_tools`` trimmed it to the session's tools (it drops the line when none remain).
++_LEAF_LINE = re.compile(r"- Children cannot call delegate_task(?:, | or |\.)([^\n]*)\n")
++_NESTED_LINE = ("- Children can themselves delegate while depth remains (max_spawn_depth={depth}); the runtime "
++                "derives this from depth automatically.\n")
++_NESTED_DEPTH = re.compile(r"(delegate while depth remains \(max_spawn_depth=)\d+")
++_TAIL = "- Children inherit the parent model"
++
++
++def _nested_description(description: str, depth: int) -> str:
++    """The stock nested-delegation rule at *depth*, in place of the leaf rule."""
++    if _NESTED_DEPTH.search(description):
++        return _NESTED_DEPTH.sub(rf"\g<1>{depth}", description)
++    nested = _NESTED_LINE.format(depth=depth)
++    match = _LEAF_LINE.search(description)
++    if match is None:
++        at = description.find(_TAIL)
++        return description[:at] + nested + description[at:] if at != -1 else description
++    names = [name for name in re.split(r", or |, | or ", match.group(1).strip().rstrip(".")) if name]
++    joined = " or ".join(names) if len(names) <= 2 else ", ".join(names[:-1]) + ", or " + names[-1]
++    kept = f"- Children cannot call {joined}.\n" if names else ""
++    return description[:match.start()] + kept + nested + description[match.end():]
++
++
++def validate_session_delegation(value: Any) -> None:
++    """``session.create``'s ``delegation``: ``{"foreground": bool, "max_spawn_depth": int >= 1}``, both optional."""
++    from hermes_state_runtime import RuntimeStoreError
++    if value is None:
++        return
++    if not isinstance(value, dict):
++        raise RuntimeStoreError('invalid_params', field='delegation',
++                                detail=f'must be a mapping, got {type(value).__name__}')
++    unknown = sorted(set(value) - {'foreground', 'max_spawn_depth'})
++    if unknown:
++        raise RuntimeStoreError('invalid_params', field=f'delegation.{unknown[0]}', detail='unknown delegation key')
++    if type(value.get('foreground', False)) is not bool:
++        raise RuntimeStoreError('invalid_params', field='delegation.foreground', detail='must be a boolean')
++    depth = value.get('max_spawn_depth', 1)
++    if type(depth) is not int or depth < 1:
++        raise RuntimeStoreError('invalid_params', field='delegation.max_spawn_depth',
++                                detail='must be an integer of at least 1')
++
++
++@contextmanager
++def session_delegation_scope(runner: Any, source: Any) -> Iterator[None]:
++    """Build a session's agent with the ``delegation`` its creation request carries (none for other sessions)."""
++    from gateway.session_policy import policy_for_source
++    policy = policy_for_source(runner, source)
++    settings = json.loads(policy.request_json).get('delegation') if policy is not None else None
++    token = _SESSION_DELEGATION.set(settings if isinstance(settings, dict) else None)
++    try:
++        yield
++    finally:
++        _SESSION_DELEGATION.reset(token)
++
++
++def session_delegation(agent: Any) -> dict:
++    """*agent*'s session settings, frozen at its first tool build (a child is stamped with its parent's)."""
++    cached = getattr(agent, "_session_delegation", None)
++    if not isinstance(cached, dict):
++        cached = dict(_SESSION_DELEGATION.get() or {})
++        agent._session_delegation = cached
++    return cached
++
++
++def spawn_depth_for(agent: Any) -> int:
++    """``delegation.max_spawn_depth``, raised to the depth *agent*'s session negotiated."""
++    from tools.delegate_tool import _get_max_spawn_depth  # through the origin, so tests can patch it
++    depth = _get_max_spawn_depth()
++    negotiated = session_delegation(agent).get("max_spawn_depth")
++    return max(depth, negotiated) if isinstance(negotiated, int) else depth
++
++
++def session_delegate_function(function: dict, agent: Any) -> dict:
++    """A built ``delegate_task`` definition as *agent*'s session negotiated it: the ``background`` choice for
++    the top-level agent, and at any depth whether *agent*'s children may delegate in turn."""
++    from tools.delegate_tool import _DELIVERY_INDEPENDENT, _DELIVERY_JOINED, _DESCRIPTION_DELIVERY
++    from tools.delegate_tool_config import _get_orchestrator_enabled
++    settings = session_delegation(agent)
++    depth = getattr(agent, "_delegate_depth", 0)
++    description = function.get("description") or ""
++    params = function["parameters"]
++    if settings.get("foreground") is True and depth == 0:
++        for delivery in (_DELIVERY_INDEPENDENT, _DELIVERY_JOINED):
++            description = description.replace(_DESCRIPTION_DELIVERY.format(delivery=delivery),
++                                              _CHOICE_DELIVERY.format(delivery=delivery))
++        params = {**params, "properties": {**params["properties"], "background": _BACKGROUND_PARAM}}
++    spawn_depth = spawn_depth_for(agent)
++    if depth + 1 < spawn_depth and _get_orchestrator_enabled():
++        description = _nested_description(description, spawn_depth)
++    return {**function, "description": description, "parameters": params}
++
++
++def session_tool_schemas(agent: Any, tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
++    """*tools* with *agent*'s ``delegate_task`` as its session negotiated it (unchanged without settings).
++    A child's first tool build runs before it is stamped with its depth, so ``_build_child_agent`` reapplies it."""
++    if not tools or not session_delegation(agent):
++        return tools
++    return [
++        {**tool, "function": session_delegate_function(tool["function"], agent)}
++        if (tool.get("function") or {}).get("name") == "delegate_task" else tool
++        for tool in tools
++    ]
++
++
++def session_chooses_background(agent: Any) -> bool:
++    """Whether the ``delegate_task`` *agent* carries lets the model pick ``background`` (its pinned bytes decide)."""
++    for tool in getattr(agent, "tools", None) or ():
++        function = tool.get("function") if isinstance(tool, dict) else None
++        if isinstance(function, dict) and function.get("name") == "delegate_task":
++            return "background" in ((function.get("parameters") or {}).get("properties") or {})
++    return False
+diff --git a/toolsets.py b/toolsets.py
+index 588cb0f117..f59a96623e 100644
+--- a/toolsets.py
++++ b/toolsets.py
+@@ -480,7 +480,10 @@ def agent_tool_surface(agent: Any, tools: list[dict[str, Any]]) -> list[dict[str
+     from tools.delegate_tool_config import agent_joins_delegation
+     drops = agent_tool_drops(agent)
+     tools = [tool for tool in tools if (tool.get("function") or {}).get("name") not in drops] if drops else list(tools)
+-    return oneshot_tool_schemas(tools) if agent_is_oneshot(agent) or agent_joins_delegation(agent) else tools
++    if agent_is_oneshot(agent) or agent_joins_delegation(agent):
++        return oneshot_tool_schemas(tools)
++    from tools.delegate_tool_session import session_tool_schemas
++    return session_tool_schemas(agent, tools)
+ 
+ 
+ def validate_toolset(name: str) -> bool:
+diff --git a/tui_gateway/contracts/canonical_sessions.py b/tui_gateway/contracts/canonical_sessions.py
+index e3569203f6..ee4dbd2e8f 100644
+--- a/tui_gateway/contracts/canonical_sessions.py
++++ b/tui_gateway/contracts/canonical_sessions.py
+@@ -64,6 +64,8 @@ class CanonicalCreateParams(ProfileParams):
+     client_env: dict[str, str] | None = None
+     # The creating client's self-declared label, echoed as ``session.info.client``; no policy reads it.
+     client: CanonicalClientIdentity | None = None
++    # Delegation settings the client negotiates for this session (``tools/delegate_tool_session.py``).
++    delegation: dict[str, JsonValue] | None = None
+ 
+ 
+ class CanonicalResumeParams(ProfileParams):

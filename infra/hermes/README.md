@@ -176,8 +176,8 @@ only when the gateway lists that field, so an older gateway is never sent it. In
   `delegation.orchestrator_enabled: false`, which still makes every child a leaf.
 
 Both settings freeze into the session when it is created, so only sessions created after the patch
-is applied and the gateway restarts get them. Verified against hermes-agent `6b21d0564d` (`main`,
-2026-11-06), alone and after the other patches. The patch's
+is applied and the gateway restarts get them. Verified against hermes-agent `981791d9d4` (`main`,
+2026-11-07), alone and after the other patches. The patch's
 `tests/acp_adapter/test_gateway_editor_delegation.py` drives a real gateway daemon and a real
 `hermes acp` process against a loopback model, covering foreground and background calls, a stock
 editor, each depth case, and a stop during a foreground call. Run it in a scratch checkout, as for
@@ -322,7 +322,8 @@ the `clarify` tool call itself, since the question already shows as its own card
 
 Verified against hermes-agent `44ec783afd` (`main`, 2026-11-06), alone and after the other
 patches. Its `90d6b98fd8` version (`main`, 2026-11-06) is the same change on top of
-`acp-editor-delegation`, which edits the same `session.create` call, and applies only after it.
+`acp-editor-delegation`, which edits the same `session.create` call, and applies only after it;
+its `981791d9d4` version (`main`, 2026-11-07) is the same again on current `main`.
 Restart the Hermes gateway after applying it: the gateway decides the session's tools.
 Run the patch's `tests/acp_adapter/test_gateway_editor_clarify_toolset.py` in a scratch checkout,
 as for `acp-delegation-progress`.
@@ -431,7 +432,8 @@ Only sessions created after the patch is applied ask before commands; an existin
 Hermes's own rule. Verified against hermes-agent `ca43606920` (`main`, 2026-11-06), alone and
 after the other patches. Its `90d6b98fd8` version (`main`, 2026-11-06) is the same change on top of
 `acp-editor-delegation`, `acp-editor-clarify`, `acp-terminal-output` and `acp-active-steering`, and
-applies only after them. Restart the Hermes gateway after applying it: the gate runs there. Run the
+applies only after them; its `981791d9d4` version (`main`, 2026-11-07) is the same again on current
+`main`. Restart the Hermes gateway after applying it: the gate runs there. Run the
 patch's `tests/acp_adapter/test_gateway_command_approval.py` in a scratch checkout, as for
 `acp-delegation-progress`.
 

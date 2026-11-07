@@ -3697,6 +3697,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               toolUpdatesSkipped: new Map(),
               toolStartedAt: new Map(),
             },
+            interruptedToolIds: new Set(),
             toolSessionIds: new Map(),
             continuationId: null,
           };

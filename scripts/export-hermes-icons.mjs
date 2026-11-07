@@ -104,6 +104,8 @@ for (const directory of ["assets/hermes", "apps/web/public"]) {
   for (const size of [16, 32])
     await write(`${directory}/favicon-${size}x${size}.png`, await png(icon, size));
   await write(`${directory}/apple-touch-icon.png`, await png(icon, 180));
+  for (const size of [192, 512])
+    await write(`${directory}/icon-${size}x${size}.png`, await png(icon, size));
 }
 // Android's adaptive mask crops to its central safe zone.
 const foreground = await sharp({

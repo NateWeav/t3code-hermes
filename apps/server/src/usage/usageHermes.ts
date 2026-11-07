@@ -2,7 +2,7 @@
 /** Reads canonical Hermes Agent usage totals from `state.db`. */
 import * as NodeSqlite from "node:sqlite";
 
-import type { HermesSettings } from "@t3tools/contracts";
+import type { HermesSettings, UsageSummary } from "@t3tools/contracts";
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import type {
   ProviderUsageReader,
@@ -201,3 +201,19 @@ export const hermesUsageReader: ProviderUsageReader<HermesSettings, HermesUsageR
     return scanned;
   }),
 };
+
+/**
+ * Clients built without the fork's `hermes` usage kind (the upstream apps) reject the whole
+ * summary on one unknown provider, even inside its forward-compatible arrays.
+ */
+export function usageSummaryForClient(
+  summary: UsageSummary,
+  client: { readonly hermesUsage: boolean },
+): UsageSummary {
+  if (client.hermesUsage) return summary;
+  return {
+    ...summary,
+    buckets: summary.buckets.filter((bucket) => bucket.provider !== "hermes"),
+    sources: summary.sources.filter((source) => source.fingerprint.provider !== "hermes"),
+  };
+}

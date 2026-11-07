@@ -6,6 +6,7 @@ import {
   type HermesSettings,
   type ProviderApprovalOption,
   type OrchestrationV2ProviderFailure,
+  type ProviderUserInputAnswers,
   ProviderDriverKind,
   type ServerProviderSlashCommand,
 } from "@t3tools/contracts";
@@ -366,6 +367,40 @@ export function makeHermesClarifyCallFilter() {
     else if (!clarifyCalls.has(key)) return false;
     if (update.status === "completed" || update.status === "failed") clarifyCalls.delete(key);
     return true;
+  };
+}
+
+/**
+ * Hermes's single-choice `clarify` form lists its choices in `enum` but takes any typed answer,
+ * so the question keeps the custom answer the shared form parser refuses for an `enum`.
+ */
+export function extractHermesClarifyForm(request: EffectAcpSchema.CreateElicitationRequest) {
+  if (request.mode !== "form" || !("requestedSchema" in request)) return undefined;
+  const properties = unknownRecord(unknownRecord(request.requestedSchema)?.properties);
+  const answer = unknownRecord(properties?.answer);
+  const choices = Array.isArray(answer?.enum) ? answer.enum : [];
+  if (
+    Object.keys(properties ?? {}).length !== 1 ||
+    answer?.type !== "string" ||
+    choices.length === 0 ||
+    !choices.every((choice): choice is string => typeof choice === "string" && choice !== "") ||
+    new Set(choices).size !== choices.length
+  ) {
+    return undefined;
+  }
+  return {
+    questions: [
+      {
+        id: "answer",
+        header: "Question 1",
+        question: request.message,
+        options: choices.map((choice) => ({ label: choice, description: choice, value: choice })),
+      },
+    ],
+    respond: (answers: ProviderUserInputAnswers): EffectAcpSchema.CreateElicitationResponse =>
+      typeof answers.answer === "string" && answers.answer.trim() !== ""
+        ? { action: "accept", content: { answer: answers.answer } }
+        : { action: "cancel" },
   };
 }
 

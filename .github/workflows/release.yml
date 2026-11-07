@@ -380,12 +380,14 @@ jobs:
           node apps/web/scripts/verify-built-boot.ts
 
   # Server test files run one at a time, so more small runners beat fewer big ones.
+  # Same command as ci.yml's test_server: each file gets its own process, so a
+  # release commit fails only where CI could have. The fork has no task cache.
   test_server:
     name: Release server tests ${{ matrix.shard }}
     needs: [preflight]
     if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -423,7 +425,7 @@ jobs:
           fi
 
       - name: Test
-        run: vp run --filter t3-hermes test --shard ${{ matrix.shard }}/${{ strategy.job-total }}
+        run: vp run test:cached -- --shard ${{ matrix.shard }}/${{ strategy.job-total }} apps/server
 
   relay_public_config:
     name: Resolve T3 Connect public config

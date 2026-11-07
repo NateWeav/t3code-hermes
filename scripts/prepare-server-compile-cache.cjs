@@ -45,10 +45,10 @@ module.exports = async ({ appOutDir, electronPlatformName, arch, packager }) => 
   );
   const env = { ...process.env, ELECTRON_RUN_AS_NODE: "1" };
   for (const name of Object.keys(env)) {
-    if (name.startsWith("NODE_") || name.startsWith("T3CODE_")) delete env[name];
+    if (/^(NODE_|T3CODE_|T3HERMES_)/.test(name)) delete env[name];
   }
   const state = fs.mkdtempSync(path.join(os.tmpdir(), "t3-release-cache-"));
-  env.T3CODE_HOME = state;
+  env.T3HERMES_HOME = state;
   let result;
   try {
     // Run a script file, not -e: -e defines a global __filename of "[eval]", which
@@ -58,7 +58,8 @@ module.exports = async ({ appOutDir, electronPlatformName, arch, packager }) => 
       runner,
       `require(${JSON.stringify(helper)}).generatePreparedServerCache(${JSON.stringify(resources)}).then(()=>process.exit(0),e=>{console.error(e);process.exit(1)})`,
     );
-    result = spawnSync(executable, [runner], { env, encoding: "utf8", timeout: 120000 });
+    // The x64 build runs this under Rosetta on a hosted arm64 runner, which takes about two minutes.
+    result = spawnSync(executable, [runner], { env, encoding: "utf8", timeout: 600000 });
   } finally {
     fs.rmSync(state, { recursive: true, force: true });
   }

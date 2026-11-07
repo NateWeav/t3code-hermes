@@ -99,14 +99,10 @@ export function assertBackgroundSubagentAfterRootOutput(
 
   assert.lengthOf(projection.subagents, 1);
   assert.lengthOf(projection.runs, 2);
-  const {
-    subagent,
-    childThreadId,
-    childProjection,
-    continuationStartIndex,
-    assertStoredWhileIdle,
-    childText,
-  } = backgroundSubagent(result, transcript.scenario);
+  const { subagent, childThreadId, childProjection, childText } = backgroundSubagent(
+    result,
+    transcript.scenario,
+  );
   assert.equal(subagent.status, "completed");
   assert.equal(subagent.origin, "provider_native");
   assert.equal(subagent.runId, projection.runs[0]?.id);
@@ -141,16 +137,32 @@ export function assertBackgroundSubagentAfterRootOutput(
     1,
     "the child thread shows its final report once",
   );
-  assertStoredWhileIdle("the subagent's final report", childText(FINAL_REPORT));
+  // The wake run opens through the continuation service, which can commit before ingestion stores
+  // the frame that ended the child; Hermes sends both in one burst. Ingestion orders the child's
+  // work before the woken root's answer. Claude's details pin the stricter run-start bound.
+  const wakeAnswerIndex = result.domainEvents.findIndex(
+    (event) =>
+      event.type === "turn-item.updated" &&
+      event.payload.runId === projection.runs[1]?.id &&
+      event.payload.type === "assistant_message",
+  );
+  assert.isAtLeast(wakeAnswerIndex, 0, "the woken root answers");
+  const finalReportIndex = result.domainEvents.findIndex(childText(FINAL_REPORT));
+  assert.isAtLeast(finalReportIndex, 0, "the subagent's final report is stored");
+  assert.isBelow(
+    finalReportIndex,
+    wakeAnswerIndex,
+    "the subagent's final report is stored before the woken root answers",
+  );
   assert.isFalse(
     result.domainEvents
-      .slice(continuationStartIndex)
+      .slice(wakeAnswerIndex)
       .some(
         (event) =>
           (event.type === "message.updated" || event.type === "turn-item.updated") &&
           event.payload.threadId === childThreadId,
       ),
-    "the continuation run stores none of the subagent's work",
+    "the woken root's answer follows all of the subagent's work",
   );
 }
 

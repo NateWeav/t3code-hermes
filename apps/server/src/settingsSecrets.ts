@@ -1,6 +1,7 @@
 import {
   AntigravitySettings,
   ClaudeSettings,
+  CloudSpeechCredentials,
   CodexSettings,
   EasDeviceHostConfig,
   type ProviderInstanceConfig,
@@ -45,6 +46,7 @@ const providerSecretFields = new Map([
   ),
 ]);
 const usageLimitSecretFields = secretSettingsFields(UsageLimitSourceConfig);
+const voiceSecretFields = secretSettingsFields(CloudSpeechCredentials);
 /** Store key the fork used before secrets were schema-declared; keep it so saved keys survive. */
 const HINDSIGHT_API_KEY_SECRET_NAME = "hindsight-api-key";
 const PAPERCLIP_API_KEY_SECRET_NAME = "paperclip-api-key";
@@ -278,6 +280,11 @@ function mapSecretFieldGroups(
 
   return {
     ...settings,
+    cloudSpeechCredentials: mapFields(
+      settings.cloudSpeechCredentials,
+      voiceSecretFields,
+      (provider) => `voice-cloud-${provider}`,
+    ) as ServerSettings["cloudSpeechCredentials"],
     providerInstances,
     sourceControlHosts,
     usageLimitSources,

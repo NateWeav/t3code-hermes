@@ -5,8 +5,12 @@ import * as NodePath from "node:path";
 import * as NodeSqlite from "node:sqlite";
 
 import { describe, expect, it } from "@effect/vitest";
+import { UsageSummary } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
 
-import { readHermesUsageRecords } from "./usageHermes.ts";
+import { readHermesUsageRecords, usageSummaryForClient } from "./usageHermes.ts";
+
+const decodeUsageSummary = Schema.decodeUnknownSync(UsageSummary);
 
 function withDatabase(run: (path: string, database: NodeSqlite.DatabaseSync) => void): void {
   const dir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-hermes-usage-"));
@@ -136,5 +140,58 @@ describe("readHermesUsageRecords", () => {
 
       expect(readHermesUsageRecords(dbPath, 0)).toEqual([]);
     });
+  });
+});
+
+describe("usageSummaryForClient", () => {
+  const totals = {
+    uncachedInputTokens: 10,
+    cachedInputTokens: 0,
+    cacheCreationTokens: 0,
+    outputTokens: 5,
+    reasoningTokens: 0,
+  };
+  const bucket = (provider: "claude" | "hermes") => ({
+    day: "2026-11-07",
+    provider,
+    model: "model",
+    totals,
+    costUsd: 0,
+    cacheSavingsUsd: 0,
+    costSource: "unpriced",
+    records: 1,
+    unpricedRecords: 1,
+    sessions: 1,
+  });
+  const source = (provider: "claude" | "hermes") => ({
+    fingerprint: { hostId: "host", provider, resolvedHomePath: "/home", volumeId: "1:1" },
+    status: "ok",
+    scannedFiles: 1,
+    skippedFiles: 0,
+    malformedRecords: 0,
+    distinctSessions: 1,
+    message: null,
+  });
+  const summary = decodeUsageSummary({
+    contractVersion: 6,
+    readAt: "2026-11-07T00:00:00.000Z",
+    timeZone: "UTC",
+    sinceDay: "2026-11-01",
+    untilDay: "2026-11-07",
+    buckets: [bucket("claude"), bucket("hermes")],
+    sources: [source("claude"), source("hermes")],
+    pricing: { status: "fresh", source: "test", fetchedAt: null, knownModels: 0 },
+    scanDurationMs: 1,
+  });
+
+  it("leaves Hermes out for clients that do not know the hermes usage kind", () => {
+    const filtered = usageSummaryForClient(summary, { hermesUsage: false });
+
+    expect(filtered.buckets.map((entry) => entry.provider)).toEqual(["claude"]);
+    expect(filtered.sources.map((entry) => entry.fingerprint.provider)).toEqual(["claude"]);
+  });
+
+  it("keeps Hermes for clients that announce it", () => {
+    expect(usageSummaryForClient(summary, { hermesUsage: true })).toBe(summary);
   });
 });

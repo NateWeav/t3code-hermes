@@ -9507,6 +9507,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           driver,
           providerSessionId: input.providerSessionId,
           providerSession,
+          canResumeAfterRestart: canLoadSession || canResumeSession,
           events: Stream.fromEffectRepeat(Queue.take(events)),
           // A closed runtime sees no wake turn, so nothing would release its marks. Until a wake or
           // an end does, the root run keeps ingesting so the roster's clear lands on it.

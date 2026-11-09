@@ -2,6 +2,8 @@ import type { ScopedThreadRef } from "@t3tools/contracts";
 import { formatDuration } from "@t3tools/shared/orchestrationTiming";
 
 import { formatContextWindowTokens } from "~/lib/contextWindow";
+import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
+import { composerFloatingLayerProps } from "./composerEventScope";
 import { orchestrationEnvironment } from "../../state/orchestration";
 import { useEnvironmentQuery } from "../../state/query";
 
@@ -23,17 +25,40 @@ function formatTokensPerSecond(tokensPerSecond: number | null): string {
   return tokensPerSecond === null ? "- tok/s" : `${Math.round(tokensPerSecond)} tok/s`;
 }
 
-/** Composer footer chip beside the context ring; dims while the model is in a tool call. */
+/** Composer footer chip; dims while the model is in a tool call, and hover shows the turn so far. */
 export function RunThroughputChip({ threadRef }: { threadRef: ScopedThreadRef }) {
   const throughput = useRunThroughput(threadRef);
   if (!throughput) return null;
   return (
-    <span
-      data-idle={throughput.idle ? "" : undefined}
-      className="shrink-0 whitespace-nowrap font-mono text-2xs text-muted-foreground tabular-nums data-idle:opacity-60"
-    >
-      {formatTokensPerSecond(throughput.tokensPerSecond)}
-    </span>
+    <Popover>
+      <PopoverTrigger
+        openOnHover
+        delay={150}
+        closeDelay={0}
+        render={
+          <button
+            type="button"
+            data-idle={throughput.idle ? "" : undefined}
+            className="shrink-0 whitespace-nowrap font-mono text-2xs text-muted-foreground tabular-nums data-idle:opacity-60"
+          />
+        }
+      >
+        {formatTokensPerSecond(throughput.tokensPerSecond)}
+      </PopoverTrigger>
+      <PopoverPopup
+        {...composerFloatingLayerProps}
+        tooltipStyle
+        side="top"
+        align="end"
+        padding="none"
+        width="sm"
+        className="text-left whitespace-normal"
+      >
+        <div className="p-(--floating-content-inset)">
+          <RunThroughputSection threadRef={threadRef} />
+        </div>
+      </PopoverPopup>
+    </Popover>
   );
 }
 
@@ -42,8 +67,8 @@ const CHART_HEIGHT = 36;
 /** Keeps the line's peaks and troughs off the chart's edges. */
 const CHART_INSET = 3;
 
-/** Throughput section of the context ring's popover: live rate, chart, and the turn so far. */
-export function RunThroughputSection({ threadRef }: { threadRef: ScopedThreadRef }) {
+/** Live rate, chart, and the turn so far. */
+function RunThroughputSection({ threadRef }: { threadRef: ScopedThreadRef }) {
   const throughput = useRunThroughput(threadRef);
   if (!throughput) return null;
   const line = chartLine(throughput.history);
@@ -60,7 +85,7 @@ export function RunThroughputSection({ threadRef }: { threadRef: ScopedThreadRef
       : [["Average time to first token", formatDuration(throughput.timeToFirstTokenMs)] as const]),
   ] as const;
   return (
-    <div className="flex flex-col border-t border-border/60 pt-2">
+    <div className="flex flex-col">
       <div className="flex items-baseline justify-between gap-3">
         <div className="font-medium text-muted-foreground text-xs">Throughput</div>
         <div className="font-mono text-secondary-label text-2xs tabular-nums">

@@ -1799,7 +1799,6 @@ function ScheduledTaskEditorForm({
                   model={activeSelection.model}
                   modelOptions={activeSelection.options ?? []}
                   allowPromptInjectedEffort={false}
-                  planModeEnabled={settings.planModeEnabled}
                   triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
                   onModelOptionsChange={(options) =>
                     setDraft((current) => ({

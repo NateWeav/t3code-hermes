@@ -72,12 +72,13 @@ jobs:
             .github/scripts
             .github/workflows
 
-      # CI runs this on every PR too. Here it covers anything that reached
+      # CI runs these on every PR too. Here they cover anything that reached
       # main without CI: a job asking for a runner the fork lacks would queue
-      # for a day and hold every later nightly behind this run.
-      - name: Check release runners
+      # for a day and hold every later nightly behind this run, and a step
+      # whose file its sparse checkout leaves out would fail after publishing.
+      - name: Check release workflows
         if: github.repository != 'pingdotgg/t3code'
-        run: node --test .github/scripts/release-runners.test.cjs
+        run: node --test .github/scripts/release-runners.test.cjs .github/scripts/sparse-checkout-paths.test.cjs
 
       - id: resolve
         name: Resolve release commit
@@ -1139,7 +1140,8 @@ jobs:
       contents: read
       id-token: write
     steps:
-      # Only what setup-ci-deps reads to install the project's Node and npm.
+      # Only what setup-ci-deps reads to install the project's Node and npm,
+      # plus the script that verifies the published launcher.
       - name: Checkout
         uses: actions/checkout@v6
         with:
@@ -1148,6 +1150,7 @@ jobs:
             /.github/actions/setup-ci-deps/
             /package.json
             /pnpm-workspace.yaml
+            /scripts/verify-npm-release.sh
           sparse-checkout-cone-mode: false
 
       - name: Setup Node.js

@@ -116,7 +116,6 @@ export interface Preferences {
   readonly microphones?: ReadonlyArray<MicrophoneEntry>;
   readonly projectGroupingEnabled?: boolean;
   readonly projectGroupingMode?: SidebarProjectGroupingMode;
-  readonly planModeEnabled?: boolean;
   /** Device-local counterparts of the web client's skill and memory activity rows. */
   readonly showSkillActivityRows?: boolean;
   readonly showMemoryActivityRows?: boolean;
@@ -204,7 +203,6 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     microphones?: ReadonlyArray<MicrophoneEntry>;
     projectGroupingEnabled?: boolean;
     projectGroupingMode?: SidebarProjectGroupingMode;
-    planModeEnabled?: boolean;
     showSkillActivityRows?: boolean;
     showMemoryActivityRows?: boolean;
     toolCallVisibility?: ToolCallVisibility;
@@ -330,9 +328,6 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     parsed.projectGroupingMode === "separate"
   ) {
     preferences.projectGroupingMode = parsed.projectGroupingMode;
-  }
-  if (typeof parsed.planModeEnabled === "boolean") {
-    preferences.planModeEnabled = parsed.planModeEnabled;
   }
   if (typeof parsed.showSkillActivityRows === "boolean") {
     preferences.showSkillActivityRows = parsed.showSkillActivityRows;

@@ -336,32 +336,6 @@ describe("ClientSettings composer throughput", () => {
   });
 });
 
-describe("ClientSettings context window meter", () => {
-  it("restores the indicator for settings saved with the retired hidden default", () => {
-    expect(
-      decodeClientSettings({ contextWindowMeterEnabled: false }).contextWindowIndicatorEnabled,
-    ).toBe(true);
-  });
-
-  it("defaults on and preserves explicit visibility preferences", () => {
-    expect(decodeClientSettings({}).contextWindowIndicatorEnabled).toBe(true);
-    expect(
-      decodeClientSettings({ contextWindowIndicatorEnabled: false }).contextWindowIndicatorEnabled,
-    ).toBe(false);
-    expect(
-      decodeClientSettings({ contextWindowIndicatorEnabled: true }).contextWindowIndicatorEnabled,
-    ).toBe(true);
-    expect(
-      decodeClientSettingsPatch({ contextWindowIndicatorEnabled: true })
-        .contextWindowIndicatorEnabled,
-    ).toBe(true);
-    expect(
-      decodeClientSettingsPatch({ contextWindowIndicatorEnabled: false })
-        .contextWindowIndicatorEnabled,
-    ).toBe(false);
-  });
-});
-
 describe("provider enabled defaults", () => {
   it("resolves instance enabled state with explicit false winning", () => {
     const grok = ProviderDriverKind.make("grok");

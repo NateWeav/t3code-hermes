@@ -136,6 +136,7 @@ import { useRenderedAppearance } from "../hooks/useTheme";
 import { useClientSettings } from "../hooks/useSettings";
 import { chatMarkdownClipboardPayload } from "../markdown-clipboard";
 import {
+  isLocalEditorFileHref,
   resolveInlineCodeFileLinkMeta,
   resolveMarkdownFileLinkMeta,
   rewriteMarkdownFileUriHref,
@@ -343,6 +344,7 @@ export function transformChatMarkdownUrl(url: string, key: string): string {
   if (parseComposerContextHref(url)) return url;
   if (parseThreadLinkHref(url)) return url;
   if (isWindowsDrivePathHref(url)) return url;
+  if (isLocalEditorFileHref(url)) return url;
   const fileHref = rewriteMarkdownFileUriHref(url);
   if (fileHref !== null) return fileHref;
   if (key === "src" && INLINE_RASTER_IMAGE_DATA_URL_PATTERN.test(url)) return url;

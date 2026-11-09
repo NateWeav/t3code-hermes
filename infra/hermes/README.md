@@ -207,7 +207,8 @@ own approval, and a background child. Run it in a scratch checkout, as for `acp-
 The patch is listed last. Its `ca4360692055` version applies alone and after the patches made
 before `acp-subagent-model-continue`. Its `90d6b98fd8` version (`main`, 2026-11-06) is the same
 change on top of every other patch, including `acp-subagent-model-continue`, which changes the same
-child run, and applies only after them.
+child run, and applies only after them. Its `466591fe65` version (`main`, 2026-11-09) is the same
+again on current `main`.
 
 ## `acp-fast-mode`
 
@@ -466,7 +467,8 @@ It builds on `acp-delegation-progress`, whose viewer file it changes; apply that
 
 Restart the Hermes gateway after applying it: `delegate_task` runs there. Verified against
 hermes-agent `90d6b98fd86d` (`main`, 2026-11-06), alone after `acp-delegation-progress` and after
-all the other patches. Run the patch's `tests/gateway/test_delegation_task_model.py` and
+all the other patches. Its `466591fe65` version (`main`, 2026-11-09) is the same change on current
+`main`. Run the patch's `tests/gateway/test_delegation_task_model.py` and
 `tests/acp_adapter/test_gateway_delegation_continue.py` (which reuses the progress patch's
 `test_gateway_delegation_progress.py`) in a scratch checkout, as for `acp-delegation-progress`.
 

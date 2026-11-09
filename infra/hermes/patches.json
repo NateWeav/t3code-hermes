@@ -24,11 +24,6 @@
           "hermesCommit": "835c3dd038d903182a66ecc45e34bf5e0de65f00",
           "hermesCommitDate": "2026-10-12T00:28:32Z",
           "file": "acp-central-ssh-execution/835c3dd038d9.patch"
-        },
-        {
-          "hermesCommit": "517b5e10febd619ce30bb22580e29b160266eb43",
-          "hermesCommitDate": "2026-10-08T17:49:31Z",
-          "file": "acp-central-ssh-execution/517b5e10febd.patch"
         }
       ]
     },
@@ -56,16 +51,6 @@
           "hermesCommit": "8e3d11f9378636a009289fe9f151077787f0e673",
           "hermesCommitDate": "2026-10-16T23:39:48Z",
           "file": "acp-delegation-progress/8e3d11f93786.patch"
-        },
-        {
-          "hermesCommit": "1e0c7730d791f5ce855c5c78935cfea6fb1e43a9",
-          "hermesCommitDate": "2026-10-09T00:06:02Z",
-          "file": "acp-delegation-progress/1e0c7730d791.patch"
-        },
-        {
-          "hermesCommit": "517b5e10febd619ce30bb22580e29b160266eb43",
-          "hermesCommitDate": "2026-10-08T17:49:31Z",
-          "file": "acp-delegation-progress/517b5e10febd.patch"
         }
       ]
     },
@@ -281,6 +266,11 @@
       "neededFor": "Apply after Live subagent progress. Lets Hermes pick a subagent's model from the ones your profile lists, and send a finished subagent a follow-up. Without it, every subagent runs on the default model, and a finished one can't be asked anything more.",
       "versions": [
         {
+          "hermesCommit": "466591fe65d0257c96083df16fcd39636032304c",
+          "hermesCommitDate": "2026-11-09T06:46:20Z",
+          "file": "acp-subagent-model-continue/466591fe65d0.patch"
+        },
+        {
           "hermesCommit": "90d6b98fd86d20981ee06ddd5b7d93e4320f26a4",
           "hermesCommitDate": "2026-11-06T07:12:42Z",
           "file": "acp-subagent-model-continue/90d6b98fd86d.patch"
@@ -297,6 +287,11 @@
       "title": "Subagent approvals",
       "neededFor": "Approvals that show under the subagent that asked, as Codex's do. Without it, a subagent's approval reaches you as if its parent had asked.",
       "versions": [
+        {
+          "hermesCommit": "466591fe65d0257c96083df16fcd39636032304c",
+          "hermesCommitDate": "2026-11-09T06:46:20Z",
+          "file": "acp-subagent-approvals/466591fe65d0.patch"
+        },
         {
           "hermesCommit": "90d6b98fd86d20981ee06ddd5b7d93e4320f26a4",
           "hermesCommitDate": "2026-11-06T07:12:42Z",

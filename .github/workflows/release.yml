@@ -87,6 +87,8 @@ jobs:
           FOLLOW_UPSTREAM: ${{ inputs.follow_upstream }}
           UPSTREAM_SHA: ${{ inputs.upstream_sha }}
         with:
+          # Every call here is a read; retry GitHub's transient 5xx and dropped connections.
+          retries: 3
           script: |
             const {
               assertCommitOnDefaultBranch,
@@ -1389,14 +1391,17 @@ jobs:
             echo "Vercel credentials are not configured; skipping the hosted web alias." >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      # Only what setup-ci-deps reads to install vp and Node. The alias call
+      # names its deployment and scope, so it reads nothing else from the repo.
       - name: Checkout
         if: steps.vercel.outputs.configured == 'true'
         uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.ref }}
           sparse-checkout: |
-            /*
-            !/.repos/
+            /.github/actions/setup-ci-deps/
+            /package.json
+            /pnpm-workspace.yaml
           sparse-checkout-cone-mode: false
 
       - name: Setup Vite+

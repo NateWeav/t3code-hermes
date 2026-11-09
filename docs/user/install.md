@@ -28,6 +28,10 @@ This starts the server and opens the local web app. Run
 only nightly builds, so always ask for `@nightly`. To keep a server running
 after you log out, use the [background service](./background-service.md).
 
+At a terminal, it first offers to install the `t3-hermes` command in
+`~/.local/bin`. If you say no, it asks again at the next minor release, and
+`npx t3-hermes@nightly install` installs it later.
+
 Run `npx t3-hermes@nightly help` for the same reference. To start in a new
 working directory, use an explicit path such as `npx t3-hermes@nightly ./my-project`.
 A bare directory name is accepted only if it already exists.

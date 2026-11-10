@@ -979,6 +979,38 @@ describe("DesktopWindow", () => {
       }),
   );
 
+  it.effect.each([
+    { closeToTray: true, expectRevealsAtStart: 0 },
+    { closeToTray: false, expectRevealsAtStart: 1 },
+  ] as const)(
+    "a login-item start stays hidden only while the tray exists (closeToTray=$closeToTray)",
+    ({ closeToTray, expectRevealsAtStart }) =>
+      Effect.gen(function* () {
+        const fake = makeFakeBrowserWindow();
+        const createCount = yield* Ref.make(0);
+        const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+        const reveal = vi.fn();
+        yield* Effect.gen(function* () {
+          const windows = yield* DesktopWindow.DesktopWindow;
+          const state = yield* DesktopState.DesktopState;
+          yield* Ref.set(state.startHidden, true);
+          yield* Ref.set(state.closeToTray, closeToTray);
+          yield* windows.handleBackendReady(new URL("http://127.0.0.1:3773"));
+          fake.windowListeners.get("ready-to-show")?.();
+          yield* Effect.promise(() => Promise.resolve());
+          assert.equal(reveal.mock.calls.length, expectRevealsAtStart);
+          assert.isFalse(yield* Ref.get(state.startHidden));
+
+          yield* windows.activate;
+          assert.equal(reveal.mock.calls.length, expectRevealsAtStart + 1);
+        }).pipe(
+          Effect.provide(
+            layerTest({ window: fake.window, createCount, mainWindow, onReveal: reveal }),
+          ),
+        );
+      }),
+  );
+
   it.effect("preserves unrestorable bounds until the user changes the window", () =>
     Effect.gen(function* () {
       const fakeWindow = makeFakeBrowserWindow();

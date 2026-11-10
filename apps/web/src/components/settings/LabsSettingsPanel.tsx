@@ -4,7 +4,7 @@ import { managedCapabilityDenial } from "@t3tools/contracts";
 
 import { hasCloudPublicConfig } from "~/cloud/publicConfig";
 import { isElectron } from "~/env";
-import { isMacPlatform } from "~/lib/utils";
+import { isMacPlatform, isWindowsPlatform } from "~/lib/utils";
 import { useT3ConnectAuthPrompt } from "../clerk/useT3ConnectAuthPrompt";
 import { Button } from "../ui/button";
 import { Switch } from "../ui/switch";
@@ -95,6 +95,31 @@ function KeepRunningInTrayRow() {
           checked={settings.keepRunningInTray}
           onCheckedChange={(checked) => updateSettings({ keepRunningInTray: Boolean(checked) })}
           aria-label="Keep running in tray"
+        />
+      }
+    >
+      {settings.keepRunningInTray && isWindowsPlatform(navigator.platform) ? (
+        <div className="mt-2 mb-2 border-l-2 border-border/60 ps-3">
+          <LaunchAtLoginRow />
+        </div>
+      ) : null}
+    </SettingsRow>
+  );
+}
+
+function LaunchAtLoginRow() {
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  return (
+    <SettingsRow
+      {...searchableSetting("launch-at-login")}
+      className="px-0 py-2 sm:px-0"
+      description="Start T3 Code in the tray when you sign in to Windows, so this computer's threads are reachable without opening the window. Installed builds only."
+      control={
+        <Switch
+          checked={settings.launchAtLogin}
+          onCheckedChange={(checked) => updateSettings({ launchAtLogin: Boolean(checked) })}
+          aria-label="Start at login in the tray"
         />
       }
     />

@@ -865,6 +865,14 @@ export const make = Effect.gen(function* () {
         (yield* Ref.get(desktopState.quitting))
       )
         return;
+      // A login-item start stays in the tray; the next activate replays this reveal.
+      if (
+        (yield* Ref.getAndSet(desktopState.startHidden, false)) &&
+        (yield* Ref.get(desktopState.closeToTray))
+      ) {
+        yield* dismissConnectingSplash;
+        return;
+      }
       firstRevealComplete = true;
       pendingMainReveals.delete(window);
       window.webContents.setBackgroundThrottling(true);

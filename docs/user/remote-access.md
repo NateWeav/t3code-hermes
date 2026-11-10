@@ -35,6 +35,11 @@ does not start a server or make the machine reachable.
 On Linux, close-to-tray needs system tray support from your desktop environment.
 If no tray icon appears, launch T3 Code again to restore the window.
 
+On Windows, with **Keep running in tray** on, **Start at login in the tray**
+starts T3 Code hidden in the tray when you sign in, so the machine is reachable
+without opening the window. Open it from the tray icon or by launching T3 Code.
+This needs an installed build.
+
 On your other device, sign in to the same T3 Connect account and choose the
 environment. On the app.t3.codes home page with no computer added yet, signing
 in adds compatible computers linked to your account. Over SSH, the CLI prints a

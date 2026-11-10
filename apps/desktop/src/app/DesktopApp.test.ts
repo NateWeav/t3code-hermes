@@ -44,6 +44,7 @@ import * as PreviewPasskeys from "../preview/Passkeys.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopShellEnvironment from "../shell/DesktopShellEnvironment.ts";
 import * as DesktopSnapShot from "../snapShot/DesktopSnapShot.ts";
+import * as DesktopLoginItem from "../window/DesktopLoginItem.ts";
 import * as DesktopTray from "../window/DesktopTray.ts";
 import * as DesktopRendererHistory from "../telemetry/DesktopRendererHistory.ts";
 import * as DesktopUpdates from "../updates/DesktopUpdates.ts";
@@ -165,6 +166,10 @@ it.effect.each([false, true])(
             initialize: Effect.void,
           } as DesktopSnapShot.DesktopSnapShot["Service"]),
           Effect.provideService(DesktopTray.DesktopTray, {
+            initialize: Effect.void,
+            configure: () => Effect.void,
+          }),
+          Effect.provideService(DesktopLoginItem.DesktopLoginItem, {
             initialize: Effect.void,
             configure: () => Effect.void,
           }),

@@ -649,6 +649,16 @@ export const SETTINGS_SEARCH_ITEMS = [
     nonMacOnly: true,
   },
   {
+    id: "launch-at-login",
+    title: "Start at login in the tray",
+    to: "/settings/labs",
+    // Shown inside the tray row only while it is on, so search lands on the parent.
+    targetId: "keep-running-in-tray",
+    searchTerms: ["beta startup boot sign in login launch windows tray hidden background"],
+    desktopOnly: true,
+    windowsOnly: true,
+  },
+  {
     id: "auto-settle-inactive-threads",
     title: "Auto-settle inactive threads",
     to: "/settings/threads",

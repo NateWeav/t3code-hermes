@@ -525,6 +525,48 @@ Verified against hermes-agent `90d6b98fd86d` (`main`, 2026-11-06), alone and aft
 patches. Run the patch's `tests/gateway/test_context_probe_memo_gateway.py` in a scratch checkout,
 as for `acp-delegation-progress`.
 
+## `acp-background-processes`
+
+**Needed by:** background commands that stay listed on their thread for as long as they run. A
+background `terminal` call completes the moment its process starts, and the gateway tells ACP
+viewers nothing when the process ends. Without the patch T3 Code reads processes from the agent's
+own tool results: it lists only one Hermes armed a completion wake for (`notify_on_complete`), and
+drops every listed one at the next wake, because a wake names no process.
+
+The patch has `hermes acp` report each process a `terminal` call starts as an `_hermes/process`
+notification carrying the launching `toolCallId` and the `proc_…` id: `running` once the gateway's
+`process.list` (what Hermes Desktop's status stack polls) shows it, then `exited` with `exitCode`
+and `reason`. It reads the list every 5 s while it tracks a process, and at once when a turn
+starts, since the gateway starts one when a process it was asked to notify about ends. `reason` is
+`lost` when the gateway stops listing the process, refuses the read, or fails three reads in a row.
+A process the gateway never lists is not reported. That covers a managed worker's (bypass sessions,
+or `gateway.managed_workers`): it keeps processes in its own registry, which the daemon refuses to
+read, so those sessions keep the stock behaviour.
+
+T3 Code keeps every reported process listed until its own exit report, whatever wakes the agent in
+between. `t3_background_wait` still holds a thread only on a process Hermes will wake for. The
+gateway does the waking as before; the patch adds liveness, not delivery. Reports are not replayed,
+so a process that started before this `hermes acp` attached (before a T3 Code restart, say) is not
+listed.
+
+Stop ends them. The patch serves an `_hermes/process_stop` notification that kills each process
+reported for the session with the gateway's `process.kill` (Hermes Desktop's per-process Stop, which
+does not wake the agent about the kill), and the exits are reported as any other. T3 Code sends it
+on Stop, whether a turn is running or has ended, and takes those exit reports as confirmation: when
+they do not arrive within 10 s, Stop reports the agent as unresponsive and the processes stay
+listed. It sends nothing while Hermes has reported none, so stock Hermes sees no new message, and
+Stop there leaves a listed process running as before.
+
+It is a port of kvnloo's gateway version (hermes-agent `fix/acp-gateway-background-process`), which
+keeps the wire shape proposed upstream in NousResearch/hermes-agent#130898; drop the patch once
+upstream carries it. Verified against hermes-agent `95fc3e668f` (`main`, 2026-11-10), alone and
+after the other patches. The change is in `hermes acp` only, so new `hermes acp` processes pick it
+up; restarting the gateway is not required. The patch's
+`tests/acp_adapter/test_gateway_background_process.py` drives the agent `hermes acp` builds, and
+`tests/gateway/test_acp_background_process.py` reads two real processes through a real gateway
+owner and stops the one still running.
+Run them in a scratch checkout, as for `acp-delegation-progress`.
+
 ## Retired
 
 **`acp-background-reports`** and **`acp-durable-completion-receipts`** hooked Hermes's in-process
@@ -533,9 +575,8 @@ when background work finished (`_hermes/notification`); the second kept a finish
 pending until a wake turn handed its ids back. Under the gateway viewer neither runs. The gateway
 now does both jobs itself: it starts its own turn when a background process or subagent finishes
 (`gateway/run_notifications.py`), which T3 Code shows through post-settle continuation, and keeps
-async delegation results durable in its own store (`gateway/session_worker_delegation.py`). The
-sidebar's Monitoring status for a running background process has no gateway equivalent yet, so a
-background `terminal` call reads as finished once the process starts.
+async delegation results durable in its own store (`gateway/session_worker_delegation.py`).
+`acp-background-processes` reports process status from the gateway viewer instead.
 
 Remove the receipts patch before the one it builds on; the tab shows the second once the first is
 off.

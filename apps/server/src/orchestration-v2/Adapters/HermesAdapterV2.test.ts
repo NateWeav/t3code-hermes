@@ -31,6 +31,7 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
+import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import { ChildProcessSpawner } from "effect/process";
@@ -156,6 +157,30 @@ function turnInput(input: {
 type MockPermission = {
   readonly permission: Omit<EffectAcpSchema.RequestPermissionRequest, "sessionId">;
 };
+type ExtNotificationHandlers = Map<string, (params: unknown) => Effect.Effect<void>>;
+/** Records the handlers a flavor registers, so a test can deliver that extension notification. */
+const recordExtNotifications =
+  (
+    runtime: AcpSessionRuntime.AcpSessionRuntime["Service"],
+    handlers: ExtNotificationHandlers,
+  ): AcpSessionRuntime.AcpSessionRuntime["Service"]["handleExtNotification"] =>
+  (method, payload, handler) =>
+    Effect.sync(() => {
+      handlers.set(method, (params) =>
+        Schema.decodeUnknownEffect(payload)(params).pipe(Effect.flatMap(handler), Effect.orDie),
+      );
+    }).pipe(Effect.andThen(runtime.handleExtNotification(method, payload, handler)));
+/** A `_hermes/process` report, as the `acp-background-processes` patch sends it. */
+type MockProcessReport = {
+  readonly process: {
+    readonly toolCallId: string;
+    readonly processId: string;
+    readonly command: string;
+    readonly status: "running" | "exited";
+    readonly exitCode?: number | null;
+    readonly reason?: string;
+  };
+};
 
 const runMockTurn = (input: {
   readonly name: string;
@@ -168,7 +193,9 @@ const runMockTurn = (input: {
    * Session updates the prompt delivers instead of the mock's own reply, for
    * Hermes's ACP v1 shapes (`tool_call`) the v2 mock cannot send.
    */
-  readonly promptUpdates?: ReadonlyArray<EffectAcpSchema.SessionUpdate | MockPermission>;
+  readonly promptUpdates?: ReadonlyArray<
+    EffectAcpSchema.SessionUpdate | MockPermission | MockProcessReport
+  >;
   /**
    * Updates of a gateway turn the first prompt's request carries ahead of the prompt's own turn,
    * stamped as the `acp-unprompted-turns` patch stamps them.
@@ -178,14 +205,19 @@ const runMockTurn = (input: {
    * Session updates delivered after the first turn ends, with no prompt open: what the Hermes
    * gateway projects when it runs a turn of its own for a finished background job.
    */
-  readonly idleUpdates?: ReadonlyArray<EffectAcpSchema.SessionUpdate>;
+  readonly idleUpdates?: ReadonlyArray<EffectAcpSchema.SessionUpdate | MockProcessReport>;
   /** Runs the buffered continuation the idle updates offered, through its quiet window. */
   readonly runContinuation?: boolean;
+  /** Delivered after the continuation run ends. */
+  readonly afterContinuationUpdates?: ReadonlyArray<MockProcessReport>;
+  /** What Hermes reports once it is sent `_hermes/process_stop`. */
+  readonly stopReports?: ReadonlyArray<MockProcessReport>;
   /** Runs after the first turn ends, before `idleUpdates`: what a caller does between runs. */
   readonly afterTurn?: (input: {
     readonly session: ProviderAdapterV2SessionRuntime;
     readonly providerThread: OrchestrationV2ProviderThread;
-  }) => Effect.Effect<void>;
+    readonly events: ReadonlyArray<ProviderAdapterV2Event>;
+  }) => Effect.Effect<void, never, Scope.Scope>;
   /** Session updates a second, user-sent prompt delivers, run after `afterTurn`. */
   readonly followUpPromptUpdates?: ReadonlyArray<EffectAcpSchema.SessionUpdate>;
   /** As `unpromptedPromptUpdates`, for the second prompt. */
@@ -225,6 +257,10 @@ const runMockTurn = (input: {
     type Runtime = AcpSessionRuntime.AcpSessionRuntime["Service"];
     let deliver: Parameters<Runtime["handleSessionUpdate"]>[0] | undefined;
     let permit: Parameters<Runtime["handleRequestPermission"]>[0] | undefined;
+    const extensions: ExtNotificationHandlers = new Map();
+    const report = (sessionId: string, { process }: MockProcessReport) =>
+      extensions.get("_hermes/process")!({ sessionId, ...process });
+    const stops: Array<unknown> = [];
     const adapter = yield* makeHermesAdapterV2({
       instanceId,
       settings,
@@ -251,6 +287,16 @@ const runMockTurn = (input: {
                     Effect.sync(() => {
                       permit = handler;
                     }).pipe(Effect.andThen(runtime.handleRequestPermission(handler))),
+                  handleExtNotification: recordExtNotifications(runtime, extensions),
+                  notify: (method, payload) =>
+                    method !== "_hermes/process_stop"
+                      ? runtime.notify(method, payload)
+                      : Effect.gen(function* () {
+                          stops.push(payload);
+                          for (const update of input.stopReports ?? []) {
+                            yield* report(sessionIdSeen!, update);
+                          }
+                        }),
                   prompt: () =>
                     Effect.gen(function* () {
                       const { sessionId } = yield* runtime.start();
@@ -262,6 +308,10 @@ const runMockTurn = (input: {
                           _meta: { hermes: { unprompted: true } },
                         });
                       for (const [index, update] of (promptUpdates.shift() ?? []).entries()) {
+                        if ("process" in update) {
+                          yield* report(sessionId, update);
+                          continue;
+                        }
                         if (!("permission" in update)) {
                           yield* deliver!({ sessionId, update });
                           continue;
@@ -327,7 +377,7 @@ const runMockTurn = (input: {
       Stream.runCollect,
     );
     const events: Array<ProviderAdapterV2Event> = Array.from(yield* untilTerminal);
-    if (input.afterTurn !== undefined) yield* input.afterTurn({ session, providerThread });
+    if (input.afterTurn !== undefined) yield* input.afterTurn({ session, providerThread, events });
     let ordinal = 1;
     if (input.followUpPromptUpdates !== undefined) {
       ordinal += 1;
@@ -344,7 +394,9 @@ const runMockTurn = (input: {
       events.push(...(yield* untilTerminal));
     }
     for (const update of idleUpdates ?? []) {
-      yield* deliver!({ sessionId: sessionIdSeen!, update });
+      yield* "process" in update
+        ? report(sessionIdSeen!, update)
+        : deliver!({ sessionId: sessionIdSeen!, update });
     }
     if (input.runContinuation === true) {
       const continuation = turnInput({
@@ -367,11 +419,20 @@ const runMockTurn = (input: {
       yield* TestClock.adjust("3 seconds");
       events.push(...(yield* untilTerminal));
     }
+    if (input.afterContinuationUpdates !== undefined) {
+      const reported = yield* session.events.pipe(
+        Stream.take(input.afterContinuationUpdates.length),
+        Stream.runCollect,
+        Effect.forkScoped,
+      );
+      for (const update of input.afterContinuationUpdates) yield* report(sessionIdSeen!, update);
+      events.push(...(yield* Fiber.join(reported)));
+    }
     const requests = (yield* fileSystem.readFileString(requestLogPath))
       .trim()
       .split("\n")
       .map((line) => decodeRequestLine(line));
-    return { threadId, events, requests };
+    return { threadId, events, requests, stops, sessionId: sessionIdSeen };
   });
 
 describe("HermesAdapterV2 flavor", () => {
@@ -1532,6 +1593,118 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
       ]);
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
+
+  it.effect("lists every process Hermes reports until Hermes reports its exit", () =>
+    Effect.gen(function* () {
+      const offers = yield* Queue.unbounded<ProviderContinuationRequest>();
+      const tests = { toolCallId: "tc-tests", processId: TESTS_PROC, command: "pnpm test" };
+      const dev = { toolCallId: "tc-dev", processId: DEV_PROC, command: "pnpm dev" };
+      let matched: ReadonlyArray<string> = [];
+      const { events } = yield* runMockTurn({
+        name: "background-process-reports",
+        mockEnvironment: {},
+        promptUpdates: [
+          ...hermesBackgroundStart({ ...tests, notify: true }),
+          { process: { ...tests, status: "running" } },
+          ...hermesBackgroundStart({ ...dev, notify: false }),
+          { process: { ...dev, status: "running" } },
+        ],
+        afterTurn: ({ session, providerThread }) =>
+          Effect.gen(function* () {
+            ({ matched } = yield* session.awaitBackgroundTasks!({
+              providerThread,
+              taskIds: [TESTS_PROC, DEV_PROC],
+              awaited: true,
+            }));
+          }).pipe(Effect.orDie),
+        idleUpdates: [
+          {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "Tests passed." },
+          },
+        ],
+        continuationRequests: {
+          offer: (request) => Queue.offer(offers, request).pipe(Effect.asVoid),
+        },
+        runContinuation: true,
+        afterContinuationUpdates: [
+          { process: { ...tests, status: "exited", exitCode: 0, reason: "exited" } },
+          { process: { ...dev, status: "exited", reason: "lost" } },
+        ],
+      });
+      // Nothing wakes Hermes when the dev server ends, so its thread cannot hold on it.
+      assert.deepEqual(matched, [TESTS_PROC]);
+      // The dev server arms no wake, so the wake can only be the test run's.
+      assert.deepEqual((yield* Queue.take(offers)).notification, {
+        source: { kind: "command" },
+        outcome: "unknown",
+        summary: 'Command "pnpm test" finished',
+      });
+      const listedTests = {
+        taskId: TESTS_PROC,
+        kind: "command",
+        description: "pnpm test",
+      } as const;
+      const listedDev = { taskId: DEV_PROC, kind: "command", description: "pnpm dev" } as const;
+      const rosters = providerThreadRosters(events);
+      // The wake releases neither: only a report says which process ended.
+      assert.deepEqual(rosters.slice(-3), [
+        [{ ...listedTests, awaited: true }, listedDev],
+        [listedDev],
+        [],
+      ]);
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+
+  // Stop reaches the adapter after the turn ended too: it alone knows what still runs.
+  it.effect.each([
+    { name: "ends them once Hermes reports each exit", reported: true, exits: true },
+    { name: "is not confirmed until Hermes reports each exit", reported: true, exits: false },
+    // Stock Hermes: the wire stays as it was.
+    { name: "sends a Hermes that reported none nothing", reported: false, exits: false },
+  ] as const)("Stop on a thread with background processes $name", (row) =>
+    Effect.gen(function* () {
+      const dev = { toolCallId: "tc-dev", processId: DEV_PROC, command: "pnpm dev" };
+      const stop = yield* Deferred.make<Exit.Exit<void, unknown>>();
+      const listed = yield* Deferred.make<boolean>();
+      const { stops, sessionId } = yield* runMockTurn({
+        name: `background-stop-${row.name.replaceAll(" ", "-")}`,
+        mockEnvironment: {},
+        promptUpdates: [
+          ...hermesBackgroundStart({ ...dev, notify: true }),
+          ...(row.reported ? [{ process: { ...dev, status: "running" } } as const] : []),
+        ],
+        ...(row.reported && row.exits
+          ? { stopReports: [{ process: { ...dev, status: "exited", reason: "killed" } }] }
+          : {}),
+        afterTurn: ({ session, providerThread, events }) =>
+          Effect.gen(function* () {
+            const turn = events.findLast((event) => event.type === "provider_turn.updated");
+            assert(turn?.type === "provider_turn.updated");
+            const stopping = yield* session
+              .interruptTurn({
+                providerThread,
+                providerTurnId: turn.providerTurn.id,
+                requestRuntimeRestart: true,
+              })
+              .pipe(Effect.exit, Effect.forkScoped);
+            yield* TestClock.adjust("10 seconds");
+            yield* Deferred.succeed(stop, yield* Fiber.join(stopping));
+            yield* Deferred.succeed(
+              listed,
+              yield* session.hasPendingBackgroundWorkForThread!(providerThread),
+            );
+          }),
+      });
+      const result = yield* Deferred.await(stop);
+      assert.deepEqual(stops, row.reported ? [{ sessionId }] : []);
+      if (row.reported) {
+        assert.equal(Exit.isSuccess(result), row.exits);
+        // A process Hermes has not reported ended stays listed.
+        assert.equal(yield* Deferred.await(listed), !row.exits);
+      }
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
 });
 
 const TESTS_PROC = "proc_aaaa11112222";
@@ -1989,6 +2162,7 @@ describe.skipIf(windowsHost)("HermesAdapterV2 across a Hermes gateway restart", 
               Effect.map((runtime): Runtime => {
                 const prompts: Array<string> = [];
                 const processIndex = spawned.push(prompts) - 1;
+                const extensions: ExtNotificationHandlers = new Map();
                 let deliver: Parameters<Runtime["handleSessionUpdate"]>[0] | undefined;
                 const say = (text: string) =>
                   deliver!({
@@ -2004,6 +2178,7 @@ describe.skipIf(windowsHost)("HermesAdapterV2 across a Hermes gateway restart", 
                     Effect.sync(() => {
                       deliver = handler;
                     }).pipe(Effect.andThen(runtime.handleSessionUpdate(handler))),
+                  handleExtNotification: recordExtNotifications(runtime, extensions),
                   prompt: (payload) =>
                     Effect.gen(function* () {
                       sessionId ??= (yield* runtime.start()).sessionId;
@@ -2011,6 +2186,13 @@ describe.skipIf(windowsHost)("HermesAdapterV2 across a Hermes gateway restart", 
                       prompts.push(text);
                       // The first process was attached when the gateway restarted mid-turn.
                       if (processIndex === 0) {
+                        yield* extensions.get("_hermes/process")!({
+                          sessionId,
+                          toolCallId: "tc-dev",
+                          processId: DEV_PROC,
+                          command: "pnpm dev",
+                          status: "running",
+                        });
                         return yield* hermesPromptError(GATEWAY_DISCONNECTED);
                       }
                       if (text === "/discard lost-1") {
@@ -2061,8 +2243,12 @@ describe.skipIf(windowsHost)("HermesAdapterV2 across a Hermes gateway restart", 
             );
           });
 
-        const lost = (yield* runTurn(1)).at(-1);
+        const lostTurn = yield* runTurn(1);
+        const lost = lostTurn.at(-1);
         assert.equal(lost?.type === "turn.terminal" && lost.status, "failed");
+        assert.deepEqual(providerThreadRosters(lostTurn).at(-1), [
+          { taskId: DEV_PROC, kind: "command", description: "pnpm dev" },
+        ]);
         assert.include(
           lost?.type === "turn.terminal" ? (lost.failure?.message ?? "") : "",
           "Hermes gateway restarted",
@@ -2073,6 +2259,8 @@ describe.skipIf(windowsHost)("HermesAdapterV2 across a Hermes gateway restart", 
         assert.equal(terminal?.type === "turn.terminal" && terminal.status, "completed");
         // A fresh process reads the lost turn on load, so nothing is queued behind it unseen.
         assert.equal(spawned.length, 2);
+        // It never reports the exit of a process the first one reported running.
+        assert.deepEqual(providerThreadRosters(next)[0], []);
         assert.deepEqual(
           spawned[1]!.map((text) => (text.includes("test prompt") ? "test prompt" : text)),
           ["test prompt", "/discard lost-1", "test prompt"],

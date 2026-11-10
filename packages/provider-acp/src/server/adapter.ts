@@ -203,6 +203,12 @@ export interface AcpAdapterV2UserInputRequest {
   readonly questions: ReadonlyArray<OrchestrationV2UserInputQuestion>;
 }
 
+export interface AcpAwaitableBackgroundTask {
+  readonly taskId: string;
+  readonly status: "running" | "ended";
+  readonly description?: string;
+}
+
 export interface AcpAdapterV2ExtensionContext {
   readonly runtime: AcpSessionRuntime.AcpSessionRuntime["Service"];
   readonly reportProviderRetry: (input: {
@@ -222,6 +228,15 @@ export interface AcpAdapterV2ExtensionContext {
     readonly output?: string;
     readonly report?: BackgroundWork;
   }) => Effect.Effect<void>;
+  /**
+   * Root background work the agent reports starting and ending, for flavors with
+   * `extractAwaitableBackgroundTasks`. It stays listed until its own end, whatever wakes the agent.
+   */
+  readonly reportBackgroundTask: (
+    report: AcpAwaitableBackgroundTask & {
+      readonly sessionId: string;
+    },
+  ) => Effect.Effect<void>;
   readonly requestUserInput: (
     input: AcpAdapterV2UserInputRequest,
     requestContext: EffectAcpProtocol.AcpRequestContext,
@@ -569,16 +584,21 @@ export interface AcpAdapterV2Flavor {
   /**
    * Opts into `t3_background_wait` for agents that show work starting but not reliably ending.
    * Reads a tool call before `normalizeToolCall`: `running` will wake the agent when it ends,
-   * `ended` it saw end. Wake turns release every mark, so a missed end only releases early.
+   * `ended` it saw end. A wake turn releases every task whose end the agent does not report
+   * (`reportBackgroundTask`), so a missed end only releases early.
    */
   readonly extractAwaitableBackgroundTasks?: (
     toolCall: AcpToolCallState,
     runningTaskIds: ReadonlySet<string>,
-  ) => ReadonlyArray<{
-    readonly taskId: string;
-    readonly status: "running" | "ended";
-    readonly description?: string;
-  }>;
+  ) => ReadonlyArray<AcpAwaitableBackgroundTask>;
+  /**
+   * Asks the agent to stop the background work it reported running (`reportBackgroundTask`).
+   * Stop sends it first and waits for each to be reported ended, so they are not left running.
+   */
+  readonly stopReportedBackgroundTasks?: (
+    runtime: AcpSessionRuntime.AcpSessionRuntime["Service"],
+    sessionId: string,
+  ) => Effect.Effect<void, EffectAcpErrors.AcpError>;
   readonly isProviderWakeNotification?: (
     notification: EffectAcpSchema.SessionNotification,
   ) => boolean;
@@ -2514,9 +2534,13 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
         const emitProviderEvent = (event: ProviderAdapter.ProviderAdapterV2Event) =>
           Queue.offer(events, event).pipe(Effect.asVoid);
 
-        // `extractAwaitableBackgroundTasks` state: running work that will wake the agent, with its
-        // description, published as the root roster; the ids the agent marked hold its thread.
-        const awaitableBackgroundTasks = new Map<string, string | undefined>();
+        // `extractAwaitableBackgroundTasks` state: running root work, published as the roster.
+        // `wakes`: the agent wakes when it ends, so its thread can hold on it. `reported`: the
+        // agent reports its end, so no wake releases it. The ids the agent marked hold its thread.
+        const awaitableBackgroundTasks = new Map<
+          string,
+          { readonly description?: string; readonly wakes: boolean; readonly reported: boolean }
+        >();
         const awaitedBackgroundTaskIds = new Set<string>();
         // Every root-thread emit carries the roster, so none clobbers it with a stale copy.
         const withAwaitedBackgroundRoster = (
@@ -2528,7 +2552,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                 ...providerThread,
                 pendingBackgroundTasks: Array.from(
                   awaitableBackgroundTasks,
-                  ([taskId, description]) => ({
+                  ([taskId, { description }]) => ({
                     taskId,
                     kind: "command" as const,
                     ...(awaitedBackgroundTaskIds.has(taskId) ? { awaited: true as const } : {}),
@@ -2558,33 +2582,85 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           );
           yield* emitProviderEvent({ type: "provider_thread.updated", driver, providerThread });
         });
-        // A wake or Stop may follow the end of any of them, and nothing names which.
         const releaseAwaitableBackgroundTasks = () => {
           awaitableBackgroundTasks.clear();
           awaitedBackgroundTaskIds.clear();
         };
-        const trackAwaitableBackgroundTasks =
+        // A replaced agent process reports the end of nothing its predecessor reported running.
+        const dropReportedBackgroundTasks = Effect.fnUntraced(function* () {
+          let rosterChanged = false;
+          for (const [taskId, task] of awaitableBackgroundTasks) {
+            if (!task.reported) continue;
+            awaitableBackgroundTasks.delete(taskId);
+            awaitedBackgroundTaskIds.delete(taskId);
+            rosterChanged = true;
+          }
+          if (rosterChanged) yield* emitAwaitedBackgroundRoster();
+        });
+        // A Stop in progress, waiting for the agent to report the end of what it was asked to stop.
+        let reportedBackgroundTasksEnded: Deferred.Deferred<void> | null = null;
+        const hasReportedBackgroundTasks = () =>
+          [...awaitableBackgroundTasks.values()].some((task) => task.reported);
+        // A tool result shows work that wakes the agent; a report (`reportBackgroundTask`) shows
+        // work whose end the agent reports. One task can be both.
+        const applyAwaitableBackgroundTasks =
           /* Provider events include streaming deltas; avoid a span for each update. */
-          Effect.fnUntraced(function* (toolCall: AcpToolCallState) {
-            if (flavor.extractAwaitableBackgroundTasks === undefined) return;
-            const tasks = flavor.extractAwaitableBackgroundTasks(
-              toolCall,
-              new Set(awaitableBackgroundTasks.keys()),
-            );
+          Effect.fnUntraced(function* (
+            tasks: ReadonlyArray<AcpAwaitableBackgroundTask>,
+            source: "toolResult" | "report",
+          ) {
             let rosterChanged = false;
             for (const task of tasks) {
+              const known = awaitableBackgroundTasks.get(task.taskId);
               if (task.status === "running") {
-                rosterChanged ||=
-                  !awaitableBackgroundTasks.has(task.taskId) ||
-                  awaitableBackgroundTasks.get(task.taskId) !== task.description;
-                awaitableBackgroundTasks.set(task.taskId, task.description);
+                const description = task.description ?? known?.description;
+                rosterChanged ||= known === undefined || known.description !== description;
+                awaitableBackgroundTasks.set(task.taskId, {
+                  ...(description === undefined ? {} : { description }),
+                  wakes: source === "toolResult" || known?.wakes === true,
+                  reported: source === "report" || known?.reported === true,
+                });
               } else {
                 rosterChanged = awaitableBackgroundTasks.delete(task.taskId) || rosterChanged;
                 awaitedBackgroundTaskIds.delete(task.taskId);
               }
             }
             if (rosterChanged) yield* emitAwaitedBackgroundRoster();
+            if (reportedBackgroundTasksEnded !== null && !hasReportedBackgroundTasks()) {
+              yield* Deferred.succeed(reportedBackgroundTasksEnded, undefined);
+            }
           });
+        /** False when the agent did not report them all ended in time. */
+        const stopReportedBackgroundTasks = Effect.fnUntraced(function* () {
+          const sessionId = yield* Ref.get(activeSessionId);
+          if (
+            flavor.stopReportedBackgroundTasks === undefined ||
+            sessionId === null ||
+            !hasReportedBackgroundTasks()
+          ) {
+            return true;
+          }
+          const ended = yield* Deferred.make<void>();
+          reportedBackgroundTasksEnded = ended;
+          return yield* flavor
+            .stopReportedBackgroundTasks(runtime, sessionId)
+            .pipe(
+              Effect.andThen(Deferred.await(ended)),
+              Effect.timeoutOption(ACP_STOP_CONFIRM_TIMEOUT_MS),
+              Effect.map(Option.isSome),
+              Effect.ensuring(Effect.sync(() => (reportedBackgroundTasksEnded = null))),
+            );
+        });
+        const trackAwaitableBackgroundTasks = (toolCall: AcpToolCallState) =>
+          flavor.extractAwaitableBackgroundTasks === undefined
+            ? Effect.void
+            : applyAwaitableBackgroundTasks(
+                flavor.extractAwaitableBackgroundTasks(
+                  toolCall,
+                  new Set(awaitableBackgroundTasks.keys()),
+                ),
+                "toolResult",
+              );
 
         let scheduleDeferredFinalize: (context: ActiveAcpTurn) => Effect.Effect<void> = () =>
           Effect.void;
@@ -5222,21 +5298,28 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                 [...pendingWake.reports].some(
                   ([key, report]) => report.kind === "subagent" && !pendingWake.offered.has(key),
                 );
-              const woken = subagentWake ? [] : [...awaitableBackgroundTasks];
-              if (woken.length > 0) releaseAwaitableBackgroundTasks();
+              const woken = subagentWake
+                ? []
+                : [...awaitableBackgroundTasks].filter(([, task]) => task.wakes);
+              // A reported task stays until its own end is reported.
+              const released = woken.filter(([, task]) => !task.reported);
+              for (const [taskId] of released) {
+                awaitableBackgroundTasks.delete(taskId);
+                awaitedBackgroundTaskIds.delete(taskId);
+              }
               const reports = yield* Ref.modify(wakeReports, ({ reports: recorded, owed }) => {
                 const [only] = woken;
                 const reports =
                   woken.length === 1 && only !== undefined
                     ? new Map(recorded).set(only[0], {
                         kind: "command",
-                        label: only[1],
+                        label: only[1].description,
                         outcome: "unknown",
                       })
                     : recorded;
                 return [reports, { reports, offered: new Set(reports.keys()), owed }];
               });
-              return Option.some({ route, generation, reports, released: woken.length > 0 });
+              return Option.some({ route, generation, reports, released: released.length > 0 });
             }),
           );
           if (Option.isNone(pending)) return false;
@@ -7619,6 +7702,15 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                     yield* finishSubagentFromNotice(notice);
                   }),
                 ).pipe(Effect.asVoid),
+              reportBackgroundTask: ({ sessionId, ...task }) =>
+                runRuntimeCallbackAtGeneration(
+                  handlerGeneration,
+                  Effect.gen(function* () {
+                    if (yield* Ref.get(stoppedRunQuarantine)) return;
+                    if ((yield* Ref.get(activeSessionId)) !== sessionId) return;
+                    yield* applyAwaitableBackgroundTasks([task], "report");
+                  }),
+                ).pipe(Effect.asVoid),
               applyBackgroundTaskMutation: (incoming) =>
                 runRuntimeCallbackAtGeneration(
                   handlerGeneration,
@@ -7696,6 +7788,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
         ) {
           if (runtimeScope !== undefined) {
             yield* Scope.close(runtimeScope, Exit.void);
+            yield* dropReportedBackgroundTasks();
           }
           runtimeScope = yield* Scope.make();
           const mcpContext = yield* readMcpContext(threadId);
@@ -9729,8 +9822,8 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                     if (providerThread.nativeThreadRef?.nativeId !== sessionId) {
                       return { matched: [] };
                     }
-                    const matched = [...new Set(taskIds)].filter((taskId) =>
-                      awaitableBackgroundTasks.has(taskId),
+                    const matched = [...new Set(taskIds)].filter(
+                      (taskId) => awaitableBackgroundTasks.get(taskId)?.wakes === true,
                     );
                     if (matched.length === 0) return { matched };
                     for (const taskId of matched) {
@@ -9824,6 +9917,26 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                   // a stalled hard teardown keeps its state and permit without holding the caller.
                   const transitionFiber = yield* Effect.gen(function* () {
                     const transition = yield* Effect.gen(function* () {
+                      if (turnInput.requestRuntimeRestart === true) {
+                        const stopped = yield* restore(stopReportedBackgroundTasks()).pipe(
+                          Effect.mapError(
+                            (cause) =>
+                              new ProviderAdapter.ProviderAdapterProtocolError({
+                                driver,
+                                detail: "The agent refused to stop its background work",
+                                cause,
+                              }),
+                          ),
+                        );
+                        if (!stopped) {
+                          return yield* new ProviderAdapter.ProviderAdapterInterruptTimeoutError({
+                            driver,
+                            providerThreadId: turnInput.providerThread.id,
+                            providerTurnId: turnInput.providerTurnId,
+                            timeoutMs: ACP_STOP_CONFIRM_TIMEOUT_MS,
+                          });
+                        }
+                      }
                       const interruptContext = yield* Ref.get(activeTurn);
                       if (
                         followsAgentWorkState &&

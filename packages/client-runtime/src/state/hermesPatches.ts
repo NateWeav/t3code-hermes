@@ -3,13 +3,14 @@
  *
  * @module state/hermesPatches
  */
-import type {
-  HermesGatewayStatus,
-  HermesPatch,
-  HermesPatchMisfitReason,
-  HermesPatchState,
-  HermesPatchesSnapshot,
-  HermesPatchUpdateHermesResult,
+import {
+  describeParkedHermesEdits,
+  type HermesGatewayStatus,
+  type HermesPatch,
+  type HermesPatchMisfitReason,
+  type HermesPatchState,
+  type HermesPatchesSnapshot,
+  type HermesPatchUpdateHermesResult,
 } from "@t3tools/contracts";
 
 export const HERMES_PATCH_STATE_LABELS: Record<HermesPatchState, string> = {
@@ -87,7 +88,7 @@ export function shouldOfferHermesUpdate(snapshot: HermesPatchesSnapshot): boolea
 export const HERMES_UPDATE_LABEL = "Update Hermes";
 export const HERMES_UPDATE_PENDING_LABEL = "Updating Hermes…";
 export const HERMES_UPDATE_DESCRIPTION =
-  "Removes T3 Code's patches, updates Hermes, then puts back each one that fits. It won't run while the checkout has uncommitted edits of your own.";
+  "Removes T3 Code's patches, updates Hermes, then puts back each one that fits. Your own edits to the checkout are carried over.";
 
 /** One line saying what Update Hermes did, built from the server's summary. */
 export function describeHermesUpdateResult(result: HermesPatchUpdateHermesResult): string {
@@ -122,6 +123,9 @@ export function describeHermesUpdateResult(result: HermesPatchUpdateHermesResult
     parts.push(`Waiting for a T3 Code update: ${list(result.awaitingPatchUpdate)}.`);
   }
   if (result.notReapplied.length > 0) parts.push(`Not reapplied: ${list(result.notReapplied)}.`);
+  if (result.parkedLocalChanges !== undefined) {
+    parts.push(describeParkedHermesEdits(result.parkedLocalChanges));
+  }
   return parts.join(" ");
 }
 

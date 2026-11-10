@@ -143,8 +143,15 @@ export const HermesPatchUpdateHermesResult = Schema.Struct({
   awaitingPatchUpdate: ForwardCompatibleArray(HermesPatchId),
   /** Previously applied patches that could not be reapplied for any other reason. */
   notReapplied: ForwardCompatibleArray(HermesPatchId),
+  /** The git stash holding the user's own edits when Hermes could not put them back. */
+  parkedLocalChanges: Schema.optional(TrimmedNonEmptyString),
 });
 export type HermesPatchUpdateHermesResult = typeof HermesPatchUpdateHermesResult.Type;
+
+/** Where the user's own Hermes edits went when the update could not put them back. */
+export const describeParkedHermesEdits = (stash: string) =>
+  `Your own edits did not fit the new Hermes and are saved in git stash ${stash}; restore them with \`git stash apply ${stash}\` in the Hermes checkout.`;
+
 export const HermesGatewayRestartInput = Schema.Struct({});
 export type HermesGatewayRestartInput = typeof HermesGatewayRestartInput.Type;
 

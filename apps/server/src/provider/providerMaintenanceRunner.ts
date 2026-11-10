@@ -1,5 +1,6 @@
 import {
   defaultInstanceIdForDriver,
+  describeParkedHermesEdits,
   ProviderDriverKind,
   ServerProviderUpdateError,
   type ProviderInstanceId,
@@ -348,6 +349,9 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
             ...listed("Patches reapplied", result.reapplied),
             ...listed("Patches awaiting a T3 Code update", result.awaitingPatchUpdate),
             ...listed("Patches not reapplied", result.notReapplied),
+            ...(result.parkedLocalChanges === undefined
+              ? []
+              : [describeParkedHermesEdits(result.parkedLocalChanges)]),
           ].join("\n");
           return {
             stdout: patches,

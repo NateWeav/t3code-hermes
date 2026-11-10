@@ -270,14 +270,18 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    name: Test
+    name: Test ${{ matrix.shard }}
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.test != 'false' }}
     runs-on: ubuntu-24.04
     # The 4-vCPU GitHub-hosted runner is about half the width of the Blacksmith
-    # box this budget was written for; the suite overran 10 minutes with every
-    # test still green.
+    # box this budget was written for, and apps/mobile alone ran ~8 minutes, so
+    # every package's files are split across runners.
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -318,9 +322,11 @@ jobs:
         run: vp run --filter @t3tools/desktop ensure:electron
 
       - name: Test preview artifact validation
+        if: matrix.shard == 1
         run: python3 -B .github/scripts/stage-preview-bundle.test.py
 
       - name: Test release and Hermes patch checks
+        if: matrix.shard == 1
         run: node --test .github/scripts/check-nightly-release.test.cjs .github/scripts/vercel-deployment-output.test.cjs .github/scripts/verify-npm-release.test.cjs .github/scripts/hermes-patch-drift.test.cjs .github/scripts/release-runners.test.cjs .github/scripts/fork-home-env.test.cjs .github/scripts/sparse-checkout-paths.test.cjs .github/scripts/mobile-preview-comment.test.cjs
 
       - name: Finish installing browser secret helper build libraries
@@ -342,7 +348,9 @@ jobs:
             for package in $TEST_PACKAGES; do filters+=(--filter "$package"); done
           fi
           # The runner's trace writer can crash on surrogate pairs in test output.
-          vp run --parallel --concurrency-limit 4 "${filters[@]}" test 2>&1 | python3 -u -c '
+          # --passWithNoTests lets packages with fewer files than shards pass empty.
+          vp run --parallel --concurrency-limit 4 "${filters[@]}" test \
+            --shard=${{ matrix.shard }}/${{ strategy.job-total }} --passWithNoTests 2>&1 | python3 -u -c '
           import sys
           for line in sys.stdin:
               sys.stdout.write(line.encode("ascii", "backslashreplace").decode("ascii"))
@@ -355,12 +363,17 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    name: Test Web
+    name: Test Web ${{ matrix.shard }}
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.test_web != 'false' }}
-    # GitHub-hosted runners are about half as wide as upstream's Blacksmith box.
+    # GitHub-hosted runners are about half as wide as upstream's Blacksmith box,
+    # so the suite is split across runners to keep it off the critical path.
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -402,7 +415,7 @@ jobs:
           fi
 
       - name: Test
-        run: vp run --filter @t3tools/web test
+        run: vp run --filter @t3tools/web test --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
   # apps/server sets `fileParallelism: false`, so its test files run strictly
   # one at a time. Sharding spreads them over separate runners instead of

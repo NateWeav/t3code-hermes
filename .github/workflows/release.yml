@@ -290,14 +290,18 @@ jobs:
       - name: Typecheck
         run: vp run typecheck
 
-  # Keep tests on their own runners, using the same package split and server
+  # Keep tests on their own runners, using the same package split and
   # shards as CI (test, test_web, test_server in ci.yml). Keep the two in sync.
   test:
-    name: Release tests
+    name: Release tests ${{ matrix.shard }}
     needs: [preflight]
     if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -324,17 +328,22 @@ jobs:
           sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config build-essential
 
       - name: Test
-        run: vp run --parallel --concurrency-limit 4 --filter '!t3-hermes' --filter '!@t3tools/monorepo' --filter '!@t3tools/web' test
+        run: >-
+          vp run --parallel --concurrency-limit 4 --filter '!t3-hermes' --filter '!@t3tools/monorepo' --filter '!@t3tools/web' test
+          --shard=${{ matrix.shard }}/${{ strategy.job-total }} --passWithNoTests
 
   # Web browser tests time out when they share a runner with the other package
   # suites: Chromium gets too little CPU and diff workers miss their 10s start budget.
   test_web:
-    name: Release web tests
+    name: Release web tests ${{ matrix.shard }}
     needs: [preflight]
     if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' }}
-    # The suite alone takes about 9 minutes on a hosted runner; upstream's 10 assume Blacksmith.
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -374,10 +383,11 @@ jobs:
           fi
 
       - name: Test
-        run: vp run --filter @t3tools/web test
+        run: vp run --filter @t3tools/web test --shard=${{ matrix.shard }}/${{ strategy.job-total }}
 
       # Browser tests run source modules; this boots the production chunk graph.
       - name: Boot the built web client
+        if: matrix.shard == 1
         run: |
           vp run --filter @t3tools/web build
           node apps/web/scripts/verify-built-boot.ts

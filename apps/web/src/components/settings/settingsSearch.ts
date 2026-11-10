@@ -67,10 +67,12 @@ export interface SettingsSearchItem {
   readonly providerSettingsOnly?: boolean;
   readonly localBackendManagementOnly?: boolean;
   readonly localEnvironmentOnly?: boolean;
+  readonly primaryEnvironmentOnly?: boolean;
   readonly wslAvailableOnly?: boolean;
   readonly managedTunnelOnly?: boolean;
   readonly peerLinksOnly?: boolean;
   readonly fastWorktreeCheckoutOnly?: boolean;
+  readonly textGeneratorsOnly?: boolean;
   readonly secondary?: boolean;
   readonly requiresThreadAutoSettlement?: boolean;
 }
@@ -86,6 +88,9 @@ export interface SettingsSearchAvailability {
   readonly managedTunnelActive?: boolean;
   readonly hasPeerLinkHost?: boolean;
   readonly hasFastWorktreeCheckoutEnvironment?: boolean;
+  /** An environment without a provider allow-list, which hides text generators. */
+  readonly hasTextGeneratorsEnvironment?: boolean;
+  readonly hasPrimaryEnvironment?: boolean;
 }
 
 export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
@@ -610,7 +615,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "speech-post-processing",
-    title: "Clean up transcripts with a provider",
+    title: "Clean up transcripts",
     to: "/settings/voice",
     searchTerms: ["speech transcription polish clean provider prompt post-processing"],
   },
@@ -906,6 +911,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["phone tablet iPhone iPad iOS Android App Store Google Play QR"],
   },
   {
+    id: "welcome-page",
+    title: "Welcome page",
+    to: "/settings/about",
+    primaryEnvironmentOnly: true,
+    searchTerms: ["onboarding setup first run getting started agents import projects"],
+  },
+  {
     id: "privacy-policy",
     title: "Privacy policy",
     to: "/settings/about",
@@ -1001,6 +1013,16 @@ export const SETTINGS_SEARCH_ITEMS = [
       "hindsight memory agents claude codex hermes install hooks recall retain remember long-term",
     ],
     providerSettingsOnly: true,
+  },
+  {
+    id: "text-generators",
+    title: "Text generators",
+    to: "/settings/providers",
+    searchTerms: [
+      "model api api key openai openrouter anthropic ollama lm studio custom endpoint base url thread titles commit messages",
+    ],
+    providerSettingsOnly: true,
+    textGeneratorsOnly: true,
   },
   {
     id: "provider-health-check-interval",
@@ -1589,11 +1611,14 @@ export function filterAvailableSettingsSearchItems(
       (!item.providerSettingsOnly || availability.hasProviderSettingsEnvironment) &&
       (!item.localBackendManagementOnly || availability.canManageLocalBackend) &&
       (!item.localEnvironmentOnly || !availability.localEnvironmentDisabled) &&
+      (!item.primaryEnvironmentOnly || availability.hasPrimaryEnvironment === true) &&
       (!item.wslAvailableOnly || availability.isWslSettingsRowVisible) &&
       (!item.requiresThreadAutoSettlement || availability.hasThreadAutoSettlement) &&
       (!item.managedTunnelOnly || availability.managedTunnelActive === true) &&
       (!item.peerLinksOnly || availability.hasPeerLinkHost === true) &&
-      (!item.fastWorktreeCheckoutOnly || availability.hasFastWorktreeCheckoutEnvironment === true),
+      (!item.fastWorktreeCheckoutOnly ||
+        availability.hasFastWorktreeCheckoutEnvironment === true) &&
+      (!item.textGeneratorsOnly || availability.hasTextGeneratorsEnvironment === true),
   );
 }
 

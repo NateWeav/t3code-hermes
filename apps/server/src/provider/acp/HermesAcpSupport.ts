@@ -31,6 +31,7 @@ import {
   type AcpToolCallState,
 } from "@t3tools/provider-acp/server/runtimeModel";
 import type { ProviderAdapterV2RuntimePolicy } from "@t3tools/provider-core/server/ProviderAdapter";
+import type { AcpAdapterV2ExtensionContext } from "@t3tools/provider-acp/server/adapter";
 import * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 import { unknownRecord } from "@t3tools/provider-acp/server/clientPolicy";
 
@@ -443,10 +444,10 @@ function resolveHermesProcessId(
 }
 
 /**
- * Background processes `t3_background_wait` can hold a Hermes thread on. The gateway reports no
- * process lifecycle to ACP viewers, so they are read from the agent's own results: a background
- * `terminal` start Hermes armed a completion wake for, keyed by the `proc_…` id its result gives
- * the agent, and a `process_manage` result that saw one end.
+ * Background processes `t3_background_wait` can hold a Hermes thread on, read from the agent's own
+ * results: a background `terminal` start Hermes armed a completion wake for, keyed by the `proc_…`
+ * id its result gives the agent, and a `process_manage` result that saw one end. Stock Hermes
+ * reports no process lifecycle to ACP viewers; see `registerHermesProcessReports`.
  */
 export function extractHermesAwaitableBackgroundTasks(
   toolCall: AcpToolCallState,
@@ -484,6 +485,37 @@ export function extractHermesAwaitableBackgroundTasks(
     reference === undefined ? undefined : resolveHermesProcessId(reference, runningTaskIds);
   return taskId === undefined ? [] : [{ taskId, status: "ended" }];
 }
+
+/** A background process a `terminal` call started, then its exit, keyed by the same `proc_…` id. */
+const HermesProcessReport = Schema.Struct({
+  sessionId: Schema.String,
+  processId: Schema.String,
+  command: Schema.String,
+  status: Schema.Literals(["running", "exited"]),
+});
+
+/**
+ * With the `acp-background-processes` patch, Hermes reports every background process the gateway
+ * lists for the session, so each stays listed until it ends, with or without a completion wake.
+ */
+export const registerHermesProcessReports = ({
+  runtime,
+  reportBackgroundTask,
+}: Pick<AcpAdapterV2ExtensionContext, "runtime" | "reportBackgroundTask">) =>
+  runtime.handleExtNotification("_hermes/process", HermesProcessReport, (report) =>
+    reportBackgroundTask({
+      sessionId: report.sessionId,
+      taskId: report.processId,
+      status: report.status === "running" ? "running" : "ended",
+      ...(report.command.trim() === "" ? {} : { description: report.command }),
+    }),
+  );
+
+/** Hermes kills the processes it reported running for the session; each then reports its exit. */
+export const stopHermesReportedProcesses = (
+  runtime: AcpSessionRuntime.AcpSessionRuntime["Service"],
+  sessionId: string,
+) => runtime.notify("_hermes/process_stop", { sessionId });
 
 type HermesAcpRuntimeHermesSettings = Pick<HermesSettings, "binaryPath">;
 

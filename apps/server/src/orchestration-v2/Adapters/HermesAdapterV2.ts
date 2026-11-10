@@ -1,7 +1,7 @@
 /**
  * Hermes Agent over ACP stdio (`hermes acp`) as a flavor of the shared ACP adapter. Differs by:
  * reasoning effort in `config.yaml`, delegations as one `delegate_task` call, and background
- * processes read from the agent's own tool results for `t3_background_wait`.
+ * processes read from the agent's own tool results and, when patched, its process reports.
  */
 import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
@@ -57,9 +57,11 @@ import {
   normalizeHermesWebSearchQuery,
   preserveHermesAgentActivityTitle,
   readHermesCompressReply,
+  registerHermesProcessReports,
   resendHermesPromptsRefusedBusy,
   resolveHermesAcpBaseModelId,
   resolveHermesSessionModeId,
+  stopHermesReportedProcesses,
 } from "../../provider/acp/HermesAcpSupport.ts";
 import { ACP_MCP_CALL_LIMIT_MS, MCP_CALL_LIMIT_HEADER } from "../../mcp/AcpMcpStdioBridge.ts";
 import { makeHermesDelegation } from "../../provider/acp/HermesDelegation.ts";
@@ -375,6 +377,8 @@ export function makeHermesAcpAdapterFlavor(
       ),
     ...makeHermesDelegation(),
     extractAwaitableBackgroundTasks: extractHermesAwaitableBackgroundTasks,
+    registerExtensions: registerHermesProcessReports,
+    stopReportedBackgroundTasks: stopHermesReportedProcesses,
     extractElicitationForm: extractHermesClarifyForm,
     // Patched Hermes steers the running turn; stock Hermes steers by restarting it.
     steering: hermesSteering,

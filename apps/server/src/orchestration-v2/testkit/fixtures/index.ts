@@ -113,6 +113,8 @@ import { assertHermesNestedSubagentModelDetails } from "./hermes_nested_subagent
 import { hermesNestedBackgroundSubagentWakeInput } from "./hermes_nested_background_subagent_wake/input.ts";
 import { hermesBackgroundTaskAfterRootInput } from "./hermes_background_task_after_root/input.ts";
 import { hermesBackgroundTaskInterruptInput } from "./hermes_background_task_interrupt/input.ts";
+import { hermesBackgroundProcessStopInput } from "./hermes_background_process_stop/input.ts";
+import { assertHermesBackgroundProcessStopOutput } from "./hermes_background_process_stop/output.ts";
 import { hermesBackgroundTaskWakeInput } from "./hermes_background_task_wake/input.ts";
 import { hermesBackgroundWakeBeforeQueuedPromptInput } from "./hermes_background_wake_before_queued_prompt/input.ts";
 import { assertHermesBackgroundWakeBeforeQueuedPromptDetails } from "./hermes_background_wake_before_queued_prompt/output.ts";
@@ -943,6 +945,21 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         runContinuationWorker: true,
         assertOutput: assertBackgroundTaskInterruptOutput,
         assertProviderDetails: assertHermesRosterListsBackgroundProcess,
+      },
+    ],
+  },
+  {
+    name: "hermes_background_process_stop",
+    buildInput: hermesBackgroundProcessStopInput,
+    providers: [
+      {
+        driver: ProviderDriverKind.make("hermes"),
+        transcriptFile: new URL(
+          "./hermes_background_process_stop/hermes_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: HERMES_MODEL_SELECTION,
+        assertOutput: assertHermesBackgroundProcessStopOutput,
       },
     ],
   },

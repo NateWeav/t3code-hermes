@@ -1,0 +1,568 @@
+diff --git a/acp_adapter/gateway_background.py b/acp_adapter/gateway_background.py
+new file mode 100644
+index 0000000000..d08b1109f6
+--- /dev/null
++++ b/acp_adapter/gateway_background.py
+@@ -0,0 +1,171 @@
++"""Background processes of a gateway session, reported to ACP editors as ``_hermes/process``.
++
++``hermes acp`` views the gateway, whose daemon owns the process registry. An editor therefore sees a
++background ``terminal`` call complete the moment its process starts and hears nothing when the process
++ends, so it shows the work as done while it still runs. This reads the session's ``process.list`` (what
++Desktop's status stack polls) for each process a ``terminal`` call started and reports it, keyed by the
++launching ``toolCallId``: ``running`` once the gateway lists it, then ``exited`` with ``exitCode`` and
++``reason``. ``reason`` is ``lost`` when the gateway can no longer say.
++
++The gateway still wakes the session itself when a ``notify_on_complete`` process ends, so this adds
++liveness, not delivery. Editors that do not know the method ignore it, as ACP requires.
++
++An editor's Stop is the ``_hermes/process_stop`` notification: it kills the processes reported for
++that session (``process.kill``, Desktop's per-process Stop), and each exit is then reported as any
++other, which is the editor's confirmation.
++"""
++from __future__ import annotations
++
++import asyncio
++import logging
++
++from hermes_cli.gateway_client import GatewayClientError, GatewayRPCError
++
++logger = logging.getLogger(__name__)
++
++# The SDK sends an extension method with a leading underscore: ``_hermes/process``.
++PROCESS_METHOD = "hermes/process"
++STOP_METHOD = "hermes/process_stop"
++POLL_SECONDS = 5.0
++# Reads in a row the transport may lose before the session's processes count as lost.
++MAX_MISSED_READS = 3
++
++
++def started_process_id(tool_name, result):
++    """The process id a successful background ``terminal`` result carries, else None."""
++    if tool_name != "terminal" or not isinstance(result, str):
++        return None
++    from acp_adapter.tools import _json_loads_maybe
++    data = _json_loads_maybe(result)
++    if not isinstance(data, dict) or data.get("error") or data.get("output") != "Background process started":
++        return None
++    proc_id = data.get("session_id")
++    return proc_id if isinstance(proc_id, str) and proc_id else None
++
++
++class _Watch:
++    """One session's tracked processes: ``{process id: report}``, plus the task that reads them."""
++
++    def __init__(self):
++        self.tracked, self.announced = {}, set()
++        self.wake = asyncio.Event()
++
++
++def _watches(agent):
++    # Kept off ``GatewayACPAgent.__init__``, so this module is the whole feature.
++    return agent.__dict__.setdefault("_process_watches", {})
++
++
++def observe_process_frame(agent, kind, sid, payload):
++    """Every projected frame passes here. A ``tool.complete`` that started a background process begins
++    tracking it; a turn starting re-reads at once, since the gateway starts one when a process it was
++    asked to notify about ends."""
++    watches = _watches(agent)
++    if kind == "message.start":
++        if sid in watches:
++            watches[sid].wake.set()
++        return
++    if kind != "tool.complete" or payload.get("is_error") is True:
++        return
++    call_id = payload.get("tool_call_id")
++    # In-process turns publish ``tool_name``; managed workers publish ``name``.
++    published = payload.get("tool_name") or payload.get("name")
++    tool_name, args, _ = agent._tool_args.get((sid, call_id), (published, {}, None))
++    proc_id = started_process_id(tool_name, payload.get("result"))
++    if proc_id is None:
++        return
++    command = args.get("command") if isinstance(args, dict) else None
++    watch = watches.get(sid)
++    if watch is None:
++        watch = watches[sid] = _Watch()
++        task = asyncio.get_running_loop().create_task(_watch(agent, sid, watch))
++        # Shutdown cancels and awaits ``_background`` (``GatewayACPAgent.aclose``).
++        agent._background.add(task)
++        task.add_done_callback(agent._background.discard)
++    watch.tracked[proc_id] = {"toolCallId": call_id, "processId": proc_id,
++                              "command": command if isinstance(command, str) else ""}
++    watch.wake.set()
++
++
++async def _watch(agent, sid, watch):
++    missed = 0
++    try:
++        while watch.tracked:
++            watch.wake.clear()
++            # A process tracked while the read is in flight may not be in its reply: next read.
++            asked = list(watch.tracked)
++            try:
++                gateway = agent._gateway
++                if gateway is None:
++                    # Never reconnect from here: that can start a gateway daemon for a status read.
++                    raise ConnectionError("gateway not connected")
++                listed = await gateway.rpc("process.list", session_id=sid)
++                rows = {row.get("session_id"): row for row in (listed or {}).get("processes", [])}
++                missed = 0
++            except GatewayRPCError:
++                # The owner refused: the session is gone, or its turns run in a managed worker whose
++                # registry the daemon cannot read. Nothing here can learn how these processes end.
++                rows = {}
++            except Exception:  # health: allow BLE001 -- a status read must never fail the viewer
++                missed += 1
++                rows = {} if missed >= MAX_MISSED_READS else None
++            if rows is not None:
++                await _report(agent, sid, watch, rows, asked)
++            if watch.tracked:
++                try:
++                    await asyncio.wait_for(watch.wake.wait(), POLL_SECONDS)
++                except asyncio.TimeoutError:
++                    pass
++    finally:
++        _watches(agent).pop(sid, None)
++
++
++async def _report(agent, sid, watch, rows, asked):
++    for proc_id in asked:
++        report = watch.tracked.get(proc_id)
++        if report is None:
++            continue
++        row = rows.get(proc_id)
++        running = row is not None and row.get("status") == "running"
++        if running and proc_id in watch.announced:
++            continue
++        params = {"sessionId": agent._editor_id(sid), **report}
++        if proc_id not in watch.announced:
++            if row is None:
++                # Never listed, so never reported: there is nothing for the editor to end.
++                del watch.tracked[proc_id]
++                continue
++            watch.announced.add(proc_id)
++            await _notify(agent, {**params, "status": "running"})
++            if running:
++                continue
++        del watch.tracked[proc_id]
++        watch.announced.discard(proc_id)
++        if row is None:
++            await _notify(agent, {**params, "status": "exited", "reason": "lost"})
++        else:
++            await _notify(agent, {**params, "status": "exited", "exitCode": row.get("exit_code"),
++                                  "reason": row.get("completion_reason") or "exited"})
++
++
++async def _notify(agent, params):
++    if agent._conn:
++        await agent._conn.ext_notification(PROCESS_METHOD, params)
++
++
++async def stop_reported_processes(agent, method, params):
++    """``_hermes/process_stop`` for ``params["sessionId"]``: kill what that session is tracked running.
++    A kill the owner refuses is not reported here; the next read says what became of the process."""
++    if method != STOP_METHOD or not isinstance(params, dict):
++        return
++    sid = agent._aliases.get(params.get("sessionId"), params.get("sessionId"))
++    watch = _watches(agent).get(sid)
++    gateway = agent._gateway
++    if watch is None or gateway is None:
++        return
++    for proc_id in list(watch.tracked):
++        try:
++            await gateway.rpc("process.kill", session_id=sid, process_id=proc_id)
++        except GatewayClientError:
++            logger.debug("ACP process stop refused for %s", proc_id, exc_info=True)
++    watch.wake.set()
+diff --git a/acp_adapter/gateway_server.py b/acp_adapter/gateway_server.py
+index ff78c7e0f3..07cf595013 100644
+--- a/acp_adapter/gateway_server.py
++++ b/acp_adapter/gateway_server.py
+@@ -445,6 +445,10 @@ class GatewayACPAgent(GatewayReplyMixin, acp.Agent):
+                 if settled["status"] != "terminal":
+                     raise
+ 
++    async def ext_notification(self, method, params):
++        from acp_adapter.gateway_background import stop_reported_processes
++        await stop_reported_processes(self, method, params)
++
+     async def cancel(self, session_id, **kwargs):
+         session_id = self._aliases.get(session_id, session_id)
+         if session_id not in self._snapshots:
+@@ -974,6 +978,8 @@ class GatewayACPAgent(GatewayReplyMixin, acp.Agent):
+         kind, payload = event.get("type"), event.get("payload", {})
+         sid, editor_id = event["session_id"], self._editor_id(event["session_id"])
+         aid = event.get("admission_id")
++        from acp_adapter.gateway_background import observe_process_frame
++        observe_process_frame(self, kind, sid, payload)
+         if kind in {"session.info", "session.updated", "session.usage", "session.tools_changed"}:
+             await self._project_session_state(kind, sid, editor_id, payload, event)
+             return
+diff --git a/tests/acp_adapter/test_gateway_background_process.py b/tests/acp_adapter/test_gateway_background_process.py
+new file mode 100644
+index 0000000000..57f18eae45
+--- /dev/null
++++ b/tests/acp_adapter/test_gateway_background_process.py
+@@ -0,0 +1,200 @@
++"""A background process a ``terminal`` call starts reaches ACP editors as ``_hermes/process``:
++``running`` once the gateway's ``process.list`` shows it, ``exited`` once that shows it finished."""
++import asyncio
++import json
++from unittest.mock import AsyncMock
++
++import pytest
++
++from acp_adapter import gateway_background
++from acp_adapter.gateway_server import GatewayACPAgent
++from hermes_cli.gateway_client import GatewayClientError, GatewayRPCError
++from tests.waiting import async_wait_until
++
++STARTED = json.dumps({"output": "Background process started", "session_id": "proc_1", "pid": 42,
++                      "exit_code": 0, "error": None})
++RUNNING = {"session_id": "proc_1", "status": "running"}
++
++
++def viewer(read):
++    """The agent ``hermes acp`` builds, on a gateway whose ``process.list`` is ``read()``."""
++    agent = GatewayACPAgent()
++    agent._snapshots["s"] = {}
++    agent._gateway = AsyncMock()
++
++    async def rpc(method, **params):
++        assert (method, params) == ("process.list", {"session_id": "s"})
++        return {"processes": read()}
++    agent._gateway.rpc.side_effect = rpc
++    agent._conn = AsyncMock()
++    return agent
++
++
++async def project(agent, kind, payload):
++    await agent._project({"session_id": "s", "type": kind, "admission_id": "a", "payload": payload})
++
++
++async def start(agent, result=STARTED, name="terminal", is_error=False):
++    await project(agent, "tool.start", {"tool_call_id": "c1", "tool_name": name,
++                                        "args": {"command": "sleep 60", "background": True}})
++    await project(agent, "tool.complete", {"tool_call_id": "c1", "tool_name": name, "result": result,
++                                           "is_error": is_error})
++
++
++def reports(agent):
++    return [call.args for call in agent._conn.ext_notification.await_args_list]
++
++
++async def settled(agent):
++    """The session's watch read everything it tracked and ended."""
++    await async_wait_until(lambda: not agent._process_watches and not agent._background, timeout=2)
++
++
++@pytest.mark.asyncio
++async def test_a_background_terminal_reports_running_then_its_exit(monkeypatch):
++    monkeypatch.setattr(gateway_background, "POLL_SECONDS", 0.01)
++    rows = [RUNNING]
++    agent = viewer(lambda: rows)
++    await start(agent)
++    await async_wait_until(lambda: agent._gateway.rpc.await_count >= 3, timeout=2)
++    report = {"sessionId": "s", "toolCallId": "c1", "processId": "proc_1", "command": "sleep 60"}
++    assert reports(agent) == [("hermes/process", {**report, "status": "running"})], "one report while it runs"
++    rows[0] = {"session_id": "proc_1", "status": "exited", "exit_code": 3, "completion_reason": "exited"}
++    await settled(agent)
++    assert reports(agent)[1:] == [
++        ("hermes/process", {**report, "status": "exited", "exitCode": 3, "reason": "exited"})]
++
++
++@pytest.mark.asyncio
++async def test_a_process_started_while_a_read_is_in_flight_waits_for_the_next_read(monkeypatch):
++    monkeypatch.setattr(gateway_background, "POLL_SECONDS", 0.01)
++    rows = [RUNNING]
++    agent = viewer(lambda: rows)
++    reading, answer = asyncio.Event(), asyncio.Event()
++
++    async def rpc(method, **params):
++        listed = list(rows)  # what the owner saw when it answered
++        if not reading.is_set():
++            reading.set()
++            await answer.wait()
++        return {"processes": listed}
++    agent._gateway.rpc.side_effect = rpc
++    await start(agent)
++    await reading.wait()
++    second = json.dumps({"output": "Background process started", "session_id": "proc_2"})
++    rows.append({"session_id": "proc_2", "status": "running"})
++    await project(agent, "tool.start", {"tool_call_id": "c2", "tool_name": "terminal", "args": {"command": "x"}})
++    await project(agent, "tool.complete", {"tool_call_id": "c2", "tool_name": "terminal", "result": second})
++    answer.set()
++    await async_wait_until(lambda: len(reports(agent)) == 2, timeout=2)
++    assert [(p["processId"], p["status"]) for _, p in reports(agent)] == [
++        ("proc_1", "running"), ("proc_2", "running")]
++    await agent.aclose()
++
++
++@pytest.mark.asyncio
++async def test_a_turn_starting_rereads_without_waiting_for_the_tick(monkeypatch):
++    monkeypatch.setattr(gateway_background, "POLL_SECONDS", 60)
++    rows = [RUNNING]
++    agent = viewer(lambda: rows)
++    await start(agent)
++    await async_wait_until(lambda: len(reports(agent)) == 1, timeout=2)
++    rows[0] = {"session_id": "proc_1", "status": "killed", "exit_code": -15, "completion_reason": "killed"}
++    # The gateway starts a turn of its own when a process it was asked to notify about ends.
++    await project(agent, "message.start", {})
++    await settled(agent)
++    assert reports(agent)[-1][1] | {"sessionId": "s"} == {
++        "sessionId": "s", "toolCallId": "c1", "processId": "proc_1", "command": "sleep 60",
++        "status": "exited", "exitCode": -15, "reason": "killed"}
++
++
++@pytest.mark.asyncio
++async def test_a_process_that_leaves_the_list_is_reported_lost(monkeypatch):
++    monkeypatch.setattr(gateway_background, "POLL_SECONDS", 0.01)
++    rows = [RUNNING]
++    agent = viewer(lambda: rows)
++    await start(agent)
++    await async_wait_until(lambda: len(reports(agent)) == 1, timeout=2)
++    rows.clear()
++    await settled(agent)
++    assert [(params["status"], params.get("reason")) for _, params in reports(agent)] == [
++        ("running", None), ("exited", "lost")]
++
++
++@pytest.mark.asyncio
++@pytest.mark.parametrize("failure,reads", [
++    # The owner refuses: the session is gone. Nothing later can say how the process ended.
++    (GatewayRPCError("not_found"), 2),
++    # The transport fails: the gateway may be restarting, so the read is tried again first.
++    (GatewayClientError("Gateway disconnected"), 1 + gateway_background.MAX_MISSED_READS),
++])
++async def test_a_process_the_gateway_can_no_longer_read_is_reported_lost(monkeypatch, failure, reads):
++    monkeypatch.setattr(gateway_background, "POLL_SECONDS", 0.01)
++    state = {"failure": None}
++
++    def read():
++        if state["failure"] is not None:
++            raise state["failure"]
++        return [RUNNING]
++    agent = viewer(read)
++    await start(agent)
++    await async_wait_until(lambda: len(reports(agent)) == 1, timeout=2)
++    before = agent._gateway.rpc.await_count
++    state["failure"] = failure
++    await settled(agent)
++    assert reports(agent)[-1][1]["reason"] == "lost"
++    assert agent._gateway.rpc.await_count - before in {reads - 1, reads}, "one read may already be in flight"
++
++
++@pytest.mark.asyncio
++@pytest.mark.parametrize("name,result,is_error,listed", [
++    ("terminal", json.dumps({"output": "hi", "exit_code": 0, "error": None}), False, [RUNNING]),  # foreground
++    ("read_file", STARTED, False, [RUNNING]),
++    ("terminal", STARTED, True, [RUNNING]),
++    # A managed worker's process: the daemon's registry never lists it, so nothing claims it runs.
++    ("terminal", STARTED, False, []),
++])
++async def test_only_a_background_process_the_gateway_lists_is_reported(monkeypatch, name, result, is_error,
++                                                                      listed):
++    monkeypatch.setattr(gateway_background, "POLL_SECONDS", 0.01)
++    agent = viewer(lambda: listed)
++    await start(agent, result=result, name=name, is_error=is_error)
++    await settled(agent)
++    assert reports(agent) == []
++
++
++@pytest.mark.asyncio
++async def test_the_editors_stop_kills_what_it_was_told_runs_and_reports_the_exits(monkeypatch):
++    monkeypatch.setattr(gateway_background, "POLL_SECONDS", 60)
++    rows = [RUNNING]
++    agent = viewer(lambda: rows)
++    killed = []
++
++    async def rpc(method, **params):
++        if method == "process.kill":
++            killed.append(params)
++            rows[0] = {"session_id": "proc_1", "status": "exited", "exit_code": -15,
++                       "completion_reason": "killed"}
++            return {"status": "killed"}
++        return {"processes": list(rows)}
++    agent._gateway.rpc.side_effect = rpc
++    await start(agent)
++    await async_wait_until(lambda: len(reports(agent)) == 1, timeout=2)
++    # Another session's Stop, and another extension's notification, reach nothing here.
++    await agent.ext_notification("hermes/process_stop", {"sessionId": "other"})
++    await agent.ext_notification("hermes/other", {"sessionId": "s"})
++    assert killed == []
++    await agent.ext_notification("hermes/process_stop", {"sessionId": "s"})
++    assert killed == [{"session_id": "s", "process_id": "proc_1"}]
++    await settled(agent)
++    assert (reports(agent)[-1][1]["status"], reports(agent)[-1][1]["reason"]) == ("exited", "killed")
++
++
++@pytest.mark.asyncio
++async def test_shutdown_ends_the_watch(monkeypatch):
++    monkeypatch.setattr(gateway_background, "POLL_SECONDS", 60)
++    agent = viewer(lambda: [RUNNING])
++    await start(agent)
++    await async_wait_until(lambda: len(reports(agent)) == 1, timeout=2)
++    await asyncio.wait_for(agent.aclose(), 2)
++    assert not agent._background and not agent._process_watches
+diff --git a/tests/gateway/fixtures/acp_background_process_peer.py b/tests/gateway/fixtures/acp_background_process_peer.py
+new file mode 100644
+index 0000000000..940b10286a
+--- /dev/null
++++ b/tests/gateway/fixtures/acp_background_process_peer.py
+@@ -0,0 +1,115 @@
++"""Real gateway, real process, real ACP projection; no inference.
++
++A ``GatewayACPAgent`` whose gateway RPCs go over the owner's actual WebSocket views a session that
++owns two real background processes: one exits 3 after about 2 s, one sleeps until the editor's Stop.
++The editor connection is a recorder. Each ``tool.complete`` frame is the one
++``terminal(background=true)`` publishes (no model call can issue it here); every read after it is
++the live ``process.list``, and the Stop is the live ``process.kill``.
++"""
++import asyncio
++import json
++import os
++from pathlib import Path
++import shlex
++import sys
++import time
++import traceback
++
++
++class Recorder:
++    def __init__(self):
++        self.reports, self.t0 = [], time.monotonic()
++        self.reported = asyncio.Condition()
++
++    async def session_update(self, **_):
++        return None
++
++    async def ext_notification(self, method, params):
++        self.reports.append({'method': method, 'at_s': round(time.monotonic() - self.t0, 2), **params})
++        async with self.reported:
++            self.reported.notify_all()
++
++    def exited(self, call_id):
++        return any(r['toolCallId'] == call_id and r['status'] == 'exited' for r in self.reports)
++
++
++class WsGateway:
++    def __init__(self, ws, rpc):
++        self.ws, self._rpc = ws, rpc
++
++    async def rpc(self, method, **params):
++        reply = await self._rpc(self.ws, method, **params)
++        if 'error' in reply:
++            raise RuntimeError(reply['error'])
++        return reply['result']
++
++
++async def probe():
++    from acp_adapter import gateway_background
++    from acp_adapter.gateway_server import GatewayACPAgent
++    from gateway.run import GatewayRunner
++    from gateway.session_authority import initialize_session_authority
++    from gateway.run_api import start_gateway_api, stop_gateway_api
++    from hermes_cli import web_server
++    from hermes_cli.dashboard_auth.ws_tickets import mint_ticket
++    from tests.gateway.fixtures.local_recovery_probe import rpc
++    from tools.process_registry import process_registry
++    from websockets.asyncio.client import connect
++
++    gateway_background.POLL_SECONDS = 0.5
++    home = Path(os.environ['HERMES_HOME'])
++    (home / 'config.yaml').write_text('gateway:\n  multiplex_profiles: false\nmodel:\n  provider: custom\n  default: no-inference\n  base_url: http://127.0.0.1:1/v1\nauxiliary:\n  title_generation:\n    enabled: false\n')
++    runner = GatewayRunner()
++    authority = await initialize_session_authority(runner, profile_id=str(home), instance_id='acp-bg')
++    api = await start_gateway_api(runner)
++    web_server.app.state.auth_required = True
++    receipt, procs = {}, []
++    python = shlex.quote(sys.executable) + ' -c '
++    commands = {'call_1': python + shlex.quote('import time,sys; time.sleep(2); sys.exit(3)'),
++                'call_2': python + shlex.quote('import time; time.sleep(300)')}
++    try:
++        ticket = mint_ticket(user_id='owner', provider='fixture')
++        async with connect(api.api_origin.replace('http:', 'ws:') + '/api/ws?ticket=' + ticket) as ws:
++            sid = (await rpc(ws, 'session.create', request_id='acp', source='acp', toolsets=[]))['result']['session_id']
++            editor = GatewayACPAgent()
++            editor._snapshots[sid] = {}
++            editor._gateway, editor._conn = WsGateway(ws, rpc), Recorder()
++            for call_id, command in commands.items():
++                proc = process_registry.spawn_local(command, cwd=str(home), task_id=sid, owner_task_id=sid,
++                                                    session_key=authority.sessions[sid].route)
++                procs.append(proc)
++                result = json.dumps({'output': 'Background process started', 'session_id': proc.id,
++                                     'pid': proc.pid, 'exit_code': 0, 'error': None})
++                for kind, payload in (('tool.start', {'tool_call_id': call_id, 'tool_name': 'terminal',
++                                                      'args': {'command': command, 'background': True}}),
++                                      ('tool.complete', {'tool_call_id': call_id, 'tool_name': 'terminal',
++                                                         'result': result, 'is_error': False})):
++                    await editor._project({'session_id': sid, 'type': kind, 'admission_id': 'a', 'payload': payload})
++            async with editor._conn.reported:
++                await editor._conn.reported.wait_for(lambda: editor._conn.exited('call_1'))
++            receipt['stopped_before_stop'] = editor._conn.exited('call_2')
++            # The editor's Stop, as the ACP router delivers ``_hermes/process_stop``.
++            await editor.ext_notification('hermes/process_stop', {'sessionId': sid})
++            # The session's watch ends once nothing is tracked.
++            await asyncio.gather(*editor._background)
++            receipt['exit_codes'] = [proc.exit_code for proc in procs]
++            receipt['all_exited'] = all(proc.exited for proc in procs)
++            receipt['reports'] = editor._conn.reports
++    finally:
++        for proc in procs:
++            if not proc.exited:
++                process_registry.kill_process(proc.id)
++        await stop_gateway_api(api)
++    (home / 'receipt.json').write_text(json.dumps(receipt))
++
++
++if __name__ == '__main__':
++    status = 0
++    try:
++        asyncio.run(asyncio.wait_for(probe(), 60))
++    except BaseException:
++        traceback.print_exc()
++        status = 1
++    sys.stdout.flush()
++    sys.stderr.flush()
++    os._exit(status)
+diff --git a/tests/gateway/test_acp_background_process.py b/tests/gateway/test_acp_background_process.py
+new file mode 100644
+index 0000000000..05a3f5d0f9
+--- /dev/null
++++ b/tests/gateway/test_acp_background_process.py
+@@ -0,0 +1,34 @@
++"""An ACP editor viewing a gateway session sees that session's background processes run and exit,
++and its Stop ends the one still running."""
++import json
++from pathlib import Path
++import subprocess
++import sys
++
++from tests.gateway.fixtures.local_recovery_probe import child_env
++
++
++def test_acp_viewer_reports_real_background_processes_and_stops_one(tmp_path):
++    root = Path(__file__).resolve().parents[2]
++    home, user = tmp_path / 'state', tmp_path / 'user'
++    home.mkdir()
++    user.mkdir()
++    env = child_env()
++    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home),
++               PYTHONPATH=str(root), PYTHONUNBUFFERED='1')
++    result = subprocess.run([sys.executable, str(root / 'tests/gateway/fixtures/acp_background_process_peer.py')],
++                            cwd=root, env=env, capture_output=True, text=True, timeout=90, check=False)
++    assert result.returncode == 0, result.stdout + result.stderr
++    receipt = json.loads((home / 'receipt.json').read_text())
++    by_call = {call: [r for r in receipt['reports'] if r['toolCallId'] == call] for call in ('call_1', 'call_2')}
++    assert all(r['method'] == 'hermes/process' for r in receipt['reports']), receipt
++    running, exited = by_call['call_1']
++    assert (running['status'], exited['status'], exited['exitCode'], exited['reason']) == \
++        ('running', 'exited', 3, 'exited'), receipt
++    assert exited['processId'] == running['processId']
++    assert exited['at_s'] >= 1.5, 'exited is reported after the process ends, not when it starts'
++    # The second process outlived the first and ran until the editor's Stop killed it.
++    assert receipt['stopped_before_stop'] is False and receipt['all_exited'] is True, receipt
++    running, stopped = by_call['call_2']
++    assert (running['status'], stopped['status'], stopped['reason']) == ('running', 'exited', 'killed'), receipt
++    assert stopped['at_s'] >= exited['at_s']

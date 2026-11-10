@@ -266,6 +266,11 @@
       "neededFor": "Apply after Live subagent progress. Lets Hermes pick a subagent's model from the ones your profile lists, and send a finished subagent a follow-up. Without it, every subagent runs on the default model, and a finished one can't be asked anything more.",
       "versions": [
         {
+          "hermesCommit": "a2fa0a4b649b7f3a771cf92f1ae43059eeec76e6",
+          "hermesCommitDate": "2026-11-10T14:57:54Z",
+          "file": "acp-subagent-model-continue/a2fa0a4b649b.patch"
+        },
+        {
           "hermesCommit": "466591fe65d0257c96083df16fcd39636032304c",
           "hermesCommitDate": "2026-11-09T06:46:20Z",
           "file": "acp-subagent-model-continue/466591fe65d0.patch"
@@ -287,6 +292,11 @@
       "title": "Subagent approvals",
       "neededFor": "Approvals that show under the subagent that asked, as Codex's do. Without it, a subagent's approval reaches you as if its parent had asked.",
       "versions": [
+        {
+          "hermesCommit": "a2fa0a4b649b7f3a771cf92f1ae43059eeec76e6",
+          "hermesCommitDate": "2026-11-10T14:57:54Z",
+          "file": "acp-subagent-approvals/a2fa0a4b649b.patch"
+        },
         {
           "hermesCommit": "466591fe65d0257c96083df16fcd39636032304c",
           "hermesCommitDate": "2026-11-09T06:46:20Z",

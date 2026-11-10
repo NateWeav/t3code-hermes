@@ -1,0 +1,1102 @@
+diff --git a/acp_adapter/gateway_delegation.py b/acp_adapter/gateway_delegation.py
+index 601f8bf533..7efd21c020 100644
+--- a/acp_adapter/gateway_delegation.py
++++ b/acp_adapter/gateway_delegation.py
+@@ -6,7 +6,8 @@ call carrying a bounded per-child snapshot in ``raw_output["hermesDelegation"]``
+ viewer did not see start, or whose child is already owned by another call, is dropped: never matched by goal, index
+ or order. A nested child's frames reach the same call through its ancestors' relays with a ``depth`` and the
+ ``parent_id`` that spawned it; that parent must already be owned by the call. Background children outlive the parent's
+-``tool.complete`` and the turn, so parents are retained.
++``tool.complete`` and the turn, so parents are retained. A ``delegate_task(action="continue")`` call takes over the
++finished child it names: the child's new run reports there.
+ """
+ from __future__ import annotations
+ 
+@@ -50,9 +51,11 @@ class DelegationProgress:
+         self.parents = {}  # (session, tool_call_id) -> {"children": {child key: state}, "ids": {subagent_id}}
+         self.owners = {}  # (session, subagent_id) -> parent key
+ 
+-    def start(self, sid: str, call_id: str) -> None:
++    def start(self, sid: str, call_id: str, args=None) -> None:
+         self._forget((sid, call_id))
+-        self.parents[(sid, call_id)] = {"children": {}, "ids": set()}
++        named = args.get("subagent_id") if isinstance(args, dict) else None
++        continues = named if isinstance(named, str) and str(args.get("action") or "").strip().lower() == "continue" else None
++        self.parents[(sid, call_id)] = {"children": {}, "ids": set(), "continues": continues}
+         if len(self.parents) > _MAX_PARENTS:
+             self._forget(next(iter(self.parents)))
+ 
+@@ -74,8 +77,12 @@ class DelegationProgress:
+         if depth and (subagent_id is None or self.owners.get((sid, fields["parent_id"])) != key):
+             return None
+         if subagent_id is not None:
+-            if self.owners.setdefault((sid, subagent_id), key) != key:
+-                return None
++            owner = self.owners.setdefault((sid, subagent_id), key)
++            if owner != key:
++                if parent.get("continues") != subagent_id:
++                    return None
++                self.parents.get(owner, {"ids": set()})["ids"].discard(subagent_id)
++                self.owners[(sid, subagent_id)] = key
+             parent["ids"].add(subagent_id)
+             child_key = ("child", subagent_id)
+         elif "delegation_id" in fields:
+diff --git a/acp_adapter/gateway_reply.py b/acp_adapter/gateway_reply.py
+index 0cc165652c..73a7596f01 100644
+--- a/acp_adapter/gateway_reply.py
++++ b/acp_adapter/gateway_reply.py
+@@ -58,7 +58,7 @@ class GatewayReplyMixin:
+             args = coerce_tool_args(payload.get("args"))
+             self._tool_args[(sid, call_id)] = (tool_name, args, aid)
+             if tool_name == "delegate_task":
+-                self._delegations.start(sid, call_id)
++                self._delegations.start(sid, call_id, args)
+             if self._conn:
+                 await self._conn.session_update(session_id=editor_id, update=build_tool_start(call_id, tool_name, args))
+             return
+diff --git a/agent/delegation_provider.py b/agent/delegation_provider.py
+index 839b133b7a..cb8a82eb04 100644
+--- a/agent/delegation_provider.py
++++ b/agent/delegation_provider.py
+@@ -41,7 +41,8 @@ from agent.provider_base import ProviderBase
+ 
+ #: Per-task property names core owns. A provider-declared parameter with one of these names is
+ #: refused at schema-build time: plugins add parameters, they never redefine core ones, and the
+-#: raw route fields (``provider``/``model``/``base_url``/``api_key``) never become model-facing.
++#: raw route fields (``provider``/``base_url``/``api_key``) never become model-facing. Core's own
++#: per-task ``model`` (default backend only) accepts only models the profile's pickers list.
+ RESERVED_TASK_PARAMETERS = frozenset({
+     "goal", "context", "index", "output_schema", "images", "group", "role", "toolsets",
+     "acp_command", "acp_args", "provider", "model", "base_url", "api_key", "api_mode",
+diff --git a/tests/acp_adapter/test_gateway_delegation_continue.py b/tests/acp_adapter/test_gateway_delegation_continue.py
+new file mode 100644
+index 0000000000..266a4fa7a3
+--- /dev/null
++++ b/tests/acp_adapter/test_gateway_delegation_continue.py
+@@ -0,0 +1,183 @@
++"""``delegate_task(action="continue")`` reaches an editor through ``hermes acp``, the gateway viewer.
++
++A finished child of the conversation runs again on its own session with a follow-up message, in the background,
++and its new answer re-enters as a completion message, as a spawn's does. These tests run the real ``delegate_task``
++(spawn and continue), the child lifecycle and registry, the async registry's background dispatch and the owner's
++publish path into the viewer ``HermesACPAgent()`` builds. Only the child agent is stubbed: it records what it was
++built and run with, and persists its turn to the child's real session store.
++"""
++import json
++import threading
++from unittest.mock import MagicMock, patch
++
++import pytest
++from acp.schema import ToolCallStart
++
++from acp_adapter.gateway_server import GatewayACPAgent
++from hermes_state import SessionDB
++from tests.acp_adapter.test_gateway_delegation_progress import (
++    editor_session, progress, registry, registry_state, run_as_tool_call,
++)
++from tools import delegate_tool_registry as reg
++from tools.delegate_tool import delegate_task
++from tools.process_registry import process_registry
++
++PARENT_SESSION = "parent-session"
++
++
++class Children:
++    """Stands in for ``AIAgent``: each child answers its last user message's ``Reply with exactly: X`` with X."""
++
++    def __init__(self):
++        self.built, self.runs = [], []
++
++    def __call__(self, **kwargs):
++        child = MagicMock()
++        child.model, child.provider, child.request_overrides = kwargs["model"], kwargs["provider"], {}
++        child.session_id = kwargs.get("session_id") or f"child-session-{len(self.built)}"
++        child._session_db, child._persist_disabled = kwargs["session_db"], False
++        child._parent_session_id = kwargs["parent_session_id"]
++        child.tool_progress_callback = kwargs["tool_progress_callback"]
++        child.get_activity_summary.return_value = {"api_call_count": 1}
++        child.session_prompt_tokens = child.session_completion_tokens = child.session_reasoning_tokens = 0
++        child.session_estimated_cost_usd = None
++
++        def run_conversation(user_message, task_id=None, stream_callback=None, conversation_history=None):
++            self.runs.append({"message": user_message, "history": conversation_history, "task_id": task_id})
++            answer = user_message.rsplit("Reply with exactly: ", 1)[-1].strip()
++            for role, content in (("user", user_message), ("assistant", answer)):
++                child._session_db.append_message(child.session_id, role, content)
++            return {"final_response": answer, "completed": True, "api_calls": 1, "messages": []}
++
++        child.run_conversation.side_effect = run_conversation
++        self.built.append(kwargs)
++        return child
++
++
++def arm(owner, tmp_path, session_id=PARENT_SESSION):
++    """Give the owner's turn a parent agent that delegates for real: its own SessionDB, the session's route."""
++    db = SessionDB(db_path=tmp_path / "state.db")
++    db.create_session(session_id=session_id, source="tui")
++    parent = MagicMock()
++    parent.provider, parent.base_url, parent.api_key = "openrouter", "https://openrouter.ai/api/v1", "parent-key"
++    parent.api_mode, parent.model, parent.platform = "chat_completions", "test/parent-model", "local"
++    parent.request_overrides, parent.reasoning_config, parent.session_id = {}, None, session_id
++    parent.providers_allowed = parent.providers_ignored = parent.providers_order = parent.provider_sort = None
++    parent._session_db, parent._delegate_depth, parent._active_children = db, 0, []
++    parent._active_children_lock = threading.Lock()
++    parent._print_fn = parent.thinking_callback = parent._delegate_spinner = parent._subagent_id = None
++    for name in ("_tool_guardrails", "_checkpoint_mgr", "_touch_activity", "quiet_mode", "verbose_logging"):
++        setattr(parent, name, getattr(owner.parent, name))
++    parent.tool_progress_callback = owner.turn.progress_callback
++    parent.tool_start_callback = owner.turn.combined_tool_start_callback
++    owner.turn._ctx.agent_holder = [parent]
++    owner.parent = parent
++    return parent
++
++
++def call(owner, call_id, **args):
++    """One ``delegate_task`` call in its own turn of the owner's session; the turn then ends."""
++    owner.authority.executing = {"s": 1}
++    result = run_as_tool_call(owner, call_id, args, lambda: delegate_task(
++        parent_agent=owner.parent, background=True, **args))
++    owner.turn.combined_tool_complete_callback(call_id, "delegate_task", args, result)
++    owner.end_turn()
++    return json.loads(result)
++
++
++@pytest.fixture
++def children():
++    built = Children()
++    with (
++        patch("run_agent.AIAgent", side_effect=built),
++        patch("tools.delegate_tool._load_config", return_value={}),
++        # The session can receive detached results (a gateway session does): spawns run in the background.
++        patch("tools.delegate_tool_dispatch._resolve_async_wake_sid", return_value=""),
++    ):
++        yield built
++    reg._finished_subagents.clear()
++
++
++def completions():
++    events = []
++    while not process_registry.completion_queue.empty():
++        events.append(process_registry.completion_queue.get_nowait())
++    return events
++
++
++@pytest.mark.asyncio
++async def test_a_finished_child_answers_a_follow_up_on_its_own_session(tmp_path, registry, children):
++    async with editor_session() as (agent, owner, updates, settle):
++        assert type(agent) is GatewayACPAgent  # what `hermes acp` builds
++        arm(owner, tmp_path)
++        spawned = call(owner, "call_1", tasks=[{"goal": "Reply with exactly: A_FIRST"}])
++        (subagent_id,) = spawned["subagent_ids"]
++        registry.run(0)
++        listed = json.loads(delegate_task(action="list", parent_agent=owner.parent))
++        assert [(c["subagent_id"], c["resumable"]) for c in listed["finished"]] == [(subagent_id, True)]
++
++        follow_up = {"action": "continue", "subagent_id": subagent_id, "message": "Reply with exactly: A_SECOND"}
++        continued = call(owner, "call_2", **follow_up)
++        assert continued["status"] == "dispatched" and continued["subagent_ids"] == [subagent_id]
++        registry.run(1)
++        await settle()
++
++    first, second = children.built
++    assert first["session_id"] is None and second["session_id"] == "child-session-0"  # the first child's session
++    assert second["model"] == first["model"]
++    assert [run["message"] for run in children.runs] == ["Reply with exactly: A_FIRST", "Reply with exactly: A_SECOND"]
++    assert children.runs[0]["history"] is None
++    assert [(m["role"], m["content"]) for m in children.runs[1]["history"]] == [
++        ("user", "Reply with exactly: A_FIRST"), ("assistant", "A_FIRST")]
++    assert children.runs[1]["task_id"] == subagent_id  # the same terminal session as before
++    # Each answer re-enters the conversation as its own completion message.
++    assert [event["results"][0]["summary"] for event in completions()] == ["A_FIRST", "A_SECOND"]
++
++    start = next(u for u in updates if isinstance(u, ToolCallStart) and u.tool_call_id == "call_2")
++    assert start.raw_input == follow_up
++    frames = [(call_id, p["subagent_id"], p["event"], p.get("summary")) for call_id, _, p in progress(updates)]
++    assert frames == [
++        ("call_1", subagent_id, "subagent.spawn_requested", None),
++        ("call_1", subagent_id, "subagent.start", None),
++        ("call_1", subagent_id, "subagent.complete", "A_FIRST"),
++        ("call_2", subagent_id, "subagent.spawn_requested", None),
++        ("call_2", subagent_id, "subagent.start", None),
++        ("call_2", subagent_id, "subagent.complete", "A_SECOND"),
++    ]
++    # Once its follow-up is answered, the child can be continued again.
++    assert json.loads(delegate_task(action="list", parent_agent=owner.parent))["finished"][0]["subagent_id"] == subagent_id
++
++
++@pytest.mark.asyncio
++async def test_only_a_finished_child_of_this_conversation_can_be_continued(tmp_path, registry, children):
++    async with editor_session() as (_agent, owner, _updates, _settle):
++        parent = arm(owner, tmp_path)
++        (subagent_id,) = call(owner, "call_1", tasks=[{"goal": "Reply with exactly: A_FIRST"}])["subagent_ids"]
++
++        def continue_(sid=subagent_id, message="Reply with exactly: again", parent_agent=parent):
++            return json.loads(delegate_task(action="continue", subagent_id=sid, message=message,
++                                            parent_agent=parent_agent, background=True))["error"]
++
++        reg._register_subagent({"subagent_id": subagent_id, "agent": MagicMock(), "owner_agent_session_id": PARENT_SESSION})
++        assert "still running" in continue_()
++        reg._unregister_subagent(subagent_id)  # the record carries no transcript: nothing to continue
++        assert "No finished subagent" in continue_()
++        registry.run(0)  # the real child runs and finishes
++
++        assert "non-empty 'message'" in continue_(message=" ")
++        assert "No finished subagent 'sa-unknown'" in continue_(sid="sa-unknown")
++        stranger = MagicMock(session_id="another-conversation", _session_db=parent._session_db)
++        assert "No finished subagent" in continue_(parent_agent=stranger)
++        steer = json.loads(delegate_task(action="steer", subagent_id=subagent_id, message="faster", parent_agent=parent))
++        assert "already finished" in steer["error"] and "action='continue'" in steer["error"]
++
++        reg.set_spawn_paused(True)
++        try:
++            assert "paused" in continue_()  # refused before anything ran: the child stays resumable
++        finally:
++            reg.set_spawn_paused(False)
++        call(owner, "call_2", action="continue", subagent_id=subagent_id, message="Reply with exactly: A_SECOND")
++        assert "already being continued" in continue_()
++        registry.run(1)
++
++    assert [run["message"] for run in children.runs] == ["Reply with exactly: A_FIRST", "Reply with exactly: A_SECOND"]
+diff --git a/tests/fixtures/prompt_surface/surfaces.json b/tests/fixtures/prompt_surface/surfaces.json
+index 08a8993797..c13c911776 100644
+--- a/tests/fixtures/prompt_surface/surfaces.json
++++ b/tests/fixtures/prompt_surface/surfaces.json
+@@ -5,7 +5,7 @@
+       "stable": 1829,
+       "volatile": 1268
+     },
+-    "tool_tokens": 11138,
++    "tool_tokens": 11291,
+     "tools": [
+       "browser_cdp",
+       "browser_dialog",
+@@ -38,7 +38,7 @@
+       "stable": 1225,
+       "volatile": 1268
+     },
+-    "tool_tokens": 11138,
++    "tool_tokens": 11291,
+     "tools": [
+       "browser_cdp",
+       "browser_dialog",
+@@ -71,7 +71,7 @@
+       "stable": 1646,
+       "volatile": 1266
+     },
+-    "tool_tokens": 11138,
++    "tool_tokens": 11291,
+     "tools": [
+       "browser_cdp",
+       "browser_dialog",
+@@ -104,7 +104,7 @@
+       "stable": 2420,
+       "volatile": 1264
+     },
+-    "tool_tokens": 11293,
++    "tool_tokens": 11446,
+     "tools": [
+       "browser_cdp",
+       "browser_dialog",
+@@ -137,7 +137,7 @@
+       "stable": 1225,
+       "volatile": 1268
+     },
+-    "tool_tokens": 11138,
++    "tool_tokens": 11291,
+     "tools": [
+       "browser_cdp",
+       "browser_dialog",
+@@ -170,7 +170,7 @@
+       "stable": 1211,
+       "volatile": 1268
+     },
+-    "tool_tokens": 11138,
++    "tool_tokens": 11291,
+     "tools": [
+       "browser_cdp",
+       "browser_dialog",
+@@ -203,7 +203,7 @@
+       "stable": 1473,
+       "volatile": 1269
+     },
+-    "tool_tokens": 11793,
++    "tool_tokens": 11946,
+     "tools": [
+       "browser_cdp",
+       "browser_dialog",
+@@ -237,7 +237,7 @@
+       "stable": 1244,
+       "volatile": 1269
+     },
+-    "tool_tokens": 11138,
++    "tool_tokens": 11291,
+     "tools": [
+       "browser_cdp",
+       "browser_dialog",
+@@ -270,7 +270,7 @@
+       "stable": 1330,
+       "volatile": 1269
+     },
+-    "tool_tokens": 11138,
++    "tool_tokens": 11291,
+     "tools": [
+       "browser_cdp",
+       "browser_dialog",
+diff --git a/tests/fixtures/prompt_surface/tools/delegate_task.json b/tests/fixtures/prompt_surface/tools/delegate_task.json
+index 567b883387..ff8f4190fb 100644
+--- a/tests/fixtures/prompt_surface/tools/delegate_task.json
++++ b/tests/fixtures/prompt_surface/tools/delegate_task.json
+@@ -1,24 +1,25 @@
+ {
+-  "description": "Spawn isolated subagents. Each gets its own conversation, terminal session, and toolset, and only its final summary returns to you.\n\nSessions without a later-result consumer (including one-shot CLI and cron) join parallel children and return results in this tool call. Otherwise runs in the background: dispatch returns live transcript paths and results re-enter as a new message when subagents finish (one message per call). Background results are delivered only BETWEEN your turns: finish whatever does not depend on them, then give a one-line status and END YOUR TURN. Never wait or poll on transcripts, artifact files, or CI for a child.\n\nUSE FOR: reasoning-heavy subtasks, work that would flood your context, or independent parallel workstreams.\nDO NOT USE FOR (use these instead):\n- Mechanical multi-step work with no reasoning needed -> execute_code\n- A single tool call -> call the tool directly\n- Tasks needing user interaction -> subagents cannot ask questions\n- Durable work that must survive this session -> cronjob or terminal(background=True, notify=True); /stop, /new, or process exit halts running subagents (whole tree); each returns an 'interrupted' completion with partial output.\n\nRULES:\n- Children know nothing of this conversation: pass everything needed via 'context', including any required output language, tone, or style (e.g. \"respond in Chinese\").\n- Child summaries are SELF-REPORTS, not verified facts: a child claiming \"uploaded successfully\" or \"file written\" may be wrong. For external side effects (uploads, remote writes, publishing), require a verifiable handle (URL, ID, absolute path) and verify it yourself before telling the user the operation succeeded.\n- Children cannot close tracked work: a child asked to close it returns findings instead; the parent applies the transition.\n- Children cannot call delegate_task, clarify, memory, or cronjob.\n- Children inherit the parent model unless pinned via delegation.provider / delegation.model in config.yaml.",
++  "description": "Spawn isolated subagents. Each gets its own conversation, terminal session, and toolset, and only its final summary returns to you.\n\nSessions without a later-result consumer (including one-shot CLI and cron) join parallel children and return results in this tool call. Otherwise runs in the background: dispatch returns live transcript paths and results re-enter as a new message when subagents finish (one message per call). Background results are delivered only BETWEEN your turns: finish whatever does not depend on them, then give a one-line status and END YOUR TURN. Never wait or poll on transcripts, artifact files, or CI for a child. `action='continue'` sends a finished child a follow-up on its own conversation, delivered the same way.\n\nUSE FOR: reasoning-heavy subtasks, work that would flood your context, or independent parallel workstreams.\nDO NOT USE FOR (use these instead):\n- Mechanical multi-step work with no reasoning needed -> execute_code\n- A single tool call -> call the tool directly\n- Tasks needing user interaction -> subagents cannot ask questions\n- Durable work that must survive this session -> cronjob or terminal(background=True, notify=True); /stop, /new, or process exit halts running subagents (whole tree); each returns an 'interrupted' completion with partial output.\n\nRULES:\n- Children know nothing of this conversation: pass everything needed via 'context', including any required output language, tone, or style (e.g. \"respond in Chinese\").\n- Child summaries are SELF-REPORTS, not verified facts: a child claiming \"uploaded successfully\" or \"file written\" may be wrong. For external side effects (uploads, remote writes, publishing), require a verifiable handle (URL, ID, absolute path) and verify it yourself before telling the user the operation succeeded.\n- Children cannot close tracked work: a child asked to close it returns findings instead; the parent applies the transition.\n- Children cannot call delegate_task, clarify, memory, or cronjob.\n- Children inherit the parent model unless a task sets `model` or config.yaml pins delegation.provider / delegation.model.",
+   "name": "delegate_task",
+   "parameters": {
+     "properties": {
+       "action": {
+-        "description": "Default 'spawn'. Live control of running children: 'list' = ids/goals/status/transcripts; 'steer' = queue course-correction text into one child without stopping it; 'stop' = end one child early (partial result still returns). Control actions return immediately; tasks are ignored unless spawning.",
++        "description": "Default 'spawn'. Live control of running children: 'list' = ids/goals/status/transcripts; 'steer' = queue course-correction text into one child without stopping it; 'stop' = end one child early (partial result still returns). Control actions return immediately; tasks are ignored unless spawning. 'continue' = send a FINISHED child a follow-up; it answers on its own conversation in the background and its new result re-enters as a new message.",
+         "enum": [
+           "spawn",
+           "list",
+           "steer",
+-          "stop"
++          "stop",
++          "continue"
+         ],
+         "type": "string"
+       },
+       "message": {
+-        "description": "Required for action='steer': the course correction, appended to the child's next tool result mid-run. Be directive and specific.",
++        "description": "Required for action='steer': the course correction, appended to the child's next tool result mid-run. Be directive and specific. Required for action='continue': the follow-up the finished child answers.",
+         "type": "string"
+       },
+       "subagent_id": {
+-        "description": "Required for action='steer'/'stop' (ids from the spawn response or action='list').",
++        "description": "Required for action='steer'/'stop'/'continue' (ids from the spawn response or action='list').",
+         "type": "string"
+       },
+       "tasks": {
+@@ -40,6 +41,10 @@
+               },
+               "type": "array"
+             },
++            "model": {
++              "description": "Optional model for this child, as the model picker lists it: a model id, or `<provider>:<model>` when several providers offer it. Only models this profile can run are accepted. Omit to use the default.",
++              "type": "string"
++            },
+             "output_schema": {
+               "description": "JSON Schema this child's final answer must validate against (told to the child up front; parent validates with one bounded correction retry; result gains schema_valid, plus schema_errors on failure — the child's raw text is still returned as summary, never discarded). Keep it forgiving — require only fields you will read.",
+               "properties": {},
+diff --git a/tests/gateway/test_delegation_task_model.py b/tests/gateway/test_delegation_task_model.py
+new file mode 100644
+index 0000000000..6026ff8cd7
+--- /dev/null
++++ b/tests/gateway/test_delegation_task_model.py
+@@ -0,0 +1,201 @@
++"""A ``delegate_task`` task's own ``model``, on the gateway path.
++
++A gateway session's agent runs ``delegate_task`` from its turn, and the turn publishes each child's
++``subagent.*`` frames to every viewer (``hermes acp``, the TUI, Desktop). These tests run the real call
++dispatch, ``delegate_task``, route resolution, model inventory and credential resolution against a
++temp profile, and read the frames the turn's real progress callback publishes. Only the child's
++construction and run are stubbed, where a test reads what they were handed.
++"""
++import json
++import threading
++from contextvars import Context
++from types import SimpleNamespace
++from unittest.mock import MagicMock, patch
++
++import hermes_yaml as yaml
++import pytest
++
++from agent.tool_executor import _dispatch_authorized_once, _ManagedToolResult, _ToolCallRef
++from gateway.config import Platform
++from gateway.run_turn_runner import TurnRunner
++from gateway.session_authority import SessionAuthority
++from gateway.session_events import SessionEvents
++
++SID = "s"
++PROXY = "http://127.0.0.1:9/v1"
++LOCAL = "http://127.0.0.1:8/v1"
++PROFILE = {
++    "model": {"default": "claude-haiku-5-5", "provider": "custom:proxy", "base_url": PROXY},
++    "custom_providers": [
++        {"name": "proxy", "base_url": PROXY, "api_key": "proxy-key", "api_mode": "anthropic_messages",
++         "discover_models": False, "models": {"claude-haiku-5-5": {}, "claude-sonnet-5-5": {}}},
++        {"name": "local", "base_url": LOCAL, "api_key": "local-key", "api_mode": "chat_completions",
++         "discover_models": False, "models": {"qwen3-local": {}, "claude-haiku-5-5": {}}},
++    ],
++}
++
++
++@pytest.fixture
++def profile(tmp_path, monkeypatch):
++    """Write the profile's config.yaml; ``managed`` also installs a managed scope over it."""
++    home = tmp_path / ".hermes"
++    home.mkdir()
++    monkeypatch.setenv("HERMES_HOME", str(home))
++
++    def write(delegation=None, managed=None):
++        (home / "config.yaml").write_text(yaml.safe_dump({**PROFILE, "delegation": delegation or {}}), encoding="utf-8")
++        if managed is not None:
++            managed_dir = tmp_path / "managed"
++            managed_dir.mkdir()
++            (managed_dir / "config.yaml").write_text(yaml.safe_dump(managed), encoding="utf-8")
++            monkeypatch.setenv("HERMES_MANAGED_DIR", str(managed_dir))
++        from hermes_cli.managed_scope import invalidate_managed_cache
++        invalidate_managed_cache()
++
++    write()
++    yield write
++    from hermes_cli.managed_scope import invalidate_managed_cache
++    invalidate_managed_cache()
++
++
++class Owner:
++    """One local session's authority side: a real turn runner publishing into a real event stream."""
++
++    def __init__(self):
++        self.stream = SessionEvents()
++        self.stream.execution = {"admission_id": "a1", "execution_generation": 1}
++        live = SimpleNamespace(tool_progress_mode=None, show_reasoning=False, event_stream=self.stream)
++        self.authority = SimpleNamespace(sessions={SID: live}, executing={SID: 1})
++        self.frames = []
++        self.stream.observers.add(lambda frame: self.frames.append(frame["params"]))
++        parent = self.parent = MagicMock()
++        parent.provider, parent.requested_provider, parent.base_url = "custom", "custom:proxy", PROXY
++        parent.api_key, parent.api_mode, parent.model = "proxy-key", "anthropic_messages", "claude-haiku-5-5"
++        parent.platform, parent.request_overrides, parent.reasoning_config = "local", {}, None
++        parent.providers_allowed = parent.providers_ignored = parent.providers_order = parent.provider_sort = None
++        parent._session_db, parent._delegate_depth, parent._active_children = None, 0, []
++        parent._active_children_lock = threading.Lock()
++        parent._print_fn = parent.thinking_callback = parent._delegate_spinner = parent._subagent_id = None
++        parent._tool_guardrails = SimpleNamespace(before_call=lambda *a: SimpleNamespace(allows_execution=True))
++        parent._checkpoint_mgr = SimpleNamespace(enabled=False)
++        parent._touch_activity = lambda _: None
++        parent.quiet_mode, parent.verbose_logging = True, False
++        turn = self.turn = object.__new__(TurnRunner)
++        turn._ctx = SimpleNamespace(
++            source=SimpleNamespace(platform=Platform.LOCAL, chat_id="chat"),
++            mute_notification_reply=False, scheduled_heartbeat=False,
++            streaming_tts_consumer_holder=[None], stream_consumer_holder=[None],
++            interim_assistant_messages_enabled=False, user_config={},
++            resolve_display_setting=lambda *a: None, _run_still_current=lambda: True,
++            _voice_ack_guild=[None], _native_slack_task_cards=False, progress_mode="all",
++            session_id=SID, progress_queue=None, _live_status_adapter=None, _live_status_mode="off",
++            log_queue=None, agent_holder=[parent],
++        )
++        turn._runner = SimpleNamespace(config=None, _delivery_adapter_for=lambda source: None)
++        turn._approval_owner = (self.authority, SID, 1)
++        turn._publish_execution = lambda kind, payload: SessionAuthority.publish_execution(
++            self.authority, SID, 1, kind, payload)
++        turn._publish_api_tool = lambda *a, **k: None
++        turn._schedule = lambda coro, _message: coro.close()
++        parent.tool_progress_callback = turn.progress_callback
++        parent.tool_start_callback = turn.combined_tool_start_callback
++
++    def delegate(self, tasks):
++        """``(tool result, [AIAgent kwargs per built child])`` for one delegate_task call in this turn."""
++        built = []
++
++        def construct(**kwargs):
++            built.append(kwargs)
++            child = MagicMock()
++            child.model, child.provider, child.request_overrides = kwargs["model"], kwargs["provider"], {}
++            return child
++
++        args = {"tasks": tasks}
++        ref = _ToolCallRef("delegate_task", args, "task", "call_1", [])
++        state = _ManagedToolResult(None, args, [], False, False)
++        from tools.delegate_tool import delegate_task
++        with (
++            patch("run_agent.AIAgent", side_effect=construct),
++            patch("tools.delegate_tool._run_batch", side_effect=lambda batch, background: json.dumps(
++                {"status": "built", **({"refused": batch.refused} if batch.refused else {})})),
++        ):
++            result = Context().run(
++                _dispatch_authorized_once, self.parent, state, ref,
++                execute=lambda _: delegate_task(tasks=tasks, parent_agent=self.parent),
++                scope_block=None, display_index=None, begin_execution=None, authorization_gate=None)
++        return json.loads(result), built
++
++    def spawned_models(self):
++        return [frame["payload"].get("model") for frame in self.frames if frame["type"] == "subagent.spawn_requested"]
++
++
++def _task_model_schema():
++    from tools.delegate_tool import _build_dynamic_schema_overrides
++    overrides = _build_dynamic_schema_overrides()
++    return overrides["parameters"]["properties"]["tasks"]["items"]["properties"].get("model"), overrides["description"]
++
++
++def test_each_task_runs_on_its_model_and_the_gateway_reports_it(profile):
++    owner = Owner()
++    result, (sonnet, local, inherited) = owner.delegate([
++        {"goal": "review the routing change", "model": "claude-sonnet-5-5"},
++        {"goal": "summarize the local logs", "model": "qwen3-local"},
++        {"goal": "check the docs build"},
++    ])
++
++    assert result == {"status": "built"}
++    # The parent's own provider keeps its endpoint and key; another provider brings its own.
++    assert (sonnet["model"], sonnet["base_url"], sonnet["api_key"]) == ("claude-sonnet-5-5", PROXY, "proxy-key")
++    assert (local["model"], local["base_url"], local["api_key"]) == ("qwen3-local", LOCAL, "local-key")
++    assert local["provider"] == "custom:local"
++    assert (inherited["model"], inherited["base_url"]) == ("claude-haiku-5-5", PROXY)
++    assert owner.spawned_models() == ["claude-sonnet-5-5", "qwen3-local", "claude-haiku-5-5"]
++    schema, description = _task_model_schema()
++    assert schema["type"] == "string" and "unless a task sets `model`" in description
++
++
++def test_a_model_the_profile_cannot_run_refuses_only_its_task(profile):
++    owner = Owner()
++    result, (qualified,) = owner.delegate([
++        {"goal": "a task on a typo", "model": "claude-sonet-5-5"},
++        {"goal": "a task on a shared id", "model": "claude-haiku-5-5"},
++        {"goal": "a task on a qualified id", "model": "custom:local:claude-haiku-5-5"},
++    ])
++
++    typo, shared = result["refused"]
++    assert typo["task_index"] == 0 and "'claude-sonet-5-5' is not a model this profile can run" in typo["error"]
++    assert "custom:proxy:claude-sonnet-5-5" in typo["error"] and "custom:local:qwen3-local" in typo["error"]
++    assert shared["task_index"] == 1 and "several providers offer 'claude-haiku-5-5'" in shared["error"]
++    assert (qualified["model"], qualified["base_url"]) == ("claude-haiku-5-5", LOCAL)
++    assert owner.spawned_models() == ["claude-haiku-5-5"]
++
++
++def test_a_managed_pin_on_the_subagent_model_wins(profile):
++    """The administrator's delegation.model is policy: the tool stops offering ``model``, and a task that names
++    one anyway is refused rather than routed around the pin."""
++    profile(managed={"delegation": {"model": "claude-sonnet-5-5"}})
++    owner = Owner()
++
++    schema, description = _task_model_schema()
++    assert schema is None and "unless a task sets `model`" not in description
++    result, (pinned,) = owner.delegate([
++        {"goal": "a task naming its own model", "model": "qwen3-local"},
++        {"goal": "a task taking the default"},
++    ])
++
++    (refused,) = result["refused"]
++    assert refused["task_index"] == 0 and "delegation.model in the managed config" in refused["error"]
++    assert (pinned["model"], pinned["base_url"]) == ("claude-sonnet-5-5", PROXY)
++    assert owner.spawned_models() == ["claude-sonnet-5-5"]
++
++
++def test_a_user_set_delegation_model_is_only_the_default(profile):
++    profile(delegation={"model": "claude-sonnet-5-5"})
++    owner = Owner()
++    _, (chosen, default) = owner.delegate([
++        {"goal": "a task naming its own model", "model": "qwen3-local"},
++        {"goal": "a task taking the default"},
++    ])
++
++    assert (chosen["model"], chosen["base_url"]) == ("qwen3-local", LOCAL)
++    assert (default["model"], default["base_url"]) == ("claude-sonnet-5-5", PROXY)
+diff --git a/tools/delegate_tool.py b/tools/delegate_tool.py
+index 381ee993a7..a114722e66 100644
+--- a/tools/delegate_tool.py
++++ b/tools/delegate_tool.py
+@@ -11,6 +11,7 @@ the delegation call and the summary result, never the child's intermediate
+ tool calls or reasoning.
+ """
+ 
++import json
+ import logging
+ import time
+ import weakref
+@@ -230,6 +231,9 @@ def _build_child_agent(
+     override_reasoning_effort: Any = None,
+     profile_home: Optional[Path] = None,
+     override_service_tier: Optional[str] = None,  # a route's checked speed tier (tools/delegate_tool_tuning.py)
++    # action='continue': the finished child's own subagent_id and session, which the rebuilt child runs on again.
++    subagent_id: Optional[str] = None,
++    resume_session_id: Optional[str] = None,
+ ):
+     """Build (don't run) a child AIAgent on the main thread. override_* (from delegation config) replace parent
+     inheritance so children can run on a different provider:model pair. ``profile_home`` builds (and later runs,
+@@ -247,7 +251,7 @@ def _build_child_agent(
+ 
+     # One subagent_id shared by the progress callback, spawn_requested event and
+     # the live registry; parent_id is set when THIS parent is itself a subagent.
+-    subagent_id = f"sa-{task_index}-{_uuid.uuid4().hex[:8]}"
++    subagent_id = subagent_id or f"sa-{task_index}-{_uuid.uuid4().hex[:8]}"
+     parent_subagent_id = getattr(parent_agent, "_subagent_id", None)
+ 
+     # General delegation behavior (reasoning, compression, capabilities) stays
+@@ -309,7 +313,7 @@ def _build_child_agent(
+                         if child_progress_cb else None
+                     ),
+                     session_db=child_session_db, parent_session_id=parent_sid, request_overrides=request_overrides,
+-                    session_id=getattr(child_session_db, "reserved_session_id", None),
++                    session_id=resume_session_id or getattr(child_session_db, "reserved_session_id", None),
+                     tool_progress_callback=child_progress_cb,
+                     iteration_budget=None,  # fresh budget per subagent
+                     # A profile route carries that profile's identity (its SOUL.md under the bound home).
+@@ -464,10 +468,63 @@ def _route_overrides(route: Any) -> dict[str, Any]:
+     }
+ 
+ 
++def _stamp_resume(child: Any, task: dict[str, Any], parent_agent: Any) -> None:
++    """What action='continue' needs to run *child* again once it finished: a top-level child whose conversation is
++    persisted in a store this process opens itself (not a managed worker's owner-reserved one)."""
++    from agent.runtime_session_store import RuntimeSessionStore
++    db = getattr(child, "_session_db", None)
++    if (getattr(parent_agent, "_delegate_depth", 0) or db is None or isinstance(db, RuntimeSessionStore)
++            or getattr(child, "_persist_disabled", False) is True or not isinstance(getattr(child, "session_id", None), str)):
++        return
++    # Images and an output schema belong to the first answer; the follow-up is a plain message.
++    child._delegate_resume = {
++        "task": {k: v for k, v in task.items() if k not in ("images", "output_schema", "group")},
++        "session_id": child.session_id,
++    }
++
++
++def _continuation_history(child: Any) -> list[dict[str, Any]]:
++    """The finished child's own conversation, as a resumed gateway session replays it."""
++    try:
++        return child._session_db.get_messages_as_conversation(child.session_id, repair_alternation=True)
++    except Exception as exc:
++        _close_child(child, "Failed to close a continuation child without history")
++        raise ValueError(f"Could not load the subagent's conversation to continue it: {exc}") from exc
++
++
++def _continue_subagent(subagent_id: Optional[str], message: Optional[str], parent_agent: Any,
++                       background: Optional[bool]) -> str:
++    """action='continue': run a finished child of this conversation again, on its own session, with a follow-up
++    message. It goes through the spawn path (route resolved again under the current policy, background dispatch,
++    completion message); a call that never starts the child gives the finished child back."""
++    from tools.delegate_tool_registry import claim_finished_subagent, restore_finished_subagent
++    sid, text = (subagent_id or "").strip(), (message or "").strip()
++    if not sid or not text:
++        return tool_error("action='continue' requires subagent_id (from the spawn response or action='list') and a "
++                          "non-empty 'message' for the finished subagent.")
++    record, err = claim_finished_subagent(sid, parent_agent)
++    if err:
++        return tool_error(err)
++    started = False
++    try:
++        result = delegate_task(tasks=[dict(record["task"])], background=background, parent_agent=parent_agent,
++                               continuation={"subagent_id": sid, "session_id": record["session_id"], "message": text})
++        try:
++            parsed = json.loads(result)
++        except (TypeError, ValueError):
++            parsed = {}
++        started = not (isinstance(parsed, dict) and "error" in parsed and "results" not in parsed)
++        return result
++    finally:
++        if not started:
++            restore_finished_subagent(record)
++
++
+ def _build_children(
+     task_list: list[dict[str, Any]], task_schemas: list[Optional[dict[str, Any]]], routes: list[Any], *,
+     top_role: str, max_iterations: int, parent_agent,
+     live_deleg_id: Optional[str], live_writers: list, task_images: Optional[list[Optional[list[str]]]] = None,
++    continuation: Optional[dict[str, Any]] = None,
+ ) -> tuple[list[tuple], Optional[str]]:
+     """Build every child on the main thread (construction is not thread-safe), each on its task's route;
+     ``(children, None)`` or ``([], error)`` on an explicit-pin preflight failure."""
+@@ -488,7 +545,12 @@ def _build_children(
+                 toolsets=None,  # always inherit the parent's toolsets
+                 model=route.creds["model"], max_iterations=max_iterations, task_count=len(task_list),
+                 parent_agent=parent_agent, role=_normalize_role(t.get("role") or top_role), **_route_overrides(route),
++                **({"subagent_id": continuation["subagent_id"], "resume_session_id": continuation["session_id"]}
++                   if continuation else {}),
+             )
++            if continuation:
++                child._delegate_continuation = {
++                    "message": continuation["message"], "history": _continuation_history(child)}
+         except ValueError as exc:
+             # An owner refusal can land mid-batch: the siblings built so far hold reservations.
+             for _, _, built in children:
+@@ -496,6 +558,7 @@ def _build_children(
+                 _close_child(built, "Failed to close child after a refused sibling")
+             return [], str(exc)
+         pin_child_service_tier(child, route.creds)
++        _stamp_resume(child, t, parent_agent)
+         if _task_schema is not None:
+             with _quiet("Could not attach output schema to child %d", i):
+                 child._delegate_output_schema = _task_schema
+@@ -571,7 +634,7 @@ def delegate_task(
+     max_iterations: Optional[int] = None, role: Optional[str] = None, background: Optional[bool] = None,
+     output_schema: Optional[dict[str, Any]] = None, images: Optional[list[str]] = None, action: Optional[str] = None,
+     subagent_id: Optional[str] = None, message: Optional[str] = None, parent_agent=None,
+-    credentials_cfg: Optional[dict[str, Any]] = None,
++    credentials_cfg: Optional[dict[str, Any]] = None, continuation: Optional[dict[str, Any]] = None,
+ ) -> str:
+     """Spawn child agents (single ``goal`` or ``tasks=[...]`` batch) or control running ones. ``action``
+     list/steer/stop run synchronously and bypass the pause gate, depth limit and async dispatch. ``role`` is legacy
+@@ -583,8 +646,10 @@ def delegate_task(
+     normalized_action = (action or "").strip().lower()
+     if normalized_action in _CONTROL_ACTIONS:
+         return _handle_control_action(normalized_action, subagent_id, message, parent_agent)
++    if normalized_action == "continue":
++        return _continue_subagent(subagent_id, message, parent_agent, background)
+     if normalized_action and normalized_action != "spawn":
+-        return tool_error(f"Unknown action '{action}'. Use spawn (default), list, steer, or stop.")
++        return tool_error(f"Unknown action '{action}'. Use spawn (default), list, steer, stop, or continue.")
+ 
+     # Operator kill switch (TUI / delegation.pause RPC): blocks NEW spawns only.
+     if is_spawn_paused():
+@@ -671,7 +736,7 @@ def delegate_task(
+ 
+     children, err = _build_children(
+         task_list, task_schemas, routes, top_role=top_role, max_iterations=default_max_iter, parent_agent=parent_agent,
+-        live_deleg_id=live_deleg_id, live_writers=live_writers, task_images=task_images,
++        live_deleg_id=live_deleg_id, live_writers=live_writers, task_images=task_images, continuation=continuation,
+     )
+     if err:
+         return tool_error(err)
+@@ -685,7 +750,7 @@ def delegate_task(
+ 
+ # ── OpenAI function-calling schema ──────────────────────────────────────────
+ 
+-def _build_top_level_description(*, independent_completions=None) -> str:
++def _build_top_level_description(*, independent_completions=None, task_model=False) -> str:
+     """delegate_task description: ONLY guidance stated nowhere else in the schema
+     (limits live in the 'tasks' parameter description, rebuilt per get_definitions())."""
+     try:
+@@ -707,7 +772,8 @@ def _build_top_level_description(*, independent_completions=None) -> str:
+     if independent_completions is None:
+         independent_completions = _get_independent_completions()
+     delivery = _DELIVERY_INDEPENDENT if independent_completions else _DELIVERY_JOINED
+-    return _DESCRIPTION_HEAD.format(delivery=delivery) + restrictions_rule + _DESCRIPTION_TAIL
++    tail = _DESCRIPTION_TAIL_TASK_MODEL if task_model else _DESCRIPTION_TAIL
++    return _DESCRIPTION_HEAD.format(delivery=delivery) + restrictions_rule + tail
+ 
+ # The independent variant states the dispatch-time choice and its cost: a parent that meant to answer once but left
+ # tasks ungrouped is woken per result and spends a filler turn on each.
+@@ -724,7 +790,8 @@ _DESCRIPTION_DELIVERY = (
+     "Otherwise runs in the background: dispatch returns live transcript paths and results re-enter "
+     "as a new message when subagents finish{delivery}. Background results are delivered only "
+     "BETWEEN your turns: finish whatever does not depend on them, then give a one-line status and END YOUR TURN. Never "
+-    "wait or poll on transcripts, artifact files, or CI for a child.\n\n"
++    "wait or poll on transcripts, artifact files, or CI for a child. "
++    "`action='continue'` sends a finished child a follow-up on its own conversation, delivered the same way.\n\n"
+ )
+ _ONESHOT_DESCRIPTION_DELIVERY = "Parallel children are joined and their results return in this tool call.\n\n"
+ _DESCRIPTION_HEAD = (
+@@ -751,6 +818,18 @@ _DESCRIPTION_HEAD = (
+ _DESCRIPTION_TAIL = (
+     "- Children inherit the parent model unless pinned via delegation.provider / delegation.model in config.yaml."
+ )
++_DESCRIPTION_TAIL_TASK_MODEL = (
++    "- Children inherit the parent model unless a task sets `model` or config.yaml pins delegation.provider / "
++    "delegation.model."
++)
++# Offered per task by _build_dynamic_schema_overrides when routing allows it (tools/delegate_tool_routes.py).
++_TASK_MODEL_PARAM = {
++    "type": "string",
++    "description": (
++        "Optional model for this child, as the model picker lists it: a model id, or `<provider>:<model>` when "
++        "several providers offer it. Only models this profile can run are accepted. Omit to use the default."
++    ),
++}
+ 
+ def _build_tasks_param_description() -> str:
+     """Compose the 'tasks' parameter description with current concurrency limit."""
+@@ -784,12 +863,16 @@ def _build_dynamic_schema_overrides() -> dict:
+ 
+     # The active delegation provider's per-task parameters and guidance (delegation.backend; none for the
+     # built-in default). Built from config with the rest of the definition, never per turn.
+-    from tools.delegate_tool_routes import schema_extension
+-    extra_params, addendum = schema_extension(_load_config())
++    from tools.delegate_tool_routes import offers_task_model, schema_extension
++    cfg = _load_config()
++    extra_params, addendum = schema_extension(cfg)
++    task_model = offers_task_model(cfg)
++    if task_model:
++        extra_params = {**extra_params, "model": _TASK_MODEL_PARAM}
+     if extra_params:
+         tasks = overrides_params["properties"]["tasks"]
+         tasks["items"] = {**tasks["items"], "properties": {**tasks["items"]["properties"], **extra_params}}
+-    description = _build_top_level_description(independent_completions=independent_completions)
++    description = _build_top_level_description(independent_completions=independent_completions, task_model=task_model)
+     return {
+         "description": f"{description}\n{addendum}" if addendum else description,
+         "parameters": overrides_params,
+@@ -863,14 +946,20 @@ DELEGATE_TASK_SCHEMA = {
+                 "'list' = ids/goals/status/transcripts; 'steer' = queue "
+                 "course-correction text into one child without stopping it; 'stop' = end one child "
+                 "early (partial result still returns). "
+-                "Control actions return immediately; tasks are ignored unless spawning.",
+-                enum=["spawn", "list", "steer", "stop"],
++                "Control actions return immediately; tasks are ignored unless spawning. "
++                "'continue' = send a FINISHED child a follow-up; it answers on its "
++                "own conversation in the background and its new result re-enters as a new message.",
++                enum=["spawn", "list", "steer", "stop", "continue"],
++            ),
++            "subagent_id": _p(
++                "string",
++                "Required for action='steer'/'stop'/'continue' (ids from the spawn response or action='list').",
+             ),
+-            "subagent_id": _p("string", "Required for action='steer'/'stop' (ids from the spawn response or action='list')."),
+             "message": _p(
+                 "string",
+                 "Required for action='steer': the course correction, appended to "
+-                "the child's next tool result mid-run. Be directive and specific.",
++                "the child's next tool result mid-run. Be directive and specific. Required for action='continue': "
++                "the follow-up the finished child answers.",
+             ),
+         },
+         "required": [],
+diff --git a/tools/delegate_tool_child_run.py b/tools/delegate_tool_child_run.py
+index c86bbdb170..383006576b 100644
+--- a/tools/delegate_tool_child_run.py
++++ b/tools/delegate_tool_child_run.py
+@@ -432,6 +432,8 @@ def _register_child(
+         "delegation_id": _str_or_none(getattr(child, "_delegation_id", None)),
+         "model": _str_or_none(getattr(child, "model", None)),
+         "started_at": time.time(), "status": "running", "tool_count": 0, "agent": child,
++        # What action='continue' needs once this child finishes (top-level children with a transcript only).
++        "resume": getattr(child, "_delegate_resume", None),
+         # Owning conversation's durable session id (same lineage completion delivery routes by), sourced from the
+         # child's stamp so it survives a parent_agent rebuild between dispatch and run; used for list/steer/stop
+         # ownership when the weakref chain breaks.
+@@ -930,6 +932,12 @@ class _ChildRun:
+         # Resolved after seed_workspace so a multimodal goal's text part carries the worktree note too.
+         _images = list(getattr(child, "_delegate_images", None) or [])
+         user_message: Any = _build_child_goal_message(self.goal, _images, child) if _images else self.goal
++        # action='continue': the follow-up message, answered on top of the child's own stored conversation.
++        continuation = getattr(child, "_delegate_continuation", None)
++        history_kwargs: dict[str, Any] = {}
++        if isinstance(continuation, dict):
++            user_message = continuation["message"]
++            history_kwargs["conversation_history"] = continuation["history"]
+ 
+         def _run_with_thread_capture():
+             worker_thread_holder["t"] = threading.current_thread()
+@@ -939,6 +947,7 @@ class _ChildRun:
+             with child_profile_scope(child), delegated_child_context(str(getattr(child, "session_id", "") or "")):
+                 return child.run_conversation(
+                     user_message=user_message, task_id=self.child_task_id, stream_callback=self.relay_text,
++                    **history_kwargs,
+                 )
+ 
+         future = executor.submit(contextvars.copy_context().run, _run_with_thread_capture)
+diff --git a/tools/delegate_tool_dispatch.py b/tools/delegate_tool_dispatch.py
+index 5065c6a3b4..32049f1611 100644
+--- a/tools/delegate_tool_dispatch.py
++++ b/tools/delegate_tool_dispatch.py
+@@ -377,7 +377,7 @@ _BACKGROUND_NOTES = {
+     "control_hint": (
+         "While a child runs you can orchestrate it live with this same tool: delegate_task(action='list') to see live "
+         "children, action='steer' with subagent_id + message to redirect one, action='stop' with subagent_id to end "
+-        "one early."
++        "one early. Once one has finished, action='continue' with subagent_id + message sends it a follow-up."
+     ),
+     "live_transcripts_hint": (
+         "Each subagent streams a human-readable transcript of its operations to the file listed above (append-only, "
+diff --git a/tools/delegate_tool_registry.py b/tools/delegate_tool_registry.py
+index 6146e46860..ba8a47ec06 100644
+--- a/tools/delegate_tool_registry.py
++++ b/tools/delegate_tool_registry.py
+@@ -24,6 +24,10 @@ _active_subagents: dict[str, dict[str, Any]] = {}
+ # and need delegation attribution even though the live registry entry is gone.
+ _RECENT_SUBAGENTS_CAP = 200
+ _recent_subagents: dict[str, dict[str, Any]] = {}
++# subagent_id -> what action='continue' needs to run a finished top-level child again on its own session (its task,
++# task_index, child session id, owning conversation). In memory only: a gateway restart forgets them (bounded FIFO).
++_FINISHED_SUBAGENTS_CAP = 64
++_finished_subagents: dict[str, dict[str, Any]] = {}
+ 
+ def get_subagent_attribution(task_id: Optional[str]) -> Optional[dict[str, Any]]:
+     """``{subagent_id, goal, delegation_id}`` for a process task_id that belongs to a live or recently-finished child
+@@ -65,6 +69,14 @@ def _unregister_subagent(subagent_id: str, *, agent: Any = None) -> None:
+         sid = record.get("subagent_id")
+         if not sid:
+             return
++        resume = record.get("resume")
++        if isinstance(resume, dict):
++            _finished_subagents.pop(sid, None)
++            _finished_subagents[sid] = {
++                **resume, "subagent_id": sid, "goal": record.get("goal"), "model": record.get("model"),
++                "owner_agent_session_id": record.get("owner_agent_session_id"), "finished_at": time.time()}
++            while len(_finished_subagents) > _FINISHED_SUBAGENTS_CAP:
++                _finished_subagents.pop(next(iter(_finished_subagents)), None)
+         _recent_subagents[sid] = {k: record.get(k) for k in ("goal", "delegation_id", "owner_agent_session_id")}
+         while len(_recent_subagents) > _RECENT_SUBAGENTS_CAP:
+             _recent_subagents.pop(next(iter(_recent_subagents)), None)
+@@ -168,7 +180,45 @@ def _capture_gateway_steer_authority(owner_session_id: Optional[str]) -> tuple[A
+         return None, None
+ 
+ # Registry record fields never exposed to the TUI/RPC snapshot.
+-_PRIVATE_RECORD_KEYS = frozenset({"agent", "owner_session_id", "owner_transport", "owner_session_record", "accepting_steer"})
++_PRIVATE_RECORD_KEYS = frozenset({
++    "agent", "owner_session_id", "owner_transport", "owner_session_record", "accepting_steer", "resume"})
++
++
++def _owned_finished(subagent_id: str, parent_agent: Any) -> Optional[dict[str, Any]]:
++    """The finished child *subagent_id* if *parent_agent*'s conversation owns it (durable lineage only: the
++    child agent is gone, so there is no identity chain to walk)."""
++    with _active_subagents_lock:
++        record = _finished_subagents.get(subagent_id)
++    if record is None or not _owns_subagent_record({**record, "agent": None}, parent_agent):
++        return None
++    return record
++
++
++def claim_finished_subagent(subagent_id: str, parent_agent: Any) -> tuple[Optional[dict[str, Any]], Optional[str]]:
++    """Take the finished child for one continuation, so two calls never run the same session at once: ``(record,
++    None)``, or ``(None, error)``. ``restore_finished_subagent`` puts it back when the continuation never starts."""
++    with _active_subagents_lock:
++        live = _active_subagents.get(subagent_id)
++    if live is not None and _owns_subagent_record(live, parent_agent):
++        return None, (f"Subagent '{subagent_id}' is still running. Use action='steer' to redirect it, or wait for its "
++                      "result before continuing it.")
++    record = _owned_finished(subagent_id, parent_agent)
++    if record is None:
++        return None, (f"No finished subagent '{subagent_id}' of this conversation can be continued (action='list' "
++                      "shows the resumable ones). Finished children are kept in memory only, so after a gateway "
++                      "restart delegate a new task instead.")
++    with _active_subagents_lock:
++        if _finished_subagents.get(subagent_id) is not record or record.get("continuing"):
++            return None, f"Subagent '{subagent_id}' is already being continued. Wait for its result."
++        record["continuing"] = True  # until the continued child finishes and records itself again
++    return record, None
++
++
++def restore_finished_subagent(record: dict[str, Any]) -> None:
++    """Give back a claimed child whose continuation never started (a newer record, if any, stays)."""
++    with _active_subagents_lock:
++        if _finished_subagents.get(record["subagent_id"]) is record:
++            record.pop("continuing", None)
+ 
+ def list_active_subagents() -> list[dict[str, Any]]:
+     """Copy of the running subagent tree ({subagent_id, parent_id, depth, goal, model,
+@@ -259,6 +309,17 @@ def _list_payload(parent_agent: Any) -> dict[str, Any]:
+             "have delivered (or will deliver) their results as normal "
+             "completion messages — there is nothing to steer or stop."
+         )
++    with _active_subagents_lock:
++        finished_ids = list(_finished_subagents)
++    finished = [
++        {"subagent_id": sid, "goal": r.get("goal"), "model": r.get("model"), "status": "finished", "resumable": True}
++        for sid in reversed(finished_ids)
++        if (r := _owned_finished(sid, parent_agent)) is not None and not r.get("continuing")]
++    if finished:
++        payload["finished"] = finished
++        payload["finished_note"] = (
++            "These children finished. action='continue' with subagent_id + message sends one a follow-up on its own "
++            "conversation; its new answer arrives as a completion message.")
+     return payload
+ 
+ def _handle_control_action(action: str, subagent_id: Optional[str], message: Optional[str], parent_agent: Any) -> str:
+@@ -273,6 +334,10 @@ def _handle_control_action(action: str, subagent_id: Optional[str], message: Opt
+         return tool_error(f"action='{action}' requires subagent_id (from the spawn dispatch response or action='list').")
+     with _active_subagents_lock:
+         record = _active_subagents.get(sid)
++    if (record is None or not _owns_subagent_record(record, parent_agent)) and _owned_finished(sid, parent_agent):
++        return tool_error(
++            f"Subagent '{sid}' already finished, so there is nothing to {action}. To give it a follow-up, use "
++            "action='continue' with this subagent_id and a message.")
+     if record is None or not _owns_subagent_record(record, parent_agent):
+         return tool_error(
+             f"No live subagent '{sid}' in this conversation's spawn tree. It "
+diff --git a/tools/delegate_tool_routes.py b/tools/delegate_tool_routes.py
+index a2dfcf3a52..72a71902d4 100644
+--- a/tools/delegate_tool_routes.py
++++ b/tools/delegate_tool_routes.py
+@@ -306,6 +306,90 @@ def _route_one(provider: DelegationProvider, declared: dict[str, dict[str, Any]]
+         raise DelegationRouteError(f"Task {index}: delegation backend '{provider.name}' failed: {exc}") from exc
+ 
+ 
++#: ``delegation`` keys that, pinned by the managed scope, make every child's model the administrator's.
++_MANAGED_ROUTE_KEYS = ("delegation.model", "delegation.provider", "delegation.base_url")
++#: Route keys a task's own ``model`` replaces with that model's provider route.
++_ENDPOINT_KEYS = frozenset({"model", "provider", "base_url", "api_key", "api_mode", "request_overrides"})
++_MAX_LISTED_MODELS = 20
++
++
++def managed_route_pin() -> Optional[str]:
++    """The ``delegation`` routing key the managed scope pins, if any."""
++    from hermes_cli.managed_scope import is_key_managed
++    return next((key for key in _MANAGED_ROUTE_KEYS if is_key_managed(key)), None)
++
++
++def offers_task_model(config: Mapping[str, Any]) -> bool:
++    """Whether ``delegate_task`` offers a per-task ``model``: not under another backend (it routes every task
++    itself) nor under a managed-scope pin on the subagent route. A backend that cannot run keeps the base schema,
++    as in ``schema_extension``; its spawns fail closed."""
++    try:
++        if _active_provider(config).name != "default":
++            return False
++    except DelegationRouteError:
++        pass
++    return managed_route_pin() is None
++
++
++def _routable_models(parent_agent: Any) -> list[tuple[str, str, bool]]:
++    """``(provider slug, model id, is the parent's provider)`` for every model the profile's pickers list: the
++    explicitly configured providers, from cached catalogs (no network)."""
++    from hermes_cli.inventory import build_models_payload, load_picker_context
++    ctx = load_picker_context()
++    provider, base_url, model = (str(getattr(parent_agent, k, "") or "") for k in ("provider", "base_url", "model"))
++    if provider.strip().lower() == "custom":  # a named endpoint: the picker's identity for it, as the TUI recovers it
++        from hermes_cli.runtime_provider import canonical_custom_identity
++        provider = canonical_custom_identity(
++            base_url=base_url or None, config_provider=ctx.current_provider, model=model or None,
++            requested=getattr(parent_agent, "requested_provider", None)) or provider
++    payload = build_models_payload(
++        ctx.with_overrides(current_provider=provider, current_model=model, current_base_url=base_url),
++        explicit_only=True, refresh=False, probe_custom_providers=False, non_blocking_catalogs=True)
++    return [(str(row["slug"]), name, bool(row.get("is_current")))
++            for row in payload.get("providers") or [] if row.get("slug")
++            for name in row.get("models") or [] if isinstance(name, str) and name]
++
++
++def _task_model_route(index: int, requested: Any, route: dict[str, Any], backend: str,
++                      parent_agent: Any) -> dict[str, Any]:
++    """The default route with its endpoint replaced by the route of the model a task names. The model must be one
++    the profile's pickers list (``provider:model``, or a bare id one provider offers), so a typo or an unconfigured
++    provider is a tool error, never a child on a guessed endpoint. A managed-scope pin wins: the administrator's
++    subagent route is policy, which a model-chosen argument must not override."""
++    if not isinstance(requested, str) or not requested.strip():
++        raise DelegationRouteError(f"Task {index}: 'model' must be a model id.")
++    requested = requested.strip()
++    if backend != "default":
++        raise DelegationRouteError(
++            f"Task {index}: the delegation backend '{backend}' picks each subagent's route, so a task cannot name "
++            f"a model. Omit 'model'.")
++    pinned = managed_route_pin()
++    if pinned:
++        raise DelegationRouteError(
++            f"Task {index}: your administrator sets the subagent model ({pinned} in the managed config), so a "
++            f"task cannot name one. Omit 'model'.")
++    try:
++        rows = _routable_models(parent_agent)
++    except Exception as exc:
++        raise DelegationRouteError(f"Task {index}: could not list this profile's models: {exc}") from exc
++    matches = [row for row in rows if f"{row[0]}:{row[1]}" == requested] or [row for row in rows if row[1] == requested]
++    if len(matches) > 1:
++        raise DelegationRouteError(
++            f"Task {index}: several providers offer '{requested}': "
++            f"{', '.join(f'{slug}:{name}' for slug, name, _ in matches)}. Name one of them.")
++    if not matches:
++        listed = [f"{slug}:{name}" for slug, name, _ in rows]
++        more = f" (and {len(listed) - _MAX_LISTED_MODELS} more)" if len(listed) > _MAX_LISTED_MODELS else ""
++        raise DelegationRouteError(
++            f"Task {index}: '{requested}' is not a model this profile can run. "
++            + (f"Use one of: {', '.join(listed[:_MAX_LISTED_MODELS])}{more}, or omit 'model'."
++               if listed else "It lists no models; omit 'model'."))
++    slug, name, current = matches[0]
++    kept = {k: v for k, v in route.items() if k not in _ENDPOINT_KEYS}
++    # The parent's own provider keeps its endpoint and key (as delegation.model alone does).
++    return {**kept, "model": name} if current else {**kept, "provider": slug, "model": name}
++
++
+ def resolve_task_routes(task_list: list[dict[str, Any]], config: Mapping[str, Any], parent_agent: Any,
+                         ) -> tuple[list[TaskRoute], Optional[str]]:
+     """One :class:`TaskRoute` per task from the backend the session's ``delegate_task`` was built from (else
+@@ -326,6 +410,8 @@ def resolve_task_routes(task_list: list[dict[str, Any]], config: Mapping[str, An
+         try:
+             route = _route_one(provider, declared, i, task, config)
+             _check_backend_effort(i, route, config)
++            if task.get("model") is not None:
++                route = _task_model_route(i, task["model"], route, provider.name, parent_agent)
+             routes.append(_route_to_task_route(route, parent_agent, cache, config, provider.name))
+         except ValueError as exc:  # DelegationRouteError, the credential resolver's and the tier check's refusals
+             routes.append(TaskRoute({}, {}, backend=provider.name, error=str(exc)))

@@ -24,6 +24,7 @@ import {
   isCommandMissingCause,
   parseGenericCliVersion,
   providerModelsFromSettings,
+  providerProbeEnvironment,
   type ServerProviderDraft,
 } from "@t3tools/provider-core/server/snapshotProbe";
 import {
@@ -334,7 +335,7 @@ export const checkHermesProviderStatus = Effect.fn("checkHermesProviderStatus")(
   const discoveryStage = yield* Ref.make("process startup");
   const discoveryExit = yield* discoverHermesModelsViaAcp(
     hermesSettings,
-    environment,
+    providerProbeEnvironment(environment),
     options?.commandAdvertisementTimeoutMs,
     (method) => Ref.set(discoveryStage, method),
   ).pipe(Effect.timeoutOption(HERMES_ACP_MODEL_DISCOVERY_TIMEOUT_MS), Effect.exit);

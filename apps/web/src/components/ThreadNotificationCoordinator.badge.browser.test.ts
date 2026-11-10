@@ -108,6 +108,7 @@ const thread = {
   archivedAt: null as string | null,
   hasPendingApprovals: false,
   hasPendingUserInput: false,
+  pendingRequestId: "request-1",
   session: null as { status: string } | null,
   latestTurn: { turnId: "turn", state: "running", completedAt: null as string | null },
 };
@@ -146,9 +147,9 @@ function toV2ThreadShell(input: typeof thread) {
           ? "failed"
           : "running",
     pendingRuntimeRequest: input.hasPendingUserInput
-      ? { id: "request-1", kind: "user_input", createdAt: SHELL_NOW }
+      ? { id: input.pendingRequestId, kind: "user_input", createdAt: SHELL_NOW }
       : input.hasPendingApprovals
-        ? { id: "request-1", kind: "command", createdAt: SHELL_NOW }
+        ? { id: input.pendingRequestId, kind: "command", createdAt: SHELL_NOW }
         : null,
     latestVisibleMessage: null,
     latestUserMessageAt: null,
@@ -336,6 +337,18 @@ it("drops badges for removed environments", async () => {
   app.setEnvironmentIds(["one"]);
   expect(lastBadge()).toBe(1);
 });
+
+it.each(["hasPendingApprovals", "hasPendingUserInput"] as const)(
+  "notifies again when a new %s request replaces the pending one in the same run",
+  async (flag) => {
+    await using app = setup();
+    app.start();
+    state.shells.set("one", shell({ [flag]: true, pendingRequestId: "request-1" }));
+    state.shells.set("one", shell({ [flag]: true, pendingRequestId: "request-2" }));
+    const title = flag === "hasPendingApprovals" ? "Approval needed" : "Input needed";
+    expect(TestNotification.sent.map(({ title }) => title)).toEqual([title, title]);
+  },
+);
 
 it("presents completion notifications and sound as soon as the shell completes", async () => {
   await using app = setup();

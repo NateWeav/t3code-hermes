@@ -1,9 +1,9 @@
 diff --git a/acp_adapter/gateway_background.py b/acp_adapter/gateway_background.py
 new file mode 100644
-index 0000000000..a300fc47c3
+index 0000000000..d08b1109f6
 --- /dev/null
 +++ b/acp_adapter/gateway_background.py
-@@ -0,0 +1,166 @@
+@@ -0,0 +1,171 @@
 +"""Background processes of a gateway session, reported to ACP editors as ``_hermes/process``.
 +
 +``hermes acp`` views the gateway, whose daemon owns the process registry. An editor therefore sees a
@@ -98,6 +98,8 @@ index 0000000000..a300fc47c3
 +    try:
 +        while watch.tracked:
 +            watch.wake.clear()
++            # A process tracked while the read is in flight may not be in its reply: next read.
++            asked = list(watch.tracked)
 +            try:
 +                gateway = agent._gateway
 +                if gateway is None:
@@ -114,7 +116,7 @@ index 0000000000..a300fc47c3
 +                missed += 1
 +                rows = {} if missed >= MAX_MISSED_READS else None
 +            if rows is not None:
-+                await _report(agent, sid, watch, rows)
++                await _report(agent, sid, watch, rows, asked)
 +            if watch.tracked:
 +                try:
 +                    await asyncio.wait_for(watch.wake.wait(), POLL_SECONDS)
@@ -124,8 +126,11 @@ index 0000000000..a300fc47c3
 +        _watches(agent).pop(sid, None)
 +
 +
-+async def _report(agent, sid, watch, rows):
-+    for proc_id, report in list(watch.tracked.items()):
++async def _report(agent, sid, watch, rows, asked):
++    for proc_id in asked:
++        report = watch.tracked.get(proc_id)
++        if report is None:
++            continue
 +        row = rows.get(proc_id)
 +        running = row is not None and row.get("status") == "running"
 +        if running and proc_id in watch.announced:
@@ -196,10 +201,10 @@ index ff78c7e0f3..07cf595013 100644
              return
 diff --git a/tests/acp_adapter/test_gateway_background_process.py b/tests/acp_adapter/test_gateway_background_process.py
 new file mode 100644
-index 0000000000..b3e03665eb
+index 0000000000..57f18eae45
 --- /dev/null
 +++ b/tests/acp_adapter/test_gateway_background_process.py
-@@ -0,0 +1,173 @@
+@@ -0,0 +1,200 @@
 +"""A background process a ``terminal`` call starts reaches ACP editors as ``_hermes/process``:
 +``running`` once the gateway's ``process.list`` shows it, ``exited`` once that shows it finished."""
 +import asyncio
@@ -265,6 +270,33 @@ index 0000000000..b3e03665eb
 +    await settled(agent)
 +    assert reports(agent)[1:] == [
 +        ("hermes/process", {**report, "status": "exited", "exitCode": 3, "reason": "exited"})]
++
++
++@pytest.mark.asyncio
++async def test_a_process_started_while_a_read_is_in_flight_waits_for_the_next_read(monkeypatch):
++    monkeypatch.setattr(gateway_background, "POLL_SECONDS", 0.01)
++    rows = [RUNNING]
++    agent = viewer(lambda: rows)
++    reading, answer = asyncio.Event(), asyncio.Event()
++
++    async def rpc(method, **params):
++        listed = list(rows)  # what the owner saw when it answered
++        if not reading.is_set():
++            reading.set()
++            await answer.wait()
++        return {"processes": listed}
++    agent._gateway.rpc.side_effect = rpc
++    await start(agent)
++    await reading.wait()
++    second = json.dumps({"output": "Background process started", "session_id": "proc_2"})
++    rows.append({"session_id": "proc_2", "status": "running"})
++    await project(agent, "tool.start", {"tool_call_id": "c2", "tool_name": "terminal", "args": {"command": "x"}})
++    await project(agent, "tool.complete", {"tool_call_id": "c2", "tool_name": "terminal", "result": second})
++    answer.set()
++    await async_wait_until(lambda: len(reports(agent)) == 2, timeout=2)
++    assert [(p["processId"], p["status"]) for _, p in reports(agent)] == [
++        ("proc_1", "running"), ("proc_2", "running")]
++    await agent.aclose()
 +
 +
 +@pytest.mark.asyncio

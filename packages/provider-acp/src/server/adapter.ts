@@ -2620,7 +2620,8 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                   wakes: source === "toolResult" || known?.wakes === true,
                   reported: source === "report" || known?.reported === true,
                 });
-              } else {
+              } else if (source === "report" || known?.reported !== true) {
+                // Only its own report ends a reported task: a tool result can say it moved on.
                 rosterChanged = awaitableBackgroundTasks.delete(task.taskId) || rosterChanged;
                 awaitedBackgroundTaskIds.delete(task.taskId);
               }

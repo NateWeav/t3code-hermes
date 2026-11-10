@@ -1608,6 +1608,26 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
           { process: { ...tests, status: "running" } },
           ...hermesBackgroundStart({ ...dev, notify: false }),
           { process: { ...dev, status: "running" } },
+          // A result that says the agent let go of it is not its exit.
+          {
+            sessionUpdate: "tool_call",
+            toolCallId: "tc-handoff",
+            title: "process_manage: handoff",
+            kind: "other",
+            rawInput: { action: "handoff", session_id: DEV_PROC },
+          },
+          {
+            sessionUpdate: "tool_call_update",
+            toolCallId: "tc-handoff",
+            kind: "other",
+            status: "completed",
+            content: [
+              {
+                type: "content",
+                content: { type: "text", text: "process_manage result\n- **status:** handed_off" },
+              },
+            ],
+          },
         ],
         afterTurn: ({ session, providerThread }) =>
           Effect.gen(function* () {

@@ -96,8 +96,10 @@ service is still installed and will start at the next login.
 Windows background services are not supported. To keep a Windows host available
 through T3 Connect, leave the desktop app running with its local environment
 enabled, or keep `t3 serve` running in a terminal. Minimize the desktop app rather
-than closing its last window, which stops its local server. Linking T3 Connect
-does not configure automatic startup at Windows sign-in.
+than closing its last window, which stops its local server, or turn on
+**Settings > Labs > Keep running in tray** and **Start at login in the tray** so
+it starts hidden at Windows sign-in and survives closing the window. Linking T3
+Connect alone does not configure automatic startup.
 
 `t3 up` installs the service when you set up T3 Connect, but the two are managed
 separately. Signing out of T3 Connect does not stop or uninstall the service.

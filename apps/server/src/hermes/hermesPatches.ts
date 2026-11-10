@@ -450,13 +450,8 @@ const hermesPatchPaths = (content: string): ReadonlyArray<string> => {
 const patchPaths = (patch: HermesPatchDefinition) =>
   new Set(patch.versions.flatMap((version) => hermesPatchPaths(version.content)));
 
-/**
- * Paths with uncommitted changes, untracked files included: those are what
- * `hermes update`'s autostash would sweep away.
- */
-export const readHermesDirtyPaths = Effect.fn("readHermesDirtyPaths")(function* (
-  checkoutRoot: string,
-) {
+/** Paths with uncommitted changes, untracked files included. */
+const readHermesDirtyPaths = Effect.fn("readHermesDirtyPaths")(function* (checkoutRoot: string) {
   const result = yield* runGit(checkoutRoot, [
     "status",
     "--porcelain=v1",
@@ -532,26 +527,6 @@ const readUserEdits = Effect.fn("readHermesUserEdits")(function* (
 });
 
 /**
- * The user's own uncommitted edits in the checkout, told apart from the
- * changes of the given patches wherever those are applied.
- */
-export const readHermesUserEdits = Effect.fn("readHermesUserEditsForPatches")(function* (
-  checkoutRoot: string,
-  patches: ReadonlyArray<HermesPatchDefinition>,
-) {
-  const files = yield* writePatchFiles(patches);
-  const resolved = yield* Effect.forEach(
-    patches,
-    (patch) =>
-      resolvePatchState(checkoutRoot, patch, files).pipe(
-        Effect.map((result) => ({ patch, ...result })),
-      ),
-    { concurrency: "unbounded" },
-  );
-  return yield* readUserEdits(checkoutRoot, appliedVersions(resolved));
-}, Effect.scoped);
-
-/**
  * The given patches whose change sits in HEAD itself (committed, or carried
  * upstream) rather than only in the working tree: some version reverses
  * against HEAD in a scratch index. Removing one of those would leave a
@@ -596,6 +571,13 @@ const appliedVersions = (
 export const readHermesHeadCommit = (checkoutRoot: string) =>
   runGit(checkoutRoot, ["rev-parse", "--short", "HEAD"]).pipe(
     Effect.map((result) => (result.code === 0 ? result.stdout.trim() || null : null)),
+  );
+
+/** The newest stash entry, abbreviated, or null when there is none or git cannot say. */
+export const readHermesStashTop = (checkoutRoot: string) =>
+  runGit(checkoutRoot, ["rev-parse", "-q", "--verify", "--short", "refs/stash"]).pipe(
+    Effect.map((result) => (result.code === 0 ? result.stdout.trim() || null : null)),
+    Effect.orElseSucceed(() => null),
   );
 
 const isAncestor = (checkoutRoot: string, ancestor: string, descendant: string) =>

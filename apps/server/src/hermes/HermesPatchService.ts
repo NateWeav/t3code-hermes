@@ -50,11 +50,10 @@ import {
   HERMES_PATCHES,
   HERMES_UPDATE_LOCK_KEY,
   hermesPatchedSourceFiles,
-  readHermesDirtyPaths,
   readHermesHeadCommit,
   readHermesPatches,
   readHermesPatchesInHead,
-  readHermesUserEdits,
+  readHermesStashTop,
   resolveHermesGitCheckout,
   type HermesPatchDefinition,
 } from "./hermesPatches.ts";
@@ -427,9 +426,9 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
   }, Effect.scoped);
 
   /**
-   * Runs `hermes update` without prompts or stash restore, deferring the gateway restart until
-   * patches are back on. Only flags `update --help` lists are passed, since older Hermes rejects
-   * `--keep-stash`/`--no-gateway-restart`.
+   * Runs `hermes update` without prompts, deferring the gateway restart until patches are back
+   * on. Hermes stashes the user's own edits and restores them itself. `--no-gateway-restart` is
+   * passed only when `update --help` lists it, since older Hermes rejects it.
    */
   const runHermesUpdate = Effect.fn("HermesPatchService.runHermesUpdate")(
     function* (checkout: {
@@ -448,7 +447,7 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
       const args = [
         "update",
         "--yes",
-        ...["--keep-stash", "--no-gateway-restart"].filter((flag) =>
+        ...["--no-gateway-restart"].filter((flag) =>
           new RegExp(`(^|[\\s\\[,])${flag}(?![\\w-])`, "m").test(help),
         ),
       ];
@@ -484,17 +483,6 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
     // Last in stack order first, each read as it comes off: a patch another
     // builds on reads as applied only once that one is gone.
     const removable = shippedPatches.filter((patch) => !inHead.has(patch.id)).toReversed();
-    const refuseLocalChanges = (paths: ReadonlyArray<string>) =>
-      new HermesPatchError({
-        reason: "wrongState",
-        detail: `The Hermes checkout has uncommitted changes of your own (${paths.length === 1 ? paths[0] : `${paths[0]} and ${paths.length - 1} more`}). Updating would park them in a git stash, so commit or discard them first.`,
-      });
-    // Refused before anything moves, whenever the user's edits can be told
-    // apart from the applied patches' changes.
-    const userEdits = yield* provide(readHermesUserEdits(checkoutRoot, shippedPatches)).pipe(
-      Effect.mapError(gitFailed("Could not read the Hermes checkout with git.")),
-    );
-    if (userEdits.size > 0) return yield* refuseLocalChanges([...userEdits].sort());
 
     const removed: HermesPatchDefinition[] = [];
     let updated = false;
@@ -510,26 +498,12 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
         const result = yield* provide(
           changeHermesPatch(checkoutRoot, patch, "reverse", shippedPatches),
         ).pipe(Effect.orElseSucceed(() => ({ ok: false, state: "applied" }) as const));
-        if (result.state !== "applied") continue;
-        if (!result.ok) {
-          yield* reapply(checkout, restore());
-          return yield* new HermesPatchError({
-            reason: "commandFailed",
-            detail: `git refused to remove ${patch.title} before updating. Hermes was not updated.`,
-          });
-        }
-        removed.push(patch);
-      }
-      // Whatever is still dirty is the user's own edit inside a patched file
-      // that the check above could not attribute.
-      const leftover = yield* provide(readHermesDirtyPaths(checkoutRoot)).pipe(
-        Effect.orElseSucceed(() => new Set<string>()),
-      );
-      if (leftover.size > 0) {
-        yield* reapply(checkout, restore());
-        return yield* refuseLocalChanges([...leftover].sort());
+        if (result.ok) removed.push(patch);
       }
 
+      // Whatever is still dirty, the user's own edits and any patch they edited
+      // inside (it no longer reads as applied), rides through Hermes's autostash.
+      const stashBefore = yield* provide(readHermesStashTop(checkoutRoot));
       const update = yield* runHermesUpdate(checkout);
       updated = update.ok;
       if (!update.ok) {
@@ -537,6 +511,8 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
           Effect.annotateLogs({ output: outputTail(update.output) }),
         );
       }
+      // A new stash entry is Hermes parking the user's edits it could not put back.
+      const stashAfter = yield* provide(readHermesStashTop(checkoutRoot));
       const restored = yield* reapply(checkout, restore());
       // Hermes and its patches changed, so provider snapshots re-probe. The
       // fast mode config opt-in stays: the patch went back on, or comes back
@@ -547,6 +523,9 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
         previousHeadCommit: before.headCommit ?? null,
         updateFailed: !update.ok,
         failureOutput: update.ok ? null : outputTail(update.output),
+        ...(stashAfter !== null && stashAfter !== stashBefore
+          ? { parkedLocalChanges: stashAfter }
+          : {}),
       } satisfies HermesPatchUpdateHermesResult;
     }).pipe(
       Effect.onInterrupt(() =>

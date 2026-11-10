@@ -65,7 +65,8 @@ const NEWEST_DATE = "2026-09-30T00:00:00Z";
 
 /**
  * A Hermes stand-in: a bare upstream repo with two commits and a checkout at the older one. Its
- * `venv/bin/hermes update` runs `git pull --rebase` like `hermes update`.
+ * `venv/bin/hermes update` runs `git pull --rebase` like `hermes update`, autostashing local edits
+ * and parking them in the stash when they no longer apply.
  * `newerVersion`/`olderVersion` are the patch versions made for each commit.
  */
 const CURRENT_UPDATE_HELP =
@@ -123,8 +124,11 @@ const makeHermesWith = (options: { readonly updateHelp: string }) =>
         `if [ -f "${NodePath.join(base, "fail")}" ]; then echo "network unreachable" >&2; exit 1; fi`,
         // A release channel lands detached at the release commit.
         `if [ -f "${NodePath.join(base, "release")}" ]; then cd "${root}" && git fetch --quiet && exec git checkout --quiet --detach origin/main; fi`,
+        `cd "${root}" || exit 1`,
+        `if [ -n "$(git status --porcelain)" ]; then git -c user.name=t -c user.email=t@t stash push --quiet --include-untracked -m hermes-update-autostash || exit 1; stashed=1; fi`,
         // Rebases, as a local commit on top of Hermes would be carried along.
-        `cd "${root}" && git -c user.name=t -c user.email=t@t pull --quiet --rebase`,
+        "git -c user.name=t -c user.email=t@t pull --quiet --rebase || exit 1",
+        `if [ -n "$stashed" ]; then if git stash apply --quiet >/dev/null 2>&1; then git stash drop --quiet; else git reset --quiet --hard; fi; fi`,
         "",
       ].join("\n"),
       { mode: 0o755 },
@@ -216,7 +220,7 @@ describe("HermesPatchService.updateHermes", () => {
         assert.notStrictEqual(result.previousHeadCommit, result.snapshot.headCommit);
         assert.strictEqual(
           NodeFS.readFileSync(hermes.log, "utf8").trim(),
-          "update --yes --keep-stash --no-gateway-restart",
+          "update --yes --no-gateway-restart",
         );
         // Nothing parked: the patch was off the tree while Hermes updated.
         assert.strictEqual(git(hermes.root, "stash", "list"), "");
@@ -242,7 +246,7 @@ describe("HermesPatchService.updateHermes", () => {
         assert.strictEqual(hermes.read(), "backend = resolve()\nremote_cwd = configured()\n");
         assert.strictEqual(
           NodeFS.readFileSync(hermes.log, "utf8").trim(),
-          "update --yes --keep-stash --no-gateway-restart",
+          "update --yes --no-gateway-restart",
         );
         assert.strictEqual(git(hermes.root, "stash", "list"), "");
       }).pipe(withService(hermes.binaryPath, [patch]));
@@ -315,7 +319,7 @@ describe("HermesPatchService.updateHermes", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("refuses while the checkout has edits of the user's own, and changes nothing", () =>
+  it.effect("carries the user's own edits across the update", () =>
     Effect.gen(function* () {
       const hermes = yield* makeHermes;
       const patch = hermes.patch([hermes.newerVersion, hermes.olderVersion]);
@@ -323,35 +327,53 @@ describe("HermesPatchService.updateHermes", () => {
         const service = yield* HermesPatchService;
         yield* service.apply({ patchId: patch.id });
         NodeFS.writeFileSync(NodePath.join(hermes.root, "notes.txt"), "my notes\n");
+        NodeFS.writeFileSync(NodePath.join(hermes.root, "mine.py"), "mine\n");
 
-        const error = yield* Effect.flip(service.updateHermes);
-        assert.strictEqual(error.reason, "wrongState");
-        assert.include(error.detail, "notes.txt");
-        assert.isFalse(NodeFS.existsSync(hermes.log));
-        assert.strictEqual(hermes.head(), hermes.older);
-        assert.strictEqual(hermes.read(), "backend = local\nremote_cwd = configured()\n");
+        const result = yield* service.updateHermes;
+        assert.isFalse(result.updateFailed);
+        assert.deepStrictEqual(result.reapplied, [patch.id]);
+        assert.isUndefined(result.parkedLocalChanges);
+        assert.strictEqual(hermes.head(), hermes.newer);
+        assert.strictEqual(hermes.read(), "backend = resolve()\nremote_cwd = configured()\n");
         assert.strictEqual(
           NodeFS.readFileSync(NodePath.join(hermes.root, "notes.txt"), "utf8"),
           "my notes\n",
         );
+        assert.strictEqual(
+          NodeFS.readFileSync(NodePath.join(hermes.root, "mine.py"), "utf8"),
+          "mine\n",
+        );
+        assert.strictEqual(git(hermes.root, "stash", "list"), "");
       }).pipe(withService(hermes.binaryPath, [patch]));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("refuses on a user's own edit inside a patched file, and puts the patch back", () =>
+  it.effect("reports where Hermes parked edits that clash with the update", () =>
     Effect.gen(function* () {
       const hermes = yield* makeHermes;
       const patch = hermes.patch([hermes.newerVersion, hermes.olderVersion]);
       yield* Effect.gen(function* () {
         const service = yield* HermesPatchService;
         yield* service.apply({ patchId: patch.id });
-        const edited = "backend = local\nremote_cwd = configured()\n# mine\n";
-        NodeFS.writeFileSync(NodePath.join(hermes.root, "session.py"), edited);
+        // An edit inside the patch, on the line the update rewrites.
+        NodeFS.writeFileSync(
+          NodePath.join(hermes.root, "session.py"),
+          "backend = mine\nremote_cwd = configured()\n",
+        );
 
-        const error = yield* Effect.flip(service.updateHermes);
-        assert.strictEqual(error.reason, "wrongState");
-        assert.isFalse(NodeFS.existsSync(hermes.log));
-        assert.strictEqual(hermes.read(), edited);
+        const result = yield* service.updateHermes;
+        assert.isFalse(result.updateFailed);
+        assert.strictEqual(hermes.head(), hermes.newer);
+        assert.strictEqual(hermes.read(), "backend = resolve()\nremote_cwd = None\n");
+        assert.strictEqual(
+          result.parkedLocalChanges,
+          git(hermes.root, "rev-parse", "--short", "refs/stash").trim(),
+        );
+        // The edit and the patch it sits in are both kept there.
+        assert.strictEqual(
+          git(hermes.root, "show", `${result.parkedLocalChanges}:session.py`),
+          "backend = mine\nremote_cwd = configured()\n",
+        );
       }).pipe(withService(hermes.binaryPath, [patch]));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );

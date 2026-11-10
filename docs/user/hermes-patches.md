@@ -37,10 +37,12 @@ Hermes. Afterwards the page says what was reapplied and what is now waiting for 
 the update fails, the patches you had are put back. Updating Hermes from its provider card in
 Settings does the same, then restarts a gateway that runs as a service.
 
-It refuses to run while the checkout has uncommitted edits of your own, because updating would park
-them in a git stash where they are easy to lose track of. Commit or discard them first. It leaves a
-running Hermes gateway alone, so it never restarts without its patches; restart it afterwards with
-**Restart gateway**, as after any patch change. Hermes from before September 2026 always restarts
+Uncommitted edits of your own in the checkout are carried over the update. When an edit no longer
+fits the new Hermes, Hermes keeps it in a git stash and the result names that stash, so you can
+bring it back with `git stash apply`. If you set Hermes's `updates.non_interactive_local_changes` to
+`discard`, Hermes drops those edits instead. It leaves a running Hermes gateway alone, so it never
+restarts without its patches; restart it afterwards with **Restart gateway**, as after any patch
+change. Hermes from before September 2026 always restarts
 its gateway while updating, before the patches are back, so restart it once more afterwards.
 
 ## Things to know

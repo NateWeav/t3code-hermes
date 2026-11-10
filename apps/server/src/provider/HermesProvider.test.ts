@@ -214,6 +214,42 @@ it.live("reports authenticated with derived upstreams once ACP returns models", 
   }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
 );
 
+it.live("does not let a lazy mise shim install Hermes during a status check", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const { installed, snapshot } = yield* Effect.scoped(
+      Effect.gen(function* () {
+        const hermesPath = yield* writeFakeHermesAcpBinary({
+          prefix: "t3code-hermes-mise-",
+          availableModels: [{ modelId: "anthropic/claude-opus-4", name: "Claude Opus 4" }],
+        });
+        const installMarker = path.join(path.dirname(hermesPath), "installed");
+        const shimPath = path.join(path.dirname(hermesPath), "hermes-shim");
+        // A `lazy = true` mise shim downloads and installs the tool unless MISE_OFFLINE is set.
+        yield* fs.writeFileString(
+          shimPath,
+          [
+            `#!/bin/sh`,
+            `case "$MISE_OFFLINE" in 1|true) ;; *) touch "${installMarker}" ;; esac`,
+            `exec "${hermesPath}" "$@"`,
+          ].join("\n"),
+        );
+        yield* fs.chmod(shimPath, 0o755);
+        const { MISE_OFFLINE: _, ...environment } = process.env;
+        const snapshot = yield* checkHermesProviderStatus(
+          decodeHermesSettings({ enabled: true, binaryPath: shimPath }),
+          environment,
+        );
+        return { snapshot, installed: yield* fs.exists(installMarker) };
+      }),
+    );
+
+    expect(snapshot.status).toBe("ready");
+    expect(installed, "the Hermes status probe let mise install Hermes").toBe(false);
+  }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+);
+
 it.live("offers fast mode only on the models Hermes marked for it", () =>
   Effect.gen(function* () {
     const snapshot = yield* Effect.scoped(

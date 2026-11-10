@@ -936,14 +936,14 @@ export function resolveThreadStatusRing(input: {
     case "waiting":
       return {
         kind: "waiting",
-        colorClass: "text-sky-600/60 dark:text-sky-400/60",
+        colorClass: "text-muted-foreground",
         dashed: true,
         motion: "none",
       };
     case "monitoring":
       return {
         kind: "monitoring",
-        colorClass: "text-sky-600/60 dark:text-sky-400/60",
+        colorClass: "text-foreground/60",
         dashed: false,
         motion: "none",
       };

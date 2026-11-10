@@ -33,7 +33,7 @@ export const make = Effect.gen(function* () {
   const supported = environment.platform === "win32" && environment.isPackaged;
 
   const apply = (openAtLogin: boolean) =>
-    Effect.try(() =>
+    Effect.sync(() =>
       Electron.app.setLoginItemSettings({
         openAtLogin,
         path: process.execPath,

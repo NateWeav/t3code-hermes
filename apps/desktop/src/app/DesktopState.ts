@@ -6,6 +6,9 @@ import * as SubscriptionRef from "effect/SubscriptionRef";
 
 import type { BackendStartupFailure } from "../backend/DesktopBackendManager.ts";
 
+/** Passed only by the login item, so a manual launch always shows the window. */
+export const HIDDEN_LAUNCH_ARG = "--t3-launched-at-login";
+
 /** Startup health of the primary local backend, read by the startup recovery window. */
 export type PrimaryBackendStartup =
   | { readonly _tag: "Starting" }
@@ -17,6 +20,10 @@ export class DesktopState extends Context.Service<
   {
     readonly backendReady: Ref.Ref<boolean>;
     readonly quitting: Ref.Ref<boolean>;
+    /** True only while keepRunningInTray is on and a tray icon exists. */
+    readonly closeToTray: Ref.Ref<boolean>;
+    /** Set when the Windows login item launched the app; consumed by the first main window reveal. */
+    readonly startHidden: Ref.Ref<boolean>;
     readonly primaryBackendStartup: SubscriptionRef.SubscriptionRef<PrimaryBackendStartup>;
   }
 >()("@t3tools/desktop/app/DesktopState") {}
@@ -24,6 +31,8 @@ export class DesktopState extends Context.Service<
 const make = Effect.all({
   backendReady: Ref.make(false),
   quitting: Ref.make(false),
+  closeToTray: Ref.make(false),
+  startHidden: Ref.make(process.argv.includes(HIDDEN_LAUNCH_ARG)),
   primaryBackendStartup: SubscriptionRef.make<PrimaryBackendStartup>({ _tag: "Starting" }),
 });
 

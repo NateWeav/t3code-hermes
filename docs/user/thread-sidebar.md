@@ -73,6 +73,8 @@ reading the labels:
 | Red, fast pulse        | Failed — the session hit an error                                   |
 | Green, still           | Done — the agent finished and you have not opened the thread yet    |
 
+In the boring sidebar, threads inside project folders carry the same outlines.
+
 Settled threads and threads you have already caught up on carry no outline.
 
 Your system's reduce-motion setting keeps the outlines and their colors but holds them still.

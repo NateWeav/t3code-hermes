@@ -39,8 +39,10 @@ Settings does the same, then restarts a gateway that runs as a service.
 
 Uncommitted edits of your own in the checkout are carried over the update. When an edit no longer
 fits the new Hermes, Hermes keeps it in a git stash and the result names that stash, so you can
-bring it back with `git stash apply`. It leaves a running Hermes gateway alone, so it never restarts without its patches; restart it afterwards with
-**Restart gateway**, as after any patch change. Hermes from before September 2026 always restarts
+bring it back with `git stash apply`. If you set Hermes's `updates.non_interactive_local_changes` to
+`discard`, Hermes drops those edits instead. It leaves a running Hermes gateway alone, so it never
+restarts without its patches; restart it afterwards with **Restart gateway**, as after any patch
+change. Hermes from before September 2026 always restarts
 its gateway while updating, before the patches are back, so restart it once more afterwards.
 
 ## Things to know

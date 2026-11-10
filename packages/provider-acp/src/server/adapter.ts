@@ -2597,10 +2597,14 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           }
           if (rosterChanged) yield* emitAwaitedBackgroundRoster();
         });
-        // A Stop in progress, waiting for the agent to report the end of what it was asked to stop.
-        let reportedBackgroundTasksEnded: Deferred.Deferred<void> | null = null;
-        const hasReportedBackgroundTasks = () =>
-          [...awaitableBackgroundTasks.values()].some((task) => task.reported);
+        // A Stop in progress: the reported tasks it asked the agent to stop, and its signal that
+        // each was reported ended. A task reported after the request is not this Stop's to wait on.
+        let stoppingBackgroundTasks: {
+          readonly taskIds: ReadonlyArray<string>;
+          readonly ended: Deferred.Deferred<void>;
+        } | null = null;
+        const isReportedBackgroundTask = (taskId: string) =>
+          awaitableBackgroundTasks.get(taskId)?.reported === true;
         // A tool result shows work that wakes the agent; a report (`reportBackgroundTask`) shows
         // work whose end the agent reports. One task can be both.
         const applyAwaitableBackgroundTasks =
@@ -2627,29 +2631,30 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               }
             }
             if (rosterChanged) yield* emitAwaitedBackgroundRoster();
-            if (reportedBackgroundTasksEnded !== null && !hasReportedBackgroundTasks()) {
-              yield* Deferred.succeed(reportedBackgroundTasksEnded, undefined);
+            if (stoppingBackgroundTasks?.taskIds.some(isReportedBackgroundTask) === false) {
+              yield* Deferred.succeed(stoppingBackgroundTasks.ended, undefined);
             }
           });
         /** False when the agent did not report them all ended in time. */
         const stopReportedBackgroundTasks = Effect.fnUntraced(function* () {
           const sessionId = yield* Ref.get(activeSessionId);
+          const taskIds = [...awaitableBackgroundTasks.keys()].filter(isReportedBackgroundTask);
           if (
             flavor.stopReportedBackgroundTasks === undefined ||
             sessionId === null ||
-            !hasReportedBackgroundTasks()
+            taskIds.length === 0
           ) {
             return true;
           }
           const ended = yield* Deferred.make<void>();
-          reportedBackgroundTasksEnded = ended;
+          stoppingBackgroundTasks = { taskIds, ended };
           return yield* flavor
             .stopReportedBackgroundTasks(runtime, sessionId)
             .pipe(
               Effect.andThen(Deferred.await(ended)),
               Effect.timeoutOption(ACP_STOP_CONFIRM_TIMEOUT_MS),
               Effect.map(Option.isSome),
-              Effect.ensuring(Effect.sync(() => (reportedBackgroundTasksEnded = null))),
+              Effect.ensuring(Effect.sync(() => (stoppingBackgroundTasks = null))),
             );
         });
         const trackAwaitableBackgroundTasks = (toolCall: AcpToolCallState) =>
@@ -9918,7 +9923,13 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                   // a stalled hard teardown keeps its state and permit without holding the caller.
                   const transitionFiber = yield* Effect.gen(function* () {
                     const transition = yield* Effect.gen(function* () {
-                      if (turnInput.requestRuntimeRestart === true) {
+                      const activeAtStop = yield* Ref.get(activeTurn);
+                      // Another turn's background work is not this Stop's to end.
+                      if (
+                        turnInput.requestRuntimeRestart === true &&
+                        (activeAtStop === null ||
+                          activeAtStop.providerTurnId === turnInput.providerTurnId)
+                      ) {
                         const stopped = yield* restore(stopReportedBackgroundTasks()).pipe(
                           Effect.mapError(
                             (cause) =>

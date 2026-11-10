@@ -157,6 +157,8 @@ function turnInput(input: {
 type MockPermission = {
   readonly permission: Omit<EffectAcpSchema.RequestPermissionRequest, "sessionId">;
 };
+/** Runs while the prompt it is scripted into is open. */
+type MockDuringPrompt = { readonly during: Effect.Effect<void> };
 type ExtNotificationHandlers = Map<string, (params: unknown) => Effect.Effect<void>>;
 /** Records the handlers a flavor registers, so a test can deliver that extension notification. */
 const recordExtNotifications =
@@ -219,7 +221,7 @@ const runMockTurn = (input: {
     readonly events: ReadonlyArray<ProviderAdapterV2Event>;
   }) => Effect.Effect<void, never, Scope.Scope>;
   /** Session updates a second, user-sent prompt delivers, run after `afterTurn`. */
-  readonly followUpPromptUpdates?: ReadonlyArray<EffectAcpSchema.SessionUpdate>;
+  readonly followUpPromptUpdates?: ReadonlyArray<EffectAcpSchema.SessionUpdate | MockDuringPrompt>;
   /** As `unpromptedPromptUpdates`, for the second prompt. */
   readonly unpromptedFollowUpUpdates?: ReadonlyArray<EffectAcpSchema.SessionUpdate>;
 }) =>
@@ -310,6 +312,10 @@ const runMockTurn = (input: {
                       for (const [index, update] of (promptUpdates.shift() ?? []).entries()) {
                         if ("process" in update) {
                           yield* report(sessionId, update);
+                          continue;
+                        }
+                        if ("during" in update) {
+                          yield* update.during;
                           continue;
                         }
                         if (!("permission" in update)) {
@@ -1594,6 +1600,36 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 
+  it.effect("a Stop for an earlier turn leaves the running turn's processes alone", () =>
+    Effect.gen(function* () {
+      const dev = { toolCallId: "tc-dev", processId: DEV_PROC, command: "pnpm dev" };
+      let stopFirstTurn: Effect.Effect<void> = Effect.void;
+      const { stops } = yield* runMockTurn({
+        name: "background-stale-stop",
+        mockEnvironment: {},
+        promptUpdates: [
+          ...hermesBackgroundStart({ ...dev, notify: true }),
+          { process: { ...dev, status: "running" } },
+        ],
+        stopReports: [{ process: { ...dev, status: "exited", reason: "killed" } }],
+        afterTurn: ({ session, providerThread, events }) =>
+          Effect.sync(() => {
+            const turn = events.findLast((event) => event.type === "provider_turn.updated");
+            assert(turn?.type === "provider_turn.updated");
+            stopFirstTurn = session
+              .interruptTurn({
+                providerThread,
+                providerTurnId: turn.providerTurn.id,
+                requestRuntimeRestart: true,
+              })
+              .pipe(Effect.orDie);
+          }),
+        followUpPromptUpdates: [{ during: Effect.suspend(() => stopFirstTurn) }],
+      });
+      assert.deepEqual(stops, []);
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+
   it.effect("lists every process Hermes reports until Hermes reports its exit", () =>
     Effect.gen(function* () {
       const offers = yield* Queue.unbounded<ProviderContinuationRequest>();
@@ -1679,6 +1715,13 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
   // Stop reaches the adapter after the turn ended too: it alone knows what still runs.
   it.effect.each([
     { name: "ends them once Hermes reports each exit", reported: true, exits: true },
+    // The turn being stopped can start another while Hermes stops these; it is not waited on.
+    {
+      name: "does not wait on one Hermes reports meanwhile",
+      reported: true,
+      exits: true,
+      late: true,
+    },
     { name: "is not confirmed until Hermes reports each exit", reported: true, exits: false },
     // Stock Hermes: the wire stays as it was.
     { name: "sends a Hermes that reported none nothing", reported: false, exits: false },
@@ -1695,7 +1738,23 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
           ...(row.reported ? [{ process: { ...dev, status: "running" } } as const] : []),
         ],
         ...(row.reported && row.exits
-          ? { stopReports: [{ process: { ...dev, status: "exited", reason: "killed" } }] }
+          ? {
+              stopReports: [
+                ...("late" in row
+                  ? [
+                      {
+                        process: {
+                          toolCallId: "tc-late",
+                          processId: TESTS_PROC,
+                          command: "pnpm test",
+                          status: "running",
+                        },
+                      } as const,
+                    ]
+                  : []),
+                { process: { ...dev, status: "exited", reason: "killed" } },
+              ],
+            }
           : {}),
         afterTurn: ({ session, providerThread, events }) =>
           Effect.gen(function* () {
@@ -1721,7 +1780,7 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
       if (row.reported) {
         assert.equal(Exit.isSuccess(result), row.exits);
         // A process Hermes has not reported ended stays listed.
-        assert.equal(yield* Deferred.await(listed), !row.exits);
+        assert.equal(yield* Deferred.await(listed), !row.exits || "late" in row);
       }
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );

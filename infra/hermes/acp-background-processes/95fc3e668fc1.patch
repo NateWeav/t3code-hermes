@@ -407,10 +407,10 @@ index 0000000000..57f18eae45
 +    assert not agent._background and not agent._process_watches
 diff --git a/tests/gateway/fixtures/acp_background_process_peer.py b/tests/gateway/fixtures/acp_background_process_peer.py
 new file mode 100644
-index 0000000000..bcadc5e55c
+index 0000000000..940b10286a
 --- /dev/null
 +++ b/tests/gateway/fixtures/acp_background_process_peer.py
-@@ -0,0 +1,112 @@
+@@ -0,0 +1,115 @@
 +"""Real gateway, real process, real ACP projection; no inference.
 +
 +A ``GatewayACPAgent`` whose gateway RPCs go over the owner's actual WebSocket views a session that
@@ -432,12 +432,18 @@ index 0000000000..bcadc5e55c
 +class Recorder:
 +    def __init__(self):
 +        self.reports, self.t0 = [], time.monotonic()
++        self.reported = asyncio.Condition()
 +
 +    async def session_update(self, **_):
 +        return None
 +
 +    async def ext_notification(self, method, params):
 +        self.reports.append({'method': method, 'at_s': round(time.monotonic() - self.t0, 2), **params})
++        async with self.reported:
++            self.reported.notify_all()
++
++    def exited(self, call_id):
++        return any(r['toolCallId'] == call_id and r['status'] == 'exited' for r in self.reports)
 +
 +
 +class WsGateway:
@@ -492,16 +498,13 @@ index 0000000000..bcadc5e55c
 +                                      ('tool.complete', {'tool_call_id': call_id, 'tool_name': 'terminal',
 +                                                         'result': result, 'is_error': False})):
 +                    await editor._project({'session_id': sid, 'type': kind, 'admission_id': 'a', 'payload': payload})
-+
-+            def exited(call_id):
-+                return any(r['toolCallId'] == call_id and r['status'] == 'exited' for r in editor._conn.reports)
-+            while not exited('call_1'):
-+                await asyncio.sleep(0.05)
-+            receipt['stopped_before_stop'] = exited('call_2')
++            async with editor._conn.reported:
++                await editor._conn.reported.wait_for(lambda: editor._conn.exited('call_1'))
++            receipt['stopped_before_stop'] = editor._conn.exited('call_2')
 +            # The editor's Stop, as the ACP router delivers ``_hermes/process_stop``.
 +            await editor.ext_notification('hermes/process_stop', {'sessionId': sid})
-+            while editor._process_watches:
-+                await asyncio.sleep(0.05)
++            # The session's watch ends once nothing is tracked.
++            await asyncio.gather(*editor._background)
 +            receipt['exit_codes'] = [proc.exit_code for proc in procs]
 +            receipt['all_exited'] = all(proc.exited for proc in procs)
 +            receipt['reports'] = editor._conn.reports

@@ -102,6 +102,9 @@ describe("RightPanelTabs", () => {
           onAddFiles={noop}
           onAddPullRequest={noop}
           onAddPullRequests={noop}
+          onAddPaperclip={noop}
+          onAddHermesChat={noop}
+          onAddHermesKanban={noop}
           onAddDevice={noop}
           browserAvailable={false}
           terminalAvailable
@@ -109,6 +112,9 @@ describe("RightPanelTabs", () => {
           filesAvailable={false}
           pullRequestAvailable={false}
           pullRequestsAvailable={false}
+          paperclipAvailable={false}
+          hermesChatAvailable={false}
+          hermesKanbanAvailable={false}
           deviceAvailable={false}
         >
           {null}

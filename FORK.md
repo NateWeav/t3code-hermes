@@ -358,9 +358,11 @@ upstream-only infrastructure. This fork therefore diverges in `.github/workflows
   The old per-platform packages (`t3-hermes-<platform>`, `nateweav-hermes-winbin-<arch>`) get no
   new versions. Intel macOS has no CLI archive. Use `npx t3-hermes@nightly`: nightlies never move
   `latest`.
-- **Mobile builds.** After each nightly and stable release, `release.yml` calls `mobile-ipa.yml`
+- **Mobile builds.** For each nightly and stable release, `release.yml` calls `mobile-ipa.yml`
   and `mobile-apk.yml` directly, because releases published with `GITHUB_TOKEN` never fire the
-  `release` trigger. `mobile-ipa.yml` builds an unsigned, sideloadable `.ipa` on hosted macOS; Feather,
+  `release` trigger. They build the release commit alongside the tests, and only their upload waits
+  for the GitHub Release, so a failed release still spends their runner time. `mobile-ipa.yml`
+  builds an unsigned, sideloadable `.ipa` on hosted macOS; Feather,
   AltStore, and Sideloadly re-sign on install. Tagged builds also refresh an AltStore-format source
   on the `ipa-source` branch so Feather can offer updates. `mobile-apk.yml` builds an arm64 `.apk`
   signed with the release keystore in the `ANDROID_KEYSTORE_*` / `ANDROID_KEY_*` secrets, which

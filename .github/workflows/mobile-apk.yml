@@ -11,16 +11,25 @@ name: Mobile APK
 # Builds arm64-v8a only, which covers current phones and keeps the APK and the
 # native build small.
 #
-# release.yml calls this after publishing each nightly and stable release,
-# because releases it publishes with GITHUB_TOKEN never fire the `release`
-# trigger below. Tagged builds attach the APK to the release, where Obtainium
-# can track it directly.
+# release.yml calls this for each nightly and stable release with the release
+# commit and version, alongside its tests, and attaches the artifact once the
+# release is published. Releases it publishes with GITHUB_TOKEN never fire the
+# `release` trigger below. Tagged builds attach the APK to the release, where
+# Obtainium can track it directly.
 
 on:
   workflow_call:
     inputs:
       tag:
-        required: true
+        required: false
+        type: string
+      ref:
+        description: "Commit to build when there is no tag yet"
+        required: false
+        type: string
+      version:
+        description: "Version for the artifact name when there is no tag yet"
+        required: false
         type: string
     secrets:
       ANDROID_KEYSTORE_BASE64:
@@ -47,7 +56,7 @@ env:
   TAG: ${{ inputs.tag || github.event.release.tag_name }}
 
 concurrency:
-  group: mobile-apk-${{ inputs.tag || github.event.release.tag_name || github.ref }}
+  group: mobile-apk-${{ inputs.tag || github.event.release.tag_name || inputs.ref || github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -64,7 +73,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          ref: ${{ env.TAG || github.ref }}
+          ref: ${{ inputs.ref || env.TAG || github.ref }}
           sparse-checkout: |
             /*
             !/.repos/
@@ -110,10 +119,14 @@ jobs:
         name: Resolve app version
         working-directory: apps/mobile
         shell: bash
+        env:
+          VERSION_INPUT: ${{ inputs.version }}
         run: |
           set -uo pipefail
           if [[ -n "$TAG" ]]; then
             version="${TAG#v}"
+          elif [[ -n "$VERSION_INPUT" ]]; then
+            version="$VERSION_INPUT"
           else
             version="$(pnpm exec expo config --type public --json | jq -r '.version // empty')"
           fi

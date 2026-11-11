@@ -1833,8 +1833,8 @@ const acpSessionTags = [
   WS_METHODS.serverListAcpRegistrySessions,
   WS_METHODS.serverImportAcpRegistrySession,
 ] as const;
-const acpSessionRpcs = WsRpcGroup.omit(
-  ...[...WsRpcGroup.requests.keys()].filter(
+const acpSessionRpcs = CoreWsRpcGroup.omit(
+  ...[...CoreWsRpcGroup.requests.keys()].filter(
     (
       tag,
     ): tag is Exclude<

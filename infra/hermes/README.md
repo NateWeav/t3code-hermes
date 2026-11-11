@@ -210,7 +210,8 @@ change on top of every other patch, including `acp-subagent-model-continue`, whi
 child run, and applies only after them. Its `466591fe65` version (`main`, 2026-11-09) is the same
 again on newer `main`, its `a2fa0a4b64` version (`main`, 2026-11-10) is the same again on top of
 that patch's `a2fa0a4b64` version, and its `9373dc1e31` version (`main`, 2026-11-11) is the same on
-newer `main` and that patch's `9373dc1e31` version.
+newer `main` and that patch's `9373dc1e31` version. That version also stacks unchanged on that
+patch's `56ac7b5d51` version.
 
 ## `acp-fast-mode`
 
@@ -473,7 +474,9 @@ all the other patches. Its `466591fe65` version (`main`, 2026-11-09) is the same
 `main`. Its `a2fa0a4b64` version (`main`, 2026-11-10) is the same change on upstream's shortened
 `delegate_task` schema text, with `continue` named in the `action` documentation. Its `9373dc1e31`
 version (`main`, 2026-11-11) is the same change on upstream's shorter core tool schemas, whose
-prompt-surface token counts it re-baselines. Run the patch's
+prompt-surface token counts it re-baselines. Its `56ac7b5d51` version (`main`, 2026-11-11) is the
+same change re-baselined again after upstream deferred `manage_connections` out of the core tool
+list. Run the patch's
 `tests/gateway/test_delegation_task_model.py` and `tests/acp_adapter/test_gateway_delegation_continue.py`
 (which reuses the progress patch's `test_gateway_delegation_progress.py`) in a scratch checkout, as
 for `acp-delegation-progress`.

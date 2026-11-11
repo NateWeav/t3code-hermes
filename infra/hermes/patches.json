@@ -261,6 +261,11 @@
       "neededFor": "Apply after Live subagent progress. Lets Hermes pick a subagent's model from the ones your profile lists, and send a finished subagent a follow-up. Without it, every subagent runs on the default model, and a finished one can't be asked anything more.",
       "versions": [
         {
+          "hermesCommit": "56ac7b5d51945ae7875c4b669baa757fa17f4846",
+          "hermesCommitDate": "2026-11-11T16:59:13Z",
+          "file": "acp-subagent-model-continue/56ac7b5d5194.patch"
+        },
+        {
           "hermesCommit": "9373dc1e315a68446f9767afd7acd15d4c0642b8",
           "hermesCommitDate": "2026-11-11T06:39:17Z",
           "file": "acp-subagent-model-continue/9373dc1e315a.patch"

@@ -208,8 +208,9 @@ The patch is listed last. Its `ca4360692055` version applies alone and after the
 before `acp-subagent-model-continue`. Its `90d6b98fd8` version (`main`, 2026-11-06) is the same
 change on top of every other patch, including `acp-subagent-model-continue`, which changes the same
 child run, and applies only after them. Its `466591fe65` version (`main`, 2026-11-09) is the same
-again on newer `main`, and its `a2fa0a4b64` version (`main`, 2026-11-10) is the same again on top of
-that patch's `a2fa0a4b64` version.
+again on newer `main`, its `a2fa0a4b64` version (`main`, 2026-11-10) is the same again on top of
+that patch's `a2fa0a4b64` version, and its `9373dc1e31` version (`main`, 2026-11-11) is the same on
+newer `main` and that patch's `9373dc1e31` version.
 
 ## `acp-fast-mode`
 
@@ -470,7 +471,9 @@ Restart the Hermes gateway after applying it: `delegate_task` runs there. Verifi
 hermes-agent `90d6b98fd86d` (`main`, 2026-11-06), alone after `acp-delegation-progress` and after
 all the other patches. Its `466591fe65` version (`main`, 2026-11-09) is the same change on newer
 `main`. Its `a2fa0a4b64` version (`main`, 2026-11-10) is the same change on upstream's shortened
-`delegate_task` schema text, with `continue` named in the `action` documentation. Run the patch's
+`delegate_task` schema text, with `continue` named in the `action` documentation. Its `9373dc1e31`
+version (`main`, 2026-11-11) is the same change on upstream's shorter core tool schemas, whose
+prompt-surface token counts it re-baselines. Run the patch's
 `tests/gateway/test_delegation_task_model.py` and `tests/acp_adapter/test_gateway_delegation_continue.py`
 (which reuses the progress patch's `test_gateway_delegation_progress.py`) in a scratch checkout, as
 for `acp-delegation-progress`.

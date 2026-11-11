@@ -400,7 +400,7 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
         _tag: "BootServicePrerequisiteError",
         problem: "user-manager-unavailable",
       });
-      expect(commands).not.toContain("systemctl --user enable t3code.service");
+      expect(commands).not.toContain("systemctl --user enable t3-hermes.service");
     }),
   );
 
@@ -437,7 +437,7 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
 
       const plan = yield* service.install();
 
-      const unitPath = path.join(home, ".config", "systemd", "user", "t3code.service");
+      const unitPath = path.join(home, ".config", "systemd", "user", "t3-hermes.service");
       expect(plan.unitPath).toBe(unitPath);
       expect(yield* service.status).toMatchObject({ current: true, unitPath });
     }),

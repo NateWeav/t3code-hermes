@@ -559,7 +559,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         undefined,
       );
 
-      assert.nestedPropertyVal(linux, "linux.desktop.entry.StartupWMClass", "com.t3tools.T3Code");
+      assert.nestedPropertyVal(linux, "linux.desktop.entry.StartupWMClass", "com.nateweav.T3Hermes");
     }),
   );
 

@@ -3329,51 +3329,6 @@ function parseClaudeBackgroundTaskEntry(
   });
 }
 
-// ScheduleWakeup (self-paced /loop) clamps its delay to this range. A wakeup
-// fires only while Claude is idle, so it can land late; the backstop waits
-// this long past the requested time before giving it up.
-const CLAUDE_SCHEDULE_WAKEUP_MIN_DELAY_SECONDS = 60;
-const CLAUDE_SCHEDULE_WAKEUP_MAX_DELAY_SECONDS = 3600;
-const CLAUDE_SCHEDULE_WAKEUP_BACKSTOP_GRACE_MS = 2 * 60_000;
-
-/**
- * What a root ScheduleWakeup call asks for: a wakeup after `delayMs`, shown
- * on the Waiting roster as a monitor, or `stop` to cancel the pending one.
- * Null when its input names neither.
- */
-function claudeScheduleWakeupRequest(
-  toolUseId: string,
-  input: unknown,
-):
-  | { readonly type: "stop" }
-  | {
-      readonly type: "schedule";
-      readonly delayMs: number;
-      readonly task: OrchestrationV2PendingBackgroundTask;
-    }
-  | null {
-  if (input === null || typeof input !== "object") return null;
-  if (Reflect.get(input, "stop") === true) return { type: "stop" };
-  const delaySeconds = Reflect.get(input, "delaySeconds");
-  if (typeof delaySeconds !== "number" || !Number.isFinite(delaySeconds)) return null;
-  const delayMs =
-    Math.min(
-      Math.max(delaySeconds, CLAUDE_SCHEDULE_WAKEUP_MIN_DELAY_SECONDS),
-      CLAUDE_SCHEDULE_WAKEUP_MAX_DELAY_SECONDS,
-    ) * 1000;
-  const minutes = Math.max(1, Math.round(delayMs / 60_000));
-  const rawReason = Reflect.get(input, "reason");
-  const reason = typeof rawReason === "string" ? rawReason.trim() : "";
-  return {
-    type: "schedule",
-    delayMs,
-    task: {
-      taskId: `wakeup:${toolUseId}`,
-      kind: "monitor",
-      description: `Check back in ${minutes} min${reason.length > 0 ? `: ${reason}` : ""}`,
-    },
-  };
-}
 
 function fileNameFromClaudeTool(toolName: string, input: ClaudeNativeToolInput): string {
   return (
@@ -5472,23 +5427,6 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
         const lastKnownOpaqueTasks = yield* Ref.make(
           new Map<string, OrchestrationV2PendingBackgroundTask>(),
         );
-        // Pending ScheduleWakeup (/loop) per native thread, held as a monitor so the thread reads
-        // as waiting and idle release keeps the timer's process. Ends when a turn starts at or
-        // after its fire time, it's replaced or stopped, the process goes, or the backstop fires.
-        const scheduledWakeups = yield* Ref.make(
-          new Map<
-            string,
-            {
-              readonly task: OrchestrationV2PendingBackgroundTask;
-              readonly fireAtMs: number;
-              readonly backstop: Fiber.Fiber<void, never>;
-            }
-          >(),
-        );
-        // Root ScheduleWakeup inputs awaiting their tool_result, and calls
-        // already applied: a wake drain replays frames the live pass handled.
-        const scheduleWakeupCalls = new Map<string, unknown>();
-        const appliedScheduleWakeupCalls = new Set<string>();
         const claudeMonitors = yield* Ref.make<{
           readonly calls: ReadonlySet<string>;
           readonly tasks: ReadonlyMap<
@@ -6010,18 +5948,15 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             nativeThreadId: string,
             tasks: ReadonlyArray<OrchestrationV2PendingBackgroundTask>,
           ) {
-            // Claude's roster never lists a scheduled wakeup; keep it.
-            const wakeup = (yield* Ref.get(scheduledWakeups)).get(nativeThreadId)?.task;
-            const rosterTasks = wakeup === undefined ? tasks : [...tasks, wakeup];
             yield* Ref.update(pendingBackgroundTasksByNativeThread, (current) => {
               const updated = new Map(current);
-              if (rosterTasks.length === 0) {
+              if (tasks.length === 0) {
                 updated.delete(nativeThreadId);
               } else {
                 updated.set(
                   nativeThreadId,
                   new Map(
-                    rosterTasks.map((task) => {
+                    tasks.map((task) => {
                       const previous = current.get(nativeThreadId)?.get(task.taskId);
                       return [task.taskId, { ...previous, ...task }] as const;
                     }),
@@ -6103,15 +6038,6 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             });
             yield* clearNativeThreadTaskIdSet(awaitedBackgroundTasksByNativeThread, nativeThreadId);
             yield* endClaudeMonitorTasks((_taskId, task) => task.nativeThreadId === nativeThreadId);
-            // Its scheduled wakeup dies with the process too.
-            const wakeup = yield* Ref.modify(scheduledWakeups, (current) => {
-              const existing = current.get(nativeThreadId);
-              if (existing === undefined) return [undefined, current] as const;
-              const updated = new Map(current);
-              updated.delete(nativeThreadId);
-              return [existing, updated] as const;
-            });
-            if (wakeup !== undefined) yield* Fiber.interrupt(wakeup.backstop);
           });
 
         const forgetAbsorbedWake = (nativeThreadId: string) =>
@@ -9154,103 +9080,6 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           return true;
         });
 
-        /** Removes the thread's wakeup (only `taskId`, when given) from the roster. */
-        const dropScheduledWakeup = Effect.fnUntraced(function* (
-          nativeThreadId: string,
-          taskId?: string,
-        ) {
-          const wakeup = yield* Ref.modify(scheduledWakeups, (current) => {
-            const existing = current.get(nativeThreadId);
-            if (
-              existing === undefined ||
-              (taskId !== undefined && existing.task.taskId !== taskId)
-            ) {
-              return [undefined, current] as const;
-            }
-            const updated = new Map(current);
-            updated.delete(nativeThreadId);
-            return [existing, updated] as const;
-          });
-          if (wakeup !== undefined) {
-            yield* clearPendingBackgroundTask(nativeThreadId, wakeup.task.taskId);
-          }
-          return wakeup;
-        });
-
-        // Applies root ScheduleWakeup calls and ends a wakeup once a turn
-        // starts at or after its fire time (the wakeup's own turn, or a user
-        // turn it follows straight away). Idempotent: drains replay frames.
-        const trackClaudeScheduledWakeups = Effect.fnUntraced(function* (
-          nativeThreadId: string,
-          message: SDKMessage,
-        ) {
-          if (parentToolUseIdFromSdkMessage(message) !== null) return;
-          for (const toolUse of claudeToolUseBlocksFromAssistantMessage(message)) {
-            if (toolUse.name === "ScheduleWakeup" && !appliedScheduleWakeupCalls.has(toolUse.id)) {
-              scheduleWakeupCalls.set(toolUse.id, toolUse.input);
-            }
-          }
-          const activeContext = yield* Ref.get(activeTurn);
-          const nowMs = DateTime.toEpochMillis(yield* DateTime.now);
-          if (isClaudeTurnStartMessage(message) && activeContext !== null) {
-            const pending = (yield* Ref.get(scheduledWakeups)).get(nativeThreadId);
-            if (pending !== undefined && nowMs >= pending.fireAtMs) {
-              yield* dropScheduledWakeup(nativeThreadId);
-              yield* Fiber.interrupt(pending.backstop);
-              yield* emitRosterUpdate(nativeThreadId, activeContext);
-            }
-            return;
-          }
-          for (const toolResult of claudeToolResultBlocksFromUserMessage(message)) {
-            if (!scheduleWakeupCalls.has(toolResult.tool_use_id)) continue;
-            const toolInput = scheduleWakeupCalls.get(toolResult.tool_use_id);
-            scheduleWakeupCalls.delete(toolResult.tool_use_id);
-            appliedScheduleWakeupCalls.add(toolResult.tool_use_id);
-            for (const oldest of appliedScheduleWakeupCalls) {
-              if (appliedScheduleWakeupCalls.size <= 64) break;
-              appliedScheduleWakeupCalls.delete(oldest);
-            }
-            const request = isClaudeToolResultError(toolResult)
-              ? null
-              : claudeScheduleWakeupRequest(toolResult.tool_use_id, toolInput);
-            if (request === null) continue;
-            const replaced = yield* dropScheduledWakeup(nativeThreadId);
-            if (replaced !== undefined) yield* Fiber.interrupt(replaced.backstop);
-            if (request.type === "schedule") {
-              const taskId = request.task.taskId;
-              const backstop = yield* Effect.sleep(
-                request.delayMs + CLAUDE_SCHEDULE_WAKEUP_BACKSTOP_GRACE_MS,
-              ).pipe(
-                Effect.andThen(
-                  Effect.gen(function* () {
-                    if ((yield* dropScheduledWakeup(nativeThreadId, taskId)) !== undefined) {
-                      yield* emitRosterUpdate(nativeThreadId, yield* Ref.get(activeTurn));
-                    }
-                  }),
-                ),
-                Effect.ignoreCause({ log: true }),
-                Effect.forkIn(sessionScope),
-              );
-              yield* Ref.update(scheduledWakeups, (current) =>
-                new Map(current).set(nativeThreadId, {
-                  task: request.task,
-                  fireAtMs: nowMs + request.delayMs,
-                  backstop,
-                }),
-              );
-              yield* Ref.update(pendingBackgroundTasksByNativeThread, (current) =>
-                new Map(current).set(
-                  nativeThreadId,
-                  new Map(rosterForNativeThread(current, nativeThreadId)).set(taskId, request.task),
-                ),
-              );
-            } else if (replaced === undefined) {
-              continue;
-            }
-            yield* emitRosterUpdate(nativeThreadId, activeContext);
-          }
-        });
-
         const settledTurnForSubagentFrame = Effect.fnUntraced(function* (
           nativeThreadId: string,
           message: SDKMessage,
@@ -11385,15 +11214,11 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           live: ClaudeLiveQueryContext,
           options?: { readonly forGoalCheck?: boolean },
         ) {
-          // A scheduled wakeup has no results to lose: a new process just ends the loop.
-          const wakeup = (yield* Ref.get(scheduledWakeups)).get(live.nativeThreadId);
           if (
-            [
-              ...rosterForNativeThread(
-                yield* Ref.get(pendingBackgroundTasksByNativeThread),
-                live.nativeThreadId,
-              ).keys(),
-            ].some((taskId) => taskId !== wakeup?.task.taskId)
+            rosterForNativeThread(
+              yield* Ref.get(pendingBackgroundTasksByNativeThread),
+              live.nativeThreadId,
+            ).size > 0
           ) {
             return true;
           }

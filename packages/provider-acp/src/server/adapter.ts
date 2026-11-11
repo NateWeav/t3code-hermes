@@ -355,6 +355,8 @@ export interface AcpAdapterV2Flavor {
   readonly mcpOverHttp?: boolean;
   /** Sent with T3's HTTP MCP server after its `Authorization`. */
   readonly mcpHttpHeaders?: ReadonlyArray<{ readonly name: string; readonly value: string }>;
+  /** The agent has no tool search of its own, so T3 lists optional tools on demand. */
+  readonly deferMcpTools?: boolean;
   readonly normalizeSessionUpdate?: (
     notification: EffectAcpSchema.SessionNotification,
   ) => EffectAcpSchema.SessionNotification;
@@ -957,7 +959,7 @@ interface AcpMcpContext {
 function acpMcpContext(
   session: McpProviderSession.McpProviderSessionConfig | undefined,
   self: SelfInvocation,
-  flavor: Pick<AcpAdapterV2Flavor, "mcpOverHttp" | "mcpHttpHeaders">,
+  flavor: Pick<AcpAdapterV2Flavor, "mcpOverHttp" | "mcpHttpHeaders" | "deferMcpTools">,
 ): AcpMcpContext {
   if (session === undefined) {
     return { servers: [], acpServers: [], httpServers: [] };
@@ -986,6 +988,9 @@ function acpMcpContext(
               url: session.endpoint,
               headers: [
                 { name: "Authorization", value: session.authorizationHeader },
+                ...(flavor.deferMcpTools === true
+                  ? [{ name: McpProviderSession.MCP_TOOL_EXPOSURE_HEADER, value: "deferred" }]
+                  : []),
                 ...(flavor.mcpHttpHeaders ?? []),
               ],
             },

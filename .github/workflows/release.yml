@@ -383,7 +383,7 @@ jobs:
           fi
 
       - name: Test
-        run: vp run --filter @t3tools/web test --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+        run: vp run --filter @t3tools/web test --shard ${{ matrix.shard }}/${{ strategy.job-total }}
 
       # Browser tests run source modules; this boots the production chunk graph.
       - name: Boot the built web client

@@ -35,6 +35,6 @@ describe("subagent card", () => {
     const reported = { ...done, usage: { totalTokens: 1_200, durationMs: 2_500 } };
     expect(subagentCardElapsed([reported], DateTime.toEpochMillis(later))).toBe("2.5s");
     // A group still spans wall time; per-child durations cannot be placed in it.
-    expect(subagentCardElapsed([reported, done], DateTime.toEpochMillis(later))).toBe("1m");
+    expect(subagentCardElapsed([reported, done], DateTime.toEpochMillis(later))).toBe("1m 0s");
   });
 });

@@ -1838,7 +1838,7 @@ const acpSessionRpcs = CoreWsRpcGroup.omit(
     (
       tag,
     ): tag is Exclude<
-      keyof typeof RpcAuthorization.RPC_REQUIRED_SCOPES,
+      RpcGroup.Rpcs<typeof CoreWsRpcGroup>["_tag"],
       (typeof acpSessionTags)[number]
     > => !(acpSessionTags as ReadonlyArray<string>).includes(tag),
   ),
@@ -2006,7 +2006,7 @@ it.effect("ACP session RPCs list a thread missing its history and repair it on i
           {},
           yield* ServerBrowser.ServerBrowser,
           () => Effect.void,
-          { secretReferences: true },
+          { secretReferences: true, hermesUsage: true },
         ).pipe(
           Layer.provide(services),
           Layer.merge(

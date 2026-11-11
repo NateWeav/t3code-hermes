@@ -55,7 +55,7 @@ export class AcpRegistrySessions extends Context.Service<
       input: AcpRegistryImportSessionInput,
     ) => Effect.Effect<AcpRegistryImportSessionResult, AcpRegistryOperationError>;
   }
->()("t3/provider/AcpRegistrySessions") {}
+>()("t3-hermes/provider/AcpRegistrySessions") {}
 
 const make = Effect.gen(function* () {
   const projectService = yield* ProjectService.ProjectService;

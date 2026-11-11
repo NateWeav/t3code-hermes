@@ -2566,6 +2566,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
           undefined,
           undefined,
           undefined,
+          undefined,
           (method) =>
             Effect.sync(() => {
               if (method === "item/completed" || method === "turn/completed")

@@ -16,7 +16,7 @@ import type {
   HindsightMemory,
 } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { PlugZapIcon, RefreshCwIcon, SettingsIcon, SparklesIcon, XIcon } from "lucide-react";
+import { BrainIcon, PlugZapIcon, RefreshCwIcon, SettingsIcon, XIcon } from "lucide-react";
 import { useState } from "react";
 
 import { useHindsightMemory } from "../../state/hindsight";
@@ -379,7 +379,7 @@ function HindsightMemorySection({
       <div className="flex flex-wrap items-center gap-2 border-t border-border/60 pt-3">
         <RetainNote disabled={bank === null} isRetaining={isRetaining} onRetain={retain} />
         <Button disabled={bank === null || isReflecting} onClick={reflect} variant="ghost">
-          <SparklesIcon />
+          <BrainIcon />
           {isReflecting ? "Reflecting…" : "Reflect now"}
         </Button>
       </div>

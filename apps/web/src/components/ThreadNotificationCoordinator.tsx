@@ -12,6 +12,7 @@ import {
   type OrchestrationV2ThreadShell,
   type ThreadId,
 } from "@t3tools/contracts";
+import { monitorHoldsWakeCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import type { ClientSettings } from "@t3tools/contracts/settings";
 import * as Option from "effect/Option";
 import type { AtomRegistry } from "effect/reactivity";
@@ -327,11 +328,13 @@ export function startThreadNotifications(
       const attention = needsAttention
         ? `${thread.latestRun?.runId ?? ""}:${status}:${requestId ?? ""}`
         : null;
-      const completedAt = Date.parse(thread.latestRun?.completedAt ?? "");
       // A watched pull request will wake the agent later, but its turn is over.
       const turnOver =
         status === "ready" || (status === "monitoring" && thread.runtime?.status !== "idle");
-      const settled = turnOver && thread.latestRun?.status === "completed";
+      const completed = turnOver && thread.latestRun?.status === "completed";
+      const settled = completed && !monitorHoldsWakeCompletion(rawThread);
+      const parsedCompletedAt = Date.parse(thread.latestRun?.completedAt ?? "");
+      const completedAt = Number.isFinite(parsedCompletedAt) ? parsedCompletedAt : null;
       const state = {
         raw: rawThread,
         subagentRequest,
@@ -340,7 +343,8 @@ export function startThreadNotifications(
         attention,
         requestId,
         settled,
-        completedAt: settled && Number.isFinite(completedAt) ? completedAt : null,
+        completedAt: settled ? completedAt : null,
+        backgroundWake: rawThread.latestRunBackgroundWake === true,
       };
       next.set(thread.id, state);
       changed.push([prior, state]);
@@ -380,6 +384,7 @@ export function startThreadNotifications(
           return;
         }
         entry.reconnecting = true;
+        entry.gate.pause();
       },
       { immediate: true },
     );

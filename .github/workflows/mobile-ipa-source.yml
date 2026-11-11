@@ -1,0 +1,109 @@
+name: Mobile IPA source
+
+# Rebuilds the AltStore-format source on the `ipa-source` branch from every
+# release with an IPA attached, so Feather can offer each new build as an
+# update. mobile-ipa.yml calls this after attaching to a tagged release, and
+# release.yml after attaching the IPA it built alongside its tests.
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+      bundle_id:
+        required: true
+        type: string
+      app_name:
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  source:
+    name: Publish IPA source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # Every run rebuilds the whole source from the release list, so a pending
+    # run that GitHub drops in favor of a newer one loses nothing.
+    concurrency:
+      group: mobile-ipa-source
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BUNDLE_ID: ${{ inputs.bundle_id }}
+      APP_NAME: ${{ inputs.app_name }}
+    steps:
+      - name: Build source.json from releases
+        shell: bash
+        run: |
+          set -euo pipefail
+          raw="https://raw.githubusercontent.com/$GITHUB_REPOSITORY"
+          source_url="$raw/ipa-source/source.json"
+          # Feather treats versions[0] as current and offers an update whenever
+          # its version string differs from the one recorded at install time.
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            | jq \
+              --arg name "$APP_NAME" \
+              --arg bundle "$BUNDLE_ID" \
+              --arg developer "$GITHUB_REPOSITORY_OWNER" \
+              --arg repo "$GITHUB_REPOSITORY" \
+              --arg sourceURL "$source_url" \
+              --arg icon "$raw/HEAD/assets/hermes/ios-1024.png" \
+              '[ .[]
+                 | select((.draft | not) and (.tag_name | test("-preview\\.") | not))
+                 | . as $release
+                 | .assets[]
+                 | select(.name | test("^T3Code-.+\\.ipa$"))
+                 | {
+                     version: ($release.tag_name | ltrimstr("v")),
+                     date: $release.published_at,
+                     localizedDescription: $release.name,
+                     downloadURL: .browser_download_url,
+                     size: .size
+                   } ]
+               | sort_by(.date) | reverse | .[:10]
+               | if length == 0 then error("No releases have an IPA attached") else . end
+               | . as $versions
+               | {
+                   name: $name,
+                   identifier: "\($bundle).source",
+                   sourceURL: $sourceURL,
+                   iconURL: $icon,
+                   apps: [{
+                     name: $name,
+                     bundleIdentifier: $bundle,
+                     developerName: $developer,
+                     localizedDescription: "Nightly and stable builds from \($repo) releases.",
+                     iconURL: $icon,
+                     versions: $versions,
+                     version: $versions[0].version,
+                     versionDate: $versions[0].date,
+                     downloadURL: $versions[0].downloadURL,
+                     size: $versions[0].size
+                   }],
+                   news: []
+                 }' > source.json
+          jq -r '.apps[0].versions[] | "\(.version)  \(.downloadURL)"' source.json
+          {
+            echo "## IPA source"
+            echo
+            echo "- Add to Feather: \`$source_url\`"
+            echo "- Current: \`$(jq -r '.apps[0].version' source.json)\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Push to the ipa-source branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          # A single force-pushed commit keeps the branch from growing history.
+          git init -q -b ipa-source site
+          mv source.json site/
+          cd site
+          git add source.json
+          git -c user.name="github-actions[bot]" \
+            -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -qm "Update IPA source for ${{ inputs.tag }}"
+          git push -qf "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:ipa-source

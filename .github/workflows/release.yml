@@ -1223,32 +1223,71 @@ jobs:
     secrets:
       AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
 
-  # Releases published with GITHUB_TOKEN never fire mobile-ipa.yml's release
-  # trigger, so the fork calls it directly.
+  # The mobile builds take longer than everything before the release, so they
+  # build the release commit alongside the tests and attach_mobile uploads them
+  # once the release exists. Releases published with GITHUB_TOKEN never fire
+  # the mobile workflows' release trigger, so the fork calls them directly.
   mobile_ipa:
     name: Build sideloadable IPA
-    needs: [preflight, release]
-    if: ${{ !failure() && !cancelled() && github.repository != 'pingdotgg/t3code' && needs.preflight.result == 'success' && needs.release.result == 'success' && needs.preflight.outputs.release_channel != 'preview' }}
+    needs: [preflight]
+    if: ${{ !cancelled() && github.repository != 'pingdotgg/t3code' && needs.preflight.result == 'success' && needs.preflight.outputs.release_channel != 'preview' }}
     permissions:
       contents: write
     uses: ./.github/workflows/mobile-ipa.yml
     with:
-      tag: ${{ needs.preflight.outputs.tag }}
+      ref: ${{ needs.preflight.outputs.ref }}
+      version: ${{ needs.preflight.outputs.version }}
 
   mobile_apk:
     name: Build sideloadable APK
-    needs: [preflight, release]
-    if: ${{ !failure() && !cancelled() && github.repository != 'pingdotgg/t3code' && needs.preflight.result == 'success' && needs.release.result == 'success' && needs.preflight.outputs.release_channel != 'preview' }}
+    needs: [preflight]
+    if: ${{ !cancelled() && github.repository != 'pingdotgg/t3code' && needs.preflight.result == 'success' && needs.preflight.outputs.release_channel != 'preview' }}
     permissions:
       contents: write
     uses: ./.github/workflows/mobile-apk.yml
     with:
-      tag: ${{ needs.preflight.outputs.tag }}
+      ref: ${{ needs.preflight.outputs.ref }}
+      version: ${{ needs.preflight.outputs.version }}
     secrets:
       ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
       ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
       ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+  # Attaches whichever mobile builds succeeded.
+  attach_mobile:
+    name: Attach mobile builds
+    needs: [preflight, release, mobile_ipa, mobile_apk]
+    if: ${{ !cancelled() && needs.release.result == 'success' && (needs.mobile_ipa.result == 'success' || needs.mobile_apk.result == 'success') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download mobile builds
+        uses: actions/download-artifact@v8
+        with:
+          pattern: T3Code-*
+          merge-multiple: true
+          path: mobile
+
+      - name: Attach to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+        run: gh release upload "$TAG" mobile/* --clobber --repo "$GITHUB_REPOSITORY"
+
+  mobile_ipa_source:
+    name: Publish IPA source
+    needs: [preflight, mobile_ipa, attach_mobile]
+    if: ${{ !cancelled() && needs.attach_mobile.result == 'success' && needs.mobile_ipa.result == 'success' }}
+    permissions:
+      contents: write
+    uses: ./.github/workflows/mobile-ipa-source.yml
+    with:
+      tag: ${{ needs.preflight.outputs.tag }}
+      bundle_id: ${{ needs.mobile_ipa.outputs.bundle_id }}
+      app_name: ${{ needs.mobile_ipa.outputs.app_name }}
 
   # Vercel builds the hosted web app while the desktop jobs run. `--skip-domain`
   # keeps the custom domains (the channel and router domains) on the previous
@@ -1804,6 +1843,8 @@ jobs:
         publish_aur,
         mobile_ipa,
         mobile_apk,
+        attach_mobile,
+        mobile_ipa_source,
         build_web,
         deploy_web,
         finalize,

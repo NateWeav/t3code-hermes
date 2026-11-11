@@ -1690,10 +1690,7 @@ const make = Effect.gen(function* () {
     wakePolicyRequestKey: string,
     requestedTimeoutMs: number | undefined,
   ): Effect.fn.Return<OrchestratorMcpDelegateTaskResult, OrchestratorMcpFailure> {
-    const timeoutMs = Math.min(
-      MAX_WAIT_TIMEOUT_MS,
-      Math.max(1, requestedTimeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS),
-    );
+    const timeoutMs = waitTimeoutMs(scope, requestedTimeoutMs);
     const upgradeWake = threadManagement
       .dispatch({
         type: "delegated_task.wake-policy",

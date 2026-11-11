@@ -46,6 +46,7 @@ import { HeaderHeightContext } from "@react-navigation/elements";
 import {
   IconBell,
   IconBellOff,
+  IconBrain,
   IconChevronRight,
   IconPlayerPause,
   IconPlayerPlay,
@@ -53,7 +54,6 @@ import {
   IconRefresh,
   IconSearch,
   IconSettings,
-  IconSparkles,
   IconX,
 } from "@tabler/icons-react-native";
 import { useCallback, useContext, useMemo, useState } from "react";
@@ -995,7 +995,7 @@ function MemoryFooter(props: {
           <ActionButton
             disabled={!props.bankAvailable || props.isReflecting}
             label={props.isReflecting ? "Reflecting…" : "Reflect now"}
-            icon={<IconSparkles size={18} color={String(iconColor)} />}
+            icon={<IconBrain size={18} color={String(iconColor)} />}
             onPress={props.onReflect}
           />
         </View>

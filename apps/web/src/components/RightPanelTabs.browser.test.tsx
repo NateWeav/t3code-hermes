@@ -184,6 +184,9 @@ function panel(activeSurface: RightPanelSurface) {
     onAddFiles: noop,
     onAddPullRequest: noop,
     onAddPullRequests: noop,
+    onAddPaperclip: noop,
+    onAddHermesChat: noop,
+    onAddHermesKanban: noop,
     onAddDevice: noop,
     browserAvailable: true,
     terminalAvailable: true,
@@ -191,6 +194,9 @@ function panel(activeSurface: RightPanelSurface) {
     filesAvailable: true,
     pullRequestAvailable: true,
     pullRequestsAvailable: true,
+    paperclipAvailable: false,
+    hermesChatAvailable: false,
+    hermesKanbanAvailable: false,
     deviceAvailable: true,
     children: (
       <div data-testid="surface-content">

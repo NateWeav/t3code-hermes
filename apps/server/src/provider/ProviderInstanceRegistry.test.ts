@@ -953,13 +953,14 @@ describe("ProviderInstanceRegistry — OpenCode Go usage source", () => {
     ),
     Layer.provideMerge(ProviderLatestVersions.layer),
     Layer.provideMerge(McpProviderSessions.layer),
+    Layer.provideMerge(ProviderInstallationGate.layer),
     Layer.provideMerge(ModelManifest.layerTest),
     Layer.provideMerge(ResetCreditCoordinator.layerTest),
   );
   const layerBase = ProviderHostLive.layer.pipe(Layer.provideMerge(layerBaseDeps));
   const layerTest = ProviderOrchestrationAdapterInfrastructure.layer.pipe(
     Layer.provideMerge(layerBase),
-    Layer.provideMerge(PortScanner.layerTest),
+    Layer.provideMerge(Layer.merge(PortScanner.layerTest, SqlitePersistence.layerMemory)),
   );
 
   it.live("keeps an explicit OpenCode dashboard source through the merged driver probe", () =>

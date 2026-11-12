@@ -23,6 +23,7 @@ import {
   paceRemainingPercent,
   usesChatGptSharing,
   resolveNewThreadModelSelection,
+  collectThreadUsageLimits,
 } from "./usageLimits.ts";
 
 const now = Date.parse("2026-09-03T12:00:00.000Z");
@@ -150,6 +151,138 @@ describe("new thread model fallback", () => {
         ],
       }).selection,
     ).toEqual(usesFallback ? fallback : defaultSelection);
+  });
+});
+
+describe("thread usage limits", () => {
+  const checkedAt = "2026-09-03T11:00:00.000Z";
+  const runtime = provider({
+    instanceId: ProviderInstanceId.make("hermes"),
+    driver: ProviderDriverKind.make("hermes"),
+    usageLimits: { checkedAt, windows: [], unavailable: { reason: "unsupported" } },
+  });
+  const source = {
+    id: UsageLimitSourceId.make("hub"),
+    kind: "cliproxy" as const,
+    label: "CLIProxy",
+    checkedAt,
+    accounts: (
+      [
+        ["codex", 20],
+        ["claudeAgent", 40],
+        ["grok", 60],
+        ["antigravity", 80],
+      ] as const
+    ).map(([driver, usedPercent]) => ({
+      id: driver,
+      driver: ProviderDriverKind.make(driver),
+      usageLimits: { checkedAt, windows: [{ ...window, usedPercent }] },
+    })),
+  };
+  const input = {
+    environmentId: EnvironmentId.make("environment"),
+    instanceId: runtime.instanceId,
+    model: "custom:cliproxyapi:gpt-6.1-sol",
+    providers: [runtime],
+    sources: [source],
+    now,
+  };
+
+  it.each([
+    ["custom:cliproxyapi:gpt-6.1-sol", 80],
+    ["gpt-6-astra", 80],
+    ["openai/o3", 80],
+    ["custom:cliproxyapi-claude:gpt-6.1-sol", 80],
+    ["custom:cliproxyapi:claude-opus-5-5", 60],
+    ["anthropic/claude-fable-5-1", 60],
+    ["xai:grok-4", 40],
+    ["google/gemini-3-pro", 20],
+  ])("selects CLIProxy limits for %s", (model, remainingPercent) => {
+    const result = collectThreadUsageLimits({ ...input, model });
+    expect(result?.notice).toBeNull();
+    expect(result?.windows.map((entry) => entry.remainingPercent)).toEqual([remainingPercent]);
+    expect(
+      collectThreadUsageLimits({
+        ...input,
+        model,
+        providers: [{ ...runtime, usageLimits: undefined }],
+      }),
+    ).toEqual(result);
+  });
+
+  it("pools matching logins and deduplicates accounts across hubs", () => {
+    const account = {
+      id: "first",
+      driver: ProviderDriverKind.make("codex"),
+      email: "same@example.com",
+      usageLimits: { checkedAt, windows: [{ ...window, usedPercent: 20 }] },
+    };
+    const result = collectThreadUsageLimits({
+      ...input,
+      sources: [
+        { ...source, accounts: [account] },
+        {
+          ...source,
+          id: UsageLimitSourceId.make("other-hub"),
+          accounts: [
+            { ...account, id: "duplicate" },
+            {
+              ...account,
+              id: "second",
+              email: "other@example.com",
+              usageLimits: { checkedAt, windows: [{ ...window, usedPercent: 80 }] },
+            },
+          ],
+        },
+      ],
+    });
+    expect(result?.windows[0]?.remainingPercent).toBe(50);
+    expect(result?.windows[0]?.members).toHaveLength(2);
+  });
+
+  it.each(["unknown-model", null])("keeps native limits for %s", (model) => {
+    const native = { ...runtime, usageLimits: { checkedAt, windows: [window] } };
+    const result = collectThreadUsageLimits({ ...input, providers: [native], model });
+    expect(result?.notice).toBeNull();
+    expect(result?.windows[0]?.remainingPercent).toBe(60);
+  });
+
+  it("falls back to the selected instance when hub probes fail", () => {
+    const native = { ...runtime, usageLimits: { checkedAt, windows: [window] } };
+    const result = collectThreadUsageLimits({
+      ...input,
+      providers: [native, { ...native, instanceId: ProviderInstanceId.make("other-login") }],
+      sources: [
+        {
+          ...source,
+          accounts: source.accounts.map((account) => ({
+            ...account,
+            usageLimits: {
+              ...account.usageLimits,
+              unavailable: { reason: "probeFailed" as const },
+            },
+          })),
+        },
+      ],
+    });
+    expect(result?.windows[0]?.remainingPercent).toBe(60);
+    expect(result?.windows[0]?.members).toHaveLength(1);
+    for (const status of [
+      { enabled: false },
+      { installed: false },
+      { availability: "unavailable" as const },
+    ]) {
+      expect(
+        collectThreadUsageLimits({
+          ...input,
+          providers: [{ ...native, ...status }],
+          sources: [],
+        })?.windows[0]?.remainingPercent,
+      ).toBe(60);
+    }
+    expect(collectThreadUsageLimits({ ...input, sources: [] })?.notice).toBe(
+      "This account has no subscription limits.",
+    );
   });
 });
 

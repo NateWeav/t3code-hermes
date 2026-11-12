@@ -1,16 +1,14 @@
 import type {
+  EnvironmentId,
   ProviderInstanceId,
   ServerProvider,
-  ServerProviderUsageWindow,
   UsageLimitSourceSnapshots,
 } from "@t3tools/contracts";
 import {
-  collectProviderUsageLimits,
+  collectThreadUsageLimits,
   formatDuration,
   type LimitPace,
-  limitsNotice,
-  paceOf,
-  remainingPercent,
+  type LimitPoolWindow,
 } from "@t3tools/shared/usageLimits";
 import type { ReactNode } from "react";
 
@@ -31,7 +29,9 @@ const PACE_LABEL: Record<LimitPace, string> = {
 };
 
 export interface ThreadDetailsUsageInput {
+  readonly environmentId: EnvironmentId;
   readonly providerInstanceId: ProviderInstanceId | null;
+  readonly model: string | null;
   readonly providers: readonly ServerProvider[];
   readonly sources: UsageLimitSourceSnapshots;
   readonly contextWindow: ContextWindowSnapshot | null;
@@ -41,23 +41,24 @@ type UsageTone = "error" | "warning" | null;
 
 /** The selected provider's limit windows. Each row reads as room left. */
 export function ThreadDetailsUsage({
+  environmentId,
   providerInstanceId,
+  model,
   providers,
   sources,
 }: Omit<ThreadDetailsUsageInput, "contextWindow">) {
   const nowMinute = useNowMinute();
   const now = Date.parse(`${nowMinute}:00Z`);
-  const report =
-    providerInstanceId !== null
-      ? collectProviderUsageLimits(providerInstanceId, providers, sources, now)
-      : null;
-  // Only this instance's data: the report keeps one instance per login, and any other entry may be
-  // a different login or workspace, so fall back to the instance's own snapshot.
-  const limits =
-    report?.accounts.find((entry) => entry.instanceId === providerInstanceId)?.limits ??
-    providers.find((provider) => provider.instanceId === providerInstanceId)?.usageLimits;
+  const limits = collectThreadUsageLimits({
+    environmentId,
+    instanceId: providerInstanceId,
+    model,
+    providers,
+    sources,
+    now,
+  });
   if (!limits) return null;
-  const notice = limitsNotice(limits);
+  const { notice } = limits;
 
   return (
     <ThreadDetailsSection
@@ -138,17 +139,11 @@ export function ThreadDetailsContext({ usage }: { readonly usage: ContextWindowS
   );
 }
 
-function LimitRow({
-  window,
-  now,
-}: {
-  readonly window: ServerProviderUsageWindow;
-  readonly now: number;
-}) {
+function LimitRow({ window, now }: { readonly window: LimitPoolWindow; readonly now: number }) {
   const timestampFormat = usePrimarySettings((settings) => settings.timestampFormat);
-  const left = remainingPercent(window);
-  const pace = paceOf(window, now);
-  const resetsAt = window.resetsAt ? Date.parse(window.resetsAt) : Number.NaN;
+  const left = window.remainingPercent;
+  const pace = window.pace;
+  const resetsAt = window.resets.find((reset) => reset.at > now && reset.restoresPercent > 0)?.at;
   return (
     <UsageRow
       label={window.label}
@@ -161,10 +156,11 @@ function LimitRow({
           <span className="text-foreground">
             {window.label}: {left}% left
           </span>
-          {window.resetsAt && resetsAt > now ? (
+          {resetsAt !== undefined ? (
             <span className="text-muted-foreground">
-              Resets in {formatDuration(resetsAt - now)} ·{" "}
-              {formatUpcomingTimestamp(window.resetsAt, timestampFormat, now)}
+              {window.members.length > 1 ? "Next reset in" : "Resets in"}{" "}
+              {formatDuration(resetsAt - now)} ·{" "}
+              {formatUpcomingTimestamp(new Date(resetsAt).toISOString(), timestampFormat, now)}
             </span>
           ) : null}
           {pace ? <span className="text-muted-foreground">{PACE_LABEL[pace]}</span> : null}

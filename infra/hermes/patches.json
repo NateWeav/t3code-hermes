@@ -55,6 +55,11 @@
       "neededFor": "Subagents that answer inside the turn and can launch their own, as Claude's do. Without it, Hermes runs every subagent in the background, so its answer arrives in a later turn, and a subagent cannot launch another.",
       "versions": [
         {
+          "hermesCommit": "eaac327fac2c2db0b77ee143989d49b29a6f36cb",
+          "hermesCommitDate": "2026-11-12T04:50:42Z",
+          "file": "acp-editor-delegation/eaac327fac2c.patch"
+        },
+        {
           "hermesCommit": "981791d9d41fd2efde27f563873ce8c48ef1dac6",
           "hermesCommitDate": "2026-11-07T05:18:01Z",
           "file": "acp-editor-delegation/981791d9d41f.patch"
@@ -260,6 +265,11 @@
       "title": "Subagent models and follow-ups",
       "neededFor": "Apply after Live subagent progress. Lets Hermes pick a subagent's model from the ones your profile lists, and send a finished subagent a follow-up. Without it, every subagent runs on the default model, and a finished one can't be asked anything more.",
       "versions": [
+        {
+          "hermesCommit": "eaac327fac2c2db0b77ee143989d49b29a6f36cb",
+          "hermesCommitDate": "2026-11-12T04:50:42Z",
+          "file": "acp-subagent-model-continue/eaac327fac2c.patch"
+        },
         {
           "hermesCommit": "56ac7b5d51945ae7875c4b669baa757fa17f4846",
           "hermesCommitDate": "2026-11-11T16:59:13Z",

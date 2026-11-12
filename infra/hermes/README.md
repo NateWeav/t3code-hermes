@@ -176,8 +176,8 @@ only when the gateway lists that field, so an older gateway is never sent it. In
   `delegation.orchestrator_enabled: false`, which still makes every child a leaf.
 
 Both settings freeze into the session when it is created, so only sessions created after the patch
-is applied and the gateway restarts get them. Verified against hermes-agent `981791d9d4` (`main`,
-2026-11-07), alone and after the other patches. The patch's
+is applied and the gateway restarts get them. Verified against hermes-agent `eaac327fac2c` (`main`,
+2026-11-12), alone and after the other patches. The patch's
 `tests/acp_adapter/test_gateway_editor_delegation.py` drives a real gateway daemon and a real
 `hermes acp` process against a loopback model, covering foreground and background calls, a stock
 editor, each depth case, and a stop during a foreground call. Run it in a scratch checkout, as for
@@ -211,7 +211,7 @@ child run, and applies only after them. Its `466591fe65` version (`main`, 2026-1
 again on newer `main`, its `a2fa0a4b64` version (`main`, 2026-11-10) is the same again on top of
 that patch's `a2fa0a4b64` version, and its `9373dc1e31` version (`main`, 2026-11-11) is the same on
 newer `main` and that patch's `9373dc1e31` version. That version also stacks unchanged on that
-patch's `56ac7b5d51` version.
+patch's `56ac7b5d51` and `eaac327fac2c` versions.
 
 ## `acp-fast-mode`
 
@@ -476,7 +476,8 @@ all the other patches. Its `466591fe65` version (`main`, 2026-11-09) is the same
 version (`main`, 2026-11-11) is the same change on upstream's shorter core tool schemas, whose
 prompt-surface token counts it re-baselines. Its `56ac7b5d51` version (`main`, 2026-11-11) is the
 same change re-baselined again after upstream deferred `manage_connections` out of the core tool
-list. Run the patch's
+list. Its `eaac327fac2c` version (`main`, 2026-11-12) preserves upstream's child context assembly
+and desktop prompt snapshot while adding continuation on top. Run the patch's
 `tests/gateway/test_delegation_task_model.py` and `tests/acp_adapter/test_gateway_delegation_continue.py`
 (which reuses the progress patch's `test_gateway_delegation_progress.py`) in a scratch checkout, as
 for `acp-delegation-progress`.

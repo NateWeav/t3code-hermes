@@ -579,7 +579,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         Effect.gen(function* () {
           const { env, tailscaleCalls } = yield* shareSpawned({ built: true, host: "localhost" });
           const serve = tailscaleCalls.find((args) => args.includes("--bg"));
-          assert.equal(serve?.at(-1), `http://localhost:${env?.T3CODE_PORT}`);
+          assert.equal(serve?.at(-1), `http://localhost:${env?.T3HERMES_PORT}`);
         }),
       );
 

@@ -139,8 +139,11 @@ is forwarded only when the call already owns that parent; T3 Code shows it in it
 Versions before `27cbcb122ff4` drop nested children. Background children keep reporting after the
 turn that spawned them ends.
 Registry-forced stalls and worker crashes report a terminal event per child, with the same secret
-redaction as other live child progress, so detached work cannot stay falsely active. A parent result
-with `status: "dispatched"` only acknowledges launch; child lifecycle events settle each subagent.
+redaction as other live child progress, so detached work cannot stay falsely active. A child already
+gone from the registry is lent a record for that one event; from version `ff2591a04602` (`main`,
+2026-11-12) removing the loan leaves the record Hermes keeps to continue that child untouched. A
+parent result with `status: "dispatched"` only acknowledges launch; child lifecycle events settle
+each subagent.
 Progress sent while T3 Code was disconnected is not replayed, but the gateway still hands each
 result to the agent in a turn of its own.
 
@@ -211,7 +214,8 @@ child run, and applies only after them. Its `466591fe65` version (`main`, 2026-1
 again on newer `main`, its `a2fa0a4b64` version (`main`, 2026-11-10) is the same again on top of
 that patch's `a2fa0a4b64` version, and its `9373dc1e31` version (`main`, 2026-11-11) is the same on
 newer `main` and that patch's `9373dc1e31` version. That version also stacks unchanged on that
-patch's `56ac7b5d51` and `eaac327fac2c` versions.
+patch's `56ac7b5d51` and `eaac327fac2c` versions. Its `ff2591a04602` version (`main`, 2026-11-12)
+is the same on newer `main` and that patch's `ff2591a04602` version.
 
 ## `acp-fast-mode`
 
@@ -268,7 +272,9 @@ reasoning model's ACP reply therefore repeated its reasoning as reply text. Beca
 no longer began with what had streamed, the bridge also sent the whole reply a second time.
 
 The patch removes the ACP exception. Verified against hermes-agent `c419cf7c86` (`main`,
-2026-10-31), alone and after the other patches. Restart the Hermes gateway after applying it. Run
+2026-10-31), alone and after the other patches. Its `ff2591a04602` version (`main`, 2026-11-12)
+removes it where upstream moved it, which also keeps the block out of the separate reasoning message
+upstream now sends after a streamed reply. Restart the Hermes gateway after applying it. Run
 the patch's `tests/gateway/test_local_viewer_reasoning.py` in a scratch checkout, as for
 `acp-delegation-progress`.
 
@@ -445,8 +451,10 @@ patch's `tests/acp_adapter/test_gateway_command_approval.py` in a scratch checko
 
 **Needed by:** choosing a subagent's model, and sending a finished subagent a follow-up, as Claude's
 `Agent` model and `SendMessage` do. Stock `delegate_task` reserves `model` (children run on
-`delegation.model` or the parent's model), and its `list`/`steer`/`stop` reach only running children.
-It builds on `acp-delegation-progress`, whose viewer file it changes; apply that first.
+`delegation.model` or the parent's model). Hermes `main` from 2026-11-12 has its own
+`delegate_task(action="continue")` (`3c336ac979`, kept across gateway restarts by `f21b52fc68`), but
+stock `hermes acp` drops the continued run's progress, because the child belongs to the call that
+spawned it. It builds on `acp-delegation-progress`, whose viewer file it changes; apply that first.
 
 - **Per-task model.** Each task may name a `model`: an id from the profile's model picker, or
   `<provider>:<model>` when several providers list it. Anything else is a tool error that lists what
@@ -457,14 +465,15 @@ It builds on `acp-delegation-progress`, whose viewer file it changes; apply that
   (`/etc/hermes/config.yaml`) that pins `delegation.model`, `delegation.provider` or
   `delegation.base_url` wins: it is the administrator's policy, so `delegate_task` stops offering
   `model` and refuses a task that names one. Only the default delegation backend offers it, since
-  another backend routes every task itself.
-- **Continue.** `delegate_task(action="continue", subagent_id, message)` runs a finished top-level
-  child again on its own session, with the same `subagent_id`, child session and stored
-  conversation. It goes through the spawn path, so the route is resolved again under the current
-  policy, the child runs in the background, and its new answer arrives as a completion message.
-  `list` shows the finished children that can be continued, and `steer`/`stop` on one point to
-  `continue`. Finished children are kept in the gateway's memory only (the last 64), so after a
-  gateway restart `continue` says the child is gone. A child is continued once at a time.
+  another backend routes every task itself. A continued child keeps its task's model, after a
+  gateway restart too.
+- **Continue.** Versions before `ff2591a04602` add `continue` to Hermes that has none:
+  `delegate_task(action="continue", subagent_id, message)` runs a finished top-level child again on
+  its own session, with the same `subagent_id`, child session and stored conversation, in the
+  background, and its new answer arrives as a completion message. `list` shows the finished children
+  that can be continued, and `steer`/`stop` on one point to `continue`. Finished children are kept
+  in the gateway's memory only (the last 64), so after a gateway restart `continue` says the child
+  is gone. From `ff2591a04602` the patch uses upstream's `continue` instead.
 - **Viewer.** A `continue` call takes over the child it names: the child's new run reports on that
   call, and T3 Code maps it back to the original subagent by `subagent_id`.
 
@@ -477,7 +486,9 @@ version (`main`, 2026-11-11) is the same change on upstream's shorter core tool 
 prompt-surface token counts it re-baselines. Its `56ac7b5d51` version (`main`, 2026-11-11) is the
 same change re-baselined again after upstream deferred `manage_connections` out of the core tool
 list. Its `eaac327fac2c` version (`main`, 2026-11-12) preserves upstream's child context assembly
-and desktop prompt snapshot while adding continuation on top. Run the patch's
+and desktop prompt snapshot while adding continuation on top. Its `ff2591a04602` version (`main`,
+2026-11-12) drops its own `continue` for upstream's, keeps a task's `model` in the routing request
+upstream re-resolves a continue from after a restart, and keeps the viewer change. Run the patch's
 `tests/gateway/test_delegation_task_model.py` and `tests/acp_adapter/test_gateway_delegation_continue.py`
 (which reuses the progress patch's `test_gateway_delegation_progress.py`) in a scratch checkout, as
 for `acp-delegation-progress`.

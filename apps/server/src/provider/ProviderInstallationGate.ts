@@ -27,7 +27,7 @@ export class ProviderInstallationGate extends Context.Service<
       effect: Effect.Effect<A, E, R>,
     ) => Effect.Effect<A, E, R>;
   }
->()("t3/provider/ProviderInstallationGate") {}
+>()("t3-hermes/provider/ProviderInstallationGate") {}
 
 export const layer = Layer.sync(ProviderInstallationGate, () => {
   // Instances are few and configured, so their gates are kept for the server's lifetime.

@@ -3104,7 +3104,9 @@ export const layerWsRpc = (
               })
               .pipe(
                 Effect.matchCauseEffect({
-                  onFailure: (cause) => Queue.failCause(queue, cause),
+                  // Earlier steps (branch, commit) may have landed before the failing one.
+                  onFailure: (cause) =>
+                    refreshGitStatus(input.cwd).pipe(Effect.andThen(Queue.failCause(queue, cause))),
                   onSuccess: (result) =>
                     (input.threadId === undefined
                       ? Effect.void
@@ -3607,7 +3609,6 @@ export const layer = Layer.unwrap(
               // Handler-context reporters see only request defects, not server-wide defects.
               Layer.provide(DefectReporter.layer),
               Layer.provide(Layer.succeed(SqlClient.SqlClient, sql)),
-              Layer.provide(AgentSessionScanner.layer),
               Layer.provide(AcpRegistrySessions.layer),
               Layer.provide(
                 Layer.succeed(

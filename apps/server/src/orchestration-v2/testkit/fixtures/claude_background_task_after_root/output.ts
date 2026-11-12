@@ -25,8 +25,8 @@ export function assertBackgroundTaskAfterRootOutput(
   assertBaseProjection({
     result,
     transcript,
-    runCount: 1,
-    runStatuses: ["completed"],
+    runCount: 2,
+    runStatuses: ["completed", "completed"],
   });
 
   const projection = projectionFor(result, transcript.scenario);
@@ -34,7 +34,9 @@ export function assertBackgroundTaskAfterRootOutput(
   assertUserMessagesInclude(projection, [forScenario(transcript, PROMPTS)]);
 
   const rootRun = projection.runs[0];
+  const wakeRun = projection.runs[1];
   assert.isDefined(rootRun);
+  assert.isDefined(wakeRun);
   const { task: rosterTask, index: pendingRosterIndex } = firstBackgroundRosterTask(result);
   assert.equal(rosterTask.kind, "command");
   const waitingRunIndex = result.domainEvents.findIndex(
@@ -50,12 +52,14 @@ export function assertBackgroundTaskAfterRootOutput(
       event.payload.kind === "root_turn" &&
       event.payload.status === "waiting",
   );
-  const idleRosterIndex = result.domainEvents.findIndex(
+  const clearedRosterIndex = result.domainEvents.findIndex(
     (event, index) =>
       index > waitingRunIndex &&
       event.type === "provider-thread.updated" &&
-      event.payload.status === "idle" &&
-      (event.payload.pendingBackgroundTasks?.length ?? 0) === 0,
+      event.payload.pendingBackgroundTasks?.length === 0,
+  );
+  const wakeRunIndex = result.domainEvents.findIndex(
+    (event) => event.type === "run.created" && event.payload.id === wakeRun.id,
   );
 
   assert.isAbove(
@@ -68,10 +72,11 @@ export function assertBackgroundTaskAfterRootOutput(
     pendingRosterIndex,
     "checkpoint-waiting root node must retain the background roster",
   );
+  assert.isAbove(wakeRunIndex, waitingRunIndex, "the wake must follow the root turn");
   assert.isAbove(
-    idleRosterIndex,
-    waitingRunIndex,
-    "late background completion must clear the roster and return the provider thread to idle",
+    clearedRosterIndex,
+    wakeRunIndex,
+    "the background task must remain pending until its wake run consumes the completion",
   );
   assert.equal(rootRun.status, "completed");
   const rootNode = projection.nodes.find(
@@ -89,7 +94,7 @@ export function assertBackgroundTaskAfterRootOutput(
     projection.turnItems.flatMap((item) =>
       item.type === "assistant_message" ? [item.text.trim()] : [],
     ),
-    ["L2_STARTED"],
+    ["L2_STARTED", "L2_WAKE: L2_BG_DONE"],
   );
 
   const shell = result.shellSnapshot.threads.find((thread) => thread.id === projection.thread.id);

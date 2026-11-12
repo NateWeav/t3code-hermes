@@ -3387,9 +3387,10 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                   sourceMessageId,
                   text: "",
                   emitted: false,
+                  nodeEmitted: false,
                   dirty: false,
                 }
-              : { ...closed, emitted: false, dirty: false };
+              : { ...closed, emitted: false, nodeEmitted: false, dirty: false };
           if (closed === undefined) stream.nextSegment += 1;
           stream.current = segment;
           return segment;

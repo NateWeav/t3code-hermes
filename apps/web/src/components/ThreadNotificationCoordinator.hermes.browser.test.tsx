@@ -251,6 +251,7 @@ function setup() {
   const router = {
     state: { matches: [{ params: {} }] },
     navigate: state.navigate,
+    subscribe: () => () => undefined,
   } as unknown as AnyRouter;
   const ui = () => (
     <RegistryContext.Provider value={testRegistry}>

@@ -24,6 +24,8 @@ export class DesktopState extends Context.Service<
     readonly closeToTray: Ref.Ref<boolean>;
     /** Set when the Windows login item launched the app; consumed by the first main window reveal. */
     readonly startHidden: Ref.Ref<boolean>;
+    // Set by DesktopUpdates.configure, which runs before the first backend start.
+    readonly canInstallUpdates: Ref.Ref<boolean>;
     readonly primaryBackendStartup: SubscriptionRef.SubscriptionRef<PrimaryBackendStartup>;
   }
 >()("@t3tools/desktop/app/DesktopState") {}
@@ -33,6 +35,7 @@ const make = Effect.all({
   quitting: Ref.make(false),
   closeToTray: Ref.make(false),
   startHidden: Ref.make(process.argv.includes(HIDDEN_LAUNCH_ARG)),
+  canInstallUpdates: Ref.make(false),
   primaryBackendStartup: SubscriptionRef.make<PrimaryBackendStartup>({ _tag: "Starting" }),
 });
 

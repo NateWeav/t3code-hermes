@@ -3453,6 +3453,7 @@ export default function ChatView(props: ChatViewProps) {
                     activePendingApproval?.requestId ?? activePendingUserInput?.requestId ?? null
                   }
                   activeTurnStartedAt={activeWorkStartedAt}
+                  providerStartingLabel={activeActivityRun?.providerStartingLabel ?? null}
                   worktreeSetup={worktreeSetup}
                   onCancelWorktreeSetup={onCancelWorktreeSetupStable}
                   retryableWorkspacePreparationRunIds={retryableWorkspacePreparationRunIds}

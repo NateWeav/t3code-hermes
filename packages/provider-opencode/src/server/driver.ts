@@ -466,29 +466,27 @@ export const OpenCodeDriver: ProviderDriver<
       serverUrl: effectiveConfig.serverUrl,
       environment: processEnv,
     });
+    const hasDashboardOverride =
+      Boolean(processEnv.OPENCODE_GO_AUTH_COOKIE?.trim()) &&
+      Boolean(processEnv.OPENCODE_GO_WORKSPACE_ID?.trim());
     // Fork: fall back to the OpenCode Go dashboard/usage reader when the
     // upstream probe is unavailable, on both the check and the usage recovery.
     const legacyUsageLimits = upstreamUsageLimits.pipe(
-      Effect.flatMap((usageLimits) => {
-        const hasDashboardOverride =
-          Boolean(processEnv.OPENCODE_GO_AUTH_COOKIE?.trim()) &&
-          Boolean(processEnv.OPENCODE_GO_WORKSPACE_ID?.trim());
-        if (
+      Effect.filterOrElse(
+        (usageLimits) =>
           !enabled ||
           (!hasDashboardOverride &&
-            (usageLimits.unavailable === undefined || effectiveConfig.serverUrl.trim().length > 0))
-        ) {
-          return Effect.succeed(usageLimits);
-        }
-        return readForkOpenCodeGoUsageLimits({
-          environment: processEnv,
-          isExternalServer: effectiveConfig.serverUrl.trim().length > 0,
-        }).pipe(
-          Effect.map((fallback) =>
-            hasDashboardOverride || fallback.unavailable === undefined ? fallback : usageLimits,
+            (usageLimits.unavailable === undefined || effectiveConfig.serverUrl.trim().length > 0)),
+        (usageLimits) =>
+          readForkOpenCodeGoUsageLimits({
+            environment: processEnv,
+            isExternalServer: effectiveConfig.serverUrl.trim().length > 0,
+          }).pipe(
+            Effect.map((fallback) =>
+              hasDashboardOverride || fallback.unavailable === undefined ? fallback : usageLimits,
+            ),
           ),
-        );
-      }),
+      ),
       Effect.provideService(FileSystem.FileSystem, fileSystem),
       Effect.provideService(Path.Path, pathService),
       Effect.provideService(HttpClient.HttpClient, httpClient),
@@ -496,7 +494,8 @@ export const OpenCodeDriver: ProviderDriver<
     );
     let unsupportedUsageVersion: string | undefined;
     const checkUsageLimits = Effect.gen(function* () {
-      if (!effectiveConfig.enabled) return yield* legacyUsageLimits;
+      // Fork: an explicit OpenCode Go dashboard source outranks the server's own limits.
+      if (!effectiveConfig.enabled || hasDashboardOverride) return yield* legacyUsageLimits;
       const runtime = yield* runtimeProbe.get;
       if (runtime.generation === "v1" || runtime.version === unsupportedUsageVersion)
         return yield* legacyUsageLimits;

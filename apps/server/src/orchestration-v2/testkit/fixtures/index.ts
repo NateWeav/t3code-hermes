@@ -6,10 +6,7 @@ import {
   assertClaudeBackgroundSubagentAfterRootDetails,
 } from "./claude_background_subagent_after_root/output.ts";
 import { claudeBackgroundTaskAfterRootInput } from "./claude_background_task_after_root/input.ts";
-import {
-  assertBackgroundTaskAfterRootOutput,
-  assertClaudeBackgroundTaskAfterRootDetails,
-} from "./claude_background_task_after_root/output.ts";
+import { assertClaudeBackgroundTaskAfterRootOutput } from "./claude_background_task_after_root/output.ts";
 import { claudeBackgroundSubagentLifecycleInput } from "./claude_background_subagent_lifecycle/input.ts";
 import {
   assertBackgroundSubagentLifecycleOutput,
@@ -112,6 +109,7 @@ import { hermesNestedSubagentModelInput } from "./hermes_nested_subagent_model/i
 import { assertHermesNestedSubagentModelDetails } from "./hermes_nested_subagent_model/output.ts";
 import { hermesNestedBackgroundSubagentWakeInput } from "./hermes_nested_background_subagent_wake/input.ts";
 import { hermesBackgroundTaskAfterRootInput } from "./hermes_background_task_after_root/input.ts";
+import { assertHermesBackgroundTaskAfterRootOutput } from "./hermes_background_task_after_root/output.ts";
 import { hermesBackgroundTaskInterruptInput } from "./hermes_background_task_interrupt/input.ts";
 import { hermesBackgroundProcessStopInput } from "./hermes_background_process_stop/input.ts";
 import { assertHermesBackgroundProcessStopOutput } from "./hermes_background_process_stop/output.ts";
@@ -369,8 +367,7 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         ),
         modelSelection: CLAUDE_MODEL_SELECTION,
         runContinuationWorker: true,
-        assertOutput: assertBackgroundTaskAfterRootOutput,
-        assertProviderDetails: assertClaudeBackgroundTaskAfterRootDetails,
+        assertOutput: assertClaudeBackgroundTaskAfterRootOutput,
       },
     ],
   },
@@ -927,7 +924,7 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
           import.meta.url,
         ),
         modelSelection: HERMES_MODEL_SELECTION,
-        assertOutput: assertBackgroundTaskAfterRootOutput,
+        assertOutput: assertHermesBackgroundTaskAfterRootOutput,
         assertProviderDetails: assertHermesRosterListsBackgroundProcess,
       },
     ],

@@ -253,7 +253,9 @@ Hermes now advertises its own session-scoped **Service tier** picker in `configO
 `42500a10d9`), shown only on routes the fast-mode gate admits. The patch keeps `fast_mode` beside it:
 T3 Code's toggle still needs the per-row `_meta` tags, the per-prompt re-pin, and the endpoint
 opt-in, which also makes that picker appear for an opted-in proxy. Verified against hermes-agent
-`27cbcb122f` (`main`, 2026-11-04), alone and after the other patches.
+`27cbcb122f` (`main`, 2026-11-04), alone and after the other patches. Its `ff2591a04602` version
+(`main`, 2026-11-12) is the same change, with its test's stand-in runner given the per-profile
+channel config lookup upstream's `/model` now reads (`8da8ca8d7a`).
 
 Restart the Hermes gateway and the T3 Code server after applying the patch: the gateway runs the
 fast-mode gate and the endpoint opt-in. The patch's `tests/acp_adapter/test_fast_mode.py` drives the real config, gate,

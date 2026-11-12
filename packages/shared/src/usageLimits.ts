@@ -1,4 +1,5 @@
 import {
+  ProviderDriverKind,
   type EnvironmentId,
   type ModelSelection,
   type ServerSettings,
@@ -764,6 +765,50 @@ export function hasProviderUsageLimits(
         (source.error !== undefined && source.accounts.length === 0),
     )
   );
+}
+
+function usageLimitDriverForModel(model: string | null): ServerProvider["driver"] | null {
+  const bare = model?.trim().toLowerCase().split(/[/:]/).at(-1) ?? "";
+  if (/^(gpt-|o[134](?:-|$))/.test(bare)) return ProviderDriverKind.make("codex");
+  if (bare.startsWith("claude-")) return ProviderDriverKind.make("claudeAgent");
+  if (bare.startsWith("grok-")) return ProviderDriverKind.make("grok");
+  if (bare.startsWith("gemini-")) return ProviderDriverKind.make("antigravity");
+  return null;
+}
+
+export function collectThreadUsageLimits(input: {
+  readonly environmentId: EnvironmentId;
+  readonly instanceId: ProviderInstanceId | null;
+  readonly model: string | null;
+  readonly providers: readonly ServerProvider[];
+  readonly sources: UsageLimitSourceSnapshots;
+  readonly now: number;
+}) {
+  const selected = input.providers.find((provider) => provider.instanceId === input.instanceId);
+  const driver = usageLimitDriverForModel(input.model) ?? selected?.driver;
+  const collect = (providers: readonly ServerProvider[], sources: UsageLimitSourceSnapshots) =>
+    collectLimitAccounts(
+      new Map([
+        [
+          input.environmentId,
+          {
+            entry: { target: { label: "" } },
+            serverConfig: { providers, usageLimitSources: sources },
+          },
+        ],
+      ]),
+    );
+  const hubAccounts = collect([], input.sources).filter((account) => account.driver === driver);
+  const nativeProvider =
+    selected?.usageLimits !== undefined
+      ? { ...selected, enabled: true, installed: true, availability: undefined }
+      : null;
+  const accounts =
+    hubAccounts.length > 0 ? hubAccounts : collect(nativeProvider ? [nativeProvider] : [], []);
+  const pool = collectLimitPools(accounts, input.now)[0];
+  if (pool) return { windows: displayLimitWindows(pool), notice: null };
+  const native = selected?.usageLimits;
+  return native ? { windows: [], notice: limitsNotice(native) } : null;
 }
 
 export function sameUsageLimitCommandCoverage(

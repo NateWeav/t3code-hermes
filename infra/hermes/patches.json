@@ -6,6 +6,11 @@
       "neededFor": "Hermes homes whose config runs tools on an SSH host without copying credentials, skills, or cache to it.",
       "versions": [
         {
+          "hermesCommit": "647db4ddbf754867c1af8a10368d9979f73532c2",
+          "hermesCommitDate": "2026-11-12T19:41:12Z",
+          "file": "acp-central-ssh-execution/647db4ddbf75.patch"
+        },
+        {
           "hermesCommit": "5b32cfc230078417fc523e12b9aabbc9b59f684b",
           "hermesCommitDate": "2026-10-26T03:55:41Z",
           "file": "acp-central-ssh-execution/5b32cfc23007.patch"

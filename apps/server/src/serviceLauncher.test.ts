@@ -141,7 +141,7 @@ const writeFakeRuntime = (
   });
 
 const runLauncher = async (root: string) => {
-  vi.stubEnv("T3CODE_HOME", root);
+  vi.stubEnv("T3HERMES_HOME", root);
   try {
     await main();
   } finally {

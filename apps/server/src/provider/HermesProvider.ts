@@ -39,6 +39,7 @@ import {
   resolveHermesAcpBaseModelId,
 } from "./acp/HermesAcpSupport.ts";
 import { dedupeSlashCommands } from "@t3tools/provider-core/server/slashCommands";
+import { resolveProviderProbeTimeoutMs } from "@t3tools/provider-core/server/snapshotProbe";
 import {
   buildHermesModelCapabilities,
   readHermesReasoningContext,
@@ -332,13 +333,18 @@ export const checkHermesProviderStatus = Effect.fn("checkHermesProviderStatus")(
     });
   }
 
+  const discoveryTimeoutMs = resolveProviderProbeTimeoutMs(
+    "hermes",
+    HERMES_ACP_MODEL_DISCOVERY_TIMEOUT_MS,
+    environment,
+  );
   const discoveryStage = yield* Ref.make("process startup");
   const discoveryExit = yield* discoverHermesModelsViaAcp(
     hermesSettings,
     providerProbeEnvironment(environment),
     options?.commandAdvertisementTimeoutMs,
     (method) => Ref.set(discoveryStage, method),
-  ).pipe(Effect.timeoutOption(HERMES_ACP_MODEL_DISCOVERY_TIMEOUT_MS), Effect.exit);
+  ).pipe(Effect.timeoutOption(discoveryTimeoutMs), Effect.exit);
   if (Exit.isFailure(discoveryExit)) {
     const missing = Option.exists(
       Cause.findErrorOption(discoveryExit.cause),
@@ -367,7 +373,7 @@ export const checkHermesProviderStatus = Effect.fn("checkHermesProviderStatus")(
   if (Option.isNone(discoveryExit.value)) {
     const stage = yield* Ref.get(discoveryStage);
     yield* Effect.logWarning(
-      `Hermes ACP model discovery timed out after ${HERMES_ACP_MODEL_DISCOVERY_TIMEOUT_MS}ms during ${stage}.`,
+      `Hermes ACP model discovery timed out after ${discoveryTimeoutMs}ms during ${stage}.`,
     );
     return buildServerProvider({
       presentation: HERMES_PRESENTATION,
@@ -380,7 +386,7 @@ export const checkHermesProviderStatus = Effect.fn("checkHermesProviderStatus")(
         version: null,
         status: "warning",
         auth: { status: "unknown" },
-        message: `Hermes CLI is installed but ACP model discovery did not finish within ${HERMES_ACP_MODEL_DISCOVERY_TIMEOUT_MS / 1000}s during ${stage}; Hermes may still be starting up.`,
+        message: `Hermes CLI is installed but ACP model discovery did not finish within ${discoveryTimeoutMs / 1000}s during ${stage}; Hermes may still be starting up.`,
       },
     });
   }

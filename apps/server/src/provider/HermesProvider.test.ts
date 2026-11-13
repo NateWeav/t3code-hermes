@@ -443,19 +443,21 @@ const makeColdHermesSpawner = Effect.fn("makeColdHermesSpawner")(function* (stag
 });
 
 it.effect.each(["initialize", "session/new"])(
-  "keeps a cold %s alive beyond the old discovery deadline",
+  "keeps a cold %s alive through a configured readiness timeout",
   (stage) =>
     Effect.gen(function* () {
       const fake = yield* makeColdHermesSpawner(stage);
       const checking = yield* checkHermesProviderStatus(
         decodeHermesSettings({ enabled: true, binaryPath: "/fake/hermes" }),
+        { ...process.env, T3CODE_HERMES_PROBE_TIMEOUT_MS: "180000" },
       ).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, fake.spawner),
         Effect.provideService(AgentScope, fake.agentScope),
         Effect.forkChild,
       );
       yield* Deferred.await(fake.reached);
-      yield* TestClock.adjust("50 seconds");
+      // Past the 120 s default, inside the configured readiness timeout.
+      yield* TestClock.adjust("150 seconds");
       expect(checking.pollUnsafe()).toBeUndefined();
       yield* Deferred.succeed(fake.release, undefined);
       const snapshot = yield* Fiber.join(checking);

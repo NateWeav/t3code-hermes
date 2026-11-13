@@ -501,6 +501,7 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
           instanceId,
           action: "update",
           state,
+          targetVersion,
         })
         .pipe(Effect.tap(Ref.set(lastStatusRef, state?.status ?? null)), Effect.uninterruptible);
     const setQueuedState = setUpdateState(

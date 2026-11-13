@@ -1837,8 +1837,9 @@ export const make = Effect.fn("AcpSessionRuntime.make")(function* (
         ...capabilities?.fs,
       },
       terminal: capabilities?.terminal ?? false,
-      // ACP v1 agents send session notices only to clients that advertise them; v2 needs no capability.
-      session: { ...capabilities?.session, notices: {} },
+      // ACP v1 agents send session notices and compaction updates only to clients that advertise
+      // them; v2 needs no capability.
+      session: { ...capabilities?.session, notices: {}, compaction: {} },
       ...(capabilities?.auth ? { auth: capabilities.auth } : {}),
       ...(capabilities?.elicitation ? { elicitation: capabilities.elicitation } : {}),
       ...(capabilities?._meta ? { _meta: capabilities._meta } : {}),

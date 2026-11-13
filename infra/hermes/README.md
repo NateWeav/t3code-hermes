@@ -541,7 +541,7 @@ probe failed (no connection, a timeout, a 5xx or 429) is not remembered, so the 
 restarted with a different window shows after the gateway restarts. No wire change; T3 Code needs
 nothing for it.
 
-Verified against hermes-agent `90d6b98fd86d` (`main`, 2026-11-06), alone and after the other
+Verified against hermes-agent `c9b20d7bc08d` (`main`, 2026-11-13), alone and after the other
 patches. Run the patch's `tests/gateway/test_context_probe_memo_gateway.py` in a scratch checkout,
 as for `acp-delegation-progress`.
 

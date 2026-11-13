@@ -394,6 +394,11 @@
       "neededFor": "Faster thread starts on a custom model endpoint that publishes no context length. Without it, Hermes asks the endpoint for the model's context window on every agent build, and a new thread waits for those requests, several seconds when the endpoint is slow to answer.",
       "versions": [
         {
+          "hermesCommit": "c9b20d7bc08dec1e10779a06d7d9073bc6e7e418",
+          "hermesCommitDate": "2026-11-13T01:12:39Z",
+          "file": "acp-context-length-reuse/c9b20d7bc08d.patch"
+        },
+        {
           "hermesCommit": "90d6b98fd86d20981ee06ddd5b7d93e4320f26a4",
           "hermesCommitDate": "2026-11-06T07:12:42Z",
           "file": "acp-context-length-reuse/90d6b98fd86d.patch"

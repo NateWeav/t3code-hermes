@@ -92,7 +92,6 @@ describe("UsageLimitSources", () => {
         ),
         NodeCrypto.layer,
       ]),
-      Effect.scoped,
     ),
   );
 
@@ -208,7 +207,6 @@ describe("UsageLimitSources", () => {
         ),
         NodeCrypto.layer,
       ]),
-      Effect.scoped,
     );
   });
 });

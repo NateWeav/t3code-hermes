@@ -1158,7 +1158,7 @@ it.effect("access changes made while the snapshot loads reach the client after i
       );
     const revokedElsewhere = AuthSessionId.make("revoked-elsewhere");
     const responses = yield* Queue.unbounded<AuthAccessStreamEvent>();
-    const server = yield* RpcServer.makeNoSerialization(WsRpcGroup, {
+    const server = yield* RpcServer.makeNoSerialization(CoreWsRpcGroup, {
       ...WS_RPC_SERVER_OPTIONS,
       onFromServer: (response) =>
         response._tag === "Chunk"
@@ -1182,7 +1182,7 @@ it.effect("access changes made while the snapshot loads reach the client after i
           {},
           yield* ServerBrowser.ServerBrowser,
           () => Effect.void,
-          { secretReferences: true },
+          { secretReferences: true, hermesUsage: true },
         ).pipe(
           Layer.merge(RpcAuthorization.layer([AuthAccessReadScope])),
           Layer.provide(

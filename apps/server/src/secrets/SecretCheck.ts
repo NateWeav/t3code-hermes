@@ -15,7 +15,7 @@ export class SecretCheck extends Context.Service<
      */
     readonly check: (reference: SecretReference) => Effect.Effect<SecretSourceCheckResult>;
   }
->()("t3/secrets/SecretCheck") {}
+>()("t3-hermes/secrets/SecretCheck") {}
 
 const make = Effect.gen(function* () {
   const resolver = yield* SecretResolver.SecretResolver;

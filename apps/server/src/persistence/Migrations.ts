@@ -97,6 +97,7 @@ import Migration0085 from "./Migrations/085_TurnItemCounts.ts";
 import Migration0086 from "./Migrations/086_QueuedTurnInputIndex.ts";
 import Migration0087 from "./Migrations/087_ProjectionProjectsCustomTitle.ts";
 import Migration0088 from "./Migrations/088_TurnItemTypeStatusIndex.ts";
+import Migration0089 from "./Migrations/089_ShellThreadReadIndexes.ts";
 
 const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
@@ -188,6 +189,7 @@ const migrationEntries = [
   [86, "QueuedTurnInputIndex", Migration0086],
   [87, "ProjectionProjectsCustomTitle", Migration0087],
   [88, "TurnItemTypeStatusIndex", Migration0088],
+  [89, "ShellThreadReadIndexes", Migration0089],
   // Fork: never add fork migrations here. Any id this fork takes is one upstream
   // will assign later, and the migrator would skip upstream's migration at it
   // (see reconcileForkMigrations and docs/internals/legacy-orchestration-migration.md).

@@ -166,7 +166,7 @@ PATH=/usr/bin:/bin exec ps "$@"`,
     }
     if (options.archive) {
       executable("node", 'printf "unexpected host node invocation\\n" >&2; exit 1');
-      const version = NodePath.join(home, ".t3/runtime/versions/1.2.3");
+      const version = NodePath.join(home, ".t3-hermes/runtime/versions/1.2.3");
       NodeFS.mkdirSync(version, { recursive: true });
       NodeFS.writeFileSync(NodePath.join(version, ".install-complete"), "1.2.3");
       NodeFS.writeFileSync(

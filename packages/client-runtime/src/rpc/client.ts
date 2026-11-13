@@ -73,6 +73,7 @@ export type EnvironmentSubscriptionRpcTag =
   | typeof WS_METHODS.subscribeHermesSkills
   | typeof WS_METHODS.hindsightSubscribeAgentMemory
   | typeof WS_METHODS.pullRequestsSubscribeRefreshes
+  | typeof WS_METHODS.pullRequestsSubscribeLinkedThreadRefreshes
   | typeof WS_METHODS.subscribeVcsStatus
   | typeof WS_METHODS.subscribeVcsBranch
   | typeof WS_METHODS.subscribeWorktreeSetup

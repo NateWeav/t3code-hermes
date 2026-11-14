@@ -228,6 +228,11 @@
       "neededFor": "Seeing a Hermes shell command's output while it runs. Without it, a command's card stays empty until the command finishes.",
       "versions": [
         {
+          "hermesCommit": "778dc708c2374d29d61ae2c127ba8f647e3b3317",
+          "hermesCommitDate": "2026-11-14T22:26:10Z",
+          "file": "acp-terminal-output/778dc708c237.patch"
+        },
+        {
           "hermesCommit": "90d6b98fd86d20981ee06ddd5b7d93e4320f26a4",
           "hermesCommitDate": "2026-11-06T07:12:42Z",
           "file": "acp-terminal-output/90d6b98fd86d.patch"
@@ -437,6 +442,11 @@
       "title": "Session reset policy",
       "neededFor": "Idle and daily resets of gateway conversations (Discord, Telegram and the like) from your config's session_reset block. Applying it also turns the plugin on in your Hermes config. Without it, Hermes v0.23 and later ignores session_reset, and a chat only starts over on /new or /reset.",
       "versions": [
+        {
+          "hermesCommit": "778dc708c2374d29d61ae2c127ba8f647e3b3317",
+          "hermesCommitDate": "2026-11-14T22:26:10Z",
+          "file": "session-reset-policy/778dc708c237.patch"
+        },
         {
           "hermesCommit": "2bfa6b07a14a9675cc6bc85e6bf254c23072fb5f",
           "hermesCommitDate": "2026-11-12T15:59:34Z",

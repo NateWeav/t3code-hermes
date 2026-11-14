@@ -366,7 +366,8 @@ lines. Turns run by a managed worker
 
 Verified against hermes-agent `53a6ced422` (`main`, 2026-11-06), alone and after the other patches.
 Its `90d6b98fd8` version (`main`, 2026-11-06) is the same change on top of `acp-editor-delegation`
-and `acp-editor-clarify`, and applies only after them.
+and `acp-editor-clarify`, and applies only after them. Its `778dc708c2` version (`main`,
+2026-11-14) is the same change beside the MCP form asker upstream now binds around each tool call.
 Restart the Hermes gateway and the T3 Code server after applying it: the gateway runs the terminal
 tool. The patch's `tests/acp_adapter/test_gateway_terminal_output.py` runs a real command through
 the terminal tool, the gateway turn's progress callback and `GatewayACPAgent`; run it in a scratch
@@ -448,7 +449,8 @@ after the other patches. Its `90d6b98fd8` version (`main`, 2026-11-06) is the sa
 `acp-editor-delegation`, `acp-editor-clarify`, `acp-terminal-output` and `acp-active-steering`, and
 applies only after them; its `981791d9d4` version (`main`, 2026-11-07) is the same again on current
 `main`; its `227845ae31` version (`main`, 2026-11-14) adds the capability after upstream's
-`session-list-cursor-v1`. Restart the Hermes gateway after applying it: the gate runs there. Run the
+`session-list-cursor-v1`, and stacks unchanged on `acp-terminal-output`'s `778dc708c2` version.
+Restart the Hermes gateway after applying it: the gate runs there. Run the
 patch's `tests/acp_adapter/test_gateway_command_approval.py` in a scratch checkout, as for
 `acp-delegation-progress`.
 
@@ -636,7 +638,13 @@ funnels call. Without those, the funnel tests fail on Hermes `main` while the pl
 run the real `GatewaySessionCommandsMixin` funnel against a real `SessionStore`.
 
 Verified against hermes-agent `2bfa6b07a14a` (`main`, 2026-11-12) and `v0.23.1` (`5037b39c0fbc`):
-the tests pass (40) on both, and nine of them fail when `_maybe_reset` is stubbed out.
+the tests pass (40) on both, and nine of them fail when `_maybe_reset` is stubbed out. Its
+`778dc708c2` version (`main`, 2026-11-14) has the funnel test pass the gateway's real
+`MessageEvent`, as `pre_gateway_dispatch` does: upstream's `/new` funnel now calls the event's
+`accept_interrupt()`, which the test's bare stand-in lacked. The plugin is unchanged. Every
+version of this patch only adds files, so all of them fit any checkout: one that contains neither
+version's commit (older than `2bfa6b07a14a`, such as `v0.23.1`) is one the Patches tab cannot
+pick a version for, and it refuses. Update Hermes, or apply `2bfa6b07a14a.patch` with `git apply`.
 Hermes discovers the plugin as `bundled`, disabled until enabled, and once enabled it silences the
 gateway's retired-`session_reset` warning. Drop the patch if Hermes takes the plugin into its own
 `plugins/`.

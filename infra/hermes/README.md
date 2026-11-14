@@ -366,7 +366,8 @@ lines. Turns run by a managed worker
 
 Verified against hermes-agent `53a6ced422` (`main`, 2026-11-06), alone and after the other patches.
 Its `90d6b98fd8` version (`main`, 2026-11-06) is the same change on top of `acp-editor-delegation`
-and `acp-editor-clarify`, and applies only after them.
+and `acp-editor-clarify`, and applies only after them. Its `778dc708c2` version (`main`,
+2026-11-14) is the same change beside the MCP form asker upstream now binds around each tool call.
 Restart the Hermes gateway and the T3 Code server after applying it: the gateway runs the terminal
 tool. The patch's `tests/acp_adapter/test_gateway_terminal_output.py` runs a real command through
 the terminal tool, the gateway turn's progress callback and `GatewayACPAgent`; run it in a scratch
@@ -448,7 +449,8 @@ after the other patches. Its `90d6b98fd8` version (`main`, 2026-11-06) is the sa
 `acp-editor-delegation`, `acp-editor-clarify`, `acp-terminal-output` and `acp-active-steering`, and
 applies only after them; its `981791d9d4` version (`main`, 2026-11-07) is the same again on current
 `main`; its `227845ae31` version (`main`, 2026-11-14) adds the capability after upstream's
-`session-list-cursor-v1`. Restart the Hermes gateway after applying it: the gate runs there. Run the
+`session-list-cursor-v1`, and stacks unchanged on `acp-terminal-output`'s `778dc708c2` version.
+Restart the Hermes gateway after applying it: the gate runs there. Run the
 patch's `tests/acp_adapter/test_gateway_command_approval.py` in a scratch checkout, as for
 `acp-delegation-progress`.
 

@@ -457,7 +457,7 @@ console.log(process.pid, provider.pid);
         const launcher = NodeChildProcess.spawn(
           process.execPath,
           [path.join(installed, "package/bin/t3.mjs"), "serve"],
-          { cwd: root, env: { PATH: hostPath, T3CODE_HOME: home }, stdio: "pipe" },
+          { cwd: root, env: { PATH: hostPath, T3HERMES_HOME: home }, stdio: "pipe" },
         );
         let pids: Array<number> = [];
         yield* Effect.addFinalizer(() =>

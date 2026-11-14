@@ -1,0 +1,442 @@
+diff --git a/acp_adapter/gateway_reply.py b/acp_adapter/gateway_reply.py
+index 4783aeb119..0cc165652c 100644
+--- a/acp_adapter/gateway_reply.py
++++ b/acp_adapter/gateway_reply.py
+@@ -10,6 +10,31 @@ import acp
+ logger = logging.getLogger(__name__)
+ 
+ 
++def _argument_diff(tool_name, args):
++    """The change an edit's own arguments describe (a ``write_file``, or a ``patch`` replace), as the
++    in-process server showed for an edit its mode ran unasked; the owner, not the viewer, reads the file."""
++    from acp_adapter.edit_approval import EditProposal
++    path = args.get("path")
++    if not isinstance(path, str) or not path:
++        return None
++    if tool_name == "write_file" and isinstance(args.get("content"), str):
++        return EditProposal(tool_name, path, None, args["content"], args)
++    if tool_name == "patch" and args.get("mode", "replace") == "replace" and isinstance(args.get("old_string"), str) \
++            and isinstance(args.get("new_string"), str):
++        return EditProposal(tool_name, path, args["old_string"] or None, args["new_string"], args)
++    return None
++
++
++def _start_builder(mode):
++    """``build_tool_start`` for a session in *mode*: under Accept Edits or Don't Ask no approval card may
++    carry an edit's diff, so its start does."""
++    from acp_adapter.tools import build_tool_start
++    if mode == "default":
++        return build_tool_start
++    return lambda call_id, tool_name, args: build_tool_start(
++        call_id, tool_name, args, edit_diff=_argument_diff(tool_name, args))
++
++
+ def _text(payload):
+     """Reply text of a message frame; ``text`` may be present and null (a suppressed delivery)."""
+     text = payload.get("text")
+@@ -19,7 +44,8 @@ def _text(payload):
+ class GatewayReplyMixin:
+     async def _project_tool(self, kind, sid, editor_id, aid, payload):
+         """``tool.start`` / ``tool.complete`` as the in-process callbacks projected them (#134889 ACP-15)."""
+-        from acp_adapter.tools import build_tool_complete, build_tool_start, coerce_tool_args
++        from acp_adapter.tools import build_tool_complete, coerce_tool_args
++        build_tool_start = _start_builder(self._modes.get(sid, "default"))
+         # In-process turns publish ``tool_name``; managed workers publish ``name``.
+         tool_name = payload.get("tool_name") or payload.get("name") or "tool"
+         call_id = payload["tool_call_id"]
+diff --git a/acp_adapter/gateway_server.py b/acp_adapter/gateway_server.py
+index 934a70f3f1..b1d85bdbd9 100644
+--- a/acp_adapter/gateway_server.py
++++ b/acp_adapter/gateway_server.py
+@@ -150,6 +150,8 @@ class GatewayACPAgent(GatewayReplyMixin, acp.Agent):
+         # The editor renders ``_meta.terminal_output`` (``acp_adapter/terminal_output.py``); the open calls it was sent for.
+         self._terminal_output = False
+         self._live_terminals = set()
++        # The editor asked to approve every shell command (``clientCapabilities._meta.command_approval``).
++        self._command_approval = False
+         from hermes_cli.gateway_mutations import PreparedMutations
+         self._mutations = PreparedMutations()
+         # Session -> title the editor was last shown (``session_info_update`` fires on a change).
+@@ -186,13 +188,16 @@ class GatewayACPAgent(GatewayReplyMixin, acp.Agent):
+     async def initialize(self, **kwargs):
+         from hermes_cli import __version__
+         from acp_adapter.auth import build_auth_methods
++        meta = getattr(kwargs.get("client_capabilities"), "field_meta", None)
++        self._command_approval = isinstance(meta, dict) and meta.get("command_approval") is True
+         return InitializeResponse(protocol_version=acp.PROTOCOL_VERSION,
+             agent_info=Implementation(name="hermes-agent", version=__version__),
+             agent_capabilities=AgentCapabilities(load_session=True,
+                 prompt_capabilities=PromptCapabilities(image=True),
+                 session_capabilities=SessionCapabilities(fork=SessionForkCapabilities(), list=SessionListCapabilities(),
+                                                          resume=SessionResumeCapabilities()),
+-                field_meta={"hermes": {"steer": True}}),
++                # This viewer asks before commands for an editor that asks it to, and shows an unasked edit's diff.
++                field_meta={"hermes": {"steer": True}, "command_approval": True}),
+             auth_methods=build_auth_methods())
+ 
+     async def ext_method(self, method, params):
+@@ -382,6 +387,9 @@ class GatewayACPAgent(GatewayReplyMixin, acp.Agent):
+         if self._form_elicitation and "acp-editor-clarify-v1" in descriptor.get("capabilities", []):
+             # This editor answers clarify as a form (``_answer_clarify``), so the session may ask.
+             editor["clarify"] = True
++        # An owner that predates the key would refuse the session; it keeps Hermes's own command rule instead.
++        if self._command_approval and "acp-command-approval-v1" in descriptor.get("capabilities", []):
++            editor["command_approval"] = True
+         snapshot = await client.rpc("session.create", request_id=uuid.uuid4().hex,
+             source="acp", cwd=_translate_acp_cwd(cwd), editor=editor, **flags,
+             **delegation_create_fields(self._delegation, descriptor))
+diff --git a/gateway/session_controls.py b/gateway/session_controls.py
+index e584a62cda..7eab347a96 100644
+--- a/gateway/session_controls.py
++++ b/gateway/session_controls.py
+@@ -563,7 +563,7 @@ class AuthorityConnection:
+                 'authority_epoch': self.authority.epoch,
+                 'capabilities': ['durable-admission-v1', 'event-replay-v1', 'local-cli-create-v1', 'acp-editor-policy-v1',
+                                  'acp-session-mcp-v1', 'clarify-batch-v1', 'plugin-rpc-v1', 'session-client-v1', 'session-transcript-v1', 'session-list-picker-v1',
+-                                 'session-list-cursor-v1', 'acp-editor-clarify-v1'],
++                                 'session-list-cursor-v1', 'acp-editor-clarify-v1', 'acp-command-approval-v1'],
+                 'session_create': {'sources': sorted(SURFACES),
+                                    'parameters': sorted(CREATE_FIELDS | {'title'})},
+                 # Main's ``gateway.ready.skin``: the canonical client's own ready carries it.
+diff --git a/gateway/session_local_editor.py b/gateway/session_local_editor.py
+index 7f5f883de6..62fccead5a 100644
+--- a/gateway/session_local_editor.py
++++ b/gateway/session_local_editor.py
+@@ -1,6 +1,7 @@
+ """Editor policy lives with execution; an ACP connection is only a viewer."""
+ from contextlib import contextmanager
+ from dataclasses import asdict
++import json
+ import uuid
+ 
+ from hermes_state_runtime import RuntimeStoreError
+@@ -20,7 +21,7 @@ def validate_editor(source, editor):
+     if not isinstance(editor, dict):
+         raise RuntimeStoreError('invalid_params', field='editor',
+                                 detail=f'must be a mapping, got {type(editor).__name__}')
+-    unknown = sorted(set(editor) - {'mcp_servers', 'edit_approval_policy', 'clarify'})
++    unknown = sorted(set(editor) - {'mcp_servers', 'edit_approval_policy', 'clarify', 'command_approval'})
+     if unknown:
+         raise RuntimeStoreError('invalid_params', field=f'editor.{unknown[0]}',
+                                 detail='unknown editor key')
+@@ -30,6 +31,9 @@ def validate_editor(source, editor):
+     if not isinstance(editor.get('clarify', False), bool):
+         raise RuntimeStoreError('invalid_params', field='editor.clarify',
+                                 detail=f'must be a boolean, got {type(editor.get("clarify")).__name__}')
++    if editor.get('command_approval', True) is not True:
++        raise RuntimeStoreError('invalid_params', field='editor.command_approval',
++                                detail='must be true: the editor approves every shell command')
+     if not isinstance(editor.get('mcp_servers', []), list):
+         raise RuntimeStoreError('invalid_params', field='editor.mcp_servers',
+                                 detail=f'must be a list, got {type(editor.get("mcp_servers")).__name__}')
+@@ -68,11 +72,23 @@ def _policy_requester(policy):
+     return request
+ 
+ 
++def _asks_before_commands(policy):
++    """An ACP editor that asked at creation (``editor.command_approval``) approves every shell command,
++    except under Don't Ask, where its edits run unasked too."""
++    if policy.source != 'acp' or policy.edit_approval_policy == 'session':
++        return False
++    editor = json.loads(policy.request_json).get('editor')
++    return isinstance(editor, dict) and editor.get('command_approval') is True
++
++
+ @contextmanager
+ def editor_scope(policy):
+     from acp_adapter.edit_approval import set_edit_approval_requester, reset_edit_approval_requester
++    from tools.approval_context import reset_editor_command_approval, set_editor_command_approval
+     token = set_edit_approval_requester(_policy_requester(policy) if policy.source == 'acp' else None)
++    command_token = set_editor_command_approval(_asks_before_commands(policy))
+     try:
+         yield
+     finally:
++        reset_editor_command_approval(command_token)
+         reset_edit_approval_requester(token)
+diff --git a/tests/acp_adapter/test_gateway_command_approval.py b/tests/acp_adapter/test_gateway_command_approval.py
+new file mode 100644
+index 0000000000..1823ab28ac
+--- /dev/null
++++ b/tests/acp_adapter/test_gateway_command_approval.py
+@@ -0,0 +1,181 @@
++"""An ACP editor that asks to approve every shell command, and an edit's diff when nothing asks, over a
++real daemon and ``hermes acp``."""
++import asyncio
++from contextlib import suppress
++from http.server import BaseHTTPRequestHandler
++import json
++
++import pytest
++
++from types import SimpleNamespace
++from unittest.mock import AsyncMock
++
++from acp_adapter.gateway_server import GatewayACPAgent
++from tests.acp_adapter.test_gateway_sessions import editor
++from tests.waiting import async_wait_until
++
++
++class ToolPeer(BaseHTTPRequestHandler):
++    """Calls ``server.tool`` (name, arguments) once per user turn, then finishes."""
++
++    def log_message(self, *args):
++        pass
++
++    def do_POST(self):
++        request = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
++        messages = request.get('messages', [])
++        last_user = max((i for i, m in enumerate(messages) if m['role'] == 'user'), default=-1)
++        tool = not any(m['role'] == 'tool' for m in messages[last_user + 1:])
++        message = {'role': 'assistant', 'content': 'COMMAND_FINISHED'}
++        if tool:
++            message = {'role': 'assistant', 'content': None, 'tool_calls': [{
++                'id': 'owned-command', 'type': 'function', 'function': {
++                    'name': self.server.tool[0], 'arguments': json.dumps(self.server.tool[1])}}]}
++        self.send_response(200)
++        self.send_header('Content-Type', 'text/event-stream' if request.get('stream') else 'application/json')
++        self.end_headers()
++        if request.get('stream'):
++            if tool:
++                message['tool_calls'][0]['index'] = 0
++            for delta, finish in [(message, None), ({}, 'tool_calls' if tool else 'stop')]:
++                self.wfile.write(('data: ' + json.dumps({'id': 'command', 'object': 'chat.completion.chunk',
++                    'created': 1, 'model': 'fixture', 'choices': [{'index': 0, 'delta': delta,
++                    'finish_reason': finish}]}) + '\n\n').encode())
++            self.wfile.write(b'data: [DONE]\n\n')
++        else:
++            self.wfile.write(json.dumps({'id': 'command', 'object': 'chat.completion', 'created': 1,
++                'model': 'fixture', 'choices': [{'index': 0, 'message': message,
++                'finish_reason': 'tool_calls' if tool else 'stop'}]}).encode())
++        self.wfile.flush()
++
++
++def _permissions(acp):
++    return [f for f in acp.frames if f.get('method') == 'session/request_permission']
++
++
++async def _answer(acp, permission, option_id):
++    acp.process.stdin.write(json.dumps({'jsonrpc': '2.0', 'id': permission['id'], 'result': {
++        'outcome': {'outcome': 'selected', 'optionId': option_id}}}).encode() + b'\n')
++    await acp.process.stdin.drain()
++
++
++async def _prompt(acp, sid, text):
++    return await acp.rpc('session/prompt', sessionId=sid, prompt=[{'type': 'text', 'text': text}])
++
++
++@pytest.mark.platforms("linux")
++@pytest.mark.asyncio
++async def test_editor_that_asked_approves_every_command_until_dont_ask(daemon, tmp_path, model_peer):
++    target = tmp_path / 'owned.txt'
++    command = f"printf approved > {target}"
++    model_peer.tool = ('terminal', {'command': command})
++    model_peer.RequestHandlerClass = ToolPeer
++    async with editor(daemon, tmp_path) as acp:
++        await acp.rpc('initialize', protocolVersion=1, clientCapabilities={'_meta': {'command_approval': True}})
++        created = await acp.rpc('session/new', cwd=str(tmp_path), mcpServers=[])
++        sid = created['result']['sessionId']
++        task = asyncio.create_task(_prompt(acp, sid, 'Write the owned file'))
++        try:
++            await async_wait_until(lambda: _permissions(acp), timeout=20, what='the command permission request')
++            permission = _permissions(acp)[0]
++            call = permission['params']['toolCall']
++            assert call['kind'] == 'execute', permission
++            assert call['rawInput']['command'] == command
++            # "Allow for session" covers this one command; no grant persists to config.yaml.
++            options = [o['optionId'] for o in permission['params']['options']]
++            assert 'allow_session' in options and 'allow_always' not in options, options
++            assert not target.exists() and not task.done()
++            await _answer(acp, permission, 'allow_once')
++            assert (await task)['result']['stopReason'] == 'end_turn'
++            assert target.read_text() == 'approved'
++        finally:
++            task.cancel()
++            with suppress(asyncio.CancelledError):
++                await task
++
++        # A denied command does not run.
++        target.unlink()
++        task = asyncio.create_task(_prompt(acp, sid, 'Write it again'))
++        try:
++            await async_wait_until(lambda: len(_permissions(acp)) == 2, timeout=20, what='the second request')
++            await _answer(acp, _permissions(acp)[1], 'deny')
++            assert (await task)['result']['stopReason'] == 'end_turn'
++            assert not target.exists()
++        finally:
++            task.cancel()
++            with suppress(asyncio.CancelledError):
++                await task
++
++        # Don't Ask runs its edits unasked, and its commands too.
++        assert 'result' in await acp.rpc('session/set_mode', sessionId=sid, modeId='dont_ask')
++        turn = await _prompt(acp, sid, 'Write it once more')
++        assert turn['result']['stopReason'] == 'end_turn', turn
++        assert target.read_text() == 'approved'
++        assert len(_permissions(acp)) == 2
++
++
++@pytest.mark.platforms("linux")
++@pytest.mark.asyncio
++async def test_editor_that_did_not_ask_keeps_the_dangerous_command_rule(daemon, tmp_path, model_peer):
++    target = tmp_path / 'owned.txt'
++    model_peer.tool = ('terminal', {'command': f"printf unasked > {target}"})
++    model_peer.RequestHandlerClass = ToolPeer
++    async with editor(daemon, tmp_path) as acp:
++        await acp.rpc('initialize', protocolVersion=1, clientCapabilities={})
++        sid = (await acp.rpc('session/new', cwd=str(tmp_path), mcpServers=[]))['result']['sessionId']
++        turn = await _prompt(acp, sid, 'Write the owned file')
++        assert turn['result']['stopReason'] == 'end_turn', turn
++        assert target.read_text() == 'unasked'
++        assert not _permissions(acp)
++
++
++@pytest.mark.platforms("linux")
++@pytest.mark.asyncio
++async def test_an_edit_that_runs_unasked_shows_its_diff_when_it_starts(daemon, tmp_path, model_peer):
++    """Default asks and its card carries the diff; Accept Edits runs a workspace write unasked, so the
++    write's own start does."""
++    model_peer.RequestHandlerClass = ToolPeer
++    async with editor(daemon, tmp_path) as acp:
++        await acp.rpc('initialize', protocolVersion=1, clientCapabilities={})
++        sid = (await acp.rpc('session/new', cwd=str(tmp_path), mcpServers=[]))['result']['sessionId']
++        assert 'result' in await acp.rpc('session/set_mode', sessionId=sid, modeId='accept_edits')
++        target = tmp_path / 'unasked.txt'
++        model_peer.tool = ('write_file', {'path': str(target), 'content': 'unasked edit'})
++        turn = await _prompt(acp, sid, 'Write the file')
++        assert turn['result']['stopReason'] == 'end_turn', turn
++        assert target.read_text() == 'unasked edit'
++        assert not _permissions(acp)
++        start = next(f['params']['update'] for f in acp.frames if f.get('method') == 'session/update'
++                     and f['params']['update'].get('sessionUpdate') == 'tool_call')
++        assert start['kind'] == 'edit'
++        assert start['content'] == [{'type': 'diff', 'path': str(target), 'newText': 'unasked edit'}], start
++
++
++@pytest.mark.asyncio
++@pytest.mark.parametrize(('meta', 'capabilities', 'asks'), [
++    ({'command_approval': True}, ['acp-editor-policy-v1', 'acp-command-approval-v1'], True),
++    ({}, ['acp-editor-policy-v1', 'acp-command-approval-v1'], False),
++    # An owner from before the key would refuse the whole session; it keeps Hermes's own rule.
++    ({'command_approval': True}, ['acp-editor-policy-v1'], False),
++])
++async def test_viewer_asks_the_owner_only_for_an_editor_that_asked(tmp_path, meta, capabilities, asks):
++    created = []
++
++    async def rpc(method, **params):
++        if method == 'runtime.describe':
++            return {'session_create': {'sources': ['acp']}, 'capabilities': capabilities}
++        if method == 'config.set':
++            return {'key': params['key'], 'value': params['value'], 'scope': 'session'}
++        assert method == 'session.create', method
++        created.append(params)
++        return {'session_id': 's', 'info': {'cwd': params['cwd']}}
++
++    agent = GatewayACPAgent()
++    agent._gateway = AsyncMock()
++    agent._gateway.rpc.side_effect = rpc
++    agent._session_fields = AsyncMock(return_value={})
++    reply = await agent.initialize(protocol_version=1, client_capabilities=SimpleNamespace(field_meta=meta))
++    # Advertised whatever the editor asked, so an editor knows Hermes can ask before commands.
++    assert reply.agent_capabilities.field_meta['command_approval'] is True
++    await agent.new_session(cwd=str(tmp_path))
++    assert ('command_approval' in created[0]['editor']) is asks
+diff --git a/tools/approval.py b/tools/approval.py
+index 7477695341..19f4f780f7 100644
+--- a/tools/approval.py
++++ b/tools/approval.py
+@@ -952,7 +952,7 @@ def _smart_gate(spec: _GateSpec, command: str, description: str, pattern_key: st
+ def _human_decision(spec: _GateSpec, *, command: str, description: str,
+                     pattern_key: str, pattern_keys: list[str],
+                     session_key: str, approval_callback, is_cli: bool, is_gateway: bool,
+-                    is_ask: bool, smart: bool = False, pending_body=None) -> dict:
++                    is_ask: bool, smart: bool = False, pending_body=None, permanent: bool = True) -> dict:
+     """Ask a human (after the optional guardian-LLM step) and turn the answer into the gate result.
+ 
+     ``pattern_keys`` are what :func:`_persist_choice` stores on session/always; a smart-DENY
+@@ -968,7 +968,7 @@ def _human_decision(spec: _GateSpec, *, command: str, description: str,
+         if result is not None:
+             return result
+     pending_body = pending_body() if pending_body else None
+-    allow_permanent = not smart_denied
++    allow_permanent = permanent and not smart_denied
+ 
+     def deny(template: str, outcome: str, **fmt) -> dict:
+         breaker = ""
+@@ -1017,7 +1017,7 @@ def _human_decision(spec: _GateSpec, *, command: str, description: str,
+             data = {
+                 "command": display_command, "pattern_key": pattern_key,
+                 "pattern_keys": pattern_keys, "description": display_description,
+-                "allow_permanent": not smart_denied,
++                "allow_permanent": allow_permanent,
+                 "allow_session": not smart_denied,
+             }
+             if smart_denied:
+@@ -1347,17 +1347,26 @@ def check_all_command_guards(command: str, env_type: str,
+ 
+     session_key = get_current_session_key()
+     findings = _command_findings(command)
++    # An ACP editor that asked for approvals consents to every command, as to every edit. Only the
++    # session's own turn can reach it: a delegated child or side task has no notifier and keeps the rule above.
++    editor_asks = (not findings and approval_context.editor_asks_before_commands()
++                   and _gateway_notify_cb(session_key) is not None)
++    if editor_asks:
++        # Per command, so "Allow for session" covers that command only.
++        findings = [("editor_command:" + hashlib.sha256(command.encode("utf-8")).hexdigest()[:16], "shell command")]
+     scopes = {key: _approval_scope(session_key, key) for key, _ in findings}
+     pending = _pending_findings(findings, lambda key: scopes[key] is not None)
+     if pending is None:
+         return _approved_with_provenance(findings, scopes)
+     keys, description = pending
+-    # One combined prompt; a session/always answer persists every key in it.
++    # One combined prompt; a session/always answer persists every key in it. The guardian LLM
++    # never answers for the editor, and its per-command grants never reach config.yaml.
+     return _human_decision(
+         _COMMAND_GATE, command=command, description=description,
+         pattern_key=keys[0], pattern_keys=keys,
+         session_key=session_key, approval_callback=approval_callback,
+-        is_cli=is_cli, is_gateway=is_gateway, is_ask=is_ask, smart=approval_mode == "smart",
++        is_cli=is_cli, is_gateway=is_gateway, is_ask=is_ask,
++        smart=approval_mode == "smart" and not editor_asks, permanent=not editor_asks,
+     )
+ 
+ 
+@@ -1428,7 +1437,9 @@ def check_execute_code_guard(code: str, env_type: str, has_host_access: bool = F
+     # A gateway-run local CLI/TUI/Desktop session's own turns keep that interactive-CLI rule: the script's terminal()
+     # calls reach the session's own prompt per call, so no whole-script prompt. Injected and automation turns keep the
+     # gate (cron/-q resolved above; messaging/API unchanged).
+-    if (not is_gateway and not is_ask) or _is_local_viewer_turn():
++    # An ACP editor that asked to approve every shell command approves the script too.
++    if (not is_gateway and not is_ask) or (_is_local_viewer_turn()
++                                           and not approval_context.editor_asks_before_commands()):
+         return _approved()
+ 
+     session_key = get_current_session_key()
+diff --git a/tools/approval_context.py b/tools/approval_context.py
+index 4c1226f639..3097313da6 100644
+--- a/tools/approval_context.py
++++ b/tools/approval_context.py
+@@ -45,6 +45,24 @@ def reset_hermes_interactive_context(token: contextvars.Token) -> None:
+     _hermes_interactive_ctx.reset(token)
+ 
+ 
++# An ACP editor that asked to approve every shell command (``editor.command_approval``), bound for its
++# session's turns by ``gateway.session_local_editor.editor_scope``.
++_editor_command_approval: contextvars.ContextVar[bool] = contextvars.ContextVar(
++    "editor_command_approval", default=False)
++
++
++def set_editor_command_approval(enabled: bool) -> contextvars.Token:
++    return _editor_command_approval.set(enabled)
++
++
++def reset_editor_command_approval(token: contextvars.Token) -> None:
++    _editor_command_approval.reset(token)
++
++
++def editor_asks_before_commands() -> bool:
++    return _editor_command_approval.get()
++
++
+ def _is_interactive_cli() -> bool:
+     """True for an interactive CLI/ACP session (contextvar first, env fallback)."""
+     ctx_val = _hermes_interactive_ctx.get()

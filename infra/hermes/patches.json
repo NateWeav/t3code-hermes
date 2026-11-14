@@ -201,6 +201,11 @@
       "neededFor": "Hermes asking you a clarifying question with choices you can pick from. Without it, Hermes's T3 sessions have no clarify tool, so it asks in its reply and you answer with a new message.",
       "versions": [
         {
+          "hermesCommit": "227845ae3113fca24b53ca9b42d99d4744d62db4",
+          "hermesCommitDate": "2026-11-14T01:31:39Z",
+          "file": "acp-editor-clarify/227845ae3113.patch"
+        },
+        {
           "hermesCommit": "981791d9d41fd2efde27f563873ce8c48ef1dac6",
           "hermesCommitDate": "2026-11-07T05:18:01Z",
           "file": "acp-editor-clarify/981791d9d41f.patch"
@@ -268,6 +273,11 @@
       "title": "Command approvals",
       "neededFor": "Approval before each shell command in Supervised and Auto-accept edits threads, as Claude Code asks before each Bash command. Without it, Hermes asks only before file edits and commands it flags as dangerous, and a file edit Hermes runs without asking shows no diff.",
       "versions": [
+        {
+          "hermesCommit": "227845ae3113fca24b53ca9b42d99d4744d62db4",
+          "hermesCommitDate": "2026-11-14T01:31:39Z",
+          "file": "acp-command-approval/227845ae3113.patch"
+        },
         {
           "hermesCommit": "981791d9d41fd2efde27f563873ce8c48ef1dac6",
           "hermesCommitDate": "2026-11-07T05:18:01Z",

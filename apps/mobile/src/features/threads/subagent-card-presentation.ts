@@ -3,18 +3,6 @@ import type { OrchestrationV2Subagent } from "@t3tools/contracts";
 import { deriveSubagentElapsedMs, formatDuration } from "@t3tools/shared/orchestrationTiming";
 import * as DateTime from "effect/DateTime";
 
-export function subagentCardDetail(detail: string | null): string | null {
-  if (!detail || /^Child task ended with status\b/i.test(detail)) return null;
-  return (
-    detail
-      .replace(/!?\[([^\]]+)\]\((?:\\.|[^\\()]|\((?:\\.|[^\\()])*\))*\)/g, "$1")
-      .replace(/`/g, "")
-      .replace(/^[ \t]*[-*][ \t]+/gm, "")
-      .replace(/\s+/g, " ")
-      .trim() || null
-  );
-}
-
 /** A lone agent shows its own duration, which prefers the provider's report. */
 export function subagentCardElapsed(
   agents: ReadonlyArray<

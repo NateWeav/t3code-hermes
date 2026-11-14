@@ -95,6 +95,12 @@ function fakeInstaller(home: string, args: ReadonlyArray<string>) {
   }
 }
 
+// Also matches the `t3-write-*/contents.tmp` an atomic write sets the mode on before its rename.
+const failsChmod = (file: string, target: string) =>
+  file.endsWith(target) ||
+  (NodePath.basename(NodePath.dirname(file)).startsWith("t3-write-") &&
+    NodePath.dirname(NodePath.dirname(file)).endsWith(NodePath.dirname(target)));
+
 function setup(options: Options) {
   const home = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-agent-memory-"));
   const hermesHome = NodePath.join(home, ".hermes");
@@ -188,11 +194,11 @@ function setup(options: Options) {
       FileSystem.FileSystem.of({
         ...fs,
         chmod: (file, mode) =>
-          // Matches the temp file an atomic write sets the mode on, too.
           options.failChmod !== undefined &&
-          file.includes(
+          failsChmod(
+            file,
             options.failChmod === "ledger"
-              ? "hindsight-agent-memory.json"
+              ? NodePath.join("userdata", "hindsight-agent-memory.json")
               : NodePath.join("hindsight", "config.json"),
           )
             ? Effect.fail(

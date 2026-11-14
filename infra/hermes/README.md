@@ -335,7 +335,9 @@ the `clarify` tool call itself, since the question already shows as its own card
 Verified against hermes-agent `44ec783afd` (`main`, 2026-11-06), alone and after the other
 patches. Its `90d6b98fd8` version (`main`, 2026-11-06) is the same change on top of
 `acp-editor-delegation`, which edits the same `session.create` call, and applies only after it;
-its `981791d9d4` version (`main`, 2026-11-07) is the same again on current `main`.
+its `981791d9d4` version (`main`, 2026-11-07) is the same again on current `main`; its
+`227845ae31` version (`main`, 2026-11-14) adds the capability after upstream's
+`session-list-cursor-v1`.
 Restart the Hermes gateway after applying it: the gateway decides the session's tools.
 Run the patch's `tests/acp_adapter/test_gateway_editor_clarify_toolset.py` in a scratch checkout,
 as for `acp-delegation-progress`.
@@ -445,7 +447,8 @@ Hermes's own rule. Verified against hermes-agent `ca43606920` (`main`, 2026-11-0
 after the other patches. Its `90d6b98fd8` version (`main`, 2026-11-06) is the same change on top of
 `acp-editor-delegation`, `acp-editor-clarify`, `acp-terminal-output` and `acp-active-steering`, and
 applies only after them; its `981791d9d4` version (`main`, 2026-11-07) is the same again on current
-`main`. Restart the Hermes gateway after applying it: the gate runs there. Run the
+`main`; its `227845ae31` version (`main`, 2026-11-14) adds the capability after upstream's
+`session-list-cursor-v1`. Restart the Hermes gateway after applying it: the gate runs there. Run the
 patch's `tests/acp_adapter/test_gateway_command_approval.py` in a scratch checkout, as for
 `acp-delegation-progress`.
 

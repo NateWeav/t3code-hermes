@@ -283,9 +283,11 @@ const makeMcpAuthMiddleware = Effect.gen(function* () {
     if (limited.client?.linked === true && !linkedEnvironments) return linkedEnvironmentsOff;
     // A client may only shorten its own waits, so the header needs no trust.
     const callLimitMs = Number(request.headers[MCP_CALL_LIMIT_HEADER]);
+    const origin = Option.getOrUndefined(Option.map(requestUrl(request), (url) => url.origin));
     return {
       ...limited,
       linkedEnvironments,
+      origin,
       ...(Number.isSafeInteger(callLimitMs) && callLimitMs > 0 ? { callLimitMs } : {}),
     };
   });

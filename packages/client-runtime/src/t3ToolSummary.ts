@@ -388,6 +388,12 @@ export function summarizeT3ToolCalls(
         quantity(countEntities(entityIds("sessionKey")), "Hermes conversation"),
       );
       break;
+    case "theme-read":
+      label = phrase("Checked", "check", `themes ${times}`);
+      break;
+    case "theme-set":
+      label = phrase("Set", "set", `the theme ${times}`);
+      break;
     case "environment-links":
       label = phrase("Listed", "list", `linked environments ${times}`);
       break;
@@ -504,6 +510,9 @@ export function summarizeT3ToolCalls(
       break;
     case "html-render":
       label = phrase("Rendered", "render", quantity(selected.length, "HTML page"));
+      break;
+    case "send-to-user":
+      label = phrase("Sent", "send", quantity(selected.length, "message"));
       break;
     case "capabilities":
       label = phrase("Checked", "check", `orchestration capabilities ${times}`);

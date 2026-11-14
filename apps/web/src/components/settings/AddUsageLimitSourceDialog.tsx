@@ -1,5 +1,5 @@
 import type { EnvironmentId, SecretReference } from "@t3tools/contracts";
-import { useState } from "react";
+import { useId, useState } from "react";
 
 import { Button } from "../ui/button";
 import {
@@ -32,6 +32,7 @@ export function AddUsageLimitSourceDialog({
     label: string;
   }) => void;
 }) {
+  const formId = useId();
   const [label, setLabel] = useState("");
   const [url, setUrl] = useState("");
   const secretSources = useSecretSources(environmentId);
@@ -74,6 +75,7 @@ export function AddUsageLimitSourceDialog({
         </DialogHeader>
         <DialogPanel>
           <form
+            id={formId}
             className="grid gap-4"
             onSubmit={(event) => {
               event.preventDefault();
@@ -124,7 +126,7 @@ export function AddUsageLimitSourceDialog({
           >
             Cancel
           </Button>
-          <Button onClick={save} disabled={!canSave}>
+          <Button type="submit" form={formId} disabled={!canSave}>
             Add hub
           </Button>
         </DialogFooter>

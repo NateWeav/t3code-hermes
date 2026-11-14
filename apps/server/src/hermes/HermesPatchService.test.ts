@@ -22,7 +22,7 @@ import {
   HERMES_SESSION_RESET_PATCH_ID,
   HERMES_UPDATE_LOCK_KEY,
 } from "./hermesPatches.ts";
-import { HermesPatchService, make } from "./HermesPatchService.ts";
+import { HermesPatchService, make, makeWith } from "./HermesPatchService.ts";
 
 const git = (cwd: string, ...args: string[]) =>
   NodeChildProcess.execFileSync("git", args, { cwd, encoding: "utf8" });
@@ -64,9 +64,9 @@ const makeHermesCheckout = Effect.gen(function* () {
  * The enabled Hermes as a provider instance whose environment points
  * `HERMES_HOME` at `home`, the way the gateway restart has to find it.
  */
-const withInstance = (binaryPath: string, home: string) =>
+const withInstance = (binaryPath: string, home: string, service = make) =>
   Effect.provide(
-    Layer.effect(HermesPatchService, make).pipe(
+    Layer.effect(HermesPatchService, service).pipe(
       Layer.provide(
         ServerSettings.layerTest({
           providerInstances: {
@@ -167,6 +167,13 @@ describe("HermesPatchService", () => {
       const configFile = NodePath.join(home, "config.yaml");
       NodeFS.writeFileSync(configFile, "plugins:\n  enabled:\n    - hindsight # mine\n");
       const pluginInit = NodePath.join(root, "plugins", "session-reset-policy", "__init__.py");
+      // The bare checkout contains no version's commit, and every version of this add-only patch
+      // fits it, so the shipped manifest is ambiguous here; one version stands for a fitting one.
+      const patches = HERMES_PATCHES.map((patch) =>
+        patch.id === HERMES_SESSION_RESET_PATCH_ID
+          ? { ...patch, versions: patch.versions.slice(0, 1) }
+          : patch,
+      );
 
       yield* Effect.gen(function* () {
         const service = yield* HermesPatchService;
@@ -188,7 +195,7 @@ describe("HermesPatchService", () => {
           "plugins:\n  enabled:\n    - hindsight # mine\n",
         );
         assert.strictEqual(git(root, "status", "--porcelain"), "");
-      }).pipe(withInstance(binaryPath, home));
+      }).pipe(withInstance(binaryPath, home, makeWith({ patches })));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 

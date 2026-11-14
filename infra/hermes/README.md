@@ -603,3 +603,40 @@ async delegation results durable in its own store (`gateway/session_worker_deleg
 
 Remove the receipts patch before the one it builds on; the tab shows the second once the first is
 off.
+
+## `session-reset-policy`
+
+**Needed by:** idle and daily resets of gateway conversations (Discord, Telegram and other chat
+platforms). Hermes stopped rotating conversations on timers in `1d5d059410` and now reads nothing
+under `session_reset`, so a chat only starts over on `/new` or `/reset`. At startup the gateway
+warns about a config that still declares an idle or daily mode and points at the
+`hermes-session-reset-policy` catalog plugin, which restores the policy unchanged.
+
+This patch vendors that plugin, [fastfinge/hermes-session-reset-policy](https://github.com/fastfinge/hermes-session-reset-policy)
+`0.3.0` (`0f2ea5ad995f`, MIT, its `LICENSE` kept beside it), as a bundled plugin in
+`plugins/session-reset-policy/`, so it installs from the Patches tab instead of the plugin catalog.
+Its code is the upstream file byte for byte. On the first inbound message past the idle threshold
+or the daily boundary, it runs the gateway's own `/new` reset funnel for that conversation: no
+timers and no background writes. It reads each profile's `session_reset` block (`mode` `idle`,
+`daily` or `both`, `idle_minutes`, `at_hour`) as it was before the removal.
+
+Hermes loads no bundled plugin until it is enabled, so applying the patch from the Patches tab also
+adds `hermes-session-reset-policy` to `plugins.enabled` in `config.yaml`, with a trailing
+`# added by T3 Code` marker, unless the config already lists it under `plugins.enabled` or
+`plugins.disabled`. Removing the patch deletes only the marked entry. Applying it with `git apply`
+leaves `config.yaml` alone; run `hermes plugins enable hermes-session-reset-policy` afterwards. The
+plugin runs in the gateway, so the gateway needs a restart either way, which the tab offers.
+
+The upstream tests ship as `tests/plugins/test_session_reset_policy.py`, changed only where they
+assumed that layout: they find the plugin and the Hermes tree from their own location rather than
+`~/.hermes/hermes-agent`; they shift the native home to a sibling of `~/.hermes` (not a directory
+inside it, which Hermes's test guard rejects); and the gateway stand-in also carries the profile
+scope and `_fire_plugin_session_reset` / `_reset_session_off_loop` bodies that newer `/new`
+funnels call. Without those, the funnel tests fail on Hermes `main` while the plugin works. They
+run the real `GatewaySessionCommandsMixin` funnel against a real `SessionStore`.
+
+Verified against hermes-agent `2bfa6b07a14a` (`main`, 2026-11-12) and `v0.23.1` (`5037b39c0fbc`):
+the tests pass (40) on both, and nine of them fail when `_maybe_reset` is stubbed out.
+Hermes discovers the plugin as `bundled`, disabled until enabled, and once enabled it silences the
+gateway's retired-`session_reset` warning. Drop the patch if Hermes takes the plugin into its own
+`plugins/`.

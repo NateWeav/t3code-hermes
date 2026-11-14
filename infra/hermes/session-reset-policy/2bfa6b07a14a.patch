@@ -1,0 +1,1461 @@
+diff --git a/plugins/session-reset-policy/LICENSE b/plugins/session-reset-policy/LICENSE
+new file mode 100644
+index 0000000000..1c3e8dc029
+--- /dev/null
++++ b/plugins/session-reset-policy/LICENSE
+@@ -0,0 +1,23 @@
++MIT License
++
++Copyright (c) 2025 Nous Research
++Copyright (c) 2026 Eric Lars Lee and contributors
++Copyright (c) 2026 Samuel Proulx
++
++Permission is hereby granted, free of charge, to any person obtaining a copy
++of this software and associated documentation files (the "Software"), to deal
++in the Software without restriction, including without limitation the rights
++to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
++copies of the Software, and to permit persons to whom the Software is
++furnished to do so, subject to the following conditions:
++
++The above copyright notice and this permission notice shall be included in all
++copies or substantial portions of the Software.
++
++THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
++AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
++OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
++SOFTWARE.
+diff --git a/plugins/session-reset-policy/README.md b/plugins/session-reset-policy/README.md
+new file mode 100644
+index 0000000000..ec68fd140b
+--- /dev/null
++++ b/plugins/session-reset-policy/README.md
+@@ -0,0 +1,113 @@
++# hermes-session-reset-policy
++
++Re-arm Hermes Agent's `session_reset` policy (idle / daily / both) as a plugin.
++
++## Why
++
++Upstream Hermes v2026.9.11 (commit `1d5d059410`, "stop time-triggered conversation
++rotation") removed the background reset timers and made the `session_reset`
++config block inert: only explicit suspension (`/stop`, `/new`) replaces a routed
++conversation. If you want time-based conversation rotation back — fresh context
++after an hour of inactivity, or once per day at 04:00 — this plugin restores it
++without patching the core.
++
++## How it works
++
++The plugin registers a `pre_gateway_dispatch` hook. On every inbound gateway
++message, before auth and dispatch, it:
++
++1. Resolves the session key for the message: the hook payload's `session_key`
++   when the gateway provides one publicly, else the gateway's own
++   `_session_key_for_source` helper — so multiplexed profiles and platform key
++   layouts match exactly. (No bare `build_session_key` fallback on purpose:
++   under multiplexed profiles that key is not profile-namespaced and could
++   resolve another profile's route for the same chat.)
++2. Reads the profile's `config.yaml` `session_reset` block (the profile is
++   resolved from the message's `source.profile` through Hermes' own
++   `get_profile_dir`, anchored at the Hermes *root* so both gateway layouts
++   read the right file: one multiplexed gateway at the root, or a standalone
++   gateway per profile running with `HERMES_HOME` set to its own
++   `profiles/<name>` dir — see issue #4).
++3. Compares the routing entry's user-activity clock — the plugin's own
++   `srp_last_user_inbound` session metadata, advanced only by messages that
++   reach this hook (slash commands and internal/cron traffic never do) —
++   against the idle threshold and/or the daily boundary. Entries that predate
++   the plugin fall back to `updated_at`/`created_at` once, then the metadata
++   clock takes over.
++4. Past the boundary, and with no turn in flight (the entry's durable
++   `active_turn_token` marker), resets the conversation through the gateway's
++   own `/new` reset funnel (`gateway._handle_reset_command`, fed a text-free
++   event) — the exact code path a typed `/new` takes, so everything a
++   conversation boundary owes happens: run-generation bump and cached-agent
++   cleanup/eviction (the compressor's previous summary cannot carry over),
++   the conversation-scope clear (per-conversation `/model` and reasoning
++   overrides), interruption of in-flight async delegations,
++   `SessionStore.reset_session()`, the `session:end`/`session:reset` gateway
++   hooks, and the `on_session_finalize`/`on_session_reset` plugin hooks. Then
++   normal dispatch proceeds, so the message lands in the fresh session.
++
++The event handed to the funnel is stripped of its text on purpose: the funnel
++treats `event.get_command_args()` as `/new <title>` — and on a plain message
++that returns the whole utterance, which would title the fresh session with
++whatever the user happened to send.
++
++Because the trigger is the first *inbound message* past the boundary — never a
++timer — there are no background writes, no timer threads, and background/cron
++activity can neither keep a session alive nor reset it.
++
++## Config
++
++The existing `session_reset` block in your (or your profile's) `config.yaml`
++drives everything; the plugin adds no keys:
++
++```yaml
++session_reset:
++  mode: both          # idle | daily | both | none
++  idle_minutes: 60
++  at_hour: 4          # local hour for the daily boundary
++```
++
++`mode: none` or an absent block disables the plugin entirely (no reset, no log
++noise).
++
++## Install
++
++```bash
++hermes plugins install https://github.com/fastfinge/hermes-session-reset-policy.git
++```
++
++or clone into `~/.hermes/plugins/` and enable:
++
++```yaml
++plugins:
++  enabled:
++    - hermes-session-reset-policy
++```
++
++Restart the gateway afterwards.
++
++## Behaviour notes
++
++- The reset is an explicit-style reset (like `/new`): the fresh session sets
++  `is_fresh_reset`, so topic/channel-bound skills re-inject on the first turn —
++  but it does **not** carry `was_auto_reset` bookkeeping, so the agent receives
++  no "context was reset due to inactivity" sidecar note or channel-continuity
++  hint. Add your own guidance if you need the agent to know.
++- A turn in flight is never reset; the clock is left untouched and the reset
++  re-arms on the next message.
++- Boundary hooks keep firing downstream (`session:end`/`session:reset`,
++  `on_session_finalize`/`on_session_reset`) — the reset goes through the /new
++  funnel, not around it.
++- When the funnel is unreachable (older gateways, renamed internals) the
++  plugin degrades to a bare `SessionStore.reset_session()` plus the lifecycle
++  hook pair and the delegation interrupt: a consistent rotation without the
++  gateway-side cache/scope teardown. A funnel that fails *after* rotating is
++  never rotated a second time by the fallback.
++- Requires Hermes >= v2026.9.11 (needs the `pre_gateway_dispatch` hook payload
++  with `session_store`). The full funnel path uses the gateway's private
++  `_handle_reset_command` — deliberately reused until a public reset funnel
++  exists (see issue #2); the fallback keeps old gateways working if it moves.
++
++## License
++
++MIT — see LICENSE.
+diff --git a/plugins/session-reset-policy/__init__.py b/plugins/session-reset-policy/__init__.py
+new file mode 100644
+index 0000000000..4e8c68c9c5
+--- /dev/null
++++ b/plugins/session-reset-policy/__init__.py
+@@ -0,0 +1,432 @@
++"""Hermes session-reset-policy plugin.
++
++Re-arms the config-declared ``session_reset`` policy (mode: idle|daily|both)
++that upstream Hermes v2026.9.11 (commit 1d5d059410) made inert by removing the
++time-triggered conversation-rotation timers. Upstream's stance is that only
++explicit suspension should replace a routed conversation; this plugin restores
++the time-based policy for operators who want it, as an opt-in plugin instead of
++a core patch.
++
++How it works
++------------
++On every inbound gateway message (``pre_gateway_dispatch``), before auth and
++dispatch, the plugin:
++
++1. Computes the session key for the message source (same helper the gateway
++   uses, so multiplexed profiles and platform key layouts match exactly).
++2. Reads that profile's ``config.yaml`` ``session_reset`` block. Under
++   multiplexing the hook fires before the per-profile runtime scope is
++   installed, so the profile home is resolved from ``event.source.profile``
++   and the config is read directly from ``profiles/<name>/config.yaml``.
++3. Compares the route's OWN user-activity clock — ``srp_last_user_inbound``
++   session metadata, advanced only by real user messages that reach this hook
++   — against the idle threshold and/or daily boundary. (Why not the entry's
++   ``updated_at``: turn-start stamps it for EVERY turn, including internal
++   background-review turns, so on an idle gateway where reviews chain the
++   clock never goes stale and the idle reset can never fire. Slash commands
++   such as ``/status`` also stamp ``updated_at`` — they are bookkeeping, not
++   conversation, and this hook skips them: see "Slash commands" below.)
++4. If past the boundary and no turn is currently in flight for that session,
++   resets the conversation through the gateway's OWN ``/new`` reset funnel
++   (``gateway._handle_reset_command``, fed a text-free event): the exact path
++   a typed ``/new`` takes, so everything a conversation boundary owes is done
++   — run-generation bump and cached-agent cleanup/eviction (the compressor's
++   previous summary cannot carry over), the conversation-scope clear
++   (per-conversation ``/model`` and reasoning overrides), interruption of
++   in-flight async delegations, the durable store rotation
++   (``SessionStore.reset_session``: route, transcript end, state.db row), the
++   ``session:end``/``session:reset`` gateway hooks, and the
++   ``on_session_finalize``/``on_session_reset`` plugin hooks (review #2).
++   When the funnel is not reachable (older/renamed gateway internals) the
++   plugin degrades to a bare ``SessionStore.reset_session()`` plus the
++   lifecycle hook pair and the delegation interrupt — a consistent rotation,
++   without the gateway-side cache/scope teardown.
++5. Otherwise records this message's arrival time as the new clock value
++   (via ``set_session_metadata``, which deliberately does not touch
++   ``updated_at``).
++
++The event handed to the reset funnel is stripped of its text: the funnel
++treats ``event.get_command_args()`` as ``/new <title>``, and on a plain
++message that returns the whole utterance — left intact, a policy reset would
++title the fresh session with whatever the user happened to send.
++
++Migration: routes that predate the plugin have no metadata clock; their first
++hook-seen message falls back to ``updated_at``/``created_at`` once, then the
++metadata clock takes over.
++
++Because the reset happens lazily on the first *inbound message* past the
++boundary (not on a timer), a session that goes idle is simply continued when
++the user comes back within the threshold, and reset exactly once when they
++come back after it. Internal/cron traffic never passes through this hook and
++slash commands are skipped by it, so background activity can never keep a
++session alive nor reset it — and can no longer keep one *un-reset* either.
++
++Slash commands
++--------------
++The gateway DOES run ``pre_gateway_dispatch`` for slash commands: it fires
++for every non-internal event, before command routing. The hook therefore
++skips commands explicitly (``event.get_command()``; a bare leading ``/`` for
++events without that helper). A command neither advances the user-activity
++clock nor triggers a time reset. Without the skip, a ``/new`` or ``/reset``
++sent past the boundary rotated the route TWICE: once here, then once more by
++the command itself. That burned a run generation and left an empty,
++already-ended session row behind. Message text that only looks like a path
++(``/etc/hosts is broken``) is not a command (``get_command()`` rejects it)
++and is handled as an ordinary message.
++
++Deferral semantics: when the boundary is past but a turn is in flight, the
++clock is NOT advanced, so the next message re-evaluates the same boundary
++against the same last-user-inbound time.
++
++Compatibility notes
++-------------------
++- Requires Hermes >= v2026.9.11 (needs ``pre_gateway_dispatch`` hook payload
++  with ``session_store``, and ``SessionStore.reset_session``). The full funnel
++  path additionally uses ``gateway._handle_reset_command`` (present ever since
++  ``/new`` exists; private, per review #2 reused deliberately until a public
++  reset funnel exists).
++- Session key resolution: the hook payload's ``session_key`` first (when a
++  future Hermes provides a public one), else ``gateway._session_key_for_source``
++  (review #2: "the right helper today", private but blessed). There is NO bare
++  ``build_session_key`` fallback on purpose: under multiplexed profiles that
++  key is not profile-namespaced and could collide with ANOTHER profile's
++  route — a wrong-key reset would be worse than no reset.
++- The reset is an *explicit-style* reset (like ``/new``): the fresh session
++  does not carry ``was_auto_reset``/``auto_reset_reason`` bookkeeping, so the
++  agent does not receive the auto-reset context note or channel-continuity
++  hint that the old core patch produced. First-turn topic/channel skill
++  re-injection DOES apply (``is_fresh_reset`` is set by ``reset_session``).
++"""
++
++from __future__ import annotations
++
++import contextlib
++import dataclasses
++import inspect
++import logging
++from datetime import datetime, timedelta
++from typing import Any, Dict, Optional
++
++logger = logging.getLogger("hermes.plugins.session_reset_policy")
++
++__version__ = "0.3.0"
++
++_META_KEY = "srp_last_user_inbound"
++
++
++def _read_session_reset_policy(profile: Optional[str]) -> Optional[Dict[str, Any]]:
++    """Return the ``session_reset`` block for *profile*, or None when unset/invalid.
++
++    ``pre_gateway_dispatch`` fires before the per-profile runtime scope is
++    installed, so the ambient ``load_config_readonly()`` would read the launch
++    profile. Instead the profile's home is installed as a context-local
++    hermes-home override — the same mechanism the gateway uses for profile
++    scoping — and the config cache is keyed by the resolved config path, so
++    each profile's block is read from its own config.yaml. The home is
++    resolved via :func:`hermes_cli.profiles.get_profile_dir`, which anchors
++    names to the Hermes ROOT (not the current home) and handles ``default``
++    as the root itself: a standalone gateway may run with ``HERMES_HOME``
++    already set to its own profile dir, where ``<home>/profiles/<name>`` would
++    double-nest and find nothing (issue #4). The returned dict is the SHARED
++    cache object (readonly variant): never mutated. Never raises.
++    """
++    try:
++        from hermes_constants import set_hermes_home_override, reset_hermes_home_override
++        from hermes_cli.config import load_config_readonly
++        from hermes_cli.profiles import get_profile_dir
++
++        token = None
++        if profile:
++            token = set_hermes_home_override(get_profile_dir(profile))
++        try:
++            config = load_config_readonly()
++        finally:
++            if token is not None:
++                reset_hermes_home_override(token)
++        policy = (config or {}).get("session_reset")
++        if not isinstance(policy, dict) or not policy:
++            return None  # unset/empty block: treat as "none", skip quietly
++        return policy
++    except Exception:
++        logger.debug("session_reset policy read failed; skipping", exc_info=True)
++        return None
++
++
++def _parse_iso(value: Any) -> Optional[datetime]:
++    if isinstance(value, datetime):
++        return value
++    if isinstance(value, str):
++        try:
++            return datetime.fromisoformat(value)
++        except ValueError:
++            return None
++    return None
++
++
++def _last_user_inbound(entry: Any) -> Optional[datetime]:
++    """The route's user-activity clock.
++
++    Order: the plugin's own ``srp_last_user_inbound`` metadata (written only by
++    messages that reach this hook), then ``updated_at``/``created_at`` as a
++    one-time migration fallback for routes that predate the plugin.
++    """
++    meta = getattr(entry, "metadata", None) or {}
++    stamp = _parse_iso(meta.get(_META_KEY)) if isinstance(meta, dict) else None
++    if stamp is not None:
++        return stamp
++    return getattr(entry, "updated_at", None) or getattr(entry, "created_at", None)
++
++
++def _time_reset_reason(policy: Dict[str, Any], last: Optional[datetime], now: datetime) -> Optional[str]:
++    """Return "idle"/"daily" when *last* user activity is past the policy boundary, else None.
++
++    Idle compares the user-activity clock against the threshold; daily fires on
++    the first activity after the configured local hour. Fails open (None) on
++    any malformed value.
++    """
++    try:
++        mode = str(policy.get("mode") or "none")
++        if mode == "none":
++            return None
++        if last is None:
++            return None
++        if not isinstance(last, datetime):
++            last = _parse_iso(last)
++            if last is None:
++                return None
++        if mode in ("idle", "both"):
++            idle_minutes = policy.get("idle_minutes")
++            if isinstance(idle_minutes, (int, float)) and idle_minutes > 0:
++                if now - last >= timedelta(minutes=float(idle_minutes)):
++                    return "idle"
++        if mode in ("daily", "both"):
++            at_hour = policy.get("at_hour")
++            if isinstance(at_hour, int) and 0 <= at_hour <= 23:
++                boundary = now.replace(hour=at_hour, minute=0, second=0, microsecond=0)
++                if boundary > now:
++                    boundary -= timedelta(days=1)
++                if last < boundary:
++                    return "daily"
++    except Exception:
++        logger.debug("session_reset boundary evaluation failed; skipping", exc_info=True)
++    return None
++
++
++def _session_in_flight(entry: Any) -> bool:
++    """True when the entry's durable active-turn marker says a turn is running.
++
++    ``active_turn_token`` is set under the store's lock when a turn starts and
++    CAS-cleared on normal unwind; a stale marker left by a crash is recovered at
++    next startup, so treating it as in-flight is the conservative choice.
++    """
++    return bool(getattr(entry, "active_turn_token", None))
++
++
++def _lookup_entry(session_store: Any, session_key: Optional[str]) -> Any:
++    """Best-effort route lookup; None on any failure (fail open to "no route")."""
++    if not session_key:
++        return None
++    try:
++        return session_store.lookup_by_session_key(session_key)
++    except Exception:
++        return None
++
++
++def _is_slash_command(event: Any) -> bool:
++    """True when *event* is a gateway slash command (``/new``, ``/status``, ...).
++
++    Uses the event's own ``get_command()`` when present: the same parse the
++    gateway's command router uses, which honours ``allow_gateway_control`` and
++    rejects path-like text (``/etc/hosts is broken``). Events without that
++    helper fall back to a leading ``/`` on their text. Never raises.
++    """
++    get_command = getattr(event, "get_command", None)
++    if callable(get_command):
++        try:
++            return bool(get_command())
++        except Exception:
++            logger.debug("session-reset-policy: get_command() failed; using the text check", exc_info=True)
++    text = getattr(event, "text", None)
++    return isinstance(text, str) and text.lstrip().startswith("/")
++
++
++def _resolve_session_key(gateway: Any, source: Any, from_payload: Optional[str]) -> Optional[str]:
++    """The routing key for *source*: the hook payload's ``session_key`` when a
++    future Hermes exposes one publicly, else ``gateway._session_key_for_source``.
++
++    The gateway helper is private but blessed by review #2 ("the right helper
++    today"). Deliberately NO bare ``build_session_key`` fallback: that key is
++    not profile-namespaced under multiplexing and could resolve ANOTHER
++    profile's route for the same platform/chat — fail closed instead.
++    """
++    if from_payload:
++        return str(from_payload)
++    helper = getattr(gateway, "_session_key_for_source", None)
++    if not callable(helper):
++        logger.debug("session-reset-policy: no session-key helper in hook payload; skipping")
++        return None
++    try:
++        key = helper(source)
++        return str(key) if key else None
++    except Exception:
++        logger.debug("session-reset-policy: session key derivation failed; skipping", exc_info=True)
++        return None
++
++
++class _CommandFreeEvent:
++    """Minimal event stand-in: same source, no command arguments."""
++
++    __slots__ = ("source",)
++
++    def __init__(self, source: Any) -> None:
++        self.source = source
++
++    def get_command_args(self) -> str:
++        return ""
++
++
++def _command_free_event(event: Any) -> Any:
++    """A copy of *event* that reads as a bare command with no arguments.
++
++    The reset funnel treats ``event.get_command_args()`` as ``/new <title>`` and
++    would title the fresh session from it — and ``MessageEvent.get_command_args``
++    returns the WHOLE message text for a non-command. Stripping the text keeps a
++    policy reset identical to a plain ``/new``. Falls back to a source-only
++    stand-in for non-dataclass events.
++    """
++    try:
++        return dataclasses.replace(event, text="")
++    except Exception:
++        return _CommandFreeEvent(getattr(event, "source", None))
++
++
++def _reset_via_store(source: Any, session_store: Any, session_key: str) -> Any:
++    """Degraded reset without the gateway funnel: rotate the store and fire what
++    is reachable from the plugin surface — in-flight async delegations end with
++    the old conversation (as in ``/new``), then the ``on_session_finalize`` /
++    ``on_session_reset`` lifecycle hooks report the boundary. No run-generation
++    bump, cached-agent eviction, conversation-scope clear, or gateway
++    ``session:end``/``session:reset`` hooks: those live on the funnel path.
++    """
++    old_entry = _lookup_entry(session_store, session_key)
++    old_sid = getattr(old_entry, "session_id", None)
++    with contextlib.suppress(Exception):
++        from tools.async_delegation import interrupt_for_session
++        interrupt_for_session(session_key=session_key, reason="session_reset",
++                              parent_session_id=str(old_sid or ""))
++    new_entry = session_store.reset_session(session_key)
++    new_sid = getattr(new_entry, "session_id", None) if new_entry is not None else None
++    try:
++        from hermes_cli.lifecycle import invoke_hook
++        platform = str(getattr(getattr(source, "platform", None), "value", "") or "")
++        invoke_hook("on_session_finalize", session_id=old_sid, platform=platform,
++                    reason="new_session", old_session_id=old_sid, new_session_id=new_sid)
++        invoke_hook("on_session_reset", session_id=new_sid, platform=platform,
++                    reason="new_session", old_session_id=old_sid, new_session_id=new_sid)
++    except Exception:
++        logger.debug("session-reset-policy: lifecycle boundary hooks failed", exc_info=True)
++    return new_entry
++
++
++async def _reset_session(gateway: Any, event: Any, source: Any, session_store: Any,
++                         session_key: str) -> Any:
++    """Rotate *session_key* through the gateway's ``/new`` reset funnel when
++    reachable, else the degraded store rotation. Returns the new entry or None.
++    """
++    funnel = getattr(gateway, "_handle_reset_command", None)
++    if callable(funnel):
++        old_sid = getattr(_lookup_entry(session_store, session_key), "session_id", None)
++        try:
++            outcome = funnel(_command_free_event(event))
++            if inspect.isawaitable(outcome):
++                await outcome
++            return _lookup_entry(session_store, session_key)
++        except Exception:
++            # Failure AFTER the rotation (e.g. banner/tip bookkeeping in the
++            # funnel's tail) must not rotate a second time.
++            new_entry = _lookup_entry(session_store, session_key)
++            new_sid = getattr(new_entry, "session_id", None)
++            if new_entry is not None and new_sid != old_sid:
++                logger.warning(
++                    "session-reset-policy: gateway reset funnel failed after rotating %s; "
++                    "keeping its result", session_key, exc_info=True)
++                return new_entry
++            logger.warning(
++                "session-reset-policy: gateway reset funnel failed for %s; falling back to a "
++                "bare store rotation", session_key, exc_info=True)
++    else:
++        logger.debug(
++            "session-reset-policy: gateway reset funnel not available for %s; using the "
++            "degraded store rotation", session_key)
++    return _reset_via_store(source, session_store, session_key)
++
++
++async def _maybe_reset(event: Any, gateway: Any, session_store: Any,
++                       session_key: Optional[str] = None, **_extra: Any) -> Optional[Dict[str, str]]:
++    """pre_gateway_dispatch body: reset the session when the policy says so.
++
++    ``session_key`` is consumed only if a future Hermes puts a public one in
++    the hook payload (the dispatcher forwards just the payload fields a
++    callback declares); otherwise resolution falls to the gateway helper.
++    """
++    if session_store is None:
++        return None
++    source = getattr(event, "source", None)
++    if source is None:
++        return None
++    if _is_slash_command(event):
++        # Bookkeeping, not conversation (module docstring, "Slash commands"):
++        # no clock stamp, no time reset. /new and /reset rotate the route
++        # themselves; resetting here first would rotate it twice.
++        return None
++
++    profile = getattr(source, "profile", None)
++    policy = _read_session_reset_policy(profile)
++    if not policy:
++        return None
++    key = _resolve_session_key(gateway, source, session_key)
++    entry = _lookup_entry(session_store, key)
++    if key is None or entry is None:
++        return None  # no key or no route yet -> brand-new conversation anyway
++
++    now = datetime.now()
++    reason = _time_reset_reason(policy, _last_user_inbound(entry), now)
++    if reason is None:
++        # Not past the boundary: this message IS the user activity — advance
++        # our own clock (never ``updated_at``; see module docstring).
++        try:
++            session_store.set_session_metadata(key, _META_KEY, now.isoformat())
++        except Exception:
++            logger.debug("session_reset clock stamp failed", exc_info=True)
++        return None
++    if _session_in_flight(entry):
++        logger.info(
++            "session-reset-policy: boundary '%s' reached for %s but a turn is in flight; deferring (clock NOT advanced)",
++            reason, key,
++        )
++        return None  # normal dispatch; the next message re-evaluates the same boundary
++
++    try:
++        new_entry = await _reset_session(gateway, event, source, session_store, key)
++    except Exception:
++        logger.warning(
++            "session-reset-policy: reset_session(%s) failed; continuing on the existing session",
++            key, exc_info=True,
++        )
++        return None
++    new_sid = getattr(new_entry, "session_id", "?") if new_entry is not None else "?"
++    logger.info(
++        "session-reset-policy: reset %s (reason=%s, new session %s)",
++        key, reason, new_sid,
++    )
++    return None  # always allow normal dispatch; the fresh session picks the message up
++
++
++def register(ctx: Any) -> None:
++    ctx.register_hook("pre_gateway_dispatch", _maybe_reset)
++    logger.info(
++        "session-reset-policy v%s armed (pre_gateway_dispatch)", __version__,
++    )
++
++
++__all__ = ["register", "__version__"]
+\ No newline at end of file
+diff --git a/plugins/session-reset-policy/plugin.yaml b/plugins/session-reset-policy/plugin.yaml
+new file mode 100644
+index 0000000000..f8eb0a95a3
+--- /dev/null
++++ b/plugins/session-reset-policy/plugin.yaml
+@@ -0,0 +1,18 @@
++name: hermes-session-reset-policy
++label: Session Reset Policy
++kind: standalone
++version: 0.3.0
++description: >
++  Re-arms Hermes Agent's config-declared session_reset policy (idle/daily/both)
++  as a plugin, after upstream v2026.9.11 stopped rotating conversations on
++  timers. On the first inbound message past an idle threshold or daily boundary,
++  the plugin resets the conversation through the gateway's own /new reset
++  funnel (SessionStore.reset_session() plus cached-agent eviction,
++  conversation-scope clear, async-delegation interrupt, and the
++  session:end/session:reset + on_session_finalize/on_session_reset boundary
++  hooks), so transcripts, routing, and state.db stay consistent. No timers, no
++  background writes. Degrades to a bare store rotation when the funnel is
++  unreachable.
++author: Samuel Proulx / fastfinge
++provides_hooks:
++  - pre_gateway_dispatch
+diff --git a/tests/plugins/test_session_reset_policy.py b/tests/plugins/test_session_reset_policy.py
+new file mode 100644
+index 0000000000..429a29c461
+--- /dev/null
++++ b/tests/plugins/test_session_reset_policy.py
+@@ -0,0 +1,844 @@
++"""Tests for the hermes-session-reset-policy plugin.
++
++Standalone-suite discipline (per the platform-plugin skill):
++- pytest must be able to COLLECT this file without any Hermes import
++  succeeding. All hermes imports are therefore behind helpers inside tests,
++  never at module scope.
++- Real classes from the installed Hermes tree are imported lazily inside
++  helpers, so the tests exercise the actual SessionStore/SessionEntry
++  behavior (routing transitions, reset_session) rather than mocks.
++- The reset path has two layers (review #2): the gateway's /new reset funnel
++  (``gateway._handle_reset_command``) when reachable, and a degraded bare
++  store rotation otherwise. Both are covered; the funnel layer additionally
++  runs the REAL mixin body bound to a minimal runner stub.
++"""
++
++from __future__ import annotations
++
++import asyncio
++import contextlib
++import importlib.util
++import os
++import sys
++from datetime import datetime, timedelta
++from pathlib import Path
++from types import SimpleNamespace
++from typing import Any
++from unittest import mock
++
++import pytest
++
++# Vendored by T3 Code (infra/hermes/session-reset-policy): the plugin ships in plugins/, and the
++# Hermes tree under test is the checkout these tests live in, not ~/.hermes/hermes-agent.
++HERMES_TREE = Path(__file__).resolve().parents[2]
++PLUGIN_DIR = HERMES_TREE / "plugins" / "session-reset-policy"
++PLUGIN_INIT = PLUGIN_DIR / "__init__.py"
++
++
++def _run(coro):
++    """Drive the (async) hook body to completion; the suite runs without pytest-asyncio."""
++    return asyncio.run(coro)
++
++
++@pytest.fixture(autouse=True)
++def _temp_hermes_home(tmp_path, monkeypatch):
++    """Redirect HERMES_HOME for every test.
++
++    The real SessionStore opens <hermes_home>/state.db; Hermes' live-system
++    guard correctly refuses any test-context open of the production DB.
++    A temporary HERMES_HOME is resolved at call time (hermes_state._default_db_path),
++    so the redirect reaches session storage regardless of import order, and
++    the guard passes because the temp root is not the platform default.
++    """
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
++    # Hermetic root inference (issue #4 repro exposed this): on hosts whose
++    # TMPDIR sits under the native ~/.hermes (e.g. the Hermes scratch dir),
++    # pytest tmp roots read as part of the DEFAULT profile tree — root
++    # inference then anchors at ~/.hermes and profile-name resolution
++    # (hermes_cli.profiles.get_profile_dir) escapes the sandbox into the LIVE
++    # profiles/ dir. Shift the platform-default suffix so every tmp root is a
++    # self-contained external root. A sibling suffix (``~/.hermes-pytest-…``), not a nested one: Hermes's
++    # own conftest redirects only native homes directly under ``~`` to tmp_path, and a nested
++    # ``~/.hermes/pytest-…`` slips past it into the real home, where its I/O guard fails the test.
++    monkeypatch.setenv("HERMES_DATA_DIR_SUFFIX", f"-pytest-{tmp_path.name}")
++    try:
++        import hermes_constants
++        monkeypatch.setattr(hermes_constants, "_default_hermes_root_memo", None)
++        monkeypatch.setattr(hermes_constants, "_profile_fallback_warned", True, raising=False)
++    except Exception:
++        pass  # tree not importable here: the tests skip anyway
++
++
++@pytest.fixture(autouse=True)
++def hook_recorder(monkeypatch, _temp_hermes_home):
++    """Record — never execute — the boundary side effects the reset path fires
++    through host modules: ``hermes_cli.lifecycle.invoke_hook`` (the
++    on_session_finalize / on_session_reset plugin hooks) and
++    ``tools.async_delegation.interrupt_for_session``. Both are patched on the
++    source module, and the plugin imports them lazily at call time, so the
++    recorders intercept every path (funnel tail and degraded fallback)."""
++    rec = SimpleNamespace(lifecycle=[], interrupts=[])
++    if HERMES_TREE.is_dir():
++        sys.path.insert(0, str(HERMES_TREE))
++    try:
++        import hermes_cli.lifecycle as lifecycle
++        monkeypatch.setattr(
++            lifecycle, "invoke_hook",
++            lambda name, **kw: rec.lifecycle.append((name, kw)) or [])
++    except Exception:
++        pass  # tree not importable here: the plugin's own try/suppress covers it
++    try:
++        import tools.async_delegation as async_delegation
++        monkeypatch.setattr(
++            async_delegation, "interrupt_for_session",
++            lambda **kw: rec.interrupts.append(kw) or 0)
++    except Exception:
++        pass
++    return rec
++
++
++@pytest.fixture()
++def plugin():
++    """Load the plugin module standalone (spec_from_file_location shape)."""
++    spec = importlib.util.spec_from_file_location(
++        "hermes_plugins.hermes_session_reset_policy", PLUGIN_INIT
++    )
++    module = importlib.util.module_from_spec(spec)
++    sys.modules[spec.name] = module
++    spec.loader.exec_module(module)
++    yield module
++    sys.modules.pop(spec.name, None)
++
++
++def _import_tree_module(name: str) -> Any:
++    """Import *name* from the installed Hermes tree, or skip the test."""
++    if not HERMES_TREE.is_dir():
++        pytest.skip("Hermes tree not present on this host")
++    sys.path.insert(0, str(HERMES_TREE))
++    try:
++        return importlib.import_module(name)
++    except Exception as exc:
++        pytest.skip(f"Hermes tree module not importable: {name}: {exc}")
++
++
++# ---------------------------------------------------------------------------
++# _time_reset_reason — boundary math (ported verbatim from the core patch)
++# ---------------------------------------------------------------------------
++
++NOW = datetime(2026, 9, 26, 12, 0, 0)
++
++
++def _last(updated_minutes_ago):
++    """A user-activity clock value N minutes before NOW."""
++    if updated_minutes_ago is None:
++        return None
++    return NOW - timedelta(minutes=updated_minutes_ago)
++
++def _entry(updated_minutes_ago: float, *, token=None):
++    from dataclasses import dataclass, field
++
++    @dataclass
++    class Entry:
++        created_at: datetime = NOW - timedelta(minutes=updated_minutes_ago or 1)
++        updated_at: datetime = NOW - timedelta(minutes=updated_minutes_ago or 1)
++        active_turn_token: str | None = token
++        session_key: str = "agent:main:telegram:dm:test"
++        session_id: str = "s-1"
++
++    return Entry()
++
++
++def test_idle_mode_triggers_past_threshold(plugin):
++    policy = {"mode": "idle", "idle_minutes": 60}
++    assert plugin._time_reset_reason(policy, _last(90), NOW) == "idle"
++
++def test_idle_mode_no_reset_within_threshold(plugin):
++    policy = {"mode": "idle", "idle_minutes": 60}
++    assert plugin._time_reset_reason(policy, _last(30), NOW) is None
++
++def test_idle_mode_exactly_at_threshold_triggers(plugin):
++    policy = {"mode": "idle", "idle_minutes": 60}
++    assert plugin._time_reset_reason(policy, _last(60), NOW) == "idle"
++
++def test_daily_mode_boundary(plugin):
++    # now=12:00, boundary hour=4 -> boundary today 04:00; last= yesterday -> reset
++    policy = {"mode": "daily", "at_hour": 4}
++    entry = SimpleNamespace(
++        created_at=datetime(2026, 9, 25, 10, 0),
++        updated_at=datetime(2026, 9, 25, 10, 0),
++    )
++    assert plugin._time_reset_reason(policy, datetime(2026, 9, 25, 10, 0), NOW) == "daily"
++    # last after today's boundary -> no reset
++    assert plugin._time_reset_reason(policy, datetime(2026, 9, 26, 8, 0), NOW) is None
++
++def test_daily_mode_boundary_in_future_rolls_back_a_day(plugin):
++    # now=02:00, boundary hour=4 (today 04:00 is in the future) -> boundary
++    # yesterday 04:00; last=yesterday 12:00 (after it) -> no reset.
++    now = datetime(2026, 9, 26, 2, 0)
++    policy = {"mode": "daily", "at_hour": 4}
++    entry = SimpleNamespace(
++        created_at=datetime(2026, 9, 25, 12, 0),
++        updated_at=datetime(2026, 9, 25, 12, 0),
++    )
++    assert plugin._time_reset_reason(policy, datetime(2026, 9, 25, 12, 0), now) is None
++    # last=day-before-yesterday -> reset
++    assert plugin._time_reset_reason(policy, datetime(2026, 9, 24, 12, 0), now) == "daily"
++
++def test_both_mode_idle_wins_first(plugin):
++    policy = {"mode": "both", "idle_minutes": 30, "at_hour": 4}
++    assert plugin._time_reset_reason(policy, _last(90), NOW) == "idle"
++
++def test_none_mode_never_triggers(plugin):
++    policy = {"mode": "none"}
++    assert plugin._time_reset_reason(policy, _last(100000), NOW) is None
++
++def test_malformed_policy_fails_open(plugin):
++    for policy in ({"mode": "idle", "idle_minutes": "lots"}, {"mode": "daily", "at_hour": 99}, {}):
++        assert plugin._time_reset_reason(policy, _last(90), NOW) is None
++
++def test_missing_timestamps_no_reset(plugin):
++    policy = {"mode": "idle", "idle_minutes": 1}
++    assert plugin._time_reset_reason(policy, None, NOW) is None
++
++def test_created_at_fallback(plugin):
++    # Migration path: entry without metadata clock falls back to created_at
++    policy = {"mode": "idle", "idle_minutes": 60}
++    entry = SimpleNamespace(
++        created_at=NOW - timedelta(minutes=90),
++        updated_at=None,
++        metadata={},
++    )
++    assert plugin._time_reset_reason(policy, plugin._last_user_inbound(entry), NOW) == "idle"
++
++
++# ---------------------------------------------------------------------------
++# register()
++# ---------------------------------------------------------------------------
++
++def test_register_registers_hook(plugin):
++    ctx = mock.MagicMock()
++    plugin.register(ctx)
++    ctx.register_hook.assert_called_once_with("pre_gateway_dispatch", plugin._maybe_reset)
++
++
++# ---------------------------------------------------------------------------
++# _command_free_event — the funnel must never title the session from the
++# triggering utterance (/new <title> semantics; get_command_args() on a plain
++# message is the whole message text).
++# ---------------------------------------------------------------------------
++
++def test_reset_event_strips_message_text(plugin):
++    from dataclasses import dataclass
++
++    @dataclass
++    class Event:
++        source: object = "src"
++        text: str = "please start fresh tomorrow morning"
++        def get_command_args(self) -> str:
++            return self.text  # non-command MessageEvent semantics
++
++    event = Event()
++    bare = plugin._command_free_event(event)
++    assert bare.get_command_args() == ""
++    assert bare.source is event.source
++    assert event.text == "please start fresh tomorrow morning"  # original untouched
++
++def test_reset_event_falls_back_for_plain_objects(plugin):
++    source = object()
++    event = SimpleNamespace(source=source, get_command_args=lambda: "hello there")
++    bare = plugin._command_free_event(event)
++    assert bare.get_command_args() == ""
++    assert bare.source is source
++
++
++# ---------------------------------------------------------------------------
++# _maybe_reset — end-to-end against the REAL SessionStore from the tree
++# ---------------------------------------------------------------------------
++
++class _RoutingCfg:
++    write_sessions_json = True
++
++
++def _make_real_store(tmp_path):
++    """Build a real SessionStore over a scratch sessions dir."""
++    mod = _import_tree_module("gateway.session")
++    return mod.SessionStore(sessions_dir=tmp_path / "sessions", config=_RoutingCfg())
++
++def _real_source():
++    mod = _import_tree_module("gateway.session")
++    cfg = _import_tree_module("gateway.config")
++    # A chat platform, not LOCAL: from the Hermes session-authority runtime (v0.23) on, a LOCAL
++    # route rotates only under the authority epoch a running gateway installs, so a bare store
++    # cannot reset one. Chat routes are what this plugin resets anyway.
++    return mod.SessionSource(platform=cfg.Platform.TELEGRAM, chat_id="test-chat", chat_type="dm",
++                             user_id="tester")
++
++def _seed_route(store, *, key="agent:main:telegram:dm:test-chat", updated_minutes_ago=0.0, token=None):
++    mod = _import_tree_module("gateway.session")
++    SessionEntry = mod.SessionEntry
++    src = _real_source()
++    entry = SessionEntry(
++        session_key=key, session_id="seed-sid",
++        created_at=datetime.now() - timedelta(minutes=updated_minutes_ago),
++        updated_at=datetime.now() - timedelta(minutes=updated_minutes_ago),
++        origin=src, platform=None, chat_type="dm",
++        active_turn_token=token,
++    )
++    store._entries[key] = entry
++    store._loaded = True
++    return key, entry
++
++
++def test_maybe_reset_store_fallback_calls_real_reset_session(plugin, tmp_path, hook_recorder):
++    """Degraded path (gateway double has no reset funnel): a bare store rotation
++    PLUS what the plugin surface can reach — the delegation interrupt and the
++    on_session_finalize / on_session_reset lifecycle pair."""
++    store = _make_real_store(tmp_path)
++    key, entry = _seed_route(store, updated_minutes_ago=120)
++    gateway = SimpleNamespace(
++        _session_key_for_source=lambda src: key,
++    )
++    event = SimpleNamespace(source=_real_source(), internal=False)
++
++    policy = {"mode": "idle", "idle_minutes": 60}
++    with mock.patch.object(plugin, "_read_session_reset_policy", return_value=policy):
++        result = _run(plugin._maybe_reset(event, gateway, store))
++
++    assert result is None  # allow normal dispatch
++    new_entry = store.lookup_by_session_key(key)
++    assert new_entry is not None
++    assert new_entry.session_id != "seed-sid"
++    assert new_entry.is_fresh_reset is True
++    # In-flight delegations end with the old conversation (review #2, item 3).
++    assert hook_recorder.interrupts
++    assert hook_recorder.interrupts[0]["session_key"] == key
++    assert hook_recorder.interrupts[0]["parent_session_id"] == "seed-sid"
++    # Boundary hooks fire (review #2, item 2): finalize for the old id, reset for the new.
++    fired = [name for name, _ in hook_recorder.lifecycle]
++    assert "on_session_finalize" in fired
++    assert "on_session_reset" in fired
++    reset_kw = dict(hook_recorder.lifecycle)["on_session_reset"]
++    assert reset_kw["old_session_id"] == "seed-sid"
++    assert reset_kw["new_session_id"] == new_entry.session_id
++
++def test_maybe_reset_prefers_the_gateway_funnel(plugin, tmp_path, hook_recorder):
++    """When the gateway reset funnel exists it IS the reset — the store is never
++    rotated behind its back — and it receives a command-free event so /new's
++    title-from-args step cannot title the fresh session from the utterance."""
++    store = _make_real_store(tmp_path)
++    key, entry = _seed_route(store, updated_minutes_ago=120)
++    seen = []
++
++    async def funnel(evt):
++        seen.append(evt)
++
++    gateway = SimpleNamespace(
++        _session_key_for_source=lambda src: key,
++        _handle_reset_command=funnel,
++    )
++    event = SimpleNamespace(source=_real_source(), internal=False,
++                            get_command_args=lambda: "and please keep the old context in mind")
++
++    policy = {"mode": "idle", "idle_minutes": 60}
++    with mock.patch.object(plugin, "_read_session_reset_policy", return_value=policy), \
++         mock.patch.object(store, "reset_session",
++                           side_effect=AssertionError("store must not rotate behind the funnel")):
++        assert _run(plugin._maybe_reset(event, gateway, store)) is None
++
++    assert len(seen) == 1
++    assert seen[0].get_command_args() == ""  # no title can leak in as /new args
++    assert seen[0].source is event.source
++
++def test_maybe_reset_funnel_failure_before_rotation_falls_back(plugin, tmp_path, hook_recorder):
++    """A funnel that blows up before rotating degrades to the store rotation;
++    the boundary must still happen."""
++    store = _make_real_store(tmp_path)
++    key, entry = _seed_route(store, updated_minutes_ago=120)
++
++    async def funnel(evt):
++        raise RuntimeError("funnel exploded")
++
++    gateway = SimpleNamespace(
++        _session_key_for_source=lambda src: key,
++        _handle_reset_command=funnel,
++    )
++    event = SimpleNamespace(source=_real_source(), internal=False)
++    policy = {"mode": "idle", "idle_minutes": 60}
++    with mock.patch.object(plugin, "_read_session_reset_policy", return_value=policy):
++        assert _run(plugin._maybe_reset(event, gateway, store)) is None
++
++    new_entry = store.lookup_by_session_key(key)
++    assert new_entry.session_id != "seed-sid"
++    assert new_entry.is_fresh_reset is True
++    assert hook_recorder.interrupts  # fallback still ends old delegations
++
++def test_maybe_reset_funnel_failure_after_rotation_keeps_result(plugin, tmp_path, hook_recorder):
++    """A funnel that rotates and THEN blows up (banner/tip tail) must not trigger
++    a second rotation in the fallback."""
++    store = _make_real_store(tmp_path)
++    key, entry = _seed_route(store, updated_minutes_ago=120)
++    rotated_sid = []
++
++    async def funnel(evt):
++        rotated_sid.append(store.reset_session(key).session_id)
++        raise RuntimeError("banner exploded after the rotation")
++
++    gateway = SimpleNamespace(
++        _session_key_for_source=lambda src: key,
++        _handle_reset_command=funnel,
++    )
++    event = SimpleNamespace(source=_real_source(), internal=False)
++    policy = {"mode": "idle", "idle_minutes": 60}
++    with mock.patch.object(plugin, "_read_session_reset_policy", return_value=policy):
++        assert _run(plugin._maybe_reset(event, gateway, store)) is None
++
++    assert store.lookup_by_session_key(key).session_id == rotated_sid[0]
++
++def test_maybe_reset_prefers_payload_session_key(plugin, tmp_path):
++    """A public session_key in the hook payload outranks the private gateway
++    helper (review #2, item 4: ready for the payload equivalent they offered)."""
++    store = _make_real_store(tmp_path)
++    payload_key = "agent:main:telegram:dm:payload-chat"
++    helper_key = "agent:main:telegram:dm:helper-chat"
++    _seed_route(store, key=payload_key, updated_minutes_ago=5)
++    _seed_route(store, key=helper_key, updated_minutes_ago=5)
++    gateway = SimpleNamespace(_session_key_for_source=lambda src: helper_key)
++    event = SimpleNamespace(source=_real_source(), internal=False)
++    policy = {"mode": "idle", "idle_minutes": 60}  # within threshold -> clock-stamp path
++    with mock.patch.object(plugin, "_read_session_reset_policy", return_value=policy):
++        assert _run(plugin._maybe_reset(event, gateway, store,
++                                        session_key=payload_key)) is None
++
++    assert store.get_session_metadata(payload_key, "srp_last_user_inbound") is not None
++    assert store.get_session_metadata(helper_key, "srp_last_user_inbound") is None
++
++def test_maybe_reset_bg_turn_does_not_block_reset(plugin, tmp_path, hook_recorder):
++    """The 19:04 bug: a background-review turn stamps ``updated_at`` but must
++    NOT reset the plugin's own clock. An old last-user-inbound with a fresh
++    ``updated_at`` must still reset."""
++    store = _make_real_store(tmp_path)
++    key, entry = _seed_route(store, updated_minutes_ago=1)  # fresh updated_at
++    # But the plugin's clock says the last real user inbound was 2h ago:
++    store.set_session_metadata(key, "srp_last_user_inbound",
++                               (datetime.now() - timedelta(hours=2)).isoformat())
++
++    gateway = SimpleNamespace(_session_key_for_source=lambda src: key)
++    event = SimpleNamespace(source=_real_source(), internal=False)
++    policy = {"mode": "idle", "idle_minutes": 60}
++    with mock.patch.object(plugin, "_read_session_reset_policy", return_value=policy):
++        assert _run(plugin._maybe_reset(event, gateway, store)) is None
++
++    new_entry = store.lookup_by_session_key(key)
++    assert new_entry.session_id != "seed-sid"
++    assert new_entry.is_fresh_reset is True
++
++def test_maybe_reset_stamps_clock_when_within_threshold(plugin, tmp_path):
++    """Within the threshold the message must advance the plugin's own clock,
++    not ``updated_at``."""
++    store = _make_real_store(tmp_path)
++    key, entry = _seed_route(store, updated_minutes_ago=5)
++    gateway = SimpleNamespace(_session_key_for_source=lambda src: key)
++    event = SimpleNamespace(source=_real_source(), internal=False)
++    policy = {"mode": "idle", "idle_minutes": 60}
++    before = datetime.now() - timedelta(seconds=5)
++    with mock.patch.object(plugin, "_read_session_reset_policy", return_value=policy):
++        assert _run(plugin._maybe_reset(event, gateway, store)) is None
++
++    assert store.lookup_by_session_key(key).session_id == "seed-sid"
++    stamp = store.get_session_metadata(key, "srp_last_user_inbound")
++    assert stamp is not None
++    assert datetime.fromisoformat(stamp) >= before
++
++def test_maybe_reset_deferral_does_not_advance_clock(plugin, tmp_path):
++    """Boundary past + turn in flight: defer AND leave the clock alone, so the
++    next message re-evaluates the same boundary."""
++    store = _make_real_store(tmp_path)
++    key, entry = _seed_route(store, updated_minutes_ago=120, token="tok-123")
++    gateway = SimpleNamespace(_session_key_for_source=lambda src: key)
++    event = SimpleNamespace(source=_real_source(), internal=False)
++    policy = {"mode": "idle", "idle_minutes": 60}
++    with mock.patch.object(plugin, "_read_session_reset_policy", return_value=policy):
++        assert _run(plugin._maybe_reset(event, gateway, store)) is None
++
++    assert store.lookup_by_session_key(key).session_id == "seed-sid"
++    # No clock stamp: the deferral must not swallow the pending reset.
++    assert store.get_session_metadata(key, "srp_last_user_inbound") is None
++
++def test_maybe_reset_skips_when_within_threshold(plugin, tmp_path):
++    store = _make_real_store(tmp_path)
++    key, entry = _seed_route(store, updated_minutes_ago=5)
++    gateway = SimpleNamespace(_session_key_for_source=lambda src: key)
++    event = SimpleNamespace(source=_real_source(), internal=False)
++    policy = {"mode": "idle", "idle_minutes": 60}
++    with mock.patch.object(plugin, "_read_session_reset_policy", return_value=policy):
++        assert _run(plugin._maybe_reset(event, gateway, store)) is None
++
++    assert store.lookup_by_session_key(key).session_id == "seed-sid"
++
++def test_maybe_reset_defers_when_turn_in_flight(plugin, tmp_path):
++    store = _make_real_store(tmp_path)
++    key, entry = _seed_route(store, updated_minutes_ago=120, token="tok-123")
++    gateway = SimpleNamespace(_session_key_for_source=lambda src: key)
++    event = SimpleNamespace(source=_real_source(), internal=False)
++    policy = {"mode": "idle", "idle_minutes": 60}
++    with mock.patch.object(plugin, "_read_session_reset_policy", return_value=policy):
++        assert _run(plugin._maybe_reset(event, gateway, store)) is None
++
++    # Route unchanged: the in-flight turn keeps its session.
++    assert store.lookup_by_session_key(key).session_id == "seed-sid"
++
++def test_maybe_reset_no_policy_no_op(plugin, tmp_path):
++    store = _make_real_store(tmp_path)
++    key, entry = _seed_route(store, updated_minutes_ago=100000)
++    gateway = SimpleNamespace(_session_key_for_source=lambda src: key)
++    event = SimpleNamespace(source=_real_source(), internal=False)
++    with mock.patch.object(plugin, "_read_session_reset_policy", return_value=None):
++        assert _run(plugin._maybe_reset(event, gateway, store)) is None
++    assert store.lookup_by_session_key(key).session_id == "seed-sid"
++
++def test_maybe_reset_survives_store_errors(plugin, tmp_path):
++    class ExplodingStore:
++        def lookup_by_session_key(self, key):
++            raise RuntimeError("boom")
++
++    gateway = SimpleNamespace(_session_key_for_source=lambda src: "agent:main:telegram:dm:x")
++    event = SimpleNamespace(source=_real_source(), internal=False)
++    policy = {"mode": "idle", "idle_minutes": 60}
++    with mock.patch.object(plugin, "_read_session_reset_policy", return_value=policy):
++        assert _run(plugin._maybe_reset(event, gateway, ExplodingStore())) is None
++
++def test_maybe_reset_no_route_no_op(plugin, tmp_path):
++    store = _make_real_store(tmp_path)
++    gateway = SimpleNamespace(_session_key_for_source=lambda src: "agent:main:telegram:dm:none")
++    event = SimpleNamespace(source=_real_source(), internal=False)
++    policy = {"mode": "idle", "idle_minutes": 60}
++    with mock.patch.object(plugin, "_read_session_reset_policy", return_value=policy):
++        assert _run(plugin._maybe_reset(event, gateway, store)) is None
++
++def test_maybe_reset_survives_missing_key_helper(plugin, tmp_path):
++    """No payload key and no gateway helper: fail closed (no reset, no stamp).
++    A bare build_session_key fallback is deliberately absent — under
++    multiplexed profiles it is not profile-namespaced and could resolve
++    ANOTHER profile's route (review #2, item 4)."""
++    store = _make_real_store(tmp_path)
++    key, entry = _seed_route(store, updated_minutes_ago=120)
++    gateway = SimpleNamespace()  # no _session_key_for_source at all
++    event = SimpleNamespace(source=_real_source(), internal=False)
++    policy = {"mode": "idle", "idle_minutes": 60}
++    with mock.patch.object(plugin, "_read_session_reset_policy", return_value=policy):
++        assert _run(plugin._maybe_reset(event, gateway, store)) is None
++    assert store.lookup_by_session_key(key).session_id == "seed-sid"
++
++
++# ---------------------------------------------------------------------------
++# The REAL /new reset funnel — GatewaySessionCommandsMixin bodies bound to a
++# minimal runner stub, run against the REAL SessionStore (review #2, items 1-3:
++# run-generation bump, cached-agent eviction, conversation-scope clear,
++# async-delegation interrupt, session:end/session:reset, boundary hooks).
++# ---------------------------------------------------------------------------
++
++def _real_funnel_gateway(store, key):
++    """A GatewayRunner stand-in carrying the REAL funnel methods.
++
++    Only the leaf internals the funnel touches are recorders (they are the
++    gateway's own per-session caches/hooks, covered by upstream tests);
++    ``_handle_reset_command``, ``_fire_session_reset_hooks`` and
++    ``_cleanup_old_agent_for_reset`` run for real."""
++    session_mod = _import_tree_module("gateway.session")
++    slash_mod = _import_tree_module("gateway.slash_commands_session")
++    mixin = slash_mod.GatewaySessionCommandsMixin
++
++    calls = SimpleNamespace(invalidated=[], released=[], evicted=[], cleared=[], finalize=[], stopped=[])
++
++    class _Hooks:
++        def __init__(self):
++            self.emitted = []
++
++        async def emit(self, name, payload):
++            self.emitted.append((name, payload))
++
++    async def _finalize_session_off_loop(**kw):
++        calls.finalize.append(kw)
++
++    gw = SimpleNamespace()
++    gw.session_store = store
++    gw.async_session_store = session_mod.AsyncSessionStore(store)
++    gw.hooks = _Hooks()
++    gw._session_key_for_source = lambda src: key
++    gw._cached_agent_for = lambda k: None  # real cleanup helper early-returns on None
++    gw._invalidate_session_run_generation = lambda k, reason="": calls.invalidated.append((k, reason))
++    gw._release_running_agent_state = lambda k: calls.released.append(k)
++    gw._evict_cached_agent = lambda k: calls.evicted.append(k)
++    gw._clear_conversation_scope = lambda k, reason="": calls.cleared.append((k, reason))
++    gw._finalize_session_off_loop = _finalize_session_off_loop
++    gw._telegram_topic_new_header = lambda source: ""
++    gw._is_telegram_topic_lane = lambda source: False
++    gw._session_db = None
++    # v0.23's funnel first stops the route owner's turn through the session authority; with no
++    # authority that is a no-op, so a recorder stands in.
++    async def _hm_stop_owner_turn(k):
++        calls.stopped.append(k)
++    gw._hm_stop_owner_turn = _hm_stop_owner_turn
++    # Newer funnels emit the gateway hooks under the session owner's profile scope, falling back to the
++    # source's routed profile; an unscoped stand-in keeps that path real without a profile runtime.
++    gw._async_profile_scope_for_source = lambda source: contextlib.nullcontext()
++    for name in ("_handle_reset_command", "_fire_session_reset_hooks",
++                 "_cleanup_old_agent_for_reset"):
++        setattr(gw, name, getattr(mixin, name).__get__(gw))
++    # Newer funnels fire on_session_reset through _fire_plugin_session_reset, which runs the hook
++    # off-loop via _reset_session_off_loop (GatewaySessionEndMixin). Bind those real bodies too, with
++    # inline stand-ins for the executor and profile-scope leaves; older funnels lack them and skip this.
++    if hasattr(mixin, "_fire_plugin_session_reset"):
++        end_mod = _import_tree_module("gateway.run_shutdown_session_end")
++        gw._FINALIZE_TIMEOUT_S = 10.0  # GatewayRunner's bound; the stand-ins finish inline anyway
++
++        async def _run_housekeeping_in_executor(func, *args):
++            return func(*args)
++
++        gw._run_housekeeping_in_executor = _run_housekeeping_in_executor
++        gw._run_release_in_profile_scope = lambda target, args, session_key: target(*args)
++        gw._fire_plugin_session_reset = mixin._fire_plugin_session_reset.__get__(gw)
++        gw._reset_session_off_loop = end_mod.GatewaySessionEndMixin._reset_session_off_loop.__get__(gw)
++    return gw, calls, slash_mod
++
++
++def test_maybe_reset_runs_the_real_new_funnel(plugin, tmp_path, hook_recorder, monkeypatch):
++    store = _make_real_store(tmp_path)
++    key, entry = _seed_route(store, updated_minutes_ago=120)
++    gw, calls, slash_mod = _real_funnel_gateway(store, key)
++    monkeypatch.setattr(slash_mod, "t", lambda key_name, **kw: key_name)  # no i18n in tests
++    event = SimpleNamespace(source=_real_source(), internal=False)
++
++    policy = {"mode": "idle", "idle_minutes": 60}
++    with mock.patch.object(plugin, "_read_session_reset_policy", return_value=policy):
++        assert _run(plugin._maybe_reset(event, gw, store)) is None
++
++    new_entry = store.lookup_by_session_key(key)
++    assert new_entry is not None
++    assert new_entry.session_id != "seed-sid"
++    assert new_entry.is_fresh_reset is True
++    # Item 1: run-generation bump, running-slot release, cached-agent eviction,
++    # conversation-scope clear — the exact /new boundary sequence.
++    assert calls.invalidated == [(key, "session_reset")]
++    assert calls.released == [key]
++    assert calls.evicted == [key]
++    assert calls.cleared == [(key, "session_reset")]
++    # Item 2: gateway session:end / session:reset hooks + on_session_finalize.
++    assert [name for name, _ in gw.hooks.emitted] == ["session:end", "session:reset"]
++    assert gw.hooks.emitted[0][1]["session_key"] == key
++    assert calls.finalize and calls.finalize[0]["session_id"] == "seed-sid"
++    assert calls.finalize[0]["new_session_id"] == new_entry.session_id
++    fired = dict(hook_recorder.lifecycle)
++    assert "on_session_reset" in fired
++    assert fired["on_session_reset"]["old_session_id"] == "seed-sid"
++    assert fired["on_session_reset"]["new_session_id"] == new_entry.session_id
++    # Item 3: in-flight async delegations end with the old conversation.
++    assert hook_recorder.interrupts
++    assert hook_recorder.interrupts[0]["session_key"] == key
++    assert hook_recorder.interrupts[0]["parent_session_id"] == "seed-sid"
++
++
++# ---------------------------------------------------------------------------
++# _read_session_reset_policy — profile resolution via the real config loader
++# ---------------------------------------------------------------------------
++
++def _bootstrap_hermes_paths():
++    sys.path.insert(0, str(HERMES_TREE))
++    return HERMES_TREE.is_dir()
++
++def test_policy_reader_none_on_missing_config(plugin, tmp_path, monkeypatch):
++    if not _bootstrap_hermes_paths():
++        pytest.skip("Hermes tree not present on this host")
++    import hermes_constants
++    from hermes_cli import config as cfgmod
++
++    # Point the config cache at the temp home (the autouse fixture redirects
++    # HERMES_HOME already; ensure no stale cache survives from other tests).
++    monkeypatch.setattr(cfgmod, "_LOAD_CONFIG_CACHE", {})
++    monkeypatch.setattr(cfgmod, "_CONFIG_CACHE", {}, raising=False)
++
++    home = Path(os.environ["HERMES_HOME"])
++    home.mkdir(parents=True, exist_ok=True)
++    monkeypatch.setattr(hermes_constants, "_profile_fallback_warned", True, raising=False)
++
++    assert plugin._read_session_reset_policy(None) is None
++
++def test_policy_reader_reads_named_profile_config(plugin, tmp_path, monkeypatch):
++    if not _bootstrap_hermes_paths():
++        pytest.skip("Hermes tree not present on this host")
++    from hermes_cli import config as cfgmod
++    monkeypatch.setattr(cfgmod, "_LOAD_CONFIG_CACHE", {})
++    monkeypatch.setattr(cfgmod, "_CONFIG_CACHE", {}, raising=False)
++    home = Path(os.environ["HERMES_HOME"])
++    home.mkdir(parents=True, exist_ok=True)
++    prof = home / "profiles" / "mom"
++    prof.mkdir(parents=True)
++    (prof / "config.yaml").write_text(
++        "session_reset:\n  mode: both\n  idle_minutes: 45\n  at_hour: 4\n"
++    )
++
++    policy = plugin._read_session_reset_policy("mom")
++    assert policy == {"mode": "both", "idle_minutes": 45, "at_hour": 4}
++
++def test_policy_reader_reads_default_profile_config(plugin, tmp_path, monkeypatch):
++    if not _bootstrap_hermes_paths():
++        pytest.skip("Hermes tree not present on this host")
++    from hermes_cli import config as cfgmod
++    monkeypatch.setattr(cfgmod, "_LOAD_CONFIG_CACHE", {})
++    monkeypatch.setattr(cfgmod, "_CONFIG_CACHE", {}, raising=False)
++    home = Path(os.environ["HERMES_HOME"])
++    home.mkdir(parents=True, exist_ok=True)
++    (home / "config.yaml").write_text(
++        "session_reset:\n  mode: idle\n  idle_minutes: 30\n"
++    )
++
++    policy = plugin._read_session_reset_policy(None)
++    assert policy == {"mode": "idle", "idle_minutes": 30}
++
++def _write_idle_policy(config_dir: Path, minutes: int) -> None:
++    config_dir.mkdir(parents=True, exist_ok=True)
++    (config_dir / "config.yaml").write_text(
++        f"session_reset:\n  mode: idle\n  idle_minutes: {minutes}\n", encoding="utf-8"
++    )
++
++def test_policy_reader_resolves_profiles_from_root(plugin, tmp_path, monkeypatch):
++    """Issue #4 regression: profile tags resolve against the Hermes ROOT under
++    BOTH gateway layouts — a multiplexed gateway (HERMES_HOME = <root>) and a
++    standalone per-profile gateway (HERMES_HOME = <root>/profiles/<name>). The
++    old ``<home>/profiles/<name>`` build double-nested on the standalone layout
++    (looking for ``profiles/alpha/profiles/alpha/config.yaml``) and the reader
++    silently returned None, so no reset ever fired.
++
++    ``default`` is just a profile name too: its home IS the root, whatever the
++    launch home is (same mapping hermes_cli.profiles.get_profile_dir encodes).
++    """
++    if not _bootstrap_hermes_paths():
++        pytest.skip("Hermes tree not present on this host")
++    import hermes_constants
++    from hermes_cli import config as cfgmod
++
++    # External/custom-root layout (the reporter's per-profile gateways, cf. a
++    # Docker /opt/data root): shift the native-home suffix so the tmp root is
++    # not absorbed into the default profile tree's root inference.
++    monkeypatch.setenv("HERMES_DATA_DIR_SUFFIX", f"-srp-test-{tmp_path.name}")
++    monkeypatch.setattr(hermes_constants, "_profile_fallback_warned", True, raising=False)
++
++    root = tmp_path / "root"
++    _write_idle_policy(root, 111)                    # the "default" profile
++    _write_idle_policy(root / "profiles" / "alpha", 222)
++    _write_idle_policy(root / "profiles" / "beta", 333)
++
++    cases = [
++        # per-profile home (standalone gateway per profile)
++        (root / "profiles" / "alpha", "alpha", 222),
++        (root / "profiles" / "alpha", "beta", 333),
++        (root / "profiles" / "alpha", None, 222),
++        (root / "profiles" / "beta", "beta", 333),
++        # root home (multiplexed gateway)
++        (root, "alpha", 222),
++        (root, "beta", 333),
++        (root, "default", 111),
++        (root, None, 111),
++        # "default" names the root profile's config, even from a profile home
++        (root / "profiles" / "alpha", "default", 111),
++    ]
++    for home, profile, minutes in cases:
++        monkeypatch.setenv("HERMES_HOME", str(home))
++        monkeypatch.setattr(hermes_constants, "_default_hermes_root_memo", None)
++        monkeypatch.setattr(cfgmod, "_LOAD_CONFIG_CACHE", {})
++        monkeypatch.setattr(cfgmod, "_CONFIG_CACHE", {}, raising=False)
++        policy = plugin._read_session_reset_policy(profile)
++        assert policy == {"mode": "idle", "idle_minutes": minutes}, (
++            f"HERMES_HOME={home} profile={profile!r} -> {policy}"
++        )
++
++
++# ---------------------------------------------------------------------------
++# Slash commands: skipped by the hook (no clock stamp, no time reset)
++# ---------------------------------------------------------------------------
++
++def _real_event(text):
++    """A real gateway MessageEvent (its get_command() is the router's parse)."""
++    event_mod = _import_tree_module("gateway.platforms.event")
++    return event_mod.MessageEvent(text=text, source=_real_source())
++
++
++@pytest.mark.parametrize("text", ["/new", "/reset", "/status", "  /model some-model"])
++def test_maybe_reset_skips_slash_commands_past_boundary(plugin, tmp_path, text):
++    """The gateway runs pre_gateway_dispatch for commands too (every
++    non-internal event, before command routing): the hook must not rotate."""
++    store = _make_real_store(tmp_path)
++    key, entry = _seed_route(store, updated_minutes_ago=120)
++    funnel = mock.AsyncMock(side_effect=AssertionError("a command must not trigger a time reset"))
++    gateway = SimpleNamespace(_session_key_for_source=lambda src: key, _handle_reset_command=funnel)
++    policy = {"mode": "idle", "idle_minutes": 60}
++    with mock.patch.object(plugin, "_read_session_reset_policy", return_value=policy), \
++         mock.patch.object(store, "reset_session",
++                           side_effect=AssertionError("store must not rotate for a command")):
++        assert _run(plugin._maybe_reset(_real_event(text), gateway, store)) is None
++
++    assert not funnel.called
++    assert store.lookup_by_session_key(key).session_id == "seed-sid"
++    # Deferral semantics hold: the clock is untouched, the next real message resets.
++    assert store.get_session_metadata(key, "srp_last_user_inbound") is None
++
++
++def test_maybe_reset_command_does_not_stamp_clock(plugin, tmp_path):
++    """Within the threshold a command is bookkeeping, not user activity: a
++    periodic /status must not keep an otherwise idle session alive."""
++    store = _make_real_store(tmp_path)
++    key, entry = _seed_route(store, updated_minutes_ago=5)
++    gateway = SimpleNamespace(_session_key_for_source=lambda src: key)
++    policy = {"mode": "idle", "idle_minutes": 60}
++    with mock.patch.object(plugin, "_read_session_reset_policy", return_value=policy):
++        assert _run(plugin._maybe_reset(_real_event("/status"), gateway, store)) is None
++
++    assert store.get_session_metadata(key, "srp_last_user_inbound") is None
++
++
++def test_command_check_falls_back_to_text_without_get_command(plugin):
++    """Event stand-ins without get_command(): a leading "/" (after whitespace)."""
++    assert plugin._is_slash_command(SimpleNamespace(text="  /new")) is True
++    assert plugin._is_slash_command(SimpleNamespace(text="hello /new")) is False
++    assert plugin._is_slash_command(SimpleNamespace(text=None)) is False
++    assert plugin._is_slash_command(SimpleNamespace()) is False
++
++
++def test_path_like_message_is_not_a_command(plugin, tmp_path):
++    """get_command() rejects path-like text: it is an ordinary message and the
++    time reset still applies to it."""
++    store = _make_real_store(tmp_path)
++    key, entry = _seed_route(store, updated_minutes_ago=120)
++    seen = []
++
++    async def funnel(evt):
++        seen.append(evt)
++
++    gateway = SimpleNamespace(_session_key_for_source=lambda src: key, _handle_reset_command=funnel)
++    policy = {"mode": "idle", "idle_minutes": 60}
++    with mock.patch.object(plugin, "_read_session_reset_policy", return_value=policy):
++        assert _run(plugin._maybe_reset(_real_event("/etc/hosts is broken"), gateway, store)) is None
++
++    assert len(seen) == 1
++
++
++def test_new_past_boundary_rotates_once_with_real_funnel(plugin, tmp_path, hook_recorder, monkeypatch):
++    """Regression: /new sent past the boundary rotated the route TWICE (the hook
++    with reason=idle, then the command), burning a run generation and leaving
++    an empty, already-ended session row. Hook first, then the command, as the
++    gateway orders them: exactly one rotation."""
++    store = _make_real_store(tmp_path)
++    key, entry = _seed_route(store, updated_minutes_ago=120)
++    gw, calls, slash_mod = _real_funnel_gateway(store, key)
++    monkeypatch.setattr(slash_mod, "t", lambda key_name, **kw: key_name)  # no i18n in tests
++    event = _real_event("/new")
++
++    policy = {"mode": "idle", "idle_minutes": 60}
++    with mock.patch.object(plugin, "_read_session_reset_policy", return_value=policy):
++        assert _run(plugin._maybe_reset(event, gw, store)) is None  # pre_gateway_dispatch
++        _run(gw._handle_reset_command(event))  # the gateway then routes /new
++
++    assert calls.invalidated == [(key, "session_reset")]
++    assert [name for name, _ in gw.hooks.emitted] == ["session:end", "session:reset"]
++    assert calls.finalize and calls.finalize[0]["session_id"] == "seed-sid"
++    assert store.lookup_by_session_key(key).session_id != "seed-sid"

@@ -47,11 +47,12 @@ import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProviderEventIngestor from "./ProviderEventIngestor.ts";
 import * as ProviderUsageAnalytics from "../telemetry/ProviderUsageAnalytics.ts";
-import * as UsageLimitSources from "../usage/UsageLimitSources.ts";
 import * as ThreadCommandExecutor from "./ThreadCommandExecutor.ts";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
+import { UsageLimitResetFallback } from "../usage/UsageLimitSources.ts";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
+import type { ServerProvider } from "@t3tools/contracts";
 import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
 import {
   makeProviderEventRoutingState,
@@ -231,7 +232,7 @@ function threadCreatedEvent(
 
 const layer = it.layer(layerTest);
 
-it.effect("refreshes the failing instance snapshot after a committed usage_limit terminal", () =>
+it.effect("takes a hub's reset for an unreset usage_limit, then refreshes the snapshot", () =>
   Effect.gen(function* () {
     const refreshed = yield* Deferred.make<void>();
     const adapter = yield* ProviderAdapter.ProviderAdapterV2.pipe(
@@ -262,7 +263,9 @@ it.effect("refreshes the failing instance snapshot after a committed usage_limit
       },
       snapshot: {
         refreshUsage: Deferred.succeed(refreshed, undefined).pipe(Effect.asVoid),
-        getSnapshot: Effect.die("unused"),
+        getSnapshot: Effect.succeed({
+          auth: { status: "authenticated", endpoint: "http://hub.test:8317" },
+        } as ServerProvider),
         refresh: Effect.die("unused"),
         resolveMaintenance: () => Effect.die("unused"),
         applyUsageLimits: () => Effect.die("unused"),
@@ -270,6 +273,7 @@ it.effect("refreshes the failing instance snapshot after a committed usage_limit
       },
     };
     const lookups: ProviderInstanceId[] = [];
+    const hubLookups: Array<[string, string, string | null]> = [];
     const instances = Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({
       getInstance: (id) =>
         Effect.sync(() => {
@@ -318,72 +322,31 @@ it.effect("refreshes the failing instance snapshot after a committed usage_limit
         });
         assert.equal(stored.length, 1);
         if (failureClass === "validation_error") assert.deepEqual(lookups, []);
+        else {
+          const event = stored[0]?.event;
+          assert.equal(
+            event?.type === "turn-item.updated" && event.payload.type === "error"
+              ? event.payload.failure.resetAt
+              : undefined,
+            "2026-11-13T18:00:00.000Z",
+          );
+        }
       }
-      assert.deepEqual(lookups, [instance.instanceId]);
+      assert.deepEqual(lookups, [instance.instanceId, instance.instanceId]);
+      assert.deepEqual(hubLookups, [["cursor", "http://hub.test:8317", "gpt-5.4"]]);
       yield* Deferred.await(refreshed);
-    }).pipe(Effect.provide(makeLayerTest(layerTestEventSink, instances)));
+    }).pipe(
+      Effect.provide(makeLayerTest(layerTestEventSink, instances)),
+      Effect.provideService(UsageLimitResetFallback, {
+        resetAt: (driver, endpoint, model) =>
+          Effect.sync(() => {
+            hubLookups.push([driver, endpoint, model]);
+            return "2026-11-13T18:00:00.000Z";
+          }),
+      }),
+    );
   }),
 );
-
-it.effect("dates a usage limit the provider left undated from a connected hub", () => {
-  const lookups: Array<{ readonly driver: string; readonly model: string }> = [];
-  const layerHubs = Layer.mock(UsageLimitSources.UsageLimitSources)({
-    limitResetAt: (input) =>
-      Effect.sync(() => {
-        lookups.push(input);
-        return "2026-11-06T05:00:00.000Z";
-      }),
-  });
-  return Effect.gen(function* () {
-    const now = yield* DateTime.now;
-    const eventSink = yield* EventSink.EventSinkV2;
-    const ingestor = yield* ProviderEventIngestor.ProviderEventIngestorV2;
-    const idAllocator = yield* IdAllocator.IdAllocatorV2;
-    const threadEvent = yield* threadCreatedEvent(now);
-    yield* eventSink.write({ events: [threadEvent] });
-    const terminal = (nativeTurnId: string, resetAt: string | null) =>
-      Effect.gen(function* () {
-        const [stored] = yield* ingestor.ingestNormalized({
-          providerSessionId: yield* idAllocator.allocate.providerSession({
-            providerInstanceId: modelSelection.instanceId,
-            threadId: threadEvent.threadId,
-          }),
-          providerInstanceId: modelSelection.instanceId,
-          threadId: threadEvent.threadId,
-          event: {
-            type: "turn.terminal",
-            driver: CODEX_DRIVER,
-            providerThreadId: idAllocator.derive.providerThread({
-              driver: CODEX_DRIVER,
-              nativeThreadId: "limited",
-            }),
-            providerTurnId: idAllocator.derive.providerTurn({
-              driver: CODEX_DRIVER,
-              nativeTurnId,
-            }),
-            runOrdinal: 1,
-            failureItemOrdinal: 1,
-            status: "failed",
-            failure: makeProviderFailure({
-              class: "usage_limit",
-              message: "All credentials for model gpt-5.4 are cooling down.",
-              resetAt,
-            }),
-            threadDisposition: "reusable",
-          },
-        });
-        const event = stored?.event;
-        return event?.type === "turn-item.updated" && event.payload.type === "error"
-          ? event.payload.failure.resetAt
-          : undefined;
-      });
-
-    assert.equal(yield* terminal("undated", null), "2026-11-06T05:00:00.000Z");
-    // A provider's own reset time wins without asking the hub.
-    assert.equal(yield* terminal("dated", "2026-11-06T04:00:00.000Z"), "2026-11-06T04:00:00.000Z");
-    assert.deepEqual(lookups, [{ driver: CODEX_DRIVER, model: modelSelection.model }]);
-  }).pipe(Effect.provide(layerTest.pipe(Layer.provide(layerHubs))));
-});
 
 it.effect("records accepted billed turn usage once without billing the context window", () => {
   const recorded: Array<ProviderUsageAnalytics.ProviderTurnReport> = [];

@@ -51,7 +51,7 @@ export class AuthConnectDeviceRepository extends Context.Service<
       keepProofKeyThumbprint: string | null,
     ) => Effect.Effect<number, AuthPairingLinkRepositoryError>;
   }
->()("t3/persistence/AuthConnectDevices/AuthConnectDeviceRepository") {}
+>()("t3-hermes/persistence/AuthConnectDevices/AuthConnectDeviceRepository") {}
 
 const sqlError = (operation: string) => (cause: unknown) =>
   new PersistenceSqlError({ operation, cause });

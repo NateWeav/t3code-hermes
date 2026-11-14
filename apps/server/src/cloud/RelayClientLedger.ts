@@ -35,7 +35,7 @@ export class RelayClientLedger extends Context.Service<
     /** Records a started relay client; the returned effect forgets it once it has stopped. */
     readonly track: (pid: number) => Effect.Effect<Effect.Effect<void>>;
   }
->()("t3/cloud/RelayClientLedger") {}
+>()("t3-hermes/cloud/RelayClientLedger") {}
 
 const ENTRY_DIRECTORY = "relay-clients";
 const ENTRY_FILE = /^\d+\.json$/;

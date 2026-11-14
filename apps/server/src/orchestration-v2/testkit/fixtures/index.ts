@@ -152,6 +152,7 @@ import { assertOpenCodeChildApprovalOutput } from "./opencode_child_approval/out
 import { openCodeRunningChildApprovalInput } from "./opencode_running_child_approval/input.ts";
 import { assertOpenCodeRunningChildApprovalOutput } from "./opencode_running_child_approval/output.ts";
 import { openCodeSubagentInput } from "./opencode_subagent/input.ts";
+import { openCodeBackgroundWakeInput } from "./opencode_background_wake/input.ts";
 import { openCode2InboxInput } from "./opencode2_inbox/input.ts";
 import { openCode2RevertInput } from "./opencode2_revert/input.ts";
 import { assertOpenCode2RevertOutput } from "./opencode2_revert/output.ts";
@@ -183,6 +184,7 @@ import { assertCodexModelRerouteOutput } from "./codex_model_reroute/output.ts";
 import { openCode2ToolCallInput } from "./opencode2_tool_call/input.ts";
 import { assertOpenCode2ToolCallOutput } from "./opencode2_tool_call/output.ts";
 import { assertOpenCodeSubagentOutput } from "./opencode_subagent/output.ts";
+import { assertOpenCodeBackgroundWakeOutput } from "./opencode_background_wake/output.ts";
 import {
   assertCodexPlanQuestionsDetails,
   assertPlanQuestionsOutput,
@@ -1577,6 +1579,22 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         transcriptFile: new URL("./opencode_subagent/opencode_transcript.ndjson", import.meta.url),
         modelSelection: OPENCODE_MODEL_SELECTION,
         assertOutput: assertOpenCodeSubagentOutput,
+      },
+    ],
+  },
+  {
+    name: "opencode_background_wake",
+    buildInput: openCodeBackgroundWakeInput,
+    providers: [
+      {
+        driver: ProviderDriverKind.make("opencode"),
+        transcriptFile: new URL(
+          "./opencode_background_wake/opencode_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: OPENCODE_MODEL_SELECTION,
+        runContinuationWorker: true,
+        assertOutput: assertOpenCodeBackgroundWakeOutput,
       },
     ],
   },

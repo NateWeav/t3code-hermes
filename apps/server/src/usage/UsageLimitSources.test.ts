@@ -49,6 +49,7 @@ describe("UsageLimitSources", () => {
         "https://hub.test:8317",
         undefined,
       ]);
+      expect(snapshots[3]?.endpoint).toBe("https://hub.test:8317/team-a");
       expect(() =>
         encodeConfigEvent({
           version: 1,
@@ -89,7 +90,7 @@ describe("UsageLimitSources", () => {
             },
             [UsageLimitSourceId.make("valid-hub")]: {
               kind: "cliproxy",
-              url: "https://hub.test:8317",
+              url: "https://hub.test:8317/team-a/management.html",
               managementKey: "",
               enabled: true,
             },

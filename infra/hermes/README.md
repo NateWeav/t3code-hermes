@@ -638,7 +638,10 @@ funnels call. Without those, the funnel tests fail on Hermes `main` while the pl
 run the real `GatewaySessionCommandsMixin` funnel against a real `SessionStore`.
 
 Verified against hermes-agent `2bfa6b07a14a` (`main`, 2026-11-12) and `v0.23.1` (`5037b39c0fbc`):
-the tests pass (40) on both, and nine of them fail when `_maybe_reset` is stubbed out.
+the tests pass (40) on both, and nine of them fail when `_maybe_reset` is stubbed out. Its
+`778dc708c2` version (`main`, 2026-11-14) has the funnel test pass the gateway's real
+`MessageEvent`, as `pre_gateway_dispatch` does: upstream's `/new` funnel now calls the event's
+`accept_interrupt()`, which the test's bare stand-in lacked. The plugin is unchanged.
 Hermes discovers the plugin as `bundled`, disabled until enabled, and once enabled it silences the
 gateway's retired-`session_reset` warning. Drop the patch if Hermes takes the plugin into its own
 `plugins/`.

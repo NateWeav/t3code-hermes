@@ -443,6 +443,11 @@
       "neededFor": "Idle and daily resets of gateway conversations (Discord, Telegram and the like) from your config's session_reset block. Applying it also turns the plugin on in your Hermes config. Without it, Hermes v0.23 and later ignores session_reset, and a chat only starts over on /new or /reset.",
       "versions": [
         {
+          "hermesCommit": "778dc708c2374d29d61ae2c127ba8f647e3b3317",
+          "hermesCommitDate": "2026-11-14T22:26:10Z",
+          "file": "session-reset-policy/778dc708c237.patch"
+        },
+        {
           "hermesCommit": "2bfa6b07a14a9675cc6bc85e6bf254c23072fb5f",
           "hermesCommitDate": "2026-11-12T15:59:34Z",
           "file": "session-reset-policy/2bfa6b07a14a.patch"

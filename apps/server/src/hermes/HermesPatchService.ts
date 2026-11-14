@@ -45,8 +45,13 @@ import {
   optOutHermesFastModeEndpoints,
 } from "./hermesFastModeConfig.ts";
 import {
+  disableHermesSessionResetPlugin,
+  enableHermesSessionResetPlugin,
+} from "./hermesSessionResetConfig.ts";
+import {
   changeHermesPatch,
   HERMES_FAST_MODE_PATCH_ID,
+  HERMES_SESSION_RESET_PATCH_ID,
   HERMES_PATCHES,
   HERMES_UPDATE_LOCK_KEY,
   hermesPatchedSourceFiles,
@@ -357,6 +362,17 @@ export const makeWith = Effect.fnUntraced(function* (options: HermesPatchService
         Effect.provideService(FileSystem.FileSystem, fileSystem),
         Effect.provideService(Path.Path, path),
         Effect.provideService(HttpClient.HttpClient, httpClient),
+      );
+    }
+    if (patch.id === HERMES_SESSION_RESET_PATCH_ID) {
+      const configFile = path.join(checkout.hermesHome, "config.yaml");
+      yield* (
+        direction === "forward"
+          ? enableHermesSessionResetPlugin(configFile)
+          : disableHermesSessionResetPlugin(configFile)
+      ).pipe(
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, path),
       );
     }
     yield* PubSub.publish(changesPubSub, undefined);

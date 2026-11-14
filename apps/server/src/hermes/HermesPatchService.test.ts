@@ -17,7 +17,11 @@ import { providerUpdateLock } from "../provider/providerMaintenanceCommandCoordi
 import * as ServerSettings from "../serverSettings.ts";
 import { writeFakeCli } from "@t3tools/provider-testing/fakeCli";
 import { startFakeGateway } from "./hermesGatewayFixtures.ts";
-import { HERMES_PATCHES, HERMES_UPDATE_LOCK_KEY } from "./hermesPatches.ts";
+import {
+  HERMES_PATCHES,
+  HERMES_SESSION_RESET_PATCH_ID,
+  HERMES_UPDATE_LOCK_KEY,
+} from "./hermesPatches.ts";
 import { HermesPatchService, make } from "./HermesPatchService.ts";
 
 const git = (cwd: string, ...args: string[]) =>
@@ -134,11 +138,14 @@ describe("HermesPatchService", () => {
         assert.strictEqual(snapshot.availability, "ready");
         assert.strictEqual(snapshot.checkoutPath, NodeFS.realpathSync(root));
         assert.isFalse(snapshot.detachedHead);
-        // The shipped patches target Hermes source this fixture does not have. Retired ones are
-        // listed only where they are still applied.
+        // The shipped patches target Hermes source this fixture does not have, except the session
+        // reset plugin, which only adds files and so fits any checkout. Retired ones are listed
+        // only where they are still applied.
         assert.deepStrictEqual(
           snapshot.patches.map((patch) => patch.state),
-          HERMES_PATCHES.filter((patch) => patch.retired !== true).map(() => "doesNotApply"),
+          HERMES_PATCHES.filter((patch) => patch.retired !== true).map((patch) =>
+            patch.id === HERMES_SESSION_RESET_PATCH_ID ? "notApplied" : "doesNotApply",
+          ),
         );
 
         const unknown = yield* Effect.flip(
@@ -149,6 +156,39 @@ describe("HermesPatchService", () => {
         assert.strictEqual(misfit.reason, "wrongState");
         assert.strictEqual(git(root, "status", "--porcelain"), "");
       }).pipe(withService({ enabled: true, binaryPath }));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("turns the session reset plugin on with its patch, and takes back only that", () =>
+    Effect.gen(function* () {
+      const { root, binaryPath } = yield* makeHermesCheckout;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "hermes-home-" });
+      const configFile = NodePath.join(home, "config.yaml");
+      NodeFS.writeFileSync(configFile, "plugins:\n  enabled:\n    - hindsight # mine\n");
+      const pluginInit = NodePath.join(root, "plugins", "session-reset-policy", "__init__.py");
+
+      yield* Effect.gen(function* () {
+        const service = yield* HermesPatchService;
+        const patchId = HERMES_SESSION_RESET_PATCH_ID;
+        const state = (snapshot: {
+          readonly patches: ReadonlyArray<{ id: string; state: string }>;
+        }) => snapshot.patches.find((patch) => patch.id === patchId)?.state;
+
+        assert.strictEqual(state(yield* service.apply({ patchId })), "applied");
+        assert.isTrue(NodeFS.existsSync(pluginInit));
+        const enabled = NodeFS.readFileSync(configFile, "utf8");
+        assert.include(enabled, "- hindsight # mine");
+        assert.match(enabled, /- hermes-session-reset-policy # added by T3 Code/);
+
+        assert.strictEqual(state(yield* service.revert({ patchId })), "notApplied");
+        assert.isFalse(NodeFS.existsSync(pluginInit));
+        assert.strictEqual(
+          NodeFS.readFileSync(configFile, "utf8"),
+          "plugins:\n  enabled:\n    - hindsight # mine\n",
+        );
+        assert.strictEqual(git(root, "status", "--porcelain"), "");
+      }).pipe(withInstance(binaryPath, home));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 

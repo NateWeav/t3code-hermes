@@ -4536,7 +4536,15 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                         FROM orchestration_v2_projection_turn_items
                         WHERE thread_id = ${forkedFrom.threadId}
                           AND run_id IS NULL
-                          AND json_extract(payload_json, '$.historyOrigin') IN ('v1_import', 'portable_import')
+                          AND (
+                            json_extract(payload_json, '$.historyOrigin') = 'v1_import'
+                            OR EXISTS (
+                              SELECT 1
+                              FROM orchestration_v2_projection_threads AS source_thread
+                              WHERE source_thread.thread_id = ${forkedFrom.threadId}
+                                AND json_extract(source_thread.payload_json, '$.historyOrigin') = 'portable_import'
+                            )
+                          )
                         ORDER BY ordinal DESC, turn_item_id DESC
                         LIMIT 1
                       ),

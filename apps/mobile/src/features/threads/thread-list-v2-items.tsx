@@ -1,3 +1,4 @@
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import * as Dialog from "../../components/ui/Dialog";
 import type { ThreadRowProviderInstance } from "./thread-provider-instance";
 import {
@@ -11,6 +12,7 @@ import {
 import { RowPressable } from "../../components/ui/RowPressable";
 import { CustomSnoozeSheet } from "./CustomSnoozeSheet";
 import { appAtomRegistry } from "../../state/atom-registry";
+import { threadMoveSheetAtom } from "../../state/threadMove";
 import { threadArrangementOpenAtom } from "../../state/thread-order";
 import { serverEnvironment } from "../../state/server";
 import { threadEnvironment } from "../../state/threads";
@@ -983,6 +985,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         : []),
       { id: "copy-thread", title: "Copy thread", image: "text.bubble" },
       { id: "copy-thread-id", title: "Copy thread ID", image: "doc.on.doc" },
+      { id: "move-to-machine", title: "Move to another machine…", image: "arrow.right.circle" },
     ];
     if (snoozedRow) {
       return layoutThreadListV2RowMenuActions({
@@ -1081,6 +1084,9 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       }
       if (nativeEvent.event === "copy-thread-id") {
         copyTextWithHaptic(thread.id, { target: "thread-id" });
+      }
+      if (nativeEvent.event === "move-to-machine") {
+        appAtomRegistry.set(threadMoveSheetAtom, scopeThreadRef(thread.environmentId, thread.id));
       }
       if (nativeEvent.event === "delete") handleDelete();
       if (nativeEvent.event === "snooze:custom") {

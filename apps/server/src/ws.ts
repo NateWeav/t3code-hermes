@@ -1,4 +1,4 @@
-import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
+import { OrchestrationDispatchCommandError, ThreadMoveError } from "@t3tools/contracts";
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- A synchronous digest inside the pure provider mapping.
 import * as NodeCrypto from "node:crypto";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -8,6 +8,7 @@ import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
 import * as PeerLinkRequests from "./peer/PeerLinkRequests.ts";
 import * as PeerLinks from "./peer/PeerLinks.ts";
+import * as ThreadMoveService from "./threadMove/ThreadMoveService.ts";
 
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
@@ -1574,6 +1575,7 @@ export const layerWsRpc = (
       const serverSettings = yield* ServerSettings.ServerSettingsService;
       const secretResolver = yield* SecretResolver.SecretResolver;
       const peerLinks = yield* PeerLinks.PeerLinks;
+      const threadMoves = yield* Effect.serviceOption(ThreadMoveService.ThreadMoveService);
       const peerLinkRequests = yield* PeerLinkRequests.PeerLinkRequests;
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
@@ -2690,6 +2692,21 @@ export const layerWsRpc = (
         [WS_METHODS.serverGetStorageCleanupReport]: () => storageCleanup.reports,
         [WS_METHODS.serverGetDatabaseStorage]: () => databaseStorage.status,
         [WS_METHODS.serverReclaimDatabaseSpace]: () => databaseStorage.requestReclaim,
+        [WS_METHODS.threadMove]: (input) =>
+          Option.match(threadMoves, {
+            onNone: () => Effect.fail(new ThreadMoveError({ reason: "unsupported" })),
+            onSome: (service) => service.move(input),
+          }),
+        [WS_METHODS.threadMoveCancel]: ({ threadId }) =>
+          Option.match(threadMoves, {
+            onNone: () => Effect.fail(new ThreadMoveError({ reason: "unsupported" })),
+            onSome: (service) => service.cancel(threadId),
+          }),
+        [WS_METHODS.threadMoveModels]: ({ destinationEnvironmentId }) =>
+          Option.match(threadMoves, {
+            onNone: () => Effect.fail(new ThreadMoveError({ reason: "unsupported" })),
+            onSome: (service) => service.models(destinationEnvironmentId),
+          }),
         [WS_METHODS.peerLinksList]: (_input) =>
           peerLinks.list.pipe(Effect.map((links) => ({ links }))),
         [WS_METHODS.peerLinksLink]: (input) => peerLinks.link(input),
@@ -3670,6 +3687,7 @@ export const layer = Layer.unwrap(
     const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
     const peerLinks = yield* PeerLinks.PeerLinks;
     const peerLinkRequests = yield* PeerLinkRequests.PeerLinkRequests;
+    const threadMoves = yield* Effect.serviceOption(ThreadMoveService.ThreadMoveService);
     const sql = yield* SqlClient.SqlClient;
     return HttpRouter.add(
       "GET",
@@ -3771,6 +3789,12 @@ export const layer = Layer.unwrap(
               ),
               Layer.provide(Layer.succeed(PeerLinks.PeerLinks, peerLinks)),
               Layer.provide(Layer.succeed(PeerLinkRequests.PeerLinkRequests, peerLinkRequests)),
+              Layer.provide(
+                Option.match(threadMoves, {
+                  onNone: () => Layer.empty,
+                  onSome: (moves) => Layer.succeed(ThreadMoveService.ThreadMoveService, moves),
+                }),
+              ),
               Layer.provide(
                 SourceControlDiscovery.layer.pipe(
                   Layer.provide(

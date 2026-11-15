@@ -204,6 +204,38 @@ on that machine. Existing threads stay where they started. If resource checks ar
 unavailable or all eligible machines are full, choose a machine manually to continue.
 Mobile keeps its manual environment selection.
 
+### Move a thread to another machine
+
+Open the thread's action menu and choose **Move to another machine**. Select a linked machine and a
+provider and model available there. T3 Code transfers a portable conversation handoff and creates a
+separate Git checkout with local commits, staged and unstaged changes, and untracked files. It keeps
+the branch, its remotes, and upstream tracking; credentials embedded in remote URLs and ignored
+files, including installed dependencies, stay on the source. Both machines need Linked environments
+enabled and a full-access link.
+
+A thread that is working stops first and continues on the destination once the move finishes.
+Commands it was running are not carried over, so the agent starts them again there. Queued messages
+and watched pull requests keep a thread from moving.
+
+If the thread hit a usage limit with a known reset time, enable **Resume when limits reset** to
+continue automatically on the destination. Keep that machine online and signed in. Wait for the
+move confirmation before taking the source offline. An interrupted transfer can be retried; a
+move that has not yet been handed off can be canceled to continue on the source, where a thread
+that was working picks up where it left off.
+
+### Move threads away from a busy machine
+
+To keep a test-heavy machine responsive, open **Settings → Threads → Moving between machines**
+and enable **Move threads when this machine is busy**. After CPU or memory pressure stays high for
+about a minute, T3 Code looks for a reachable linked machine with spare capacity and moves one
+top-level thread, preferring one that is working. A working thread stops, including its running
+commands, and continues on the destination.
+
+Threads waiting on a question, with queued messages or watched pull requests, or sharing a worktree
+with another working thread are left alone. Both machines need a full-access link, and the
+destination must remain online until the move finishes. The option is off by default and can be
+enabled separately on each machine.
+
 ### Tailscale HTTPS
 
 Join both devices to the same tailnet. In the desktop app, enable **Tailscale

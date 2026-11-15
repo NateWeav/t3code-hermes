@@ -340,6 +340,7 @@ import { useProactivePanels } from "../hooks/useProactivePanels";
 import { useIncrementalTimelineEntries } from "../hooks/useIncrementalTimelineEntries";
 import { useRightPanelSurfaceClose } from "../hooks/useRightPanelSurfaceClose";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
+import { threadMoveBannerItem } from "./chat/threadMoveBanner";
 import { modelFallbackBannerItem } from "./chat/ComposerUsageLimits";
 import { ComposerSurface } from "./chat/ComposerSurface";
 import { resolveThreadSyncPhase } from "../threadSync";
@@ -2675,7 +2676,14 @@ export default function ChatView(props: ChatViewProps) {
             }),
           ]
         : [];
-    const limitRecoveryItems = limitRecoveryBanner === null ? [] : [limitRecoveryBanner];
+    const moveBanner =
+      isServerThread && activeThreadShell !== null
+        ? threadMoveBannerItem(routeThreadRef, activeThreadShell.move)
+        : null;
+    const limitRecoveryItems = [
+      ...(moveBanner === null ? [] : [moveBanner]),
+      ...(limitRecoveryBanner === null ? [] : [limitRecoveryBanner]),
+    ];
     const extensionStatusBanner = extensionStatusBannerItem(
       deriveProviderExtensionStatuses(serverProjection),
     );

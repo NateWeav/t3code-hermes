@@ -1,4 +1,10 @@
 import {
+  ThreadMoveInput,
+  ThreadMoveResult,
+  ThreadMoveModels,
+  ThreadMoveError,
+} from "./threadMove.ts";
+import {
   OrchestrationV2SearchThreadError,
   OrchestrationV2SearchThreadInput,
   OrchestrationV2SearchThreadResult,
@@ -37,7 +43,7 @@ import * as Schema from "effect/Schema";
 import * as Rpc from "effect/rpc/Rpc";
 import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as RpcMiddleware from "effect/rpc/RpcMiddleware";
-import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { EnvironmentId, NonNegativeInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { SecretSourceCheckResult } from "./settingsSecretValue.ts";
 import { SecretReference } from "./secretReference.ts";
 import {
@@ -596,6 +602,9 @@ export const WS_METHODS = {
   serverGetStorageCleanupReport: "server.getStorageCleanupReport",
   serverGetDatabaseStorage: "server.getDatabaseStorage",
   serverReclaimDatabaseSpace: "server.reclaimDatabaseSpace",
+  threadMove: "threadMove.move",
+  threadMoveCancel: "threadMove.cancel",
+  threadMoveModels: "threadMove.models",
   peerLinksList: "peerLinks.list",
   peerLinksLink: "peerLinks.link",
   peerLinksUnlink: "peerLinks.unlink",
@@ -956,6 +965,20 @@ const WsServerReclaimDatabaseSpaceRpc = Rpc.make(WS_METHODS.serverReclaimDatabas
   error: Schema.Union([DatabaseReclaimError, EnvironmentAuthorizationError]),
 });
 
+const WsThreadMoveRpc = Rpc.make(WS_METHODS.threadMove, {
+  payload: ThreadMoveInput,
+  success: ThreadMoveResult,
+  error: Schema.Union([ThreadMoveError, EnvironmentAuthorizationError]),
+});
+const WsThreadMoveCancelRpc = Rpc.make(WS_METHODS.threadMoveCancel, {
+  payload: Schema.Struct({ threadId: ThreadId }),
+  error: Schema.Union([ThreadMoveError, EnvironmentAuthorizationError]),
+});
+const WsThreadMoveModelsRpc = Rpc.make(WS_METHODS.threadMoveModels, {
+  payload: Schema.Struct({ destinationEnvironmentId: EnvironmentId }),
+  success: ThreadMoveModels,
+  error: Schema.Union([ThreadMoveError, EnvironmentAuthorizationError]),
+});
 const WsPeerLinksListRpc = Rpc.make(WS_METHODS.peerLinksList, {
   payload: Schema.Struct({}),
   success: Schema.Struct({ links: Schema.Array(PeerLinkSummary) }),
@@ -2551,6 +2574,9 @@ export const CoreWsRpcGroup = RpcGroup.make(
   WsServerGetSettingsRpc,
   WsServerReclaimDatabaseSpaceRpc,
   WsServerUpdateSettingsRpc,
+  WsThreadMoveRpc,
+  WsThreadMoveCancelRpc,
+  WsThreadMoveModelsRpc,
   WsPeerLinksListRpc,
   WsPeerLinksLinkRpc,
   WsPeerLinksUnlinkRpc,

@@ -279,6 +279,10 @@
       "types": "./src/state/deviceHubAccess.ts",
       "default": "./src/state/deviceHubAccess.ts"
     },
+    "./state/thread-move": {
+      "types": "./src/state/threadMove.ts",
+      "default": "./src/state/threadMove.ts"
+    },
     "./state/peerLinks": {
       "types": "./src/state/peerLinks.ts",
       "default": "./src/state/peerLinks.ts"

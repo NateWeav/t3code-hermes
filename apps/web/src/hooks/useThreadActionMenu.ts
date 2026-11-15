@@ -1,5 +1,6 @@
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { requestCustomSnooze } from "../components/CustomSnoozeDialog";
+import { openThreadMoveDialog } from "../components/chat/threadMoveDialogState";
 import { openGuestShareDialog } from "../components/chat/guestShareDialogState";
 import {
   type AtomCommandResult,
@@ -143,6 +144,7 @@ export function useThreadActionMenu(input: {
         supports,
         snoozePresets,
         canShareWithGuest,
+        canMove: thread.lineage?.relationshipToParent !== "subagent" && thread.hermesRun == null,
         canTurnIntoProject: canTurnThreadIntoProject(threadRef),
       });
       const clicked = await settlePromise(() => api.contextMenu.show(items, position));
@@ -255,6 +257,9 @@ export function useThreadActionMenu(input: {
         }
         case "mark-unread":
           markThreadUnread(threadRef);
+          return;
+        case "move-thread":
+          openThreadMoveDialog(threadRef);
           return;
         case "share-guest":
           openGuestShareDialog(threadRef);

@@ -618,6 +618,10 @@ export interface ProjectionStoreV2Shape {
   readonly getThreadShell: (
     threadId: ThreadId,
   ) => Effect.Effect<OrchestrationV2ThreadShell | null, ProjectionStoreV2Error>;
+  readonly getPendingAutomaticMoves: () => Effect.Effect<
+    ReadonlyArray<OrchestrationV2AppThread>,
+    ProjectionStoreV2Error
+  >;
   /** The thread whose current guest share has this id. Scans thread rows; only redeem uses it. */
   readonly findGuestShareThreadId: (
     shareId: GuestShareId,
@@ -1519,7 +1523,7 @@ function isTurnItemAtOrBeforeRun(input: {
   readonly sourceRunOrdinal: number;
 }): boolean {
   if (input.itemRunId === null) {
-    return input.historyOrigin === "v1_import";
+    return input.historyOrigin === "v1_import" || input.historyOrigin === "portable_import";
   }
   const ordinal = input.runOrdinalById.get(input.itemRunId);
   return ordinal !== undefined && ordinal <= input.sourceRunOrdinal;
@@ -1816,6 +1820,7 @@ export function threadShellFromProjection(
     ...(projection.thread.historyOrigin === undefined
       ? {}
       : { historyOrigin: projection.thread.historyOrigin }),
+    ...(projection.thread.move === undefined ? {} : { move: projection.thread.move }),
     ...(projection.thread.linkOrigin === undefined
       ? {}
       : { linkOrigin: projection.thread.linkOrigin }),
@@ -2024,7 +2029,11 @@ function itemCountThroughRun(input: {
     return 0;
   }
 
-  let count = input.state.thread.historyOrigin === "v1_import" ? input.state.runlessItemCount : 0;
+  let count =
+    input.state.thread.historyOrigin === "v1_import" ||
+    input.state.thread.historyOrigin === "portable_import"
+      ? input.state.runlessItemCount
+      : 0;
   for (const [runId, itemCount] of input.state.itemCountByRunId) {
     const itemRun = input.state.runsById.get(runId);
     if (
@@ -2130,6 +2139,7 @@ function shellFromState(input: {
     ...(input.state.thread.historyOrigin === undefined
       ? {}
       : { historyOrigin: input.state.thread.historyOrigin }),
+    ...(input.state.thread.move === undefined ? {} : { move: input.state.thread.move }),
     ...(input.state.thread.linkOrigin === undefined
       ? {}
       : { linkOrigin: input.state.thread.linkOrigin }),
@@ -8940,6 +8950,20 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         .withTransaction(readShellSnapshotRows(options))
         .pipe(Effect.mapError(shellSnapshotReadError), Effect.flatMap(decodeShellSnapshot));
 
+    const getPendingAutomaticMoves = Effect.fn("ProjectionStore.getPendingAutomaticMoves")(
+      function* () {
+        const rows = yield* sql<{ readonly payload_json: string }>`
+        SELECT payload_json FROM orchestration_v2_projection_threads
+        WHERE deleted_at IS NULL
+          AND json_extract(payload_json, '$.move.automatic') = 1
+          AND json_extract(payload_json, '$.move.direction') = 'outgoing'
+          AND json_extract(payload_json, '$.move.phase') <> 'complete'
+      `;
+        return yield* Effect.forEach(rows, (row) => decodeThreadPayload(row.payload_json));
+      },
+      Effect.mapError(shellSnapshotReadError),
+    );
+
     const listActiveSubagentThreadIds = Effect.fn("ProjectionStore.listActiveSubagentThreadIds")(
       function* () {
         const rows = yield* sql<{ readonly thread_id: string }>`
@@ -9302,6 +9326,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       apply,
       getAgentAwarenessSnapshot: readOnReader(getAgentAwarenessSnapshot),
       getShellSnapshot: readOnReader(getShellSnapshot),
+      getPendingAutomaticMoves: readOnReader(getPendingAutomaticMoves),
       getPullRequestSnapshot: readOnReader(getPullRequestSnapshot),
       listActiveSubagentThreadIds: readOnReader(listActiveSubagentThreadIds),
       countThreads: readOnReader(countThreads),

@@ -451,7 +451,9 @@ applies only after them; its `981791d9d4` version (`main`, 2026-11-07) is the sa
 `main`; its `227845ae31` version (`main`, 2026-11-14) adds the capability after upstream's
 `session-list-cursor-v1`, and stacks unchanged on `acp-terminal-output`'s `778dc708c2` version;
 its `d1b46d718f` version (`main`, 2026-11-15) is the same again after upstream made answers to a
-command the hardline scan could not finish one-shot, and keeps that rule for editor commands too.
+command the hardline scan could not finish one-shot, and keeps that rule for editor commands too;
+its `4162ecf11f` version (`main`, 2026-11-15) is the same again after upstream made an `osascript`
+program that can discard unsaved work one-shot too.
 Restart the Hermes gateway after applying it: the gate runs there. Run the
 patch's `tests/acp_adapter/test_gateway_command_approval.py` in a scratch checkout, as for
 `acp-delegation-progress`.

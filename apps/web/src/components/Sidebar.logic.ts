@@ -1437,15 +1437,18 @@ export function getFallbackThreadIdAfterDelete<
     "id" | "projectId" | "createdAt" | "updatedAt" | "settledOverride" | "lineage"
   > &
     ThreadSortInput &
-    ThreadSnoozeShell,
+    ThreadSnoozeShell &
+    Pick<Thread, "environmentId">,
 >(input: {
   threads: readonly T[];
   deletedThreadId: T["id"];
   sortOrder: SidebarThreadSortOrder;
   now: string;
   deletedThreadIds?: ReadonlySet<T["id"]>;
+  delegatedUnderParent: ReadonlySet<string>;
 }): T["id"] | null {
-  const { deletedThreadId, deletedThreadIds, sortOrder, now, threads } = input;
+  const { deletedThreadId, deletedThreadIds, sortOrder, now, threads, delegatedUnderParent } =
+    input;
   const deletedThread = threads.find((thread) => thread.id === deletedThreadId);
   if (!deletedThread) {
     return null;
@@ -1460,7 +1463,11 @@ export function getFallbackThreadIdAfterDelete<
           !deletedThreadIds?.has(thread.id) &&
           thread.settledOverride !== "settled" &&
           !effectiveSnoozed(thread, { now }) &&
-          !isSidebarHiddenThread(thread),
+          !isShownUnderParent(
+            { environmentId: thread.environmentId, threadId: thread.id },
+            thread.lineage,
+            delegatedUnderParent,
+          ),
       ),
       sortOrder,
     )[0]?.id ?? null

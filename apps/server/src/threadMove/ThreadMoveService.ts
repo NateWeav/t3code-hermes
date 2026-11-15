@@ -500,6 +500,9 @@ const make = Effect.gen(function* () {
               }
             }),
           );
+          const projectId = ProjectId.make(`moved-${id}`);
+          if (Option.isSome(yield* projects.getById(projectId)))
+            yield* projects.delete({ commandId: CommandId.make(`move:${id}:discard`), projectId });
           yield* fs.remove(path.join(config.worktreesDir, `moved-${stored.header.id}`), {
             recursive: true,
             force: true,

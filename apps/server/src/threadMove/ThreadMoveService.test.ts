@@ -5,6 +5,7 @@ import {
   EnvironmentId,
   MessageId,
   NodeId,
+  type ProjectId,
   RunId,
   ThreadId,
   type OrchestrationV2ServerCommand,
@@ -52,9 +53,21 @@ const makeHarness = Effect.gen(function* () {
   const prepareFails = yield* Ref.make(false);
   const activationFails = yield* Ref.make(false);
   const captures = yield* Ref.make(0);
+  const deletedProjects = yield* Ref.make<ReadonlyArray<string>>([]);
   const requests = yield* Ref.make<ReadonlyArray<string>>([]);
   const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationV2ServerCommand>>([]);
   const now = DateTime.makeUnsafe(0);
+  const project = (id: ProjectId) => ({
+    id,
+    title: "Project",
+    workspaceRoot: "/repo",
+    repositoryIdentity: null,
+    defaultModelSelection: null,
+    scripts: [],
+    createdAt: DateTime.formatIso(now),
+    updatedAt: DateTime.formatIso(now),
+    deletedAt: null,
+  });
   const client = HttpClient.make((request) =>
     Effect.gen(function* () {
       const action = request.url.split("/").at(-1)!;
@@ -86,6 +99,7 @@ const makeHarness = Effect.gen(function* () {
         Layer.mock(ProjectionStore.ProjectionStoreV2)({
           getThreadRecords: () => Ref.get(state),
           getThread: () => Ref.get(state).pipe(Effect.map((current) => current.thread)),
+          getThreadShell: () => Effect.succeed(null),
         }),
         Layer.mock(EventSink.EventSinkV2)({
           write: ({ events }) =>
@@ -113,21 +127,13 @@ const makeHarness = Effect.gen(function* () {
           waitForThread: () => Effect.succeed({ threadId: sourceId, run: null, timedOut: false }),
         }),
         Layer.mock(ProjectService.ProjectService)({
+          delete: ({ projectId }) =>
+            Ref.update(deletedProjects, (current) => [...current, projectId]).pipe(
+              Effect.as(project(projectId)),
+            ),
           getById: () =>
             Ref.get(state).pipe(
-              Effect.map((current) =>
-                Option.some({
-                  id: current.thread.projectId,
-                  title: "Project",
-                  workspaceRoot: "/repo",
-                  repositoryIdentity: null,
-                  defaultModelSelection: null,
-                  scripts: [],
-                  createdAt: DateTime.formatIso(now),
-                  updatedAt: DateTime.formatIso(now),
-                  deletedAt: null,
-                }),
-              ),
+              Effect.map((current) => Option.some(project(current.thread.projectId))),
             ),
         }),
         Layer.mock(WorkspaceTransfer.WorkspaceTransfer)({
@@ -190,6 +196,7 @@ const makeHarness = Effect.gen(function* () {
     captures,
     requests,
     dispatched,
+    deletedProjects,
   };
 });
 
@@ -263,5 +270,38 @@ it.effect("an ambiguous activation keeps the source committed and retries the sa
     assert.deepEqual(yield* Ref.get(requests), sent);
     assert.isUndefined(frozen.move?.resume);
     assert.deepEqual(yield* Ref.get(dispatched), []);
+  }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
+it.effect("discarding a prepared destination also removes its project", () =>
+  Effect.gen(function* () {
+    const { moves, deletedProjects } = yield* makeHarness;
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const config = yield* ServerConfig.ServerConfig;
+    const id = "00000000-0000-4000-8000-000000000001";
+    const folder = path.join(config.stateDir, "thread-moves", id);
+    yield* fs.makeDirectory(folder, { recursive: true });
+    yield* fs.writeFileString(
+      path.join(folder, "move.json"),
+      JSON.stringify({
+        owner: "peer",
+        ready: true,
+        header: {
+          id,
+          sourceEnvironmentId: "source",
+          sourceLabel: "Source",
+          sourceThreadId: sourceId,
+          title: "Thread",
+          modelSelection: { instanceId: "codex", model: "gpt-5" },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          resumeAtReset: false,
+        },
+      }),
+    );
+    yield* moves.discard("peer", id);
+    assert.deepEqual(yield* Ref.get(deletedProjects), [`moved-${id}`]);
+    assert.isFalse(yield* fs.exists(folder));
   }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );

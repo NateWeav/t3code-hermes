@@ -2584,6 +2584,7 @@ describe("CodexAdapterV2 post-settle continuation", () => {
             ? Deferred.succeed(firstSampleAnswered, undefined).pipe(Effect.asVoid)
             : Effect.void,
         undefined,
+        undefined,
         Effect.succeed(true),
       );
       const turn = makeCodexTestTurnInput({

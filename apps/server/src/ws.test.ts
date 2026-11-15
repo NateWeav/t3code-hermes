@@ -168,6 +168,17 @@ import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import { projectIdentitiesDigest } from "./orchestration-v2/ShellStream.ts";
 import * as OrchestrationEventStore from "./persistence/OrchestrationEventStore.ts";
 import * as SqlitePersistence from "./persistence/Sqlite.ts";
+import * as HermesChatHubService from "./hermes/HermesChatHubService.ts";
+import * as HermesChatService from "./hermes/HermesChatService.ts";
+import * as HermesCronService from "./hermes/HermesCronService.ts";
+import * as HermesKanbanService from "./hermes/HermesKanbanService.ts";
+import * as HermesMemoryService from "./hermes/HermesMemoryService.ts";
+import * as HermesPatchService from "./hermes/HermesPatchService.ts";
+import * as HermesRunService from "./hermes/HermesRunService.ts";
+import * as HermesSkillsService from "./hermes/HermesSkillsService.ts";
+import * as HindsightAgentMemory from "./integrations/hindsight/HindsightAgentMemory.ts";
+import * as HindsightService from "./integrations/hindsight/HindsightService.ts";
+import * as PaperclipService from "./integrations/paperclip/PaperclipService.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import * as ProjectEnrichment from "./project/ProjectEnrichmentService.ts";
 import * as ProjectService from "./project/ProjectService.ts";
@@ -918,6 +929,18 @@ it.live.each([
         Layer.mock(ServerBrowser.ServerBrowser)({
           profileReporter: Effect.succeed(() => Effect.void),
         }),
+        // Ws.layer also serves the fork's Hermes RPCs.
+        Layer.mock(HermesChatHubService.HermesChatHubService)({}),
+        Layer.mock(HermesChatService.HermesChatService)({}),
+        Layer.mock(HermesCronService.HermesCronService)({}),
+        Layer.mock(HermesKanbanService.HermesKanbanService)({}),
+        Layer.mock(HermesMemoryService.HermesMemoryService)({}),
+        Layer.mock(HermesPatchService.HermesPatchService)({}),
+        Layer.mock(HermesRunService.HermesRunService)({}),
+        Layer.mock(HermesSkillsService.HermesSkillsService)({}),
+        Layer.mock(HindsightAgentMemory.HindsightAgentMemory)({}),
+        Layer.mock(HindsightService.HindsightService)({}),
+        Layer.mock(PaperclipService.PaperclipService)({}),
         Layer.mock(EnvironmentAuth.EnvironmentAuth)({
           authenticateWebSocketUpgrade: () =>
             Effect.succeed({

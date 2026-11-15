@@ -36,9 +36,10 @@ Run `npx t3-hermes@nightly help` for the same reference. To start in a new
 working directory, use an explicit path such as `npx t3-hermes@nightly ./my-project`.
 A bare directory name is accepted only if it already exists.
 
-If `t3-hermes` or `t3-hermes start` reports an already running server, connect
-to that server instead. Stop it before starting a replacement, or use a
-different `--base-dir` for an independent server.
+If `t3-hermes` or `t3-hermes start` reports an already running server, run the
+`t3-hermes pair` command it names and open the pairing URL to connect to that
+server. Stop it before starting a replacement, or use a different `--base-dir`
+for an independent server.
 
 To return freed database space to disk, run `npx t3-hermes@nightly doctor`
 (see [Reclaim database space](./background-service.md#reclaim-database-space)).

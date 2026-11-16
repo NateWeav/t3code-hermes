@@ -197,6 +197,7 @@ import {
 import {
   BUNDLED_CLAUDE_MODEL_CATALOG,
   resolveClaudeCatalogContextWindowTokens,
+  resolveClaudeCatalogModel,
   type ClaudeModelCatalog,
   getClaudeCatalogModelCapabilities,
   resolveClaudeModelSlug,
@@ -2501,6 +2502,34 @@ function providerSession(input: {
 
 function textFromClaudeContent(content: SDKAssistantMessage["message"]["content"]): string {
   return content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("");
+}
+
+// The API's safeguards can answer with another model; the reply then starts with a
+// `fallback` block that the SDK types do not declare yet.
+function claudeModelFallbackFromContent(
+  content: ReadonlyArray<unknown>,
+): { readonly from: string; readonly to: string } | undefined {
+  for (const block of content) {
+    if (!Predicate.isObject(block) || !("type" in block) || block.type !== "fallback") continue;
+    const from = "from" in block && Predicate.isObject(block.from) ? block.from : undefined;
+    const to = "to" in block && Predicate.isObject(block.to) ? block.to : undefined;
+    const fromModel = from !== undefined && "model" in from ? from.model : undefined;
+    const toModel = to !== undefined && "model" in to ? to.model : undefined;
+    if (typeof fromModel === "string" && typeof toModel === "string") {
+      return { from: fromModel, to: toModel };
+    }
+  }
+  return undefined;
+}
+
+function claudeModelFallbackNotice(
+  catalog: ClaudeModelCatalog,
+  fallback: { readonly from: string; readonly to: string },
+): string {
+  const label = (reported: string) =>
+    resolveClaudeCatalogModel(catalog, resolveClaudeReportedModelSlug(catalog, reported))?.model
+      .name ?? reported;
+  return `Claude's safeguards flagged this request, so ${label(fallback.to)} answered instead of ${label(fallback.from)}.`;
 }
 
 // Claude 5.1+ emits at most one pre-tool text block as thinking; treat only a second consecutive thinking block as text.
@@ -5042,6 +5071,7 @@ interface ActiveClaudeTurnContext {
   readonly steerUuids: Set<string>;
   // Claude can run another model than requested, such as when an organization disallows it.
   executedModel: string | undefined;
+  modelFallbackNoticed: boolean;
 }
 
 interface ActiveClaudeProviderRetry {
@@ -6947,6 +6977,43 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             context.itemOrdinals.set(nativeItemId, ordinal);
             return ordinal;
           });
+
+        const emitSystemNotice = Effect.fn("ClaudeAdapterV2.emitSystemNotice")(function* (
+          context: ActiveClaudeTurnContext,
+          nativeItemId: string,
+          text: string,
+        ) {
+          const now = yield* DateTime.now;
+          yield* emitProviderEvent({
+            type: "turn_item.updated",
+            driver: CLAUDE_PROVIDER,
+            turnItem: {
+              id: idAllocator.derive.turnItemFromProviderItem({
+                driver: CLAUDE_PROVIDER,
+                nativeItemId,
+              }),
+              threadId: context.input.threadId,
+              runId: context.input.runId,
+              nodeId: context.input.rootNodeId,
+              providerThreadId: context.input.providerThread.id,
+              providerTurnId: context.providerTurnId,
+              nativeItemRef: {
+                driver: CLAUDE_PROVIDER,
+                nativeId: nativeItemId,
+                strength: "strong",
+              },
+              parentItemId: null,
+              ordinal: yield* resolveItemOrdinal(context, nativeItemId),
+              type: "system_notice",
+              status: "completed",
+              title: text,
+              message: text,
+              startedAt: now,
+              completedAt: now,
+              updatedAt: now,
+            },
+          });
+        });
 
         const providerTurnPayload = (input: {
           readonly context: ActiveClaudeTurnContext;
@@ -10832,6 +10899,17 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                   message.message.model,
                 );
               }
+              const modelFallback = context.modelFallbackNoticed
+                ? undefined
+                : claudeModelFallbackFromContent(message.message.content);
+              if (modelFallback !== undefined) {
+                context.modelFallbackNoticed = true;
+                yield* emitSystemNotice(
+                  context,
+                  `model-fallback:${context.providerTurnId}`,
+                  claudeModelFallbackNotice(modelCatalog, modelFallback),
+                );
+              }
               // Subagent uuids exist only in the sidechain transcript, so resume and fork cannot target them.
               context.nativeMessageCursor = message.uuid;
               context.latestAssistantRateLimit =
@@ -11011,37 +11089,15 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             ) {
               return;
             }
-            const now = yield* DateTime.now;
-            const nativeItemId = message.uuid;
-            yield* emitProviderEvent({
-              type: "turn_item.updated",
-              driver: CLAUDE_PROVIDER,
-              turnItem: {
-                id: idAllocator.derive.turnItemFromProviderItem({
-                  driver: CLAUDE_PROVIDER,
-                  nativeItemId,
-                }),
-                threadId: context.input.threadId,
-                runId: context.input.runId,
-                nodeId: context.input.rootNodeId,
-                providerThreadId: context.input.providerThread.id,
-                providerTurnId: context.providerTurnId,
-                nativeItemRef: {
-                  driver: CLAUDE_PROVIDER,
-                  nativeId: nativeItemId,
-                  strength: "strong",
-                },
-                parentItemId: null,
-                ordinal: yield* resolveItemOrdinal(context, nativeItemId),
-                type: "system_notice",
-                status: "completed",
-                title: message.content,
-                message: message.content,
-                startedAt: now,
-                completedAt: now,
-                updatedAt: now,
-              },
-            });
+            // Claude's own banner replaces the notice a fallback block already raised this turn.
+            const sessionFallback =
+              message.subtype === "model_refusal_fallback" && message.scope !== "local";
+            if (sessionFallback) context.modelFallbackNoticed = true;
+            yield* emitSystemNotice(
+              context,
+              sessionFallback ? `model-fallback:${context.providerTurnId}` : message.uuid,
+              message.content,
+            );
             return;
           }
 
@@ -13226,6 +13282,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               pendingSteers: new Map(),
               steerUuids: new Set(),
               executedModel: undefined,
+              modelFallbackNoticed: false,
             };
             const attachTurn = Effect.gen(function* () {
               // Set before claiming: a query that exits after the claim finalizes this turn; one that exits before it fails the start.

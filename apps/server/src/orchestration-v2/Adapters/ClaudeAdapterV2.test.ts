@@ -10298,6 +10298,93 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     ),
   );
 
+  it.effect("shows one notice per turn when Claude's safeguards answer with a fallback model", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeWakeHarness;
+      yield* harness.runtime.startTurn(
+        makeClaudeTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now: yield* DateTime.now,
+          attemptId: RunAttemptId.make("claude-model-fallback-attempt"),
+          text: "How do I sideload this app?",
+          attachments: [],
+        }),
+      );
+      const fallbackReply = (uuid: string, id: string) =>
+        claudeSdkFrame({
+          type: "assistant",
+          uuid,
+          session_id: WAKE_NATIVE_SESSION,
+          parent_tool_use_id: null,
+          message: {
+            id,
+            type: "message",
+            role: "assistant",
+            model: "claude-opus-4-8",
+            content: [
+              {
+                type: "fallback",
+                from: { model: "claude-opus-5-5" },
+                to: { model: "claude-opus-4-8" },
+              },
+            ],
+          },
+        });
+      yield* harness.offerAndWait(
+        fallbackReply("00000000-0000-4000-8000-000000000830", "msg_fallback_1"),
+      );
+      yield* harness.offerAndWait(
+        fallbackReply("00000000-0000-4000-8000-000000000831", "msg_fallback_2"),
+      );
+      const banner = "Opus 5.5 flagged this message, so Opus 4.8 responded.";
+      yield* Queue.offer(
+        harness.sdkMessages,
+        claudeSdkFrame({
+          type: "system",
+          subtype: "model_refusal_fallback",
+          trigger: "refusal",
+          direction: "retry",
+          scope: "session",
+          original_model: "claude-opus-5-5",
+          fallback_model: "claude-opus-4-8",
+          request_id: null,
+          content: banner,
+          session_id: WAKE_NATIVE_SESSION,
+          uuid: "00000000-0000-4000-8000-000000000832",
+        }),
+      );
+      yield* Queue.offer(
+        harness.sdkMessages,
+        makeResultFrame({ uuid: "00000000-0000-4000-8000-000000000833", result: "" }),
+      );
+      yield* Queue.take(harness.terminalReceipts);
+      const notices = harness.events.flatMap((event) =>
+        event.type === "turn_item.updated" && event.turnItem.type === "system_notice"
+          ? [event.turnItem]
+          : [],
+      );
+      assert.deepEqual(
+        notices.map((notice) => notice.message),
+        [
+          "Claude's safeguards flagged this request, so Claude Opus 4.8 answered instead of Claude Opus 5.5.",
+          banner,
+        ],
+      );
+      assert.equal(notices[0]?.id, notices[1]?.id);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        Layer.mergeAll(
+          NodeServices.layer,
+          NodeCrypto.layer,
+          IdAllocator.layer,
+          McpProviderSessions.layer,
+        ),
+      ),
+    ),
+  );
+
   it.effect("shows a hook-dropped Claude prompt once and skips info-level lines", () =>
     Effect.gen(function* () {
       const harness = yield* makeWakeHarness;

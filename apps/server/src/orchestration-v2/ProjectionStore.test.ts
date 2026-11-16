@@ -8544,6 +8544,17 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
           archivedAt === null,
         );
       }
+      // The move guard rejects recovery commands while the thread is leaving.
+      yield* sql`UPDATE orchestration_v2_projection_threads
+        SET payload_json = json_set(payload_json, '$.move', json('{"direction":"outgoing","phase":"preparing"}'))
+        WHERE thread_id = ${threadId}`;
+      assert.isUndefined(
+        (yield* store.getLimitRecoveryCandidates({ now, autoResume: true, snooze: false })).find(
+          (row) => row.id === threadId,
+        ),
+      );
+      yield* sql`UPDATE orchestration_v2_projection_threads
+        SET payload_json = ${originalRow!.payload_json} WHERE thread_id = ${threadId}`;
       yield* sql`UPDATE orchestration_v2_projection_threads
         SET payload_json = json_set(payload_json, '$.settledOverride', 'settled')
         WHERE thread_id = ${threadId}`;

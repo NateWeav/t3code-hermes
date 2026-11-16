@@ -4709,6 +4709,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 AND json_extract(failure.payload_json, '$.failure.class') = 'usage_limit'
             )
             AND t.archived_at IS NULL
+            AND json_extract(t.payload_json, '$.move.direction') IS NOT 'outgoing'
             AND json_extract(t.payload_json, '$.settledOverride') IS NOT 'settled'
             AND json_extract(item.payload_json, '$.failure.class') = 'usage_limit'
             AND json_extract(item.payload_json, '$.failure.resetAt') IS NOT NULL
@@ -4800,6 +4801,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             FROM orchestration_v2_projection_threads
             WHERE deleted_at IS NULL
               AND json_extract(payload_json, '$.limitRecovery.autoResume') = 1
+              AND json_extract(payload_json, '$.move.direction') IS NOT 'outgoing'
           )
         `;
         const wakes = [rows[0]?.reset_ms, rows[0]?.snooze_ms].filter(

@@ -985,7 +985,15 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         : []),
       { id: "copy-thread", title: "Copy thread", image: "text.bubble" },
       { id: "copy-thread-id", title: "Copy thread ID", image: "doc.on.doc" },
-      { id: "move-to-machine", title: "Move to another machine…", image: "arrow.right.circle" },
+      ...(thread.lineage.relationshipToParent !== "subagent" && thread.hermesRun == null
+        ? [
+            {
+              id: "move-to-machine",
+              title: "Move to another machine…",
+              image: "arrow.right.circle",
+            },
+          ]
+        : []),
     ];
     if (snoozedRow) {
       return layoutThreadListV2RowMenuActions({
@@ -1054,6 +1062,8 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     snoozedRow,
     swipeActions.secondary,
     thread.branch,
+    thread.hermesRun,
+    thread.lineage.relationshipToParent,
     titleMenuItems,
   ]);
   const handleMenuAction = useCallback(

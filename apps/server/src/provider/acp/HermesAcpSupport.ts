@@ -955,7 +955,7 @@ export const hermesSteering = {
     runtime.request(HERMES_STEER_METHOD, { sessionId, text }).pipe(
       Effect.flatMap((result) =>
         Option.match(decodeHermesSteerResult(result), {
-          onSome: ({ steered }) => Effect.succeed(steered ? {} : null),
+          onSome: ({ steered }) => Effect.succeed(steered ? undefined : null),
           onNone: () =>
             Effect.fail(
               new EffectAcpErrors.AcpRequestError({

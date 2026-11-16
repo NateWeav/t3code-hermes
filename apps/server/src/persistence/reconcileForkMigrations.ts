@@ -15,6 +15,11 @@ export const reconcileForkMigrations = Effect.fn("reconcileForkMigrations")(func
   `;
   if (tables.length === 0) return;
   for (const row of FORK_LEDGER_ROWS) {
+    // Read first: an unconditional DELETE takes the write lock on every startup.
+    const present = yield* sql`
+      SELECT 1 FROM effect_sql_migrations WHERE migration_id = ${row.id} AND name = ${row.name}
+    `;
+    if (present.length === 0) continue;
     yield* sql`
       DELETE FROM effect_sql_migrations WHERE migration_id = ${row.id} AND name = ${row.name}
     `;

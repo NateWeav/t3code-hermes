@@ -232,7 +232,7 @@ it.effect("a running turn stops for a move, and continues here when the move is 
     const frozen = (yield* Ref.get(state)).thread;
     assert.equal(frozen.move?.phase, "preparing");
     assert.isTrue(frozen.move?.resume);
-    assert.isNotNull(frozen.archivedAt);
+    assert.isNull(frozen.archivedAt);
     assert.deepEqual(
       (yield* Ref.get(dispatched)).map((command) => command.type),
       ["thread.stop"],
@@ -256,12 +256,13 @@ it.effect("an ambiguous activation keeps the source committed and retries the sa
     assert.equal((yield* moves.move(input).pipe(Effect.flip)).reason, "committed");
     const frozen = (yield* Ref.get(state)).thread;
     assert.equal(frozen.move?.phase, "committed");
-    assert.isNotNull(frozen.archivedAt);
+    assert.isNull(frozen.archivedAt);
     assert.equal((yield* moves.cancel(sourceId).pipe(Effect.flip)).reason, "committed");
     yield* Ref.set(activationFails, false);
     const moved = yield* moves.move(input);
     assert.equal(moved.threadId, frozen.move?.threadId);
     assert.equal((yield* Ref.get(state)).thread.move?.phase, "complete");
+    assert.isNotNull((yield* Ref.get(state)).thread.archivedAt);
     assert.equal(yield* Ref.get(captures), 1);
     const sent = yield* Ref.get(requests);
     assert.equal(sent.filter((action) => action === "activate").length, 2);

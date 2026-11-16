@@ -649,7 +649,8 @@ const make = Effect.gen(function* () {
               resetAt: failure?.class === "usage_limit" ? (failure.resetAt ?? null) : null,
               ...(stopped ? { resume: true } : {}),
             };
-            yield* publishThread({ ...source.thread, archivedAt: now, move: state }, "preparing");
+            // Stays listed until the handoff completes, so an unfinished move can be retried or cancelled.
+            yield* publishThread({ ...source.thread, move: state }, "preparing");
             return state;
           }),
         );
@@ -775,7 +776,12 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             const thread = yield* projections.getThread(input.threadId);
             yield* publishThread(
-              { ...thread, limitRecovery: null, move: { ...moveState, phase: "complete" } },
+              {
+                ...thread,
+                archivedAt: thread.archivedAt ?? (yield* DateTime.now),
+                limitRecovery: null,
+                move: { ...moveState, phase: "complete" },
+              },
               "complete",
             );
           }),
@@ -802,7 +808,7 @@ const make = Effect.gen(function* () {
               if (state.direction !== "outgoing" || state.phase !== "preparing")
                 return yield* new ThreadMoveError({ reason: "committed" });
               // The destination cannot activate before a committed source, so offline cancellation is safe.
-              yield* publishThread({ ...thread, archivedAt: null, move: null }, "cancelled");
+              yield* publishThread({ ...thread, move: null }, "cancelled");
               yield* fs
                 .remove(folder(state.id), { recursive: true, force: true })
                 .pipe(Effect.ignore);

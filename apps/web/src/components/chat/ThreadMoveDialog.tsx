@@ -337,7 +337,7 @@ function ThreadMoveDialog({ threadRef }: { readonly threadRef: ScopedThreadRef }
                       ? "The source is paused while this move is unfinished. Retry, or cancel to continue here."
                       : working
                         ? `The current turn stops here and continues on ${destinationLabel}. Wait for confirmation before taking this machine offline.`
-                        : "The source thread is archived when the move starts. Wait for confirmation before taking this machine offline."}
+                        : "This thread is archived here once the move finishes. Wait for confirmation before taking this machine offline."}
               </p>
               {error ? (
                 <p role="alert" className="text-destructive-foreground text-sm">

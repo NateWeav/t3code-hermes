@@ -276,7 +276,10 @@ no longer began with what had streamed, the bridge also sent the whole reply a s
 The patch removes the ACP exception. Verified against hermes-agent `c419cf7c86` (`main`,
 2026-10-31), alone and after the other patches. Its `ff2591a04602` version (`main`, 2026-11-12)
 removes it where upstream moved it, which also keeps the block out of the separate reasoning message
-upstream now sends after a streamed reply. Restart the Hermes gateway after applying it. Run
+upstream now sends after a streamed reply. Its `ae2a81ccc00e` version (`main`, 2026-11-16) removes it
+from `_show_reasoning_for_source`, where upstream moved it; that check now also stops a reply's live
+deltas when reasoning shows, so without the patch an ACP session with `show_reasoning` on would also
+stop streaming its answer. Restart the Hermes gateway after applying it. Run
 the patch's `tests/gateway/test_local_viewer_reasoning.py` in a scratch checkout, as for
 `acp-delegation-progress`.
 
@@ -499,7 +502,9 @@ same change re-baselined again after upstream deferred `manage_connections` out 
 list. Its `eaac327fac2c` version (`main`, 2026-11-12) preserves upstream's child context assembly
 and desktop prompt snapshot while adding continuation on top. Its `ff2591a04602` version (`main`,
 2026-11-12) drops its own `continue` for upstream's, keeps a task's `model` in the routing request
-upstream re-resolves a continue from after a restart, and keeps the viewer change. Run the patch's
+upstream re-resolves a continue from after a restart, and keeps the viewer change. Its `ae2a81ccc00e`
+version (`main`, 2026-11-16) is the same change, reading delegation config through
+`tools.delegate_tool_config`, where upstream moved it (`43dc9a0a28`). Run the patch's
 `tests/gateway/test_delegation_task_model.py` and `tests/acp_adapter/test_gateway_delegation_continue.py`
 (which reuses the progress patch's `test_gateway_delegation_progress.py`) in a scratch checkout, as
 for `acp-delegation-progress`.

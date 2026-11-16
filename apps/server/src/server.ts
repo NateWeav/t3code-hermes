@@ -95,6 +95,11 @@ import * as RemoteDelegation from "./peer/RemoteDelegation.ts";
 import * as PeerLinkRequests from "./peer/PeerLinkRequests.ts";
 import * as PeerLinks from "./peer/PeerLinks.ts";
 import * as PeerMcpClient from "./peer/PeerMcpClient.ts";
+import * as ThreadMoveService from "./threadMove/ThreadMoveService.ts";
+import * as ThreadMoveHttp from "./threadMove/http.ts";
+import * as WorkspaceTransfer from "./threadMove/WorkspaceTransfer.ts";
+import * as ThreadCommandExecutor from "./orchestration-v2/ThreadCommandExecutor.ts";
+import * as Scheduler from "./scheduling/Scheduler.ts";
 import * as McpSessionRegistry from "./mcp/McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as DeviceService from "./device/DeviceService.ts";
@@ -955,6 +960,7 @@ const layerMakeRoutes = Layer.mergeAll(
     ServerHttp.layerAssetRoute,
     ServerHttp.layerAttachmentUploadRoute,
     GuestHttp.layer,
+    ThreadMoveHttp.layer,
     DeviceHubProxy.layer,
     ServerBrowserStream.routeLayer,
     ServerHttp.layerStaticAndDevRoute,
@@ -973,6 +979,16 @@ const layerMakeRoutes = Layer.mergeAll(
   Layer.provide(
     PullRequestReviewGuideService.layer.pipe(Layer.provide(PullRequestReviewGuides.layer)),
   ),
+  Layer.provide(
+    ThreadMoveService.layer.pipe(
+      Layer.provide(Scheduler.layer),
+      Layer.provide(HostResources.layer),
+      Layer.provide(WorkspaceTransfer.layer),
+      Layer.provide(ProjectionStoreV2.layer),
+      Layer.provide(ThreadCommandExecutor.layer),
+      Layer.provide(RuntimeLayer.layerEventSink),
+    ),
+  ),
   // delegate_task to a linked environment, from /mcp and the follower above.
   Layer.provide(RemoteDelegation.layer.pipe(Layer.provide(ProjectionStoreV2.layer))),
   // Links agents ask for: shown in a thread from /mcp, answered over WebSocket.
@@ -987,7 +1003,7 @@ const layerMakeRoutes = Layer.mergeAll(
   ),
   Layer.provide(PreviewBrowser.layer),
   // Links to other environments, shared by Settings (WebSocket) and agents (/mcp).
-  Layer.provide(
+  Layer.provideMerge(
     PeerForwarding.layer.pipe(
       Layer.provideMerge(PeerMcpClient.layer),
       Layer.provideMerge(PeerLinks.layer),

@@ -185,6 +185,7 @@ export interface EnvironmentThreadShell {
   readonly snoozedUntil: string | null;
   readonly snoozedAt: string | null;
   readonly limitRecovery?: import("@t3tools/contracts").OrchestrationV2LimitRecovery | null;
+  readonly move?: import("@t3tools/contracts").ThreadMoveState | null;
   readonly pinnedAt: string | null;
   readonly autoSettleDisabledAt?: string | null;
   /** Set on threads mirrored from a Hermes background run. */
@@ -385,6 +386,7 @@ export function presentThreadShell(
     snoozedUntil: nullableIso(thread.snoozedUntil ?? null),
     snoozedAt: nullableIso(thread.snoozedAt ?? null),
     limitRecovery: thread.limitRecovery ?? null,
+    move: thread.move ?? null,
     pinnedAt: nullableIso(thread.pinnedAt ?? null),
     autoSettleDisabledAt: nullableIso(thread.autoSettleDisabledAt ?? null),
     hermesRun: thread.hermesRun ?? null,

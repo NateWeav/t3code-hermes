@@ -521,6 +521,9 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.autoResumeLimitedThreads !== DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads
       ? ["Resume after usage limits"]
       : []),
+    ...(settings.autoMoveThreadsOnHighLoad !== DEFAULT_UNIFIED_SETTINGS.autoMoveThreadsOnHighLoad
+      ? ["Move threads when this machine is busy"]
+      : []),
     ...(settings.snoozeLimitedThreads !== DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads
       ? ["Snooze until limits reset"]
       : []),
@@ -701,6 +704,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       showSkillActivityRows: DEFAULT_UNIFIED_SETTINGS.showSkillActivityRows,
       showMemoryActivityRows: DEFAULT_UNIFIED_SETTINGS.showMemoryActivityRows,
       autoResumeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads,
+      autoMoveThreadsOnHighLoad: DEFAULT_UNIFIED_SETTINGS.autoMoveThreadsOnHighLoad,
       snoozeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads,
       snoozePresets: DEFAULT_UNIFIED_SETTINGS.snoozePresets,
       responseStreamingMode: DEFAULT_UNIFIED_SETTINGS.responseStreamingMode,
@@ -1891,6 +1895,27 @@ export function ThreadsSettingsPanel() {
       {!isProjectScope ? (
         <SettingsSection id="snooze" title="Snooze">
           <SnoozePresetsRow />
+        </SettingsSection>
+      ) : null}
+
+      {!isProjectScope ? (
+        <SettingsSection id="thread-moves" title="Moving between machines">
+          <SettingsRow
+            serverScoped
+            {...searchableSetting("auto-move-threads-on-high-load")}
+            description="After a minute of high CPU or memory use, move a thread to a linked machine with spare capacity, keeping its model and changes. A working thread stops here and continues there."
+            settingKeys={["autoMoveThreadsOnHighLoad"]}
+            control={
+              <ScopedSwitch
+                settingKeys={["autoMoveThreadsOnHighLoad"]}
+                checked={settings.autoMoveThreadsOnHighLoad}
+                onCheckedChange={(checked) =>
+                  updateSettings({ autoMoveThreadsOnHighLoad: Boolean(checked) })
+                }
+                aria-label="Move threads when this machine is busy"
+              />
+            }
+          />
         </SettingsSection>
       ) : null}
 

@@ -488,6 +488,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["usage quota rate limit reset recover continue"],
   },
   {
+    id: "auto-move-threads-on-high-load",
+    title: "Move threads when this machine is busy",
+    to: "/settings/threads",
+    environmentOnly: true,
+    scope: "environment-defaults",
+    searchTerms: ["automatic move transfer migration machine load balance cpu memory tests"],
+  },
+  {
     id: "working-shelf",
     title: msg("Working section"),
     to: "/settings/general",

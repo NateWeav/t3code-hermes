@@ -8544,6 +8544,17 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
           archivedAt === null,
         );
       }
+      // The move guard rejects recovery commands while the thread is leaving.
+      yield* sql`UPDATE orchestration_v2_projection_threads
+        SET payload_json = json_set(payload_json, '$.move', json('{"direction":"outgoing","phase":"preparing"}'))
+        WHERE thread_id = ${threadId}`;
+      assert.isUndefined(
+        (yield* store.getLimitRecoveryCandidates({ now, autoResume: true, snooze: false })).find(
+          (row) => row.id === threadId,
+        ),
+      );
+      yield* sql`UPDATE orchestration_v2_projection_threads
+        SET payload_json = ${originalRow!.payload_json} WHERE thread_id = ${threadId}`;
       yield* sql`UPDATE orchestration_v2_projection_threads
         SET payload_json = json_set(payload_json, '$.settledOverride', 'settled')
         WHERE thread_id = ${threadId}`;
@@ -10855,6 +10866,24 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
           ["local", targetThreadId, "command_execution"],
           ["local", targetThreadId, "command_execution"],
         ],
+      );
+      // Moved threads mark only the thread as imported, not each item.
+      yield* sql`
+        UPDATE orchestration_v2_projection_turn_items
+        SET payload_json = json_remove(payload_json, '$.historyOrigin')
+        WHERE turn_item_id = ${importedItemId}
+      `;
+      yield* sql`
+        UPDATE orchestration_v2_projection_threads
+        SET payload_json = json_set(payload_json, '$.historyOrigin', 'portable_import')
+        WHERE thread_id = ${sourceThreadId}
+      `;
+      const movedEmptyBoundary = yield* projectionStore.getThreadSnapshotWindow(targetThreadId, {
+        rowLimit: 2,
+      });
+      assert.deepEqual(
+        movedEmptyBoundary.projection.visibleTurnItems.map((row) => row.visibility),
+        ["inherited", "synthetic", "local", "local"],
       );
 
       const sourceThread = (yield* projectionStore.getThreadProjection(sourceThreadId)).thread;

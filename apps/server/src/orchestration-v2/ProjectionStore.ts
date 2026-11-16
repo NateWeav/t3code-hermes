@@ -618,6 +618,10 @@ export interface ProjectionStoreV2Shape {
   readonly getThreadShell: (
     threadId: ThreadId,
   ) => Effect.Effect<OrchestrationV2ThreadShell | null, ProjectionStoreV2Error>;
+  readonly getPendingAutomaticMoves: () => Effect.Effect<
+    ReadonlyArray<OrchestrationV2AppThread>,
+    ProjectionStoreV2Error
+  >;
   /** The thread whose current guest share has this id. Scans thread rows; only redeem uses it. */
   readonly findGuestShareThreadId: (
     shareId: GuestShareId,
@@ -1519,7 +1523,7 @@ function isTurnItemAtOrBeforeRun(input: {
   readonly sourceRunOrdinal: number;
 }): boolean {
   if (input.itemRunId === null) {
-    return input.historyOrigin === "v1_import";
+    return input.historyOrigin === "v1_import" || input.historyOrigin === "portable_import";
   }
   const ordinal = input.runOrdinalById.get(input.itemRunId);
   return ordinal !== undefined && ordinal <= input.sourceRunOrdinal;
@@ -1816,6 +1820,7 @@ export function threadShellFromProjection(
     ...(projection.thread.historyOrigin === undefined
       ? {}
       : { historyOrigin: projection.thread.historyOrigin }),
+    ...(projection.thread.move === undefined ? {} : { move: projection.thread.move }),
     ...(projection.thread.linkOrigin === undefined
       ? {}
       : { linkOrigin: projection.thread.linkOrigin }),
@@ -2024,7 +2029,11 @@ function itemCountThroughRun(input: {
     return 0;
   }
 
-  let count = input.state.thread.historyOrigin === "v1_import" ? input.state.runlessItemCount : 0;
+  let count =
+    input.state.thread.historyOrigin === "v1_import" ||
+    input.state.thread.historyOrigin === "portable_import"
+      ? input.state.runlessItemCount
+      : 0;
   for (const [runId, itemCount] of input.state.itemCountByRunId) {
     const itemRun = input.state.runsById.get(runId);
     if (
@@ -2130,6 +2139,7 @@ function shellFromState(input: {
     ...(input.state.thread.historyOrigin === undefined
       ? {}
       : { historyOrigin: input.state.thread.historyOrigin }),
+    ...(input.state.thread.move === undefined ? {} : { move: input.state.thread.move }),
     ...(input.state.thread.linkOrigin === undefined
       ? {}
       : { linkOrigin: input.state.thread.linkOrigin }),
@@ -3267,7 +3277,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                           SELECT 1
                           FROM orchestration_v2_projection_threads AS source_thread
                           WHERE source_thread.thread_id = item.thread_id
-                            AND json_extract(source_thread.payload_json, '$.historyOrigin') = 'v1_import'
+                            AND json_extract(source_thread.payload_json, '$.historyOrigin') IN ('v1_import', 'portable_import')
                         )
                       )
                       OR (
@@ -4526,7 +4536,15 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                         FROM orchestration_v2_projection_turn_items
                         WHERE thread_id = ${forkedFrom.threadId}
                           AND run_id IS NULL
-                          AND json_extract(payload_json, '$.historyOrigin') = 'v1_import'
+                          AND (
+                            json_extract(payload_json, '$.historyOrigin') = 'v1_import'
+                            OR EXISTS (
+                              SELECT 1
+                              FROM orchestration_v2_projection_threads AS source_thread
+                              WHERE source_thread.thread_id = ${forkedFrom.threadId}
+                                AND json_extract(source_thread.payload_json, '$.historyOrigin') = 'portable_import'
+                            )
+                          )
                         ORDER BY ordinal DESC, turn_item_id DESC
                         LIMIT 1
                       ),
@@ -4691,6 +4709,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 AND json_extract(failure.payload_json, '$.failure.class') = 'usage_limit'
             )
             AND t.archived_at IS NULL
+            AND json_extract(t.payload_json, '$.move.direction') IS NOT 'outgoing'
             AND json_extract(t.payload_json, '$.settledOverride') IS NOT 'settled'
             AND json_extract(item.payload_json, '$.failure.class') = 'usage_limit'
             AND json_extract(item.payload_json, '$.failure.resetAt') IS NOT NULL
@@ -4782,6 +4801,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             FROM orchestration_v2_projection_threads
             WHERE deleted_at IS NULL
               AND json_extract(payload_json, '$.limitRecovery.autoResume') = 1
+              AND json_extract(payload_json, '$.move.direction') IS NOT 'outgoing'
           )
         `;
         const wakes = [rows[0]?.reset_ms, rows[0]?.snooze_ms].filter(
@@ -8940,6 +8960,20 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         .withTransaction(readShellSnapshotRows(options))
         .pipe(Effect.mapError(shellSnapshotReadError), Effect.flatMap(decodeShellSnapshot));
 
+    const getPendingAutomaticMoves = Effect.fn("ProjectionStore.getPendingAutomaticMoves")(
+      function* () {
+        const rows = yield* sql<{ readonly payload_json: string }>`
+        SELECT payload_json FROM orchestration_v2_projection_threads
+        WHERE deleted_at IS NULL
+          AND json_extract(payload_json, '$.move.automatic') = 1
+          AND json_extract(payload_json, '$.move.direction') = 'outgoing'
+          AND json_extract(payload_json, '$.move.phase') <> 'complete'
+      `;
+        return yield* Effect.forEach(rows, (row) => decodeThreadPayload(row.payload_json));
+      },
+      Effect.mapError(shellSnapshotReadError),
+    );
+
     const listActiveSubagentThreadIds = Effect.fn("ProjectionStore.listActiveSubagentThreadIds")(
       function* () {
         const rows = yield* sql<{ readonly thread_id: string }>`
@@ -9302,6 +9336,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       apply,
       getAgentAwarenessSnapshot: readOnReader(getAgentAwarenessSnapshot),
       getShellSnapshot: readOnReader(getShellSnapshot),
+      getPendingAutomaticMoves: readOnReader(getPendingAutomaticMoves),
       getPullRequestSnapshot: readOnReader(getPullRequestSnapshot),
       listActiveSubagentThreadIds: readOnReader(listActiveSubagentThreadIds),
       countThreads: readOnReader(countThreads),

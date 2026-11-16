@@ -157,7 +157,10 @@ const readOwnHistoryItems = Effect.fn("orchestrationV2.contextHandoff.readOwnHis
     const { turnItems } = yield* projectionStore.getThreadRecords(source.thread.id, ["turnItems"], {
       turnItemRunIds: [
         ...source.runs.filter((run) => run.ordinal <= throughRun.ordinal).map((run) => run.id),
-        ...(source.thread.historyOrigin === "v1_import" ? [null] : []),
+        ...(source.thread.historyOrigin === "v1_import" ||
+        source.thread.historyOrigin === "portable_import"
+          ? [null]
+          : []),
       ],
     });
     return visibleConversationItems(source, turnItems);

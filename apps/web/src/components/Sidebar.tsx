@@ -1,3 +1,4 @@
+import { openThreadMoveDialog } from "./chat/threadMoveDialogState";
 import { attachSidebarTree } from "../lib/sidebarTree";
 import { type EnvironmentId, type ScopedProjectRef } from "@t3tools/contracts";
 import type { EnvironmentServerConfig } from "@t3tools/client-runtime/connection";
@@ -2629,6 +2630,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         const clicked = await settlePromise(() =>
           api.contextMenu.show(
             buildThreadActionMenuItems({
+              canMove:
+                thread.lineage?.relationshipToParent !== "subagent" && thread.hermesRun == null,
               canOperate: readEnvironmentScope(
                 threadRef.environmentId,
                 AuthOrchestrationOperateScope,
@@ -2773,6 +2776,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           }
           case "rename":
             startThreadRename(threadRef, thread.title);
+            return;
+          case "move-thread":
+            openThreadMoveDialog(threadRef);
             return;
           case "share-guest":
             openGuestShareDialog(threadRef);

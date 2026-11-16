@@ -100,6 +100,7 @@ export function AutoSettleSettingsRows(props: {
   const writeToAll = (
     patch: Partial<AutoSettleSettings> & {
       autoResumeLimitedThreads?: boolean;
+      autoMoveThreadsOnHighLoad?: boolean;
       snoozeLimitedThreads?: boolean;
     },
   ) => props.write(patch);
@@ -125,6 +126,18 @@ export function AutoSettleSettingsRows(props: {
 
   return (
     <View className="gap-6">
+      {!projectSelected ? (
+        <SettingsSection title="Moving between machines">
+          <SettingsSwitchRow
+            icon="arrow.triangle.branch"
+            label="Move threads when this machine is busy"
+            subtitle="After a minute of high CPU or memory use, move a thread to a linked machine with spare capacity, keeping its provider, model, and uncommitted changes. A working thread stops here and continues there."
+            value={uniformMobileSetting(displayTargets, "autoMoveThreadsOnHighLoad")}
+            disabled={disabledFor("autoMoveThreadsOnHighLoad")}
+            onValueChange={(value) => writeToAll({ autoMoveThreadsOnHighLoad: value })}
+          />
+        </SettingsSection>
+      ) : null}
       {!projectSelected ? (
         <SettingsSection title="Usage limits">
           <SettingsSwitchRow

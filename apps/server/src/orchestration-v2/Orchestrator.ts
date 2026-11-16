@@ -1352,7 +1352,7 @@ export function shouldPrepareLegacyImportHandoff(input: {
   readonly legacyImportItemCount: number;
 }): boolean {
   return (
-    input.historyOrigin === "v1_import" &&
+    (input.historyOrigin === "v1_import" || input.historyOrigin === "portable_import") &&
     !input.hasNativeHistory &&
     !input.hasCompletedRun &&
     input.legacyImportItemCount > 0
@@ -2783,7 +2783,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             );
       const needsFullContext = deliveryProviderThread.nativeThreadRef === null;
       const legacyImportItems =
-        projection.thread.historyOrigin === "v1_import" && contextBoundary === 0
+        (projection.thread.historyOrigin === "v1_import" ||
+          projection.thread.historyOrigin === "portable_import") &&
+        contextBoundary === 0
           ? yield* readHandoffItems(threadId, [null])
           : [];
       const handoffStrategy = needsFullContext
@@ -7921,7 +7923,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     const latestCompletedRun = projection.runs.findLast((run) => run.status === "completed");
     const latestHandoffRun = projection.runs.findLast(isHandoffSourceRun);
     const legacyImportItems =
-      projection.thread.historyOrigin === "v1_import" && contextBoundary === 0
+      (projection.thread.historyOrigin === "v1_import" ||
+        projection.thread.historyOrigin === "portable_import") &&
+      contextBoundary === 0
         ? yield* readHandoffItems(command.threadId, [null])
         : [];
     const isProviderSwitch =
@@ -8585,7 +8589,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     const sideChatParentRunIds = [
       // Queued messages have not reached the main thread yet.
       ...sourceRunsAfterFork.filter((run) => run.status !== "queued").map((run) => run.id),
-      ...(sourceRun === null && sourceProjection?.thread.historyOrigin === "v1_import"
+      ...(sourceRun === null &&
+      sourceProjection !== null &&
+      (sourceProjection.thread.historyOrigin === "v1_import" ||
+        sourceProjection.thread.historyOrigin === "portable_import")
         ? [null]
         : []),
     ];
@@ -14944,6 +14951,26 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       "orchestration_v2.command_type": command.type,
       "orchestration_v2.thread_id": commandThreadId(command),
     });
+
+    if (
+      command.type !== "thread.create" &&
+      command.type !== "thread.visit" &&
+      command.type !== "thread.mark-unread"
+    ) {
+      const thread = yield* findThread(commandThreadId(command));
+      if (
+        thread?.move != null &&
+        (thread.move.direction === "outgoing" || thread.move.phase !== "complete") &&
+        !(command.type === "thread.delete" && thread.move.phase === "complete")
+      ) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause:
+            "This thread is moving to another machine. Finish or cancel the move before changing it.",
+        });
+      }
+    }
 
     const events = yield* Ref.make<Array<OrchestrationV2DomainEvent>>([]);
     const effects = yield* Ref.make<Array<PendingOrchestrationEffectV2>>([]);

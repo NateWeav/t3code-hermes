@@ -115,7 +115,11 @@ const make = Effect.gen(function* () {
       if (forkOrdinal === undefined) return undefined;
       const messages = source.messages.filter((message) => {
         if (message.streaming) return false;
-        if (message.runId === null) return source.thread.historyOrigin === "v1_import";
+        if (message.runId === null)
+          return (
+            source.thread.historyOrigin === "v1_import" ||
+            source.thread.historyOrigin === "portable_import"
+          );
         return (ordinals.get(message.runId) ?? Infinity) <= forkOrdinal;
       });
       return { thread: source.thread, messages };

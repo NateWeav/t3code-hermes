@@ -110,6 +110,11 @@ export const HermesProviderCapabilitiesV2 = {
     ...AcpProviderCapabilitiesV2.tools,
     supportsMcpTools: true,
   },
+  checkpointing: {
+    ...AcpProviderCapabilitiesV2.checkpointing,
+    // `rewindSession` (`/undo N`) truncates the native session, so the next turn resumes it.
+    providerCanRollbackConversation: true,
+  },
 } satisfies OrchestrationV2ProviderCapabilities;
 
 export interface HermesAdapterV2Options {

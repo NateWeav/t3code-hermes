@@ -161,6 +161,9 @@ export async function reopenClosedView(
     case "hermes-chat":
       panels.openHermesChat(ref, surface.sessionKey, surface.title);
       break;
+    case "issue":
+      panels.openIssue(ref, surface);
+      break;
     case "side-chat":
       panels.openSideChat(ref, surface.threadId);
       break;

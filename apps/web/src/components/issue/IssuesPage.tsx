@@ -670,6 +670,9 @@ export function IssuesPage() {
             onAddFiles={() => undefined}
             onAddPullRequest={() => undefined}
             onAddPullRequests={() => undefined}
+            onAddPaperclip={() => undefined}
+            onAddHermesChat={() => undefined}
+            onAddHermesKanban={() => undefined}
             onAddDevice={() => undefined}
             browserAvailable={false}
             terminalAvailable={false}
@@ -677,6 +680,9 @@ export function IssuesPage() {
             filesAvailable={false}
             pullRequestAvailable={false}
             pullRequestsAvailable={false}
+            paperclipAvailable={false}
+            hermesChatAvailable={false}
+            hermesKanbanAvailable={false}
             deviceAvailable={false}
           >
             {renderedSurface.kind === "issue" ? (

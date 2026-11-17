@@ -49,6 +49,7 @@ export function assertHermesBackgroundProcessStopOutput(
   assert.deepEqual(before?.pendingBackgroundTasks, [
     {
       taskId: reports[0]!.processId,
+      runId: projection.runs[0]?.id,
       kind: "command",
       description: HERMES_BACKGROUND_PROCESS_STOP_COMMAND,
     },

@@ -14,6 +14,7 @@ import {
   type UsageLimitSourceWrite,
 } from "@t3tools/client-runtime/state/usage-limit-sources";
 import { AsyncResult } from "effect/reactivity";
+import { T, useGT, Var } from "gt-react";
 import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 
@@ -34,7 +35,7 @@ import {
 } from "../ui/alert-dialog";
 import { Button } from "../ui/button";
 import { AddUsageLimitSourceDialog } from "./AddUsageLimitSourceDialog";
-import { searchableSetting } from "./settingsSearch";
+import { useSearchableSetting } from "./settingsSearch";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
 
 /** Connected environments whose hubs this connection may change. */
@@ -66,6 +67,8 @@ function useUsageLimitSourceTargets(): ReadonlyArray<UsageLimitSourceTarget<Envi
   });
 }
 
+const CLI_PROXY_NAME = "CLI Proxy";
+
 export function UsageProviderSettings({
   environmentId,
 }: {
@@ -94,6 +97,8 @@ export function UsageProviderSettings({
       description: `Could not save on ${failed.map(({ label }) => label).join(", ")}. Try again once they reconnect.`,
     });
   };
+  const gt = useGT();
+  const searchableSetting = useSearchableSetting();
   const [adding, setAdding] = useState(false);
   const hubsReadOnly = targets.length === 0;
 
@@ -105,13 +110,13 @@ export function UsageProviderSettings({
           !hubsReadOnly ? (
             <Button size="xs" variant="outline" onClick={() => setAdding(true)}>
               <PlusIcon className="size-3" aria-hidden />
-              Add hub
+              <T>Add hub</T>
             </Button>
           ) : null
         }
       >
         {hubs.length === 0 ? (
-          <SettingsRow title="No hubs configured." />
+          <SettingsRow title={gt("No hubs configured.")} />
         ) : (
           hubs.map((hub) => (
             <SettingsRow
@@ -119,7 +124,7 @@ export function UsageProviderSettings({
               title={hub.label}
               description={
                 <span className="break-all">
-                  CLI Proxy{hub.enabled ? "" : " · Disabled"}
+                  {hub.enabled ? CLI_PROXY_NAME : gt("{name} · Disabled", { name: CLI_PROXY_NAME })}
                   {hub.label !== hub.url ? ` · ${hub.url}` : ""}
                   {hub.missingFrom.length > 0
                     ? ` · Not saved on ${hub.missingFrom.map(({ label }) => label).join(", ")}. Add it again with its key.`
@@ -159,12 +164,16 @@ function RemoveUsageProviderButton({
   return (
     <>
       <Button size="xs" variant="ghost" onClick={() => setOpen(true)}>
-        Remove
+        <T>Remove</T>
       </Button>
       <AlertDialog open={open} onOpenChange={setOpen}>
         <AlertDialogPopup>
           <AlertDialogHeader>
-            <AlertDialogTitle>Remove {label}?</AlertDialogTitle>
+            <AlertDialogTitle>
+              <T>
+                Remove <Var>{label}</Var>?
+              </T>
+            </AlertDialogTitle>
             <AlertDialogDescription>
               The hub's management key is deleted from every environment you manage. Its accounts
               leave the Limits view and limited threads stop getting its reset times; the hub itself
@@ -172,7 +181,9 @@ function RemoveUsageProviderButton({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
+            <AlertDialogClose render={<Button variant="outline" />}>
+              <T>Cancel</T>
+            </AlertDialogClose>
             <Button
               variant="destructive"
               onClick={() => {
@@ -180,7 +191,7 @@ function RemoveUsageProviderButton({
                 onConfirm();
               }}
             >
-              Remove hub
+              <T>Remove hub</T>
             </Button>
           </AlertDialogFooter>
         </AlertDialogPopup>

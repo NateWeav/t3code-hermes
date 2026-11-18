@@ -73,8 +73,7 @@ diff --git a/acp_adapter/gateway_session_meta.py b/acp_adapter/gateway_session_m
 index 5f5a58380e..28fbcb018d 100644
 --- a/acp_adapter/gateway_session_meta.py
 +++ b/acp_adapter/gateway_session_meta.py
-@@ -127,12 +127,17 @@ async def session_config_options(client, session_id, models, info, mode_id):
- def model_state(info: dict) -> SessionModelState | None:
+@@ -128,11 +128,16 @@ def model_state(info: dict) -> SessionModelState | None:
      """The picker for ``session.info`` from shared inventory, with a current-model fallback. Blocking."""
      from acp_adapter.auth import detect_provider
 -    from acp_adapter.model_catalog import build_model_state, fallback_model_state

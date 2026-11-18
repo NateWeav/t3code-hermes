@@ -295,6 +295,11 @@ that commit's first 12 characters.
      Hermes's ACP adapter sends none.
    - `reportsPerTurnPromptUsage`: set per agent once its `PromptResponse.usage` is proven
      per-turn live; Hermes reports usage through `usage_update` instead.
+   - `watchPromptOutcome`: siblings watch a vendor-specific store (Kimi, Antigravity's profile)
+     for how a prompt ended; Hermes reports failures in the prompt response (`promptFailure`).
+   - `deferFinalizeForBackgroundWork`: the ACP Registry sets it for a local `hermes acp` so the
+     gateway's post-settle reply ends on a debounce; the dedicated adapter gets that from
+     `enablePostSettleContinuation` plus `isUnpromptedTurnUpdate`, covered by its wake-run tests.
 2. New optional inputs. In `git diff R -- packages/provider-core/src/server packages/provider-acp/src/server`,
    find optional fields added to input types and options. Where Hermes builds that input itself,
    check that it passes the field on as its siblings do.

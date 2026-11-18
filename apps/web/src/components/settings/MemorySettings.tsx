@@ -18,7 +18,7 @@ import { DraftInput } from "../ui/draft-input";
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
 import { SettingResetButton, SettingsRow, SettingsSection } from "./settingsLayout";
-import { searchableSetting } from "./settingsSearch";
+import { useSearchableSetting } from "./settingsSearch";
 import { useSettingsScope } from "./SettingsScopeContext";
 
 /** Hindsight's own default, shown when Hermes has nothing to suggest. */
@@ -27,6 +27,7 @@ const HINDSIGHT_URL_PLACEHOLDER = "http://127.0.0.1:8888";
 type HindsightPatch = { -readonly [K in keyof HindsightSettings]?: HindsightSettings[K] };
 
 export function MemorySettingsSection() {
+  const searchableSetting = useSearchableSetting();
   const { environment: selected } = useSettingsScope();
   const connected = selected?.connection.phase === "connected" && selected.serverConfig !== null;
 
@@ -48,6 +49,7 @@ export function MemorySettingsSection() {
 }
 
 function MemorySettingsControls({ environmentId }: { readonly environmentId: EnvironmentId }) {
+  const searchableSetting = useSearchableSetting();
   const saved = useEnvironmentSettings(
     environmentId,
     (settings) => settings.integrations.hindsight,
@@ -148,7 +150,7 @@ function MemorySettingsControls({ environmentId }: { readonly environmentId: Env
         resetAction={
           savedUrl.length > 0 ? (
             <SettingResetButton
-              label="Hindsight server"
+              ariaLabel="Reset Hindsight server to default"
               tooltip={hermes === null ? "Clear" : "Use Hermes' config"}
               onClick={() => void save({ baseUrl: "" })}
             />
@@ -174,7 +176,7 @@ function MemorySettingsControls({ environmentId }: { readonly environmentId: Env
         resetAction={
           savedBank.length > 0 ? (
             <SettingResetButton
-              label="default bank"
+              ariaLabel="Reset default bank to default"
               tooltip={hermes?.bank ? "Use Hermes' bank" : "Clear"}
               onClick={() => void save({ defaultBank: "" })}
             />

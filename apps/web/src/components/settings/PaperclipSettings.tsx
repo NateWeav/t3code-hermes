@@ -28,7 +28,7 @@ import { NumberField, NumberFieldGroup, NumberFieldInput } from "../ui/number-fi
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { SettingResetButton, SettingsRow, SettingsSection } from "./settingsLayout";
-import { searchableSetting } from "./settingsSearch";
+import { useSearchableSetting } from "./settingsSearch";
 import { useSettingsScope } from "./SettingsScopeContext";
 
 type PaperclipPatch = { -readonly [K in keyof PaperclipSettings]?: PaperclipSettings[K] };
@@ -41,6 +41,7 @@ const REFRESH_UNIT_LABELS: Record<PaperclipRefreshUnit, string> = {
 };
 
 export function PaperclipSettingsSection() {
+  const searchableSetting = useSearchableSetting();
   const { environment: selected } = useSettingsScope();
   const connected = selected?.connection.phase === "connected" && selected.serverConfig !== null;
 
@@ -62,6 +63,7 @@ export function PaperclipSettingsSection() {
 }
 
 function PaperclipSettingsControls({ environmentId }: { readonly environmentId: EnvironmentId }) {
+  const searchableSetting = useSearchableSetting();
   const saved = useEnvironmentSettings(
     environmentId,
     (settings) => settings.integrations.paperclip,
@@ -153,7 +155,7 @@ function PaperclipSettingsControls({ environmentId }: { readonly environmentId: 
         resetAction={
           savedUrl.length > 0 ? (
             <SettingResetButton
-              label="Paperclip server"
+              ariaLabel="Reset Paperclip server to default"
               tooltip="Clear"
               onClick={() => void save({ baseUrl: "" })}
             />
@@ -223,7 +225,7 @@ function PaperclipSettingsControls({ environmentId }: { readonly environmentId: 
         resetAction={
           savedCompany.length > 0 ? (
             <SettingResetButton
-              label="Paperclip company"
+              ariaLabel="Reset Paperclip company to default"
               tooltip="Use the key's first company"
               onClick={() => void save({ companyId: "" })}
             />
@@ -252,6 +254,7 @@ function PaperclipAutoRefreshRow(props: {
   readonly disabled: boolean;
   readonly onSave: (seconds: number) => void;
 }) {
+  const searchableSetting = useSearchableSetting();
   // The unit is local so "0 hours" stays in hours after turning it off.
   const [unit, setUnit] = useState<PaperclipRefreshUnit>(
     () => splitPaperclipRefreshInterval(props.savedSeconds).unit,
@@ -269,7 +272,7 @@ function PaperclipAutoRefreshRow(props: {
       resetAction={
         props.savedSeconds > 0 ? (
           <SettingResetButton
-            label="Paperclip auto-refresh"
+            ariaLabel="Reset Paperclip auto-refresh to default"
             tooltip="Turn off"
             onClick={() => props.onSave(0)}
           />

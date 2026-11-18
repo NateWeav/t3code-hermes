@@ -30,10 +30,11 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Switch } from "../ui/switch";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
-import { searchableSetting } from "./settingsSearch";
+import { useSearchableSetting } from "./settingsSearch";
 import { useSettingsScope } from "./SettingsScopeContext";
 
 export function HermesHubsSettingsSection() {
+  const searchableSetting = useSearchableSetting();
   const { environment: selected } = useSettingsScope();
   const connected = selected?.connection.phase === "connected" && selected.serverConfig !== null;
 
@@ -64,6 +65,7 @@ function nextHubId(hubs: readonly HermesHubSettings[]): string {
 }
 
 function HermesHubsControls({ environmentId }: { readonly environmentId: EnvironmentId }) {
+  const searchableSetting = useSearchableSetting();
   const hubs = useEnvironmentSettings(
     environmentId,
     (settings) => settings.integrations.hermesHubs,

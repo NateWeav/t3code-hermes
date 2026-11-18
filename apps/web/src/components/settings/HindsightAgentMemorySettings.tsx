@@ -38,7 +38,7 @@ import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
 import { resolveRemoteOperateAccess } from "./ProviderSettingsPanel.logic";
 import { SettingResetButton, SettingsRow, SettingsSection } from "./settingsLayout";
-import { searchableSetting } from "./settingsSearch";
+import { useSearchableSetting } from "./settingsSearch";
 
 /** Hindsight's own default, shown when no machine has a server yet. */
 const HINDSIGHT_URL_PLACEHOLDER = "http://127.0.0.1:8888";
@@ -98,6 +98,7 @@ function machineStatus(machine: Machine): {
 }
 
 export function HindsightAgentMemorySettings() {
+  const searchableSetting = useSearchableSetting();
   const { environments } = useEnvironments();
   const connected = environments.filter(
     (environment) =>
@@ -289,7 +290,7 @@ export function HindsightAgentMemorySettings() {
         resetAction={
           shared.hasOverride ? (
             <SettingResetButton
-              label="Hindsight server"
+              ariaLabel="Reset Hindsight server to default"
               tooltip="Use each machine's own server"
               onClick={() => void saveServer("")}
             />

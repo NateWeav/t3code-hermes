@@ -1,7 +1,10 @@
 import { isActiveSubagentStatus } from "@t3tools/client-runtime/state/subagentRuntime";
 import type { OrchestrationV2Subagent } from "@t3tools/contracts";
-import { deriveSubagentElapsedMs, formatDuration } from "@t3tools/shared/orchestrationTiming";
+import { deriveSubagentElapsedMs } from "@t3tools/shared/orchestrationTiming";
+import { formatDuration } from "@t3tools/shared/orchestrationTimingCopy";
 import * as DateTime from "effect/DateTime";
+
+import { m, type MessageResolver } from "../../i18n/messages";
 
 /** A lone agent shows its own duration, which prefers the provider's report. */
 export function subagentCardElapsed(
@@ -9,6 +12,7 @@ export function subagentCardElapsed(
     Pick<OrchestrationV2Subagent, "status" | "startedAt" | "completedAt" | "usage">
   >,
   nowMs: number,
+  resolve: MessageResolver = m,
 ): string | null {
   const only = agents.length === 1 ? agents[0] : undefined;
   if (only !== undefined) {
@@ -21,7 +25,7 @@ export function subagentCardElapsed(
       },
       nowMs,
     );
-    return elapsedMs ? formatDuration(elapsedMs) : null;
+    return elapsedMs ? formatDuration(elapsedMs, resolve) : null;
   }
   const starts = agents.flatMap((agent) =>
     agent.startedAt ? [DateTime.toEpochMillis(agent.startedAt)] : [],
@@ -33,5 +37,5 @@ export function subagentCardElapsed(
     agent.completedAt ? [DateTime.toEpochMillis(agent.completedAt)] : [],
   );
   const duration = (live ? nowMs : Math.max(...ends)) - Math.min(...starts);
-  return duration > 0 ? formatDuration(duration) : null;
+  return duration > 0 ? formatDuration(duration, resolve) : null;
 }

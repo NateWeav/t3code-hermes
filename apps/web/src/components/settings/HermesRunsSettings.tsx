@@ -14,10 +14,11 @@ import { formatRelativeTimeLabel } from "~/timestampFormat";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
-import { searchableSetting } from "./settingsSearch";
+import { useSearchableSetting } from "./settingsSearch";
 import { useSettingsScope } from "./SettingsScopeContext";
 
 export function HermesRunsSettingsSection() {
+  const searchableSetting = useSearchableSetting();
   const { environment: selected } = useSettingsScope();
   const connected = selected?.connection.phase === "connected" && selected.serverConfig !== null;
 
@@ -49,6 +50,7 @@ function describeSource(source: HermesRunSource): string {
 }
 
 function HermesRunsControls({ environmentId }: { readonly environmentId: EnvironmentId }) {
+  const searchableSetting = useSearchableSetting();
   const query = useEnvironmentQuery(
     serverEnvironment.hermesRunSources({ environmentId, input: {} }),
   );

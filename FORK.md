@@ -351,6 +351,11 @@ upstream-only infrastructure. This fork therefore diverges in `.github/workflows
   feed is derived from `GITHUB_REPOSITORY`, so fork builds self-update from fork releases.
   Dispatching `release.yml` by hand defaults to the `preview` channel, which nothing installs
   unless asked for by name.
+- **Untranslated copy.** `t3code/no-untranslated-copy` warns instead of failing lint
+  (`vite.config.ts`): the fork's Hermes, Paperclip, and memory UI is English only.
+  `vp run i18n:untranslated` counts what is left. When a sync rewords a string the fork rebranded
+  (`T3 Hermes`, `t3-hermes`), keep upstream's `msg()` form with the fork's wording and translate
+  the new key in every locale, deriving it from upstream's translation of the original.
 - **Agent context budget.** `agent-context-budget.yml` subtracts the growth a PR merges in from
   upstream, so a sync PR fails only when the fork's own agent text grew. Keep that when resolving
   it; without it, every sync that adds upstream tool text waits on the `agent-context-increase` label.

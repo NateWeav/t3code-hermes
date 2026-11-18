@@ -262,7 +262,11 @@ T3 Code's toggle still needs the per-row `_meta` tags, the per-prompt re-pin, an
 opt-in, which also makes that picker appear for an opted-in proxy. Verified against hermes-agent
 `27cbcb122f` (`main`, 2026-11-04), alone and after the other patches. Its `ff2591a04602` version
 (`main`, 2026-11-12) is the same change, with its test's stand-in runner given the per-profile
-channel config lookup upstream's `/model` now reads (`8da8ca8d7a`).
+channel config lookup upstream's `/model` now reads (`8da8ca8d7a`). Its `0e8e42164063` version
+(`main`, 2026-11-18) is the same change on upstream's `fallback_model_state` picker fallback
+(`730d593fe3`) and the `tier` argument its route gate now takes (`786314cef1`). Its `model_state`
+hunk starts below the `def` line, which `acp-model-picker-reuse` renames, so it still reverses with
+that patch installed.
 
 Restart the Hermes gateway and the T3 Code server after applying the patch: the gateway runs the
 fast-mode gate and the endpoint opt-in. The patch's `tests/acp_adapter/test_fast_mode.py` drives the real config, gate,
@@ -554,8 +558,10 @@ seconds late. No wire change; T3 Code needs nothing for it.
 
 Verified against hermes-agent `90d6b98fd86d` (`main`, 2026-11-06), alone and after the other
 patches. Its `da9c2bd62f` version (`main`, 2026-11-18) is the same change beside upstream's
-`provenance_meta`, which now reads through the persistence interface. The change is in `hermes acp`
-only. Run the patch's `tests/acp_adapter/test_gateway_model_picker_reuse.py` in a scratch checkout, as for
+`provenance_meta`, which now reads through the persistence interface. Its `0e8e42164063` version
+(`main`, 2026-11-18) is the same change around upstream's `fallback_model_state` (`730d593fe3`); its
+rename hunk carries one line less context, so it still applies alone and after `acp-fast-mode`,
+which edits the line below it. The change is in `hermes acp` only. Run the patch's `tests/acp_adapter/test_gateway_model_picker_reuse.py` in a scratch checkout, as for
 `acp-delegation-progress`.
 
 ## `acp-context-length-reuse`

@@ -114,7 +114,10 @@ The remote target needs only SSH, Bash, and the project toolchain (not even `scp
 Node, T3, the Hermes binary, provider credentials, memories, or a `.hermes` directory.
 
 Upstream already carries half of this: `SSHEnvironment` takes `sync_files`, used by Hermes's own SSH
-workspace browser. The patch exposes it as config and keeps ACP tools at the remote cwd.
+workspace browser. The patch exposes it as config and keeps ACP tools at the remote cwd. Its
+`da9c2bd62f` version (`main`, 2026-11-18) is the same change, with its test reading the session's
+policy row through upstream's `policy_key` test helper now that the old session store is gone
+(`be3d6affc8`).
 
 After applying the patch, stop that home's gateway (`HERMES_HOME=<home> hermes gateway stop`) so the
 next `hermes acp` starts one with the patched code, and restart the T3 Code server. Terminal changes
@@ -143,7 +146,9 @@ redaction as other live child progress, so detached work cannot stay falsely act
 gone from the registry is lent a record for that one event; from version `ff2591a04602` (`main`,
 2026-11-12) removing the loan leaves the record Hermes keeps to continue that child untouched. A
 parent result with `status: "dispatched"` only acknowledges launch; child lifecycle events settle
-each subagent.
+each subagent. Its `da9c2bd62f` version (`main`, 2026-11-18) is the same change, with its test
+pointing the delegation ledger at a scratch profile through `_scope`, which replaced `_db_path`
+upstream (`f1cd9b0703`).
 Progress sent while T3 Code was disconnected is not replayed, but the gateway still hands each
 result to the agent in a turn of its own.
 
@@ -180,11 +185,13 @@ only when the gateway lists that field, so an older gateway is never sent it. In
 
 Both settings freeze into the session when it is created, so only sessions created after the patch
 is applied and the gateway restarts get them. Verified against hermes-agent `eaac327fac2c` (`main`,
-2026-11-12), alone and after the other patches. The patch's
-`tests/acp_adapter/test_gateway_editor_delegation.py` drives a real gateway daemon and a real
-`hermes acp` process against a loopback model, covering foreground and background calls, a stock
-editor, each depth case, and a stop during a foreground call. Run it in a scratch checkout, as for
-`acp-delegation-progress`.
+2026-11-12), alone and after the other patches. Its `da9c2bd62f` version (`main`, 2026-11-18)
+refuses a malformed `delegation` with `AuthorityRefusal`: upstream removed `hermes_state_runtime`
+with the old session store (`be3d6affc8`), so the earlier version applies but fails the request. The
+patch's `tests/acp_adapter/test_gateway_editor_delegation.py` drives a real gateway daemon and a
+real `hermes acp` process against a loopback model, covering foreground and background calls, a
+stock editor, each depth case, and a stop during a foreground call. Run it in a scratch checkout, as
+for `acp-delegation-progress`.
 
 ## `acp-subagent-approvals`
 
@@ -279,7 +286,8 @@ removes it where upstream moved it, which also keeps the block out of the separa
 upstream now sends after a streamed reply. Its `ae2a81ccc00e` version (`main`, 2026-11-16) removes it
 from `_show_reasoning_for_source`, where upstream moved it; that check now also stops a reply's live
 deltas when reasoning shows, so without the patch an ACP session with `show_reasoning` on would also
-stop streaming its answer. Restart the Hermes gateway after applying it. Run
+stop streaming its answer. Its `da9c2bd62f` version (`main`, 2026-11-18) is the same, after upstream
+renamed the store refusal that check caught. Restart the Hermes gateway after applying it. Run
 the patch's `tests/gateway/test_local_viewer_reasoning.py` in a scratch checkout, as for
 `acp-delegation-progress`.
 
@@ -315,9 +323,11 @@ persisted, session-scoped bypass as `/yolo` in the TUI, so it survives a gateway
 covers the session's subagents. A gateway that refuses it fails the reopen instead of running in
 the wrong mode.
 
-Verified against hermes-agent `27cbcb122f` (`main`, 2026-11-04), alone and after the other
-patches. New `hermes acp` processes pick it up; restarting the gateway is not required. Run the
-patch's `tests/acp_adapter/test_gateway_launch_yolo_resume.py` in a scratch checkout, as for
+Verified against hermes-agent `27cbcb122f` (`main`, 2026-11-04), alone and after the other patches.
+Its `da9c2bd62f` version (`main`, 2026-11-18) is the same change, with its test run outside the
+checkout as upstream's gateway-authority tests now are. New `hermes acp` processes pick it up;
+restarting the gateway is not required. Run the patch's
+`tests/acp_adapter/test_gateway_launch_yolo_resume.py` in a scratch checkout, as for
 `acp-delegation-progress`.
 
 ## `acp-editor-clarify`
@@ -340,7 +350,8 @@ patches. Its `90d6b98fd8` version (`main`, 2026-11-06) is the same change on top
 `acp-editor-delegation`, which edits the same `session.create` call, and applies only after it;
 its `981791d9d4` version (`main`, 2026-11-07) is the same again on current `main`; its
 `227845ae31` version (`main`, 2026-11-14) adds the capability after upstream's
-`session-list-cursor-v1`.
+`session-list-cursor-v1`; its `da9c2bd62f` version (`main`, 2026-11-18) refuses a malformed
+`editor.clarify` with `AuthorityRefusal`, upstream's name for the store refusal since `be3d6affc8`.
 Restart the Hermes gateway after applying it: the gateway decides the session's tools.
 Run the patch's `tests/acp_adapter/test_gateway_editor_clarify_toolset.py` in a scratch checkout,
 as for `acp-delegation-progress`.
@@ -371,6 +382,9 @@ Verified against hermes-agent `53a6ced422` (`main`, 2026-11-06), alone and after
 Its `90d6b98fd8` version (`main`, 2026-11-06) is the same change on top of `acp-editor-delegation`
 and `acp-editor-clarify`, and applies only after them. Its `778dc708c2` version (`main`,
 2026-11-14) is the same change beside the MCP form asker upstream now binds around each tool call.
+Its `da9c2bd62f` version (`main`, 2026-11-18) tees output only after the collector cuts the
+cwd-fallback line a sandbox backend prints ahead of the command (`065f5abbb3`), so that line is
+never streamed.
 Restart the Hermes gateway and the T3 Code server after applying it: the gateway runs the terminal
 tool. The patch's `tests/acp_adapter/test_gateway_terminal_output.py` runs a real command through
 the terminal tool, the gateway turn's progress callback and `GatewayACPAgent`; run it in a scratch
@@ -456,7 +470,8 @@ applies only after them; its `981791d9d4` version (`main`, 2026-11-07) is the sa
 its `d1b46d718f` version (`main`, 2026-11-15) is the same again after upstream made answers to a
 command the hardline scan could not finish one-shot, and keeps that rule for editor commands too;
 its `4162ecf11f` version (`main`, 2026-11-15) is the same again after upstream made an `osascript`
-program that can discard unsaved work one-shot too.
+program that can discard unsaved work one-shot too; its `da9c2bd62f` version (`main`, 2026-11-18)
+is the same again with upstream's `AuthorityRefusal`.
 Restart the Hermes gateway after applying it: the gate runs there. Run the
 patch's `tests/acp_adapter/test_gateway_command_approval.py` in a scratch checkout, as for
 `acp-delegation-progress`.
@@ -504,7 +519,9 @@ and desktop prompt snapshot while adding continuation on top. Its `ff2591a04602`
 2026-11-12) drops its own `continue` for upstream's, keeps a task's `model` in the routing request
 upstream re-resolves a continue from after a restart, and keeps the viewer change. Its `ae2a81ccc00e`
 version (`main`, 2026-11-16) is the same change, reading delegation config through
-`tools.delegate_tool_config`, where upstream moved it (`43dc9a0a28`). Run the patch's
+`tools.delegate_tool_config`, where upstream moved it (`43dc9a0a28`). Its `da9c2bd62f` version
+(`main`, 2026-11-18) is the same change, with its test's stand-in children saving their transcripts
+through the storage interface, where upstream's `continue` now reads them. Run the patch's
 `tests/gateway/test_delegation_task_model.py` and `tests/acp_adapter/test_gateway_delegation_continue.py`
 (which reuses the progress patch's `test_gateway_delegation_progress.py`) in a scratch checkout, as
 for `acp-delegation-progress`.
@@ -536,8 +553,9 @@ session opened later finds the inventory warm. A credentials change shows in a p
 seconds late. No wire change; T3 Code needs nothing for it.
 
 Verified against hermes-agent `90d6b98fd86d` (`main`, 2026-11-06), alone and after the other
-patches. The change is in `hermes acp` only. Run the patch's
-`tests/acp_adapter/test_gateway_model_picker_reuse.py` in a scratch checkout, as for
+patches. Its `da9c2bd62f` version (`main`, 2026-11-18) is the same change beside upstream's
+`provenance_meta`, which now reads through the persistence interface. The change is in `hermes acp`
+only. Run the patch's `tests/acp_adapter/test_gateway_model_picker_reuse.py` in a scratch checkout, as for
 `acp-delegation-progress`.
 
 ## `acp-context-length-reuse`

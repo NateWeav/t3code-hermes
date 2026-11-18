@@ -6,6 +6,11 @@
       "neededFor": "Hermes homes whose config runs tools on an SSH host without copying credentials, skills, or cache to it.",
       "versions": [
         {
+          "hermesCommit": "da9c2bd62fa567ed0006866de022939ac14582cf",
+          "hermesCommitDate": "2026-11-18T00:18:16Z",
+          "file": "acp-central-ssh-execution/da9c2bd62fa5.patch"
+        },
+        {
           "hermesCommit": "ae2a81ccc00e9b7c06301523e5bb09608397149c",
           "hermesCommitDate": "2026-11-16T19:28:45Z",
           "file": "acp-central-ssh-execution/ae2a81ccc00e.patch"
@@ -38,6 +43,11 @@
       "neededFor": "Live progress for subagents Hermes delegates to. Without it, background subagents show as idle once dispatched.",
       "versions": [
         {
+          "hermesCommit": "da9c2bd62fa567ed0006866de022939ac14582cf",
+          "hermesCommitDate": "2026-11-18T00:18:16Z",
+          "file": "acp-delegation-progress/da9c2bd62fa5.patch"
+        },
+        {
           "hermesCommit": "995181a8db361c55c5a1bd12b8d28cb01e1aef60",
           "hermesCommitDate": "2026-11-13T11:10:58Z",
           "file": "acp-delegation-progress/995181a8db36.patch"
@@ -69,6 +79,11 @@
       "title": "Subagents in the turn",
       "neededFor": "Subagents that answer inside the turn and can launch their own, as Claude's do. Without it, Hermes runs every subagent in the background, so its answer arrives in a later turn, and a subagent cannot launch another.",
       "versions": [
+        {
+          "hermesCommit": "da9c2bd62fa567ed0006866de022939ac14582cf",
+          "hermesCommitDate": "2026-11-18T00:18:16Z",
+          "file": "acp-editor-delegation/da9c2bd62fa5.patch"
+        },
         {
           "hermesCommit": "eaac327fac2c2db0b77ee143989d49b29a6f36cb",
           "hermesCommitDate": "2026-11-12T04:50:42Z",
@@ -150,6 +165,11 @@
       "neededFor": "Hermes models that return reasoning text, with display.show_reasoning on. Without it, an ACP reply repeats the streamed reasoning as a code block, followed by a second copy of the reply.",
       "versions": [
         {
+          "hermesCommit": "da9c2bd62fa567ed0006866de022939ac14582cf",
+          "hermesCommitDate": "2026-11-18T00:18:16Z",
+          "file": "acp-reasoning-once/da9c2bd62fa5.patch"
+        },
+        {
           "hermesCommit": "ae2a81ccc00e9b7c06301523e5bb09608397149c",
           "hermesCommitDate": "2026-11-16T19:28:45Z",
           "file": "acp-reasoning-once/ae2a81ccc00e.patch"
@@ -189,6 +209,11 @@
       "neededFor": "Full access on a Hermes thread that was opened, or last ran, in another approval mode. Without it, switching an existing thread to Full access keeps asking for approval and its subagents keep denying dangerous commands, and switching away from Full access keeps approving everything.",
       "versions": [
         {
+          "hermesCommit": "da9c2bd62fa567ed0006866de022939ac14582cf",
+          "hermesCommitDate": "2026-11-18T00:18:16Z",
+          "file": "acp-launch-yolo-resume/da9c2bd62fa5.patch"
+        },
+        {
           "hermesCommit": "27cbcb122ff47a1d6878cf3c390b24395f98ee14",
           "hermesCommitDate": "2026-11-04T16:58:03Z",
           "file": "acp-launch-yolo-resume/27cbcb122ff4.patch"
@@ -205,6 +230,11 @@
       "title": "Clarifying questions",
       "neededFor": "Hermes asking you a clarifying question with choices you can pick from. Without it, Hermes's T3 sessions have no clarify tool, so it asks in its reply and you answer with a new message.",
       "versions": [
+        {
+          "hermesCommit": "da9c2bd62fa567ed0006866de022939ac14582cf",
+          "hermesCommitDate": "2026-11-18T00:18:16Z",
+          "file": "acp-editor-clarify/da9c2bd62fa5.patch"
+        },
         {
           "hermesCommit": "227845ae3113fca24b53ca9b42d99d4744d62db4",
           "hermesCommitDate": "2026-11-14T01:31:39Z",
@@ -232,6 +262,11 @@
       "title": "Live command output",
       "neededFor": "Seeing a Hermes shell command's output while it runs. Without it, a command's card stays empty until the command finishes.",
       "versions": [
+        {
+          "hermesCommit": "da9c2bd62fa567ed0006866de022939ac14582cf",
+          "hermesCommitDate": "2026-11-18T00:18:16Z",
+          "file": "acp-terminal-output/da9c2bd62fa5.patch"
+        },
         {
           "hermesCommit": "778dc708c2374d29d61ae2c127ba8f647e3b3317",
           "hermesCommitDate": "2026-11-14T22:26:10Z",
@@ -284,6 +319,11 @@
       "neededFor": "Approval before each shell command in Supervised and Auto-accept edits threads, as Claude Code asks before each Bash command. Without it, Hermes asks only before file edits and commands it flags as dangerous, and a file edit Hermes runs without asking shows no diff.",
       "versions": [
         {
+          "hermesCommit": "da9c2bd62fa567ed0006866de022939ac14582cf",
+          "hermesCommitDate": "2026-11-18T00:18:16Z",
+          "file": "acp-command-approval/da9c2bd62fa5.patch"
+        },
+        {
           "hermesCommit": "4162ecf11f611400fa6e5c42d2f360188ce50b39",
           "hermesCommitDate": "2026-11-15T20:04:54Z",
           "file": "acp-command-approval/4162ecf11f61.patch"
@@ -320,6 +360,11 @@
       "title": "Subagent models and follow-ups",
       "neededFor": "Apply after Live subagent progress. Lets Hermes pick a subagent's model from the ones your profile lists, and send a finished subagent a follow-up that shows under it. Without it, every subagent runs on the default model, and a finished one either can't be asked anything more or its follow-up doesn't show in T3 Code.",
       "versions": [
+        {
+          "hermesCommit": "da9c2bd62fa567ed0006866de022939ac14582cf",
+          "hermesCommitDate": "2026-11-18T00:18:16Z",
+          "file": "acp-subagent-model-continue/da9c2bd62fa5.patch"
+        },
         {
           "hermesCommit": "ae2a81ccc00e9b7c06301523e5bb09608397149c",
           "hermesCommitDate": "2026-11-16T19:28:45Z",
@@ -421,6 +466,11 @@
       "title": "Model list reuse",
       "neededFor": "Faster thread starts: Hermes builds the model list a new thread's setup shows once, and ahead of time, instead of up to four times while the thread opens. Without it, a new thread's first reply waits about a second longer.",
       "versions": [
+        {
+          "hermesCommit": "da9c2bd62fa567ed0006866de022939ac14582cf",
+          "hermesCommitDate": "2026-11-18T00:18:16Z",
+          "file": "acp-model-picker-reuse/da9c2bd62fa5.patch"
+        },
         {
           "hermesCommit": "90d6b98fd86d20981ee06ddd5b7d93e4320f26a4",
           "hermesCommitDate": "2026-11-06T07:12:42Z",

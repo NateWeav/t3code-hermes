@@ -8,8 +8,10 @@ import {
   collectThreadUsageLimits,
   type LimitPace,
   type LimitPoolWindow,
+  paceRemainingPercent,
 } from "@t3tools/shared/usageLimits";
 import { formatDuration } from "@t3tools/shared/usageLimitsCopy";
+import { Link } from "@tanstack/react-router";
 import { msg, useGT, useLocale, useMessages } from "gt-react";
 import type { ReactNode } from "react";
 
@@ -40,7 +42,7 @@ export interface ThreadDetailsUsageInput {
 
 type UsageTone = "error" | "warning" | null;
 
-/** The selected provider's limit windows. Each row reads as room left. */
+/** The selected provider's limit windows. Each row reads as room left and opens the usage page. */
 export function ThreadDetailsUsage({
   environmentId,
   providerInstanceId,
@@ -76,6 +78,7 @@ export function ThreadDetailsUsage({
             tone={null}
             value={gt("Unavailable")}
             tooltip={<span className="text-foreground">{notice}</span>}
+            opensUsage
           />
         ) : (
           limits.windows.map((window) => <LimitRow key={window.id} window={window} now={now} />)
@@ -158,19 +161,32 @@ function LimitRow({ window, now }: { readonly window: LimitPoolWindow; readonly 
   const timestampFormat = usePrimarySettings((settings) => settings.timestampFormat);
   const left = window.remainingPercent;
   const pace = window.pace;
+  // A pooled window has no single clock; only a lone member's time left is meaningful.
+  const lone = window.members.length === 1 ? window.members[0] : undefined;
+  const timeLeft = lone ? paceRemainingPercent(lone.window, now) : null;
   const resetsAt = window.resets.find((reset) => reset.at > now && reset.restoresPercent > 0)?.at;
   return (
     <UsageRow
       label={window.label}
       fill={left}
       tone={left <= 10 ? "error" : left <= 20 ? "warning" : null}
+      tick={timeLeft}
       value={`${left}%`}
       ariaValue={gt("{left}% left", { left })}
+      opensUsage
       tooltip={
         <>
           <span className="text-foreground">
             {gt("{label}: {left}% left", { label: window.label, left })}
           </span>
+          {pace ? (
+            <span className="text-muted-foreground">
+              {m(PACE_LABEL[pace])}
+              {timeLeft !== null ? (
+                <> · {gt("{timeLeft}% of the window left", { timeLeft })}</>
+              ) : null}
+            </span>
+          ) : null}
           {resetsAt !== undefined ? (
             <span className="text-muted-foreground">
               {window.members.length > 1
@@ -187,14 +203,13 @@ function LimitRow({ window, now }: { readonly window: LimitPoolWindow; readonly 
                   })}
             </span>
           ) : null}
-          {pace ? <span className="text-muted-foreground">{m(PACE_LABEL[pace])}</span> : null}
         </>
       }
     />
   );
 }
 
-/** One label, hairline, and value row; the whole row opens the details tooltip. */
+/** One label, hairline, and value row; the whole row opens the details tooltip. With `opensUsage` it links to the usage page. */
 function UsageRow({
   label,
   fill,
@@ -204,6 +219,7 @@ function UsageRow({
   ariaValue = value,
   tooltip,
   muted = false,
+  opensUsage = false,
 }: {
   readonly label: string;
   /** Bar fill from 0 to 100. Null hides the bar. */
@@ -215,20 +231,28 @@ function UsageRow({
   readonly ariaValue?: string;
   readonly tooltip: ReactNode;
   readonly muted?: boolean;
+  readonly opensUsage?: boolean;
 }) {
   const gt = useGT();
+  const rowProps = {
+    "aria-label": gt("{label}: {value}", { label, value: ariaValue }),
+    className: cn(
+      "col-span-3 grid h-6 grid-cols-subgrid items-center rounded-lg px-2.5 outline-none hover:bg-black/[0.035] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring data-popup-open:bg-black/[0.035] dark:hover:bg-white/[0.08] dark:data-popup-open:bg-white/[0.08]",
+      opensUsage
+        ? "group cursor-pointer active:bg-black/[0.06] dark:active:bg-white/[0.12]"
+        : "cursor-default",
+    ),
+  };
   return (
     <Tooltip>
       <TooltipTrigger
         render={
-          <div
-            tabIndex={0}
-            aria-label={gt("{label}: {value}", { label, value: ariaValue })}
-            className="col-span-3 grid h-6 cursor-default grid-cols-subgrid items-center rounded-lg px-2.5 outline-none hover:bg-black/[0.035] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring data-popup-open:bg-black/[0.035] dark:hover:bg-white/[0.08] dark:data-popup-open:bg-white/[0.08]"
-          />
+          opensUsage ? <Link to="/usage" {...rowProps} /> : <div tabIndex={0} {...rowProps} />
         }
       >
-        <span className="max-w-28 truncate text-muted-foreground">{label}</span>
+        <span className="max-w-28 truncate text-muted-foreground group-hover:text-foreground">
+          {label}
+        </span>
         {fill !== null ? (
           <span className="relative h-[3px] rounded-full bg-muted-foreground/30 dark:bg-muted-foreground/20">
             {fill > 0 ? (
@@ -249,8 +273,8 @@ function UsageRow({
             {tick !== null ? (
               <span
                 aria-hidden
-                className="absolute -top-[3px] h-[9px] w-px -translate-x-1/2 bg-foreground/60"
-                style={{ left: `${tick}%` }}
+                className="absolute -top-[3px] h-[9px] w-px -translate-x-1/2 bg-foreground/75"
+                style={{ left: `clamp(0.5px, ${tick}%, calc(100% - 0.5px))` }}
               />
             ) : null}
           </span>
@@ -274,7 +298,10 @@ function UsageRow({
       </TooltipTrigger>
       {/* Rows sit 8px inside the card; clear its edge instead of overlapping it. */}
       <TooltipPopup side="left" sideOffset={16}>
-        <div className="flex flex-col gap-0.5">{tooltip}</div>
+        <div className="flex flex-col gap-0.5">
+          {tooltip}
+          {opensUsage ? <span className="text-muted-foreground">{gt("Open usage")}</span> : null}
+        </div>
       </TooltipPopup>
     </Tooltip>
   );

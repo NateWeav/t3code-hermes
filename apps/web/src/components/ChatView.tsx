@@ -2030,6 +2030,9 @@ export default function ChatView(props: ChatViewProps) {
   const paperclipSurfaceAvailable = isServerThread && settings.integrations.paperclip.enabled;
   const hermesChatSurfaceAvailable = useHermesEnvironmentEnabled(environmentId) && isServerThread;
   const hermesKanbanSurfaceAvailable = hermesChatSurfaceAvailable;
+  const linkedItemsSurfaceAvailable =
+    pullRequestsSurfaceAvailable ||
+    (isServerThread && (activeThreadShell?.issues?.length ?? 0) > 0);
   const { state: deviceState, loaded: deviceStateLoaded } = useDeviceState(
     activeThreadRef?.environmentId ?? null,
   );
@@ -2460,7 +2463,7 @@ export default function ChatView(props: ChatViewProps) {
     canMaximizeRightPanel,
     rightPanelMaximized,
     supportsPullRequests,
-    pullRequestsSurfaceAvailable,
+    pullRequestsSurfaceAvailable: linkedItemsSurfaceAvailable,
     paperclipSurfaceAvailable,
     hermesChatSurfaceAvailable,
     hermesKanbanSurfaceAvailable,
@@ -2911,7 +2914,7 @@ export default function ChatView(props: ChatViewProps) {
                 ? gt("Available once the thread's worktree is set up.")
                 : null;
   const openSideChatStable = useStableCallback(() => void sideChat.open());
-  const sendSideChatStable = useStableCallback((prompt: string) => sideChat.open(prompt));
+  const sendSideChatStable = useStableCallback(sideChat.open);
   const { onConfirmRevertStable, onForkFromRunStable, onRevertTimelineTurnStable } =
     useTimelineRewind({
       environmentId,
@@ -4126,7 +4129,7 @@ export default function ChatView(props: ChatViewProps) {
           diffAvailable={isServerThread && isGitRepo}
           filesAvailable={activeProject !== null}
           pullRequestAvailable={pullRequestSurfaceAvailable}
-          pullRequestsAvailable={pullRequestsSurfaceAvailable}
+          pullRequestsAvailable={linkedItemsSurfaceAvailable}
           paperclipAvailable={paperclipSurfaceAvailable}
           hermesChatAvailable={hermesChatSurfaceAvailable}
           hermesKanbanAvailable={hermesKanbanSurfaceAvailable}

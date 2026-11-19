@@ -193,7 +193,7 @@ const SURFACE_DISABLED_REASONS = {
   files: msg("Files are only available when a project is open."),
   diff: msg("Diff is only available for server threads in Git repositories."),
   pullRequest: msg("This thread's branch has no pull request yet."),
-  pullRequests: msg("No linked pull requests are available for this thread."),
+  pullRequests: msg("This thread has no linked items."),
   paperclip: "Turn on Paperclip in Settings → Integrations.",
   hermesChat: "Turn on the Hermes provider in Settings to see its conversations.",
   hermesKanban: "Turn on the Hermes provider in Settings to see its Kanban boards.",
@@ -221,7 +221,7 @@ const SURFACE_UNAVAILABLE_HINTS = {
   files: msg("Available when a project is open."),
   diff: msg("Available for Git repositories."),
   pullRequest: msg("No pull request on this branch yet."),
-  pullRequests: msg("No linked pull requests available."),
+  pullRequests: msg("No linked items available."),
   paperclip: "Turn on Paperclip in Settings.",
   hermesChat: "Turn on Hermes in Settings.",
   hermesKanban: "Turn on Hermes in Settings.",
@@ -411,7 +411,7 @@ function RightPanelEmptyState(props: {
       onClick: props.onAddPullRequest,
     },
     {
-      label: msg("Linked pull requests"),
+      label: msg("Linked items"),
       icon: PullRequestGlyph.link,
       shortcut: "L",
       available: props.pullRequestsAvailable,
@@ -653,7 +653,7 @@ function surfaceTitle(
     case "pull-request":
       return `#${surface.number}`;
     case "pull-requests":
-      return resolve(msg("Pull requests"));
+      return resolve(msg("Linked items"));
     case "paperclip":
       return "Paperclip";
     case "hermes-kanban":
@@ -1271,7 +1271,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       onClick: props.onAddPullRequest,
     },
     {
-      label: msg("Linked pull requests"),
+      label: msg("Linked items"),
       icon: PullRequestGlyph.link,
       shortcut: "L",
       available: props.pullRequestsAvailable,

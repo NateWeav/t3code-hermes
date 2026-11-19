@@ -39,6 +39,7 @@ import { canSnooze } from "@t3tools/client-runtime/state/thread-settled";
 import { threadChipCopyTarget } from "@t3tools/client-runtime/thread-reference";
 import type { MenuAction } from "@react-native-menu/menu";
 import { useAtomValue } from "@effect/atom-react";
+import { useNavigation } from "@react-navigation/native";
 import { msg, T, useGT, useMessages } from "gt-react-native";
 import { memo, useCallback, useMemo, useState, type ComponentProps } from "react";
 import { Platform, Pressable, Text as RNText, useWindowDimensions, View } from "react-native";
@@ -78,6 +79,7 @@ import { ThreadSwipeable } from "../home/thread-swipe-actions";
 import { buildThreadTitleRegenerationMenuItems } from "./thread-title-regeneration-menu";
 import { canTurnThreadIntoProject, turnThreadIntoProject } from "./turnThreadIntoProject";
 import { threadCanArchive } from "../home/threadArchive";
+import { useCanShareWithGuest } from "./useCanShareWithGuest";
 import {
   THREAD_LIST_V2_SETTLED_PAGE_COUNT,
   resolveThreadListV2SnoozeGateExpiryMs,
@@ -942,6 +944,8 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const handleDelete = useCallback(() => onDeleteThread(thread), [onDeleteThread, thread]);
   const handleRename = useCallback(() => onRenameThread(thread), [onRenameThread, thread]);
   const canOperateThread = useEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope);
+  const canShareWithGuest = useCanShareWithGuest(thread.environmentId);
+  const navigation = useNavigation();
   const handleRegenerateTitle = useCallback(
     () => onRegenerateThreadTitle(thread),
     [onRegenerateThreadTitle, thread],
@@ -1128,6 +1132,9 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
             },
           ]
         : []),
+      ...(canShareWithGuest
+        ? [{ id: "share-guest", title: gt("Share with guest"), image: "person.badge.plus" }]
+        : []),
     ];
     if (snoozedRow) {
       return layoutThreadListV2RowMenuActions(
@@ -1207,6 +1214,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     );
   }, [
     autoSettleMenuItems,
+    canShareWithGuest,
     canUnsettle,
     pinMenuItems,
     props.settlementSupported,
@@ -1261,6 +1269,12 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       if (nativeEvent.event === "move-to-machine") {
         appAtomRegistry.set(threadMoveSheetAtom, scopeThreadRef(thread.environmentId, thread.id));
       }
+      if (nativeEvent.event === "share-guest") {
+        navigation.navigate("ThreadGuestShare", {
+          environmentId: thread.environmentId,
+          threadId: thread.id,
+        });
+      }
       if (nativeEvent.event === "delete") handleDelete();
       if (nativeEvent.event === "snooze:custom") {
         setCustomSnoozeOpen(true);
@@ -1286,6 +1300,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       m,
       onNewThreadOnBranch,
       thread,
+      navigation,
       handleArchive,
       handleDelete,
       handleRegenerateTitle,

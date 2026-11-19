@@ -1325,6 +1325,7 @@ export const make = Effect.fn("AcpSessionRuntime.make")(function* (
     Option.none(),
   );
   const stoppingRef = yield* Ref.make(false);
+  const terminationRecorded = yield* Deferred.make<void>();
   const stderrFailure = yield* Deferred.make<never, EffectAcpErrors.AcpError>();
   const stderrTailRef = yield* Ref.make("");
   const homeDirectory = yield* HostProcess.HomeDirectory;
@@ -1387,10 +1388,13 @@ export const make = Effect.fn("AcpSessionRuntime.make")(function* (
         : ([true, Option.some(enriched)] as const),
     );
     if (!firstTermination) {
-      return;
+      return yield* Deferred.await(terminationRecorded);
     }
-    yield* closeActiveAssistantSegment({ queue: eventQueue, assistantSegmentRef });
-    yield* Queue.offer(eventQueue, { _tag: "ConnectionTerminated", error: enriched });
+    yield* Effect.gen(function* () {
+      yield* closeActiveAssistantSegment({ queue: eventQueue, assistantSegmentRef });
+      yield* Queue.offer(eventQueue, { _tag: "ConnectionTerminated", error: enriched });
+      yield* binding.onTermination?.(enriched) ?? Effect.void;
+    }).pipe(Effect.ensuring(Deferred.succeed(terminationRecorded, undefined)));
   });
 
   const logRequest = (event: AcpSessionRequestLogEvent) =>
@@ -1701,8 +1705,8 @@ export const make = Effect.fn("AcpSessionRuntime.make")(function* (
         ),
         Effect.catch((error) =>
           Effect.gen(function* () {
-            yield* Deferred.fail(stderrFailure, error);
             yield* recordTermination(error);
+            yield* Deferred.fail(stderrFailure, error);
             yield* child.kill({ forceKillAfter: "1 second" }).pipe(Effect.ignore);
           }),
         ),
@@ -1729,7 +1733,6 @@ export const make = Effect.fn("AcpSessionRuntime.make")(function* (
       ...(options.onIncomingRequest ? { onIncomingRequest: options.onIncomingRequest } : {}),
       onTermination: (error) =>
         recordTermination(error).pipe(
-          Effect.andThen(binding.onTermination?.(error) ?? Effect.void),
           Effect.ensuring(
             Scope.close(runtimeScope, Exit.fail(error)).pipe(Effect.forkDetach, Effect.asVoid),
           ),

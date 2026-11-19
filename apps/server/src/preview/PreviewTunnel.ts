@@ -57,7 +57,7 @@ export class PreviewTunnel extends Context.Service<
       Scope.Scope
     >;
   }
->()("t3/preview/PreviewTunnel") {}
+>()("t3-hermes/preview/PreviewTunnel") {}
 
 const make = Effect.sync(() => {
   const dial = Effect.fnUntraced(function* (host: string, port: number) {

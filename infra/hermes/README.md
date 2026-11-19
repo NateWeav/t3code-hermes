@@ -388,7 +388,8 @@ and `acp-editor-clarify`, and applies only after them. Its `778dc708c2` version 
 2026-11-14) is the same change beside the MCP form asker upstream now binds around each tool call.
 Its `da9c2bd62f` version (`main`, 2026-11-18) tees output only after the collector cuts the
 cwd-fallback line a sandbox backend prints ahead of the command (`065f5abbb3`), so that line is
-never streamed.
+never streamed. Its `502009cc3f` version (`main`, 2026-11-19) is the same change beside the faster
+early poll upstream gave the command wait loop (`704705ba8d`).
 Restart the Hermes gateway and the T3 Code server after applying it: the gateway runs the terminal
 tool. The patch's `tests/acp_adapter/test_gateway_terminal_output.py` runs a real command through
 the terminal tool, the gateway turn's progress callback and `GatewayACPAgent`; run it in a scratch

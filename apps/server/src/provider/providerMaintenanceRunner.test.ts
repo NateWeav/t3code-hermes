@@ -39,6 +39,7 @@ import * as ProviderInstanceRegistry from "./ProviderInstanceRegistry.ts";
 import * as ProviderRegistry from "./ProviderRegistry.ts";
 import * as ModelManifest from "./ModelManifest.ts";
 import * as ProviderMaintenanceRunner from "./providerMaintenanceRunner.ts";
+import { providerUpdateLock } from "./providerMaintenanceCommandCoordinator.ts";
 import * as ProviderLatestVersions from "@t3tools/provider-core/server/ProviderLatestVersions";
 import {
   enrichProviderSnapshotWithVersionAdvisory,
@@ -1297,6 +1298,10 @@ describe("providerMaintenanceRunner", () => {
       yield* Deferred.succeed(releaseQueuedState, undefined);
 
       assert.strictEqual((yield* Deferred.await(finished)).status, "succeeded");
+      // The detached update still holds the provider until its locks are released.
+      yield* providerUpdateLock(lifecycleFor(CODEX_DRIVER).update!.lockKey).withPermits(1)(
+        Effect.void,
+      );
       const second = yield* updater.updateProvider(CODEX_DRIVER);
       assert.strictEqual(second.providers[0]?.updateState?.status, "succeeded");
     }).pipe(

@@ -56,7 +56,7 @@ import {
   IconSettings,
   IconX,
 } from "@tabler/icons-react-native";
-import { useCallback, useContext, useMemo, useState } from "react";
+import { useCallback, useContext, useState } from "react";
 import { Alert, Platform, Pressable, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -66,16 +66,15 @@ import { ScreenScrollView } from "../../components/ui/ScreenScrollView";
 import { copyTextWithHaptic } from "../../lib/copyTextWithHaptic";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
-import { useServerConfigs } from "../../state/entities";
 import { serverEnvironment } from "../../state/server";
 import { useHermesCron } from "../../state/hermesCron";
 import { useHermesPatches } from "../../state/hermesPatches";
 import { useHindsightMemory } from "../../state/hindsight";
+import { type HermesEnvironmentOption, useHermesEnvironmentOptions } from "./hermesEnvironments";
 import { HermesSkillsTab } from "./HermesSkillsTab";
 import { HermesNativeMemorySection } from "./HermesNativeMemorySection";
 import { HermesRunDelivery } from "./HermesRunDelivery";
 
-const HERMES_DRIVER = "hermes";
 type HermesTab = "tasks" | "memory" | "patches" | "skills";
 
 const TAB_LABELS: Record<HermesTab, string> = {
@@ -84,31 +83,6 @@ const TAB_LABELS: Record<HermesTab, string> = {
   patches: "Patches",
   skills: "Skills",
 };
-
-interface HermesEnvironmentOption {
-  readonly environmentId: EnvironmentId;
-  readonly label: string;
-}
-
-export function useHermesEnvironmentOptions(): ReadonlyArray<HermesEnvironmentOption> {
-  const configs = useServerConfigs();
-  return useMemo(() => {
-    const options: HermesEnvironmentOption[] = [];
-    for (const [environmentId, config] of configs) {
-      // Hermes is built in, so every environment lists it; only enabled ones count.
-      if (
-        config.providers.some((provider) => provider.driver === HERMES_DRIVER && provider.enabled)
-      ) {
-        options.push({ environmentId, label: config.environment.label });
-      }
-    }
-    return options.sort((left, right) => left.label.localeCompare(right.label));
-  }, [configs]);
-}
-
-export function useHermesProviderPresent(): boolean {
-  return useHermesEnvironmentOptions().length > 0;
-}
 
 export function HermesRouteScreen() {
   const navigation = useNavigation();

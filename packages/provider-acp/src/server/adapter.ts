@@ -9967,8 +9967,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               workAccepted: false,
               promptWireSettled,
               finalizesOnQuiet:
-                defersFinalizeForBackgroundWork ||
-                (isContinuationTurn && !followsAgentWorkState),
+                defersFinalizeForBackgroundWork || (isContinuationTurn && !followsAgentWorkState),
               promptDispatched,
               foregroundIdle: yield* Deferred.make<void>(),
               promptSentAt: null,

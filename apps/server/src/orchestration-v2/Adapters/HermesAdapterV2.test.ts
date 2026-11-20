@@ -452,6 +452,8 @@ describe("HermesAdapterV2 flavor", () => {
     assert.isTrue(flavor.supportsImagePrompts);
     assert.isTrue(HermesProviderCapabilitiesV2.subagents.supportsSubagents);
     assert.isTrue(HermesProviderCapabilitiesV2.sessions.supportsModelSwitchInSession);
+    // Upstream offers `t3_background_wait` only to adapters that declare it.
+    assert.isTrue(HermesProviderCapabilitiesV2.tools.supportsBackgroundWait);
     // Stock Hermes steers by interrupt and re-prompt; a patched one negotiates native steering.
     assert.isFalse(HermesProviderCapabilitiesV2.turns.supportsActiveSteering);
   });

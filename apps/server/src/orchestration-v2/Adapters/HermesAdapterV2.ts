@@ -109,6 +109,7 @@ export const HermesProviderCapabilitiesV2 = {
   tools: {
     ...AcpProviderCapabilitiesV2.tools,
     supportsMcpTools: true,
+    supportsBackgroundWait: true,
   },
   checkpointing: {
     ...AcpProviderCapabilitiesV2.checkpointing,

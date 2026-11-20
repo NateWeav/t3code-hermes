@@ -302,6 +302,11 @@ that commit's first 12 characters.
      `enablePostSettleContinuation` plus `isUnpromptedTurnUpdate`, covered by its wake-run tests.
    - `compactViaAdvertisedCommand`: siblings send `/compact` when the agent advertises it; Hermes
      always compacts with its own `/compress` (`supportsCompaction` plus `compactionCommand`).
+   - `wakeOnDetachedRequest`, `replyEndsWithUsageUpdate`: both users are Antigravity (the ACP
+     Registry sets them only for the Antigravity CLI); Hermes wakes through
+     `enablePostSettleContinuation` plus `isUnpromptedTurnUpdate`.
+   - `preserveRuntimeOnSettledInterrupt`: it only skips the restart that
+     `restartRuntimeOnEveryInterrupt` asks for, and Hermes never restarts on interrupt.
 2. New optional inputs. In `git diff R -- packages/provider-core/src/server packages/provider-acp/src/server`,
    find optional fields added to input types and options. Where Hermes builds that input itself,
    check that it passes the field on as its siblings do.

@@ -237,6 +237,7 @@ import * as CursorUsageAccounts from "@t3tools/provider-cursor/server/CursorUsag
 import * as UsageService from "./usage/UsageService.ts";
 import * as CodexUsageHistory from "./usage/CodexUsageHistory.ts";
 import * as RuntimeLayer from "./orchestration-v2/runtimeLayer.ts";
+import * as ThreadViewers from "./orchestration-v2/ThreadViewers.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
 import * as ThreadSearch from "./orchestration-v2/ThreadSearch.ts";
 import * as ThreadSettlementService from "./orchestration-v2/ThreadSettlementService.ts";
@@ -921,6 +922,8 @@ const layerRuntimeDependencies = layerRuntimeCoreDependencies
     // Hubs sit below the provider registry because Codex adapters read their cooldowns.
     Layer.provideMerge(Layer.merge(layerUsage, UsageLimitSources.layer)),
     Layer.provideMerge(layerBackground),
+    // The same layer the event sink uses; memoized, subscriptions and batch ranking share it.
+    Layer.provideMerge(ThreadViewers.layer),
     Layer.provideMerge(layerResourceDiagnostics),
     Layer.provideMerge(layerHermesCron),
     Layer.provideMerge(layerHermesSkills),
@@ -1043,6 +1046,7 @@ const layerMakeRoutes = Layer.mergeAll(
   Layer.provide(layerCommandReadiness),
   Layer.provide(ServerHttp.layerBrowserApiCors),
   Layer.provide(ServerHttp.layerHttpCompression),
+  Layer.provide(ServerHttp.layerUnloggedSignedRequests),
 );
 
 const layerMakeServer = Layer.unwrap(

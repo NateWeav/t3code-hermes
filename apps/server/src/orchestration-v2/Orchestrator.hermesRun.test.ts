@@ -39,6 +39,7 @@ import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAda
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import * as RuntimeLayer from "./runtimeLayer.ts";
 import * as ThreadCommandExecutor from "./ThreadCommandExecutor.ts";
+import * as ModelManifest from "../provider/ModelManifest.ts";
 
 const PlatformTestLayer = Layer.mergeAll(
   NodeServices.layer,
@@ -96,6 +97,7 @@ const TestLayer = Layer.mergeAll(
   ),
   Layer.provide(ServerConfigLayer),
   Layer.provide(ServerSettings.layerTest()),
+  Layer.provide(ModelManifest.layerTest),
   Layer.provide(
     Layer.succeed(ProviderInstanceRegistry.ProviderInstanceRegistry, {
       getInstance: (instanceId) =>

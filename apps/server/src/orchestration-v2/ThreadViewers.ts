@@ -10,7 +10,7 @@ export class ThreadViewers extends Context.Service<
     readonly view: (threadId: string) => Effect.Effect<void, never, Scope.Scope>;
     readonly isViewed: (threadId: string) => boolean;
   }
->()("t3/orchestration-v2/ThreadViewers") {}
+>()("t3-hermes/orchestration-v2/ThreadViewers") {}
 
 export const layer = Layer.sync(ThreadViewers, () => {
   const viewers = new Map<string, number>();

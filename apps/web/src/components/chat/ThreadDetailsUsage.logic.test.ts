@@ -144,4 +144,31 @@ describe("resolveThreadDetailsLimits", () => {
       rows: [{ label: "Session", left: 70, accounts: 1, from: { hubs: ["Hub"], signedIn: false } }],
     });
   });
+
+  it("pools a Hermes thread's hub accounts by the provider its model names", () => {
+    const hermes = {
+      ...claudeInstance(unsupported),
+      instanceId: ProviderInstanceId.make("hermes"),
+      driver: ProviderDriverKind.make("hermes"),
+      auth: { status: "authenticated" as const },
+    };
+    const sources = [
+      hub("Hub", [
+        { id: "a.json", limits: limitsAt(10) },
+        { id: "c.json", driver: codex, limits: limitsAt(30) },
+      ]),
+    ];
+    for (const usageLimits of [unsupported, undefined]) {
+      const resolved = resolveThreadDetailsLimits(
+        hermes.instanceId,
+        "custom:cliproxyapi:gpt-6.1-sol",
+        [{ ...hermes, usageLimits }],
+        sources,
+        now,
+      );
+      expect(resolved?.kind === "pool" && resolved.windows.map((w) => w.remainingPercent)).toEqual([
+        70,
+      ]);
+    }
+  });
 });

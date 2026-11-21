@@ -10,6 +10,7 @@ import {
   collectLimitAccounts,
   collectLimitPools,
   collectProviderUsageLimits,
+  collectThreadUsageLimits,
   displayLimitWindows,
   hubRoutes,
   instanceHubs,
@@ -39,8 +40,20 @@ export function resolveThreadDetailsLimits(
   const own =
     report?.accounts.find((entry) => entry.instanceId === provider.instanceId)?.limits ??
     provider.usageLimits;
-  if (!own) return null;
   const hubs = instanceHubs(provider, sources);
+  // Fork: Hermes has no limits or hub endpoint of its own; pool the hub accounts of the model's provider.
+  if (provider.auth.endpoint === undefined && (!own || own.unavailable?.reason === "unsupported")) {
+    const pooled = collectThreadUsageLimits({
+      environmentId: CARD_ENVIRONMENT,
+      instanceId: provider.instanceId,
+      model,
+      providers,
+      sources,
+      now,
+    });
+    if (pooled && pooled.windows.length > 0) return { kind: "pool", windows: pooled.windows };
+  }
+  if (!own) return null;
   if (limitsNotice(own) === null || hubs.length === 0) return { kind: "instance", limits: own };
   // An instance sent to a hub reads no limits of its own; its hub pools the accounts it spends.
   return hubPool(provider.driver, model, providers, hubs, now) ?? { kind: "instance", limits: own };

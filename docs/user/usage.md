@@ -202,10 +202,13 @@ accounts for other providers are not read. Codex accounts show banked reset cred
 account and choose **Use reset** to redeem one. No hub plugin is required.
 
 This connection supplies usage information; configure the provider separately to send agent
-requests through the hub. When a Claude or Codex turn stops on a usage limit without a reset
-time, T3 asks the hub when the model's next account comes back, so **Resume at reset** and
-auto-resume work through the hub. Codex would otherwise wait out a long hub cooldown inside the
-turn, so T3 stops that turn as Limited instead.
+requests through the hub. A thread uses the hub's limits and reset times only when its provider's
+endpoint has the same address as the hub, for example `http://127.0.0.1:8317` for both. Hermes has
+no endpoint of its own, so a Hermes thread shows the hub accounts of the provider its model names.
+When a Claude or Codex turn stops on a usage limit without a reset time, T3 asks the hub when the
+model's next account comes back, so **Resume at reset** and auto-resume work through the hub. Codex
+would otherwise wait out a long hub cooldown inside the turn, so T3 stops that turn as Limited
+instead. Remove the hub from the same settings section when you no longer need it.
 
 ## Subscription usage widget
 

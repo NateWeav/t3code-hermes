@@ -1,16 +1,18 @@
 import type {
-  EnvironmentId,
   ProviderInstanceId,
   ServerProvider,
+  ServerProviderUsageLimits,
+  ServerProviderUsageWindow,
   UsageLimitSourceSnapshots,
 } from "@t3tools/contracts";
 import {
-  collectThreadUsageLimits,
   type LimitPace,
   type LimitPoolWindow,
+  paceOf,
   paceRemainingPercent,
+  remainingPercent,
 } from "@t3tools/shared/usageLimits";
-import { formatDuration } from "@t3tools/shared/usageLimitsCopy";
+import { formatDuration, limitsNotice } from "@t3tools/shared/usageLimitsCopy";
 import { Link } from "@tanstack/react-router";
 import { msg, useGT, useLocale, useMessages } from "gt-react";
 import type { ReactNode } from "react";
@@ -24,6 +26,7 @@ import { formatUpcomingTimestamp } from "../../timestampFormat";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { formatContextWindowCompactionMessage } from "./compaction.logic";
 import { ThreadDetailsSection } from "./ThreadDetailsSection";
+import { nextPoolReset, poolSources, resolveThreadDetailsLimits } from "./ThreadDetailsUsage.logic";
 
 const PACE_LABEL: Record<LimitPace, string> = {
   ahead: msg("Ahead of pace"),
@@ -32,7 +35,6 @@ const PACE_LABEL: Record<LimitPace, string> = {
 };
 
 export interface ThreadDetailsUsageInput {
-  readonly environmentId: EnvironmentId;
   readonly providerInstanceId: ProviderInstanceId | null;
   readonly model: string | null;
   readonly providers: readonly ServerProvider[];
@@ -42,9 +44,14 @@ export interface ThreadDetailsUsageInput {
 
 type UsageTone = "error" | "warning" | null;
 
+function limitTone(left: number): UsageTone {
+  if (left <= 10) return "error";
+  if (left <= 20) return "warning";
+  return null;
+}
+
 /** The selected provider's limit windows. Each row reads as room left and opens the usage page. */
 export function ThreadDetailsUsage({
-  environmentId,
   providerInstanceId,
   model,
   providers,
@@ -53,16 +60,8 @@ export function ThreadDetailsUsage({
   const gt = useGT();
   const nowMinute = useNowMinute();
   const now = Date.parse(`${nowMinute}:00Z`);
-  const limits = collectThreadUsageLimits({
-    environmentId,
-    instanceId: providerInstanceId,
-    model,
-    providers,
-    sources,
-    now,
-  });
-  if (!limits) return null;
-  const { notice } = limits;
+  const resolved = resolveThreadDetailsLimits(providerInstanceId, model, providers, sources, now);
+  if (!resolved) return null;
 
   return (
     <ThreadDetailsSection
@@ -71,21 +70,39 @@ export function ThreadDetailsUsage({
       showHeading={false}
     >
       <div className="grid grid-cols-[auto_minmax(3rem,1fr)_auto] gap-x-3 text-xs">
-        {notice ? (
-          <UsageRow
-            label={gt("Limits", { $context: "usage limits row label" })}
-            fill={null}
-            tone={null}
-            value={gt("Unavailable")}
-            tooltip={<span className="text-foreground">{notice}</span>}
-            opensUsage
-          />
+        {resolved.kind === "pool" ? (
+          resolved.windows.map((window) => <PoolRow key={window.id} window={window} now={now} />)
         ) : (
-          limits.windows.map((window) => <LimitRow key={window.id} window={window} now={now} />)
+          <InstanceRows limits={resolved.limits} now={now} />
         )}
       </div>
     </ThreadDetailsSection>
   );
+}
+
+function InstanceRows({
+  limits,
+  now,
+}: {
+  readonly limits: ServerProviderUsageLimits;
+  readonly now: number;
+}) {
+  const gt = useGT();
+  const m = useMessages();
+  const notice = limitsNotice(limits, m);
+  if (notice) {
+    return (
+      <UsageRow
+        label={gt("Limits", { $context: "usage limits row label" })}
+        fill={null}
+        tone={null}
+        value={gt("Unavailable")}
+        tooltip={<span className="text-foreground">{notice}</span>}
+        opensUsage
+      />
+    );
+  }
+  return limits.windows.map((window) => <LimitRow key={window.id} window={window} now={now} />);
 }
 
 /** The thread's context window. The bar fills as context is used; the tick marks auto-compaction. */
@@ -155,21 +172,25 @@ export function ThreadDetailsContext({ usage }: { readonly usage: ContextWindowS
   );
 }
 
-function LimitRow({ window, now }: { readonly window: LimitPoolWindow; readonly now: number }) {
+function LimitRow({
+  window,
+  now,
+}: {
+  readonly window: ServerProviderUsageWindow;
+  readonly now: number;
+}) {
   const gt = useGT();
   const m = useMessages();
   const timestampFormat = usePrimarySettings((settings) => settings.timestampFormat);
-  const left = window.remainingPercent;
-  const pace = window.pace;
-  // A pooled window has no single clock; only a lone member's time left is meaningful.
-  const lone = window.members.length === 1 ? window.members[0] : undefined;
-  const timeLeft = lone ? paceRemainingPercent(lone.window, now) : null;
-  const resetsAt = window.resets.find((reset) => reset.at > now && reset.restoresPercent > 0)?.at;
+  const left = remainingPercent(window);
+  const pace = paceOf(window, now);
+  const timeLeft = paceRemainingPercent(window, now);
+  const resetsAt = window.resetsAt ? Date.parse(window.resetsAt) : Number.NaN;
   return (
     <UsageRow
       label={window.label}
       fill={left}
-      tone={left <= 10 ? "error" : left <= 20 ? "warning" : null}
+      tone={limitTone(left)}
       tick={timeLeft}
       value={`${left}%`}
       ariaValue={gt("{left}% left", { left })}
@@ -179,28 +200,77 @@ function LimitRow({ window, now }: { readonly window: LimitPoolWindow; readonly 
           <span className="text-foreground">
             {gt("{label}: {left}% left", { label: window.label, left })}
           </span>
-          {pace ? (
+          {pace && timeLeft !== null ? (
             <span className="text-muted-foreground">
-              {m(PACE_LABEL[pace])}
-              {timeLeft !== null ? (
-                <> · {gt("{timeLeft}% of the window left", { timeLeft })}</>
-              ) : null}
+              {m(PACE_LABEL[pace])} · {gt("{timeLeft}% of the window left", { timeLeft })}
             </span>
           ) : null}
-          {resetsAt !== undefined ? (
+          {window.resetsAt && resetsAt > now ? (
             <span className="text-muted-foreground">
-              {window.members.length > 1
-                ? `Next reset in ${formatDuration(resetsAt - now, m)} · ${formatUpcomingTimestamp(new Date(resetsAt).toISOString(), timestampFormat, now, undefined, m)}`
-                : gt("Resets in {duration} · {time}", {
-                    duration: formatDuration(resetsAt - now, m),
-                    time: formatUpcomingTimestamp(
-                      new Date(resetsAt).toISOString(),
-                      timestampFormat,
-                      now,
-                      undefined,
-                      m,
-                    ),
-                  })}
+              {gt("Resets in {duration} · {time}", {
+                duration: formatDuration(resetsAt - now, m),
+                time: formatUpcomingTimestamp(window.resetsAt, timestampFormat, now, undefined, m),
+              })}
+            </span>
+          ) : null}
+        </>
+      }
+    />
+  );
+}
+
+function PoolRow({ window, now }: { readonly window: LimitPoolWindow; readonly now: number }) {
+  const gt = useGT();
+  const m = useMessages();
+  const timestampFormat = usePrimarySettings((settings) => settings.timestampFormat);
+  const left = window.remainingPercent;
+  const accounts = window.members.length;
+  const from = poolSources(window);
+  const sourceLabels = [...from.hubs, ...(from.signedIn ? [gt("Signed-in accounts")] : [])];
+  const next = nextPoolReset(window, now);
+  const resetsAt = next?.member.window.resetsAt;
+  const reset =
+    next && resetsAt
+      ? {
+          duration: formatDuration(next.at - now, m),
+          time: formatUpcomingTimestamp(resetsAt, timestampFormat, now, undefined, m),
+        }
+      : null;
+  return (
+    <UsageRow
+      label={window.label}
+      fill={left}
+      tone={limitTone(left)}
+      value={`${left}%`}
+      ariaValue={gt("{left}% left", { left })}
+      opensUsage
+      tooltip={
+        <>
+          <span className="text-foreground">
+            {accounts > 1
+              ? gt("{label}: {left}% left across {accounts} accounts", {
+                  label: window.label,
+                  left,
+                  accounts,
+                })
+              : gt("{label}: {left}% left", { label: window.label, left })}
+          </span>
+          {window.pace ? (
+            <span className="text-muted-foreground">{m(PACE_LABEL[window.pace])}</span>
+          ) : null}
+          {next && reset ? (
+            <span className="text-muted-foreground">
+              {accounts > 1
+                ? gt("+{percent}% in {duration} · {time}", {
+                    percent: next.restoresPercent,
+                    ...reset,
+                  })
+                : gt("Resets in {duration} · {time}", reset)}
+            </span>
+          ) : null}
+          {sourceLabels.length > 0 ? (
+            <span className="text-muted-foreground">
+              {gt("From {sources}", { sources: sourceLabels.join(", ") })}
             </span>
           ) : null}
         </>

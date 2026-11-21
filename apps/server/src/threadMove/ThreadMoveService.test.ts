@@ -53,6 +53,7 @@ const makeHarness = Effect.gen(function* () {
   const prepareFails = yield* Ref.make(false);
   const activationFails = yield* Ref.make(false);
   const captures = yield* Ref.make(0);
+  const trackedFolders = yield* Ref.make<ReadonlyArray<{ path: string; name: string }>>([]);
   const deletedProjects = yield* Ref.make<ReadonlyArray<string>>([]);
   const requests = yield* Ref.make<ReadonlyArray<string>>([]);
   const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationV2ServerCommand>>([]);
@@ -132,9 +133,11 @@ const makeHarness = Effect.gen(function* () {
               Effect.as(project(projectId)),
             ),
           getById: () =>
-            Ref.get(state).pipe(
-              Effect.map((current) => Option.some(project(current.thread.projectId))),
-            ),
+            Effect.gen(function* () {
+              const { thread } = yield* Ref.get(state);
+              const folders = yield* Ref.get(trackedFolders);
+              return Option.some({ ...project(thread.projectId), trackedFolders: folders });
+            }),
         }),
         Layer.mock(WorkspaceTransfer.WorkspaceTransfer)({
           capture: ({ staging }) =>
@@ -173,6 +176,7 @@ const makeHarness = Effect.gen(function* () {
                 lastReachedAt: null,
                 lastError: null,
               },
+              capabilities: { repositoryIdentity: true },
             }),
         }),
         Layer.mock(ServerEnvironment.ServerEnvironment)({
@@ -197,6 +201,7 @@ const makeHarness = Effect.gen(function* () {
     requests,
     dispatched,
     deletedProjects,
+    trackedFolders,
   };
 });
 
@@ -246,6 +251,19 @@ it.effect("a running turn stops for a move, and continues here when the move is 
       (yield* Ref.get(dispatched)).map((command) => command.type),
       ["thread.stop", "message.dispatch"],
     );
+  }).pipe(Effect.scoped, Effect.provide(testLayer)),
+);
+
+it.effect("a project that tracks other folders refuses a move before stopping its turn", () =>
+  Effect.gen(function* () {
+    const { moves, state, trackedFolders, requests, dispatched, captures } = yield* makeHarness;
+    yield* Ref.update(state, (current) => ({ ...current, runs: [runningTurn] }));
+    yield* Ref.set(trackedFolders, [{ path: "/sibling", name: "sibling" }]);
+    assert.equal((yield* moves.move(input).pipe(Effect.flip)).reason, "unsupported");
+    assert.isUndefined((yield* Ref.get(state)).thread.move ?? undefined);
+    assert.deepEqual(yield* Ref.get(dispatched), []);
+    assert.deepEqual(yield* Ref.get(requests), []);
+    assert.equal(yield* Ref.get(captures), 0);
   }).pipe(Effect.scoped, Effect.provide(testLayer)),
 );
 

@@ -33,15 +33,18 @@ jobs:
           fetch-depth: 0
           filter: tree:0
 
+      # The checkout is the PR merged onto main; compare with that merge's main parent. A fresh
+      # fetch of main can be newer and lower, which reports the PR as growing what main just cut.
       - name: Compare with main
+        # HEAD is the PR merge commit; its first parent is the main it was built on. A freshly
+        # fetched main can hold lower values the PR never saw, which would read as growth.
         run: |
-          git fetch --quiet origin main
-          if ! git cat-file -e "FETCH_HEAD:$BUDGET" 2>/dev/null; then
+          if ! git cat-file -e "HEAD^1:$BUDGET" 2>/dev/null; then
             echo "main has no agent context budget yet."
             exit 0
           fi
-          git show "FETCH_HEAD:$BUDGET" > "$RUNNER_TEMP/main.json"
-          main_sha=$(git rev-parse FETCH_HEAD)
+          git show "HEAD^1:$BUDGET" > "$RUNNER_TEMP/main.json"
+          main_sha=$(git rev-parse HEAD^1)
           git remote add upstream "$UPSTREAM_URL"
           git fetch --quiet --filter=tree:0 upstream main
           # Upstream's budget at the last upstream commit merged into $1.

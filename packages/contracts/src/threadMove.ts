@@ -59,7 +59,7 @@ export class ThreadMoveError extends Schema.TaggedError<ThreadMoveError>()("Thre
       case "busy":
         return "The thread is still busy. Send or remove its queued messages and stop watching its pull requests, then try again.";
       case "unsupported":
-        return "This thread cannot be moved. Use an unarchived, top-level conversation in a Git checkout.";
+        return "This thread cannot be moved. Use an unarchived, top-level conversation in a single-folder Git project.";
       case "destination":
         return "The destination needs a full-access environment link and the selected provider and model. Check Connections and provider settings on both machines.";
       case "transfer":

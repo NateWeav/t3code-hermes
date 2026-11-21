@@ -17,6 +17,7 @@ import { GitWorkflowService } from "../git/GitWorkflowService.ts";
 import { HermesChatHubService } from "../hermes/HermesChatHubService.ts";
 import { HermesChatService } from "../hermes/HermesChatService.ts";
 import { PaperclipService } from "../integrations/paperclip/PaperclipService.ts";
+import { TaskFolders } from "../workspace/TaskFolders.ts";
 import * as McpHttpServer from "../mcp/McpHttpServer.ts";
 import { PreviewAutomationBroker } from "../mcp/PreviewAutomationBroker.ts";
 import {
@@ -64,6 +65,7 @@ const toolHandlerServices = Layer.mergeAll(
   Layer.mock(GitWorkflowService)({}),
   Layer.mock(HermesChatHubService)({}),
   Layer.mock(HermesChatService)({}),
+  Layer.mock(TaskFolders)({}),
   Layer.mock(IssueService)({}),
   Layer.mock(ManagedProjectFolders)({ namedProjectsRoot: "" }),
   Layer.mock(McpProviderSessions)({}),

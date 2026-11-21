@@ -35,6 +35,7 @@ import * as EffectOutbox from "./EffectOutbox.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProjectStore from "./ProjectStore.ts";
+import { layerNoTaskFolders } from "./ProviderTurnStartService.testkit.ts";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import * as RuntimeLayer from "./runtimeLayer.ts";
@@ -115,6 +116,7 @@ const TestLayer = Layer.mergeAll(
     }),
   ),
   Layer.provide(Layer.mock(ProjectService.ProjectService)({ getById: () => Effect.succeedNone })),
+  Layer.provide(layerNoTaskFolders),
   Layer.provide(PlatformTestLayer),
 );
 

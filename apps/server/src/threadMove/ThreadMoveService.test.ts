@@ -173,6 +173,7 @@ const makeHarness = Effect.gen(function* () {
                 lastReachedAt: null,
                 lastError: null,
               },
+              capabilities: { repositoryIdentity: true },
             }),
         }),
         Layer.mock(ServerEnvironment.ServerEnvironment)({

@@ -7,7 +7,7 @@ import type {
 } from "@t3tools/contracts";
 import { formatModelSlugName, resolveSelectableModel } from "@t3tools/shared/model";
 import { formatTokens } from "@t3tools/shared/usageFormat";
-import { fileBasename } from "@t3tools/shared/path";
+import { fileDisplayName } from "@t3tools/shared/path";
 import { resolveModelShortName } from "../providerClients.ts";
 import { isTerminalSubagentStatus } from "./subagentRuntime.ts";
 import { mFallback, msg } from "gt-i18n";
@@ -139,7 +139,7 @@ export function resolveSubagentMetadata(
               : input.childThread?.worktreePath
                 ? resolve(msg("Worktree", { $context: "field label" }))
                 : resolve(msg("Workspace", { $context: "field label" })),
-            value: input.childThread?.branch ?? fileBasename(childWorkspace),
+            value: input.childThread?.branch ?? fileDisplayName(childWorkspace),
           },
         ]
       : []),

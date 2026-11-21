@@ -68,6 +68,7 @@ import { claudeMcpToolPresentationInput } from "./claude_mcp_tool_presentation/i
 import { assertClaudeMcpToolPresentationOutput } from "./claude_mcp_tool_presentation/output.ts";
 import { claudeResultIsErrorInput } from "./claude_result_is_error/input.ts";
 import { assertClaudeResultIsErrorOutput } from "./claude_result_is_error/output.ts";
+import { assertClaudeUsageLimitOutput } from "./usage_limit/claude_output.ts";
 import { grokAutoBlockedCommandInput } from "./grok_auto_blocked_command/input.ts";
 import { kiroCompactionInput } from "./kiro_compaction/input.ts";
 import { kiroForkFromTurnInput } from "./kiro_fork_from_turn/input.ts";
@@ -650,6 +651,18 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         modelSelection: HERMES_MODEL_SELECTION,
         assertOutput: assertIdleResumeConversation,
         assertProviderDetails: assertHermesIdleResumeSession,
+      },
+    ],
+  },
+  {
+    name: "usage_limit",
+    buildInput: simpleInput,
+    providers: [
+      {
+        driver: ProviderDriverKind.make("claudeAgent"),
+        transcriptFile: new URL("./usage_limit/claude_transcript.ndjson", import.meta.url),
+        modelSelection: CLAUDE_MODEL_SELECTION,
+        assertOutput: assertClaudeUsageLimitOutput,
       },
     ],
   },

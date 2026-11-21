@@ -94,15 +94,19 @@ export const OmittedWhenNull = <Value extends Schema.Top>(value: Value) => {
   );
 };
 
+const UnknownArrayElement = Schema.Unknown.pipe(
+  Schema.decodeTo(Schema.Undefined, {
+    decode: SchemaGetter.succeed(undefined),
+    encode: SchemaGetter.passthrough(),
+  }),
+);
+
 /** Prefer {@link ForwardCompatibleUnion} for tagged unions so malformed known members still fail. */
 export const ForwardCompatibleArray = <Element extends Schema.Top>(element: Element) =>
+  // Exit derives its wire codec from the encoded shape, which keeps the union but drops recovery middleware.
   Schema.Array(
-    Schema.UndefinedOr(element).pipe(
-      // Fork: no catchEncoding here. Upstream also put one on this side, but it made a nested
-      // ForwardCompatibleArray drop the whole outer element whenever it dropped one of its own (a
-      // Hermes cron job vanished when one run had an unknown status). The catch on the decoded side
-      // below already sends an unencodable element as a hole.
-      Schema.catchDecoding(() => Effect.succeedSome(undefined)),
+    Schema.Union([element, UnknownArrayElement]).pipe(
+      Schema.catchEncoding(() => Effect.succeedSome(undefined)),
     ),
   ).pipe(
     Schema.decodeTo(

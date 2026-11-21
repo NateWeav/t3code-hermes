@@ -220,7 +220,8 @@ enabled and a full-access link.
 
 A thread that is working stops first and continues on the destination once the move finishes.
 Commands it was running are not carried over, so the agent starts them again there. Queued messages
-and watched pull requests keep a thread from moving.
+and watched pull requests keep a thread from moving, and so does a project that covers several
+repositories.
 
 If the thread hit a usage limit with a known reset time, enable **Resume when limits reset** to
 continue automatically on the destination. Keep that machine online and signed in. Wait for the

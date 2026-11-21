@@ -585,6 +585,12 @@ const make = Effect.gen(function* () {
     if (source.thread.move?.direction === "outgoing") return false;
     const blocked = moveBlocker(source);
     if (blocked !== null) return yield* new ThreadMoveError({ reason: blocked });
+    // The package carries one checkout; a project's other tracked repositories would stay behind.
+    const project = yield* projects
+      .getById(source.thread.projectId)
+      .pipe(Effect.mapError(storageError));
+    if (Option.exists(project, ({ trackedFolders }) => (trackedFolders?.length ?? 0) > 0))
+      return yield* new ThreadMoveError({ reason: "unsupported" });
     if (!isWorking(source)) return false;
     yield* management.dispatch({
       type: "thread.stop",

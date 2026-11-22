@@ -547,7 +547,7 @@ export const OrchestrationV2AppThread = Schema.Struct({
   /** Set on threads mirrored from a Hermes background run (fork); absent elsewhere. */
   hermesRun: Schema.optional(Schema.NullOr(ThreadHermesRun)),
   lastTitleRegeneration: Schema.optional(Schema.NullOr(OrchestrationV2LastTitleRegeneration)),
-  /** Set by a rename until a generated title replaces it; absent reads as false. */
+  /** Set by a rename or a naming launch until a generated title replaces it; absent reads false. */
   titleRenamed: Schema.optional(Schema.Boolean),
   rollbackRequestId: Schema.optional(CommandId),
   rollbackFailure: Schema.optional(
@@ -3278,6 +3278,7 @@ export const OrchestrationV2Command = Schema.Union([
     threadId: ThreadId,
     projectId: ProjectId,
     title: TrimmedNonEmptyString,
+    titleRenamed: Schema.optional(Schema.Boolean),
     modelSelection: ModelSelection,
     runtimeMode: RuntimeMode,
     interactionMode: ProviderInteractionMode,

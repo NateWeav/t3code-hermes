@@ -196,13 +196,13 @@ it.layer(NodeServices.layer)("host CLI commands", (it) => {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
         const bin = yield* fs.makeTempDirectoryScoped();
-        yield* fs.writeFileString(path.join(bin, "t3"), "#!/bin/sh\n", { mode: 0o755 });
+        yield* fs.writeFileString(path.join(bin, "t3-hermes"), "#!/bin/sh\n", { mode: 0o755 });
         const hostCommand = (searchPath: string) =>
           resolveHostCliCommand("doctor").pipe(
             Effect.provideService(HostProcess.ExecutablePath, "/usr/bin/node"),
             Effect.provideService(HostProcess.Arguments, [
               "/usr/bin/node",
-              "/opt/t3/lib/node_modules/t3/dist/bin.mjs",
+              "/opt/t3/lib/node_modules/t3-hermes/dist/bin.mjs",
             ]),
             Effect.provideService(HostProcess.IsExecutable, false),
             Effect.provideService(HostProcess.Platform, "linux"),
@@ -211,15 +211,15 @@ it.layer(NodeServices.layer)("host CLI commands", (it) => {
 
         // A relative entry was searched from this process's directory, unlike the user's shell.
         expect(yield* hostCommand(path.relative(process.cwd(), bin))).toEqual({
-          command: `${hostShellWord("linux", path.join(bin, "t3"))} doctor`,
+          command: `${hostShellWord("linux", path.join(bin, "t3-hermes"))} doctor`,
           launcher: false,
         });
         // An empty entry makes the shell search its own directory first, wherever that is.
         expect(yield* hostCommand(`:${bin}`)).toEqual({
-          command: `${hostShellWord("linux", path.join(bin, "t3"))} doctor`,
+          command: `${hostShellWord("linux", path.join(bin, "t3-hermes"))} doctor`,
           launcher: false,
         });
-        expect(yield* hostCommand(bin)).toEqual({ command: "t3 doctor", launcher: false });
+        expect(yield* hostCommand(bin)).toEqual({ command: "t3-hermes doctor", launcher: false });
       }),
   );
 });

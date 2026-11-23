@@ -25,6 +25,12 @@ const observeEndpointUrl = repoEnv.T3CODE_RELAY_URL?.trim()
   ? new URL("/v1/mobile/observe", repoEnv.T3CODE_RELAY_URL.trim()).toString()
   : "https://observe.invalid";
 
+// expo-observe's native module throws "Project ID is required" while constructing, which aborts
+// the JS bundle before `main` registers and leaves the app on the splash screen. Builds without an
+// EAS project (forks, local and CI APKs) still need some ID there. It is never used to reach Expo:
+// `observe.endpointUrl` stays on `.invalid` without a relay, and OTA updates stay off below.
+const OBSERVE_PLACEHOLDER_PROJECT_ID = "00000000-0000-0000-0000-000000000000";
+
 const fromRepoRoot = (relativePath: string) => `../../${relativePath}`;
 const androidAdaptiveForeground = "./assets/android-icon-foreground.png";
 
@@ -499,9 +505,7 @@ const config: ExpoConfig = {
       tracesToken: repoEnv.EXPO_PUBLIC_OTLP_TRACES_TOKEN ?? null,
     },
     eas: {
-      ...(repoEnv.T3HERMES_EAS_PROJECT_ID?.trim()
-        ? { projectId: repoEnv.T3HERMES_EAS_PROJECT_ID.trim() }
-        : {}),
+      projectId: repoEnv.T3HERMES_EAS_PROJECT_ID?.trim() || OBSERVE_PLACEHOLDER_PROJECT_ID,
       observe: { endpointUrl: observeEndpointUrl },
     },
   },

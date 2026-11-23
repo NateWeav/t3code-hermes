@@ -3,7 +3,10 @@ import { afterEach, expect, it, vi } from "vite-plus/test";
 
 // Keep config parsing independent of local env files and build credentials.
 vi.mock("../../scripts/lib/public-config.ts", () => ({
-  loadRepoEnv: () => ({ APP_VARIANT: process.env.APP_VARIANT }),
+  loadRepoEnv: () => ({
+    APP_VARIANT: process.env.APP_VARIANT,
+    T3HERMES_EAS_PROJECT_ID: process.env.T3HERMES_EAS_PROJECT_ID,
+  }),
 }));
 
 afterEach(() => {
@@ -39,4 +42,19 @@ it.each([
   expect(config.android?.intentFilters?.[0]?.data).toEqual([
     { scheme: "https", host, pathPrefix: "/threads/" },
   ]);
+});
+
+it("keeps a project ID for expo-observe and OTA updates off when no EAS project is configured", async () => {
+  vi.stubEnv("T3HERMES_EAS_PROJECT_ID", undefined);
+  const config = await loadConfig("production");
+  expect(config.extra?.eas?.projectId).toBe("00000000-0000-0000-0000-000000000000");
+  expect(config.updates?.enabled).toBe(false);
+  expect(config.updates?.url).toBeUndefined();
+});
+
+it("uses the configured EAS project ID for expo-observe and OTA updates", async () => {
+  vi.stubEnv("T3HERMES_EAS_PROJECT_ID", " 11111111-1111-4111-8111-111111111111 ");
+  const config = await loadConfig("production");
+  expect(config.extra?.eas?.projectId).toBe("11111111-1111-4111-8111-111111111111");
+  expect(config.updates?.url).toBe("https://u.expo.dev/11111111-1111-4111-8111-111111111111");
 });

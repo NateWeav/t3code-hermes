@@ -51,7 +51,13 @@ import * as Schema from "effect/Schema";
 import * as Rpc from "effect/rpc/Rpc";
 import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as RpcMiddleware from "effect/rpc/RpcMiddleware";
-import { EnvironmentId, NonNegativeInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import {
+  EnvironmentId,
+  IsoDateTime,
+  NonNegativeInt,
+  ThreadId,
+  TrimmedNonEmptyString,
+} from "./baseSchemas.ts";
 import { SecretSourceCheckResult } from "./settingsSecretValue.ts";
 import { SecretReference } from "./secretReference.ts";
 import {
@@ -504,6 +510,22 @@ import {
   TextGeneratorError,
 } from "./settings.ts";
 import {
+  WorkflowAnswerInput,
+  WorkflowRequestError,
+  WorkflowDefinitionChangeResult,
+  WorkflowDefinitionDeleteInput,
+  WorkflowDefinitionFiles,
+  WorkflowDefinitionGetInput,
+  WorkflowDefinitionSaveInput,
+  WorkflowRunCancelInput,
+  WorkflowRunDetail,
+  WorkflowRunGetInput,
+  WorkflowRunResumeInput,
+  WorkflowCounts,
+  WorkflowRunsSnapshot,
+  WorkflowRunsSubscribeInput,
+} from "./workflow.ts";
+import {
   ScheduledTaskDeleteInput,
   ScheduledTaskDeleteResult,
   ScheduledTaskError,
@@ -521,6 +543,7 @@ import {
   ScheduledTaskMutationResult,
 } from "./scheduledTask.ts";
 import { SecretRequestAnswerInput, SecretRequestError } from "./secretRequest.ts";
+import { AgentFeedbackAnswerInput, AgentFeedbackRequestError } from "./agentFeedback.ts";
 import {
   ProjectCloneActionInput,
   ProjectCloneActionResult,
@@ -737,6 +760,16 @@ export const WS_METHODS = {
   paperclipOverview: "paperclip.overview",
   serverRefreshUsageRates: "server.refreshUsageRates",
 
+  workflowsSubscribe: "workflows.subscribe",
+  workflowsCounts: "workflows.counts",
+  workflowsGet: "workflows.get",
+  workflowsAnswer: "workflows.answer",
+  workflowsResume: "workflows.resume",
+  workflowsCancel: "workflows.cancel",
+  workflowsGetDefinition: "workflows.getDefinition",
+  workflowsSaveDefinition: "workflows.saveDefinition",
+  workflowsDeleteDefinition: "workflows.deleteDefinition",
+
   scheduledTasksSubscribe: "scheduledTasks.subscribe",
   scheduledTasksUpsert: "scheduledTasks.upsert",
   scheduledTasksSetEnabled: "scheduledTasks.setEnabled",
@@ -744,6 +777,7 @@ export const WS_METHODS = {
   scheduledTasksRunNow: "scheduledTasks.runNow",
   scheduledTasksRotateWebhookToken: "scheduledTasks.rotateWebhookToken",
   secretsAnswerRequest: "secrets.answerRequest",
+  agentFeedbackAnswerRequest: "agentFeedback.answerRequest",
   guestShareCreate: "guestShare.create",
   scheduledTasksListWebhookDeliveries: "scheduledTasks.listWebhookDeliveries",
   scheduledTasksGetWebhookDelivery: "scheduledTasks.getWebhookDelivery",
@@ -848,7 +882,9 @@ const WsServerRemoveKeybindingRpc = Rpc.make(WS_METHODS.serverRemoveKeybinding, 
 
 const WsServerProbeRpc = Rpc.make(WS_METHODS.serverProbe, {
   payload: Schema.Struct({}),
-  success: Schema.Struct({}),
+  success: Schema.Struct({
+    serverTime: Schema.optionalKey(IsoDateTime),
+  }),
   error: EnvironmentAuthorizationError,
 });
 
@@ -2659,6 +2695,59 @@ const WsSubscribeServerLifecycleRpc = Rpc.make(WS_METHODS.subscribeServerLifecyc
   stream: true,
 });
 
+const WsWorkflowsSubscribeRpc = Rpc.make(WS_METHODS.workflowsSubscribe, {
+  payload: WorkflowRunsSubscribeInput,
+  success: WorkflowRunsSnapshot,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
+
+const WsWorkflowsCountsRpc = Rpc.make(WS_METHODS.workflowsCounts, {
+  payload: WorkflowRunsSubscribeInput,
+  success: WorkflowCounts,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
+
+const WsWorkflowsGetRpc = Rpc.make(WS_METHODS.workflowsGet, {
+  payload: WorkflowRunGetInput,
+  success: WorkflowRunDetail,
+  error: Schema.Union([WorkflowRequestError, EnvironmentAuthorizationError]),
+});
+
+const WsWorkflowsAnswerRpc = Rpc.make(WS_METHODS.workflowsAnswer, {
+  payload: WorkflowAnswerInput,
+  error: Schema.Union([WorkflowRequestError, EnvironmentAuthorizationError]),
+});
+
+const WsWorkflowsResumeRpc = Rpc.make(WS_METHODS.workflowsResume, {
+  payload: WorkflowRunResumeInput,
+  error: Schema.Union([WorkflowRequestError, EnvironmentAuthorizationError]),
+});
+
+const WsWorkflowsCancelRpc = Rpc.make(WS_METHODS.workflowsCancel, {
+  payload: WorkflowRunCancelInput,
+  error: Schema.Union([WorkflowRequestError, EnvironmentAuthorizationError]),
+});
+
+const WsWorkflowsGetDefinitionRpc = Rpc.make(WS_METHODS.workflowsGetDefinition, {
+  payload: WorkflowDefinitionGetInput,
+  success: WorkflowDefinitionFiles,
+  error: EnvironmentAuthorizationError,
+});
+
+const WsWorkflowsSaveDefinitionRpc = Rpc.make(WS_METHODS.workflowsSaveDefinition, {
+  payload: WorkflowDefinitionSaveInput,
+  success: WorkflowDefinitionChangeResult,
+  error: EnvironmentAuthorizationError,
+});
+
+const WsWorkflowsDeleteDefinitionRpc = Rpc.make(WS_METHODS.workflowsDeleteDefinition, {
+  payload: WorkflowDefinitionDeleteInput,
+  success: WorkflowDefinitionChangeResult,
+  error: EnvironmentAuthorizationError,
+});
+
 const WsScheduledTasksSubscribeRpc = Rpc.make(WS_METHODS.scheduledTasksSubscribe, {
   payload: ScheduledTaskListInput,
   success: ScheduledTaskListResult,
@@ -2708,6 +2797,11 @@ const WsGuestShareCreateRpc = Rpc.make(WS_METHODS.guestShareCreate, {
 const WsSecretsAnswerRequestRpc = Rpc.make(WS_METHODS.secretsAnswerRequest, {
   payload: SecretRequestAnswerInput,
   error: Schema.Union([SecretRequestError, EnvironmentAuthorizationError]),
+});
+
+const WsAgentFeedbackAnswerRequestRpc = Rpc.make(WS_METHODS.agentFeedbackAnswerRequest, {
+  payload: AgentFeedbackAnswerInput,
+  error: Schema.Union([AgentFeedbackRequestError, EnvironmentAuthorizationError]),
 });
 
 const WsScheduledTasksListWebhookDeliveriesRpc = Rpc.make(
@@ -2886,6 +2980,15 @@ export const CoreWsRpcGroup = RpcGroup.make(
   WsServerGetUsageSummaryRpc,
   WsServerRefreshUsageRatesRpc,
   WsServerSignalProcessRpc,
+  WsWorkflowsSubscribeRpc,
+  WsWorkflowsCountsRpc,
+  WsWorkflowsGetRpc,
+  WsWorkflowsAnswerRpc,
+  WsWorkflowsResumeRpc,
+  WsWorkflowsCancelRpc,
+  WsWorkflowsGetDefinitionRpc,
+  WsWorkflowsSaveDefinitionRpc,
+  WsWorkflowsDeleteDefinitionRpc,
   WsScheduledTasksSubscribeRpc,
   WsScheduledTasksUpsertRpc,
   WsScheduledTasksSetEnabledRpc,
@@ -2893,6 +2996,7 @@ export const CoreWsRpcGroup = RpcGroup.make(
   WsScheduledTasksRunNowRpc,
   WsScheduledTasksRotateWebhookTokenRpc,
   WsSecretsAnswerRequestRpc,
+  WsAgentFeedbackAnswerRequestRpc,
   WsScheduledTasksListWebhookDeliveriesRpc,
   WsScheduledTasksGetWebhookDeliveryRpc,
   WsServerReportClientActivityRpc,

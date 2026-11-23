@@ -25,7 +25,7 @@ export function getDesktopCallbackScheme(isDevelopment: boolean): string {
   return getDesktopScheme(isDevelopment);
 }
 
-function getDesktopOrigin(isDevelopment: boolean): string {
+export function getDesktopOrigin(isDevelopment: boolean): string {
   return `${getDesktopScheme(isDevelopment)}://${DESKTOP_HOST}`;
 }
 

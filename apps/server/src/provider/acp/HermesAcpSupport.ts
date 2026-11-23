@@ -12,7 +12,7 @@ import {
 } from "@t3tools/contracts";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Clock from "effect/Clock";
-import type * as Duration from "effect/Duration";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -24,6 +24,7 @@ import type * as EffectAcpSchema from "effect-acp/compat";
 import { AgentScope } from "@t3tools/shared/AgentScope";
 import { normalizeModelSlug } from "@t3tools/shared/model";
 import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
+import { resolveProviderProbeTimeoutMs } from "@t3tools/provider-core/server/snapshotProbe";
 
 import {
   collectSessionConfigOptionValues,
@@ -550,6 +551,12 @@ export function buildHermesAcpSpawnInput(
 
 const HERMES_SESSION_LOAD_REPLAY_IDLE_GAP = "90 seconds";
 
+/**
+ * A cold Hermes can spend ~50s on SQLite maintenance during `initialize` and then start its
+ * gateway in `session/new`, so its handshake gets longer than the shared ACP startup bound.
+ */
+export const HERMES_ACP_READINESS_TIMEOUT_MS = 120_000;
+
 export const makeHermesAcpRuntime = Effect.fn("HermesAcpSupport.makeHermesAcpRuntime")(function* (
   input: HermesAcpRuntimeInput,
 ): Effect.fn.Return<
@@ -571,6 +578,13 @@ export const makeHermesAcpRuntime = Effect.fn("HermesAcpSupport.makeHermesAcpRun
       // Hermes always answers `session/load`, often seconds after replaying history. Treating a
       // quiet replay as loaded would send `set_model` and the rollback rewind before the load.
       sessionLoadReplayIdleGap: HERMES_SESSION_LOAD_REPLAY_IDLE_GAP,
+      startupRequestTimeout: Duration.millis(
+        resolveProviderProbeTimeoutMs(
+          "hermes",
+          HERMES_ACP_READINESS_TIMEOUT_MS,
+          input.environment ?? process.env,
+        ),
+      ),
       ...runtimeInput,
       ...(requestLogger === undefined ? {} : { requestLogger }),
       spawn: buildHermesAcpSpawnInput(input.hermesSettings, input.cwd, input.environment),

@@ -116,6 +116,9 @@ import Migration0104 from "./Migrations/104_ProjectionProjectsTrackedFolders.ts"
 import Migration0105 from "./Migrations/105_TaskFolders.ts";
 import Migration0106 from "./Migrations/106_WorktreePathKeyIndex.ts";
 import Migration0107 from "./Migrations/107_DeferredSlashCommandIndex.ts";
+import Migration0108 from "./Migrations/108_AgentFeedback.ts";
+import Migration0109 from "./Migrations/109_IssueTrackerAccounts.ts";
+import Migration0110 from "./Migrations/110_Workflows.ts";
 
 const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
@@ -226,6 +229,9 @@ const migrationEntries = [
   [105, "TaskFolders", Migration0105],
   [106, "WorktreePathKeyIndex", Migration0106],
   [107, "DeferredSlashCommandIndex", Migration0107],
+  [108, "AgentFeedback", Migration0108],
+  [109, "IssueTrackerAccounts", Migration0109],
+  [110, "Workflows", Migration0110],
   // Fork: never add fork migrations here. Any id this fork takes is one upstream
   // will assign later, and the migrator would skip upstream's migration at it
   // (see reconcileForkMigrations and docs/internals/legacy-orchestration-migration.md).

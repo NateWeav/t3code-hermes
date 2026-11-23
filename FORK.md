@@ -54,7 +54,7 @@ and slash-command rows are not Hermes-specific either: the other ACP agents pick
 The Hermes adapter builds on the shared ACP adapter (`packages/provider-acp/src/server/adapter.ts`
 over `packages/provider-acp/src/server/`) that also backs Grok, Antigravity, and ACP registry agents, so
 it inherits streaming, tool-call cards, approvals, steering, session resume, and model switching.
-See [docs/internals/providers.md](./docs/internals/providers.md).
+See [docs/internals/03_providers.md](./docs/internals/03_providers.md).
 
 ## Requirements
 
@@ -107,7 +107,7 @@ needs to stay installed. State lives in `~/.t3-hermes/userdata`, separate from u
 Connected clients also offer **Update server** when the host is behind. The service runs headless
 `serve`, so it does not auto-create a project. Add one from the client. See
 [docs/user/background-service.md](./docs/user/background-service.md) for troubleshooting. To work
-on the fork itself, see [docs/operations/development.md](./docs/operations/development.md).
+on the fork itself, see [docs/operations/00_development.md](./docs/operations/00_development.md).
 
 **Reaching it.** The service listens on `127.0.0.1:4773`. `pair --tailscale` fronts it with
 Tailscale Serve over HTTPS, and that mapping survives restarts. To bind a LAN or tailnet address
@@ -126,7 +126,7 @@ as long as it isn't abused. Run `npx t3-hermes@nightly connect link` on the host
 prints a sign-in code), then `npx t3-hermes@nightly service restart`. Webhook tasks then get a
 public URL. Each linked machine takes one of your account's tunnels (three by default), so link
 long-lived hosts only, not dev servers. Desktop sign-in shares T3 Code's callback (see
-[Connect setup](./docs/operations/connect-setup.md#t3-hermes-builds)). Mobile builds ship without
+[Connect setup](./docs/operations/02_connect-setup.md#t3-hermes-builds)). Mobile builds ship without
 it: upstream's Clerk does not allow the Hermes app's redirects.
 
 **Bind deliberately.** The server controls agents on the host, which is remote code execution by
@@ -359,7 +359,7 @@ upstream-only infrastructure. This fork therefore diverges in `.github/workflows
   client tracing stays off without Cloudflare credentials. Windows code signing
   degrades to unsigned; macOS builds are signed with the stable self-signed identity in
   `MACOS_SELF_SIGNED_P12` when set, so in-app updates pass Squirrel.Mac's same-signer check (see
-  [self-signed fallback](./docs/operations/release.md#self-signed-fallback)). The desktop updater
+  [self-signed fallback](./docs/operations/03_release.md#self-signed-fallback)). The desktop updater
   feed is derived from `GITHUB_REPOSITORY`, so fork builds self-update from fork releases.
   Dispatching `release.yml` by hand defaults to the `preview` channel, which nothing installs
   unless asked for by name.

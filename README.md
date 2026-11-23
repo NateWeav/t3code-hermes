@@ -112,8 +112,8 @@ git clone https://github.com/NateWeav/t3code-hermes
 cd t3code-hermes && vp i
 ```
 
-Start with the [development runbook](./docs/operations/development.md) and the
-[architecture overview](./docs/internals/overview.md).
+Start with the [development runbook](./docs/operations/00_development.md) and the
+[architecture overview](./docs/internals/01_architecture.md).
 
 ## Issues
 

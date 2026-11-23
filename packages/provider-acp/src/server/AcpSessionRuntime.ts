@@ -110,6 +110,8 @@ export interface AcpSessionRuntimeOptions {
   readonly resumeSessionId?: string;
   readonly resumeMethod?: "load" | "resume";
   readonly sessionLoadTimeout?: Duration.Input;
+  /** Bounds `initialize`, `session/new` and `session/resume`; agents with a slow cold start raise it. */
+  readonly startupRequestTimeout?: Duration.Input;
   readonly sessionLoadReplayIdleGap?: Duration.Input;
   // Treat replay going quiet as loaded, for agents whose session/load may never reply.
   readonly sessionLoadReplayIdleReadiness?: boolean;
@@ -1442,7 +1444,7 @@ export const make = Effect.fn("AcpSessionRuntime.make")(function* (
   ): Effect.Effect<A, EffectAcpErrors.AcpError> =>
     effect.pipe(
       Effect.timeoutOrElse({
-        duration: startupRequestTimeout,
+        duration: options.startupRequestTimeout ?? startupRequestTimeout,
         orElse: () =>
           Effect.fail(
             new EffectAcpErrors.AcpTransportError({

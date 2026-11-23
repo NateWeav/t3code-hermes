@@ -10,6 +10,7 @@ import { causeErrorTag } from "@t3tools/shared/observability";
 import * as Cause from "effect/Cause";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
@@ -34,6 +35,7 @@ import {
 import * as ProviderLatestVersions from "@t3tools/provider-core/server/ProviderLatestVersions";
 import {
   HERMES_BUILT_IN_SLASH_COMMANDS,
+  HERMES_ACP_READINESS_TIMEOUT_MS,
   HERMES_FALLBACK_MODEL_ID,
   makeHermesAcpRuntime,
   resolveHermesAcpBaseModelId,
@@ -72,12 +74,11 @@ const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({
 });
 
 /**
- * Whole-probe budget for spawn, `initialize`, `session/new`, and model listing. A cold Hermes can
- * spend ~50s on SQLite maintenance during `initialize` and then start its gateway in `session/new`.
- * The ACP handshake is the whole health check: `hermes --version` runs Hermes's synchronous update
- * check (git plus GitHub, 20s per git call), so it is no measure of whether Hermes can run.
+ * Whole-probe budget for spawn, `initialize`, `session/new`, and model listing. The ACP handshake
+ * is the whole health check: `hermes --version` runs Hermes's synchronous update check (git plus
+ * GitHub, 20s per git call), so it is no measure of whether Hermes can run.
  */
-const HERMES_ACP_MODEL_DISCOVERY_TIMEOUT_MS = 120_000;
+const HERMES_ACP_MODEL_DISCOVERY_TIMEOUT_MS = HERMES_ACP_READINESS_TIMEOUT_MS;
 
 /**
  * Placeholder shown before the ACP handshake reports the models Hermes
@@ -270,6 +271,8 @@ const discoverHermesModelsViaAcp = Effect.fn("HermesProvider.discoverHermesModel
       environment,
       childProcessSpawner,
       launch: "probe",
+      // The whole-probe deadline bounds the handshake and reports which stage it reached.
+      startupRequestTimeout: Duration.infinity,
       ...(onRequestStarted === undefined ? {} : { onRequestStarted }),
       cwd: process.cwd(),
       clientInfo: { name: "t3-code-provider-probe", version: "0.0.0" },

@@ -16,7 +16,7 @@ import { ChildProcessSpawner } from "effect/process";
 import { AgentScope } from "@t3tools/shared/AgentScope";
 import { HermesSettings } from "@t3tools/contracts";
 
-import { HERMES_BUILT_IN_SLASH_COMMANDS } from "./acp/HermesAcpSupport.ts";
+import { HERMES_BUILT_IN_SLASH_COMMANDS, makeHermesAcpRuntime } from "./acp/HermesAcpSupport.ts";
 import { buildInitialHermesProviderSnapshot, checkHermesProviderStatus } from "./HermesProvider.ts";
 
 const decodeHermesSettings = Schema.decodeSync(HermesSettings);
@@ -468,6 +468,28 @@ it.effect.each(["initialize", "session/new"])(
       expect(fake.isGatewayRunning()).toBe(true);
       expect(yield* fake.child.isRunning).toBe(false);
     }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+);
+
+it.effect("a Hermes session waits out a cold initialize past the shared ACP startup bound", () =>
+  Effect.gen(function* () {
+    const fake = yield* makeColdHermesSpawner("initialize");
+    const starting = yield* Effect.gen(function* () {
+      const acp = yield* makeHermesAcpRuntime({
+        hermesSettings: { binaryPath: "/fake/hermes" },
+        childProcessSpawner: fake.spawner,
+        cwd: process.cwd(),
+        clientInfo: { name: "t3-code", version: "0.0.0" },
+      });
+      return yield* acp.start();
+    }).pipe(Effect.provideService(AgentScope, fake.agentScope), Effect.forkChild);
+    yield* Deferred.await(fake.reached);
+    // Past upstream's 90 s ACP startup bound, inside Hermes's 120 s readiness timeout.
+    yield* TestClock.adjust("100 seconds");
+    expect(starting.pollUnsafe()).toBeUndefined();
+    yield* Deferred.succeed(fake.release, undefined);
+    const started = yield* Fiber.join(starting);
+    expect(started.sessionId).toBe("cold-session");
+  }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
 );
 
 it.effect.each(["initialize", "session/new"])(

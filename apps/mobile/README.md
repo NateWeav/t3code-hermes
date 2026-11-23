@@ -1,7 +1,7 @@
 # T3 Code Mobile
 
 This fork builds **T3 Hermes**, with separate iOS/Android identifiers and launch links. Configure
-your own signing and Expo project before distributing it; see [Hermes build setup](../../docs/operations/connect-setup.md#t3-hermes-builds).
+your own signing and Expo project before distributing it; see [Hermes build setup](../../docs/operations/02_connect-setup.md#t3-hermes-builds).
 
 > [!NOTE]
 > To install a T3 Hermes build instead, see [Mobile app](../../docs/user/install.md#mobile-app). This guide covers building it from source.
@@ -73,7 +73,7 @@ vp run dev:client:reset
 Run that reset once after installing or changing the Uniwind dependency patch. Cached transforms
 can otherwise reference its previous pnpm package path. Ordinary Metro starts still keep the cache.
 
-Component edits use Fast Refresh. See [mobile development lifecycle](../../docs/internals/mobile-development.md)
+Component edits use Fast Refresh. See [mobile development lifecycle](../../docs/internals/13_mobile-development.md)
 before changing runtime ownership or refresh behavior.
 
 Build and run the local iOS dev client:

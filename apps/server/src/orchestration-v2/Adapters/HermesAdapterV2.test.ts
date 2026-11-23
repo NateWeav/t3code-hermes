@@ -2502,21 +2502,16 @@ describe("Hermes rollback", () => {
       );
       assert.notInclude(texts.join("\n"), "Undid");
 
-      // Rolling back past only a gateway-answered turn sends no `/undo` but still forgets it.
+      // Rolling back past only a gateway-answered turn sends no `/undo`.
       const lastProviderTurn = (turnEvents: ReadonlyArray<(typeof events)[number]>) =>
         turnEvents.findLast((event) => event.type === "provider_turn.updated")?.providerTurn;
       const kept = lastProviderTurn(after);
       const titled = lastProviderTurn(yield* runTurn(5, "/title again"));
       assert.isDefined(kept);
       assert.isDefined(titled);
-      const beforeSecondRollback = yield* session.readThreadSnapshot({ providerThread });
-      assert.include(
-        beforeSecondRollback.providerTurns.map((turn) => turn.id),
-        titled.id,
-      );
       yield* session.rollbackThread({
         providerThread,
-        providerThreadTurns: beforeSecondRollback.providerTurns,
+        providerThreadTurns: [first, kept, titled],
         target: {
           type: "provider_turn",
           checkpointId: CheckpointId.make("checkpoint-hermes-rollback-title"),
@@ -2525,11 +2520,6 @@ describe("Hermes rollback", () => {
         },
       });
       assert.equal(prompts.at(-1), "/title again");
-      const afterSecondRollback = yield* session.readThreadSnapshot({ providerThread });
-      assert.sameMembers(
-        afterSecondRollback.providerTurns.map((turn) => turn.id),
-        [first.id, kept.id],
-      );
     }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 });

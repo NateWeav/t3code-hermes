@@ -234,7 +234,7 @@ const migrationEntries = [
   [110, "Workflows", Migration0110],
   // Fork: never add fork migrations here. Any id this fork takes is one upstream
   // will assign later, and the migrator would skip upstream's migration at it
-  // (see reconcileForkMigrations and docs/internals/legacy-orchestration-migration.md).
+  // (see reconcileForkMigrations).
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

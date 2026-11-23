@@ -47,6 +47,7 @@ import {
   type ServerProviderModel,
   isDelegatedAppThread,
   ThreadId,
+  type TurnItemId,
 } from "@t3tools/contracts";
 import { SKILL_MENTION_PATTERN } from "@t3tools/shared/composerInlineTokens";
 import { AgentScope } from "@t3tools/shared/AgentScope";
@@ -1396,6 +1397,7 @@ interface ActiveCodexTurnContext {
   capacityRetryAttempt?: number;
   capacityRetryPending?: Deferred.Deferred<ActiveCodexTurnContext | undefined>;
   closedCommandItemIds?: ReadonlySet<string>;
+  recoveredProviderRetries?: number;
   latestProviderFailure?: {
     readonly nativeMessage: string;
     readonly nativeCode: string | null;
@@ -1422,6 +1424,7 @@ interface ActiveCodexTurnContext {
   // Modern approval requests omit paths; keep the kinds without retaining patch bodies.
   readonly fileChangeKindsByItem: Map<string, CodexFileChangeKinds>;
   readonly messagePhases: Map<string, "commentary" | "partial_answer" | "final_answer">;
+  readonly asyncMessageIds: Set<string>;
   readonly itemPositions: Map<
     string,
     { readonly ordinal: number; readonly startedAt: DateTime.Utc }
@@ -1438,6 +1441,24 @@ interface ActiveCodexProviderRetry {
   readonly failure: OrchestrationV2ProviderFailure;
   readonly startedAt: DateTime.Utc;
   readonly itemOrdinal: number;
+  readonly id: TurnItemId | undefined;
+}
+
+// Each retry episode after a recovery gets its own row, placed after the turn's progress so far.
+function codexFailureItemKey(context: ActiveCodexTurnContext): string {
+  const key = `terminal-failure:${context.providerTurnId}`;
+  return context.recoveredProviderRetries === undefined
+    ? key
+    : `${key}:${context.recoveredProviderRetries}`;
+}
+
+function codexFailureItemId(context: ActiveCodexTurnContext): TurnItemId | undefined {
+  return context.recoveredProviderRetries === undefined
+    ? undefined
+    : IdAllocator.derive.turnItemFromProviderItem({
+        driver: CODEX_PROVIDER,
+        nativeItemId: codexFailureItemKey(context),
+      });
 }
 
 function codexRetryTurnItem(
@@ -1449,6 +1470,7 @@ function codexRetryTurnItem(
   // A continuation keeps the retry row attached to the native turn that failed.
   const context = state.context ?? activeContext;
   return makeProviderRetryTurnItem({
+    ...(state.id === undefined ? {} : { id: state.id }),
     driver: CODEX_PROVIDER,
     threadId: context.projectionThreadId,
     runId: context.projectionRunId,
@@ -2624,6 +2646,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           if (providerRetry === undefined) {
             return;
           }
+          context.recoveredProviderRetries = (context.recoveredProviderRetries ?? 0) + 1;
           yield* emitProviderEvent({
             type: "turn_item.updated",
             driver: CODEX_PROVIDER,
@@ -2664,6 +2687,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             itemPositions: new Map(),
             fileChangeKindsByItem: new Map(),
             messagePhases: new Map(),
+            asyncMessageIds: new Set(),
             runningCompactionItemIds: new Set(),
             runningWebSearchItems: new Map(),
           };
@@ -3300,6 +3324,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               itemPositions: new Map(),
               fileChangeKindsByItem: new Map(),
               messagePhases: new Map(),
+              asyncMessageIds: new Set(),
               runningCompactionItemIds: new Set(),
               runningWebSearchItems: new Map(),
             };
@@ -3981,6 +4006,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             ...(context.messagePhases.has(item.id)
               ? { phase: context.messagePhases.get(item.id) }
               : {}),
+            ...(context.asyncMessageIds.has(item.id) ? { delivery: "async" as const } : {}),
             messageId,
             text: item.text,
             streaming: !completed,
@@ -5438,8 +5464,9 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             );
             const itemOrdinal =
               previous?.itemOrdinal ??
-              (yield* resolveItemOrdinal(context, `terminal-failure:${context.providerTurnId}`));
+              (yield* resolveItemOrdinal(context, codexFailureItemKey(context)));
             const state: ActiveCodexProviderRetry = {
+              id: previous === undefined ? codexFailureItemId(context) : previous.id,
               ...(previous?.context === undefined ? {} : { context: previous.context }),
               nativeMessage: payload.error.message,
               nativeCode: code,
@@ -5647,6 +5674,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             if (payload.item.type === "agentMessage") {
               if (payload.item.phase != null)
                 context.messagePhases.set(payload.item.id, payload.item.phase);
+              if (payload.item.delivery === "async") context.asyncMessageIds.add(payload.item.id);
               if (payload.item.phase == null || payload.item.phase === "final_answer") {
                 yield* Ref.update(finalAnswerItemIdsByTurn, (current) => {
                   const updated = new Map(current);
@@ -6051,6 +6079,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
 
             if (payload.item.phase != null)
               context.messagePhases.set(payload.item.id, payload.item.phase);
+            if (payload.item.delivery === "async") context.asyncMessageIds.add(payload.item.id);
             const finalAnswer = payload.item.phase == null || payload.item.phase === "final_answer";
             if (finalAnswer) {
               yield* Ref.update(finalAnswerItemIdsByTurn, (current) => {
@@ -6654,6 +6683,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
               ) {
                 failure = { ...failure, class: "transport_error" };
               }
+              const failureItemId = codexFailureItemId(input.context);
               return {
                 type: "turn.terminal",
                 driver: CODEX_PROVIDER,
@@ -6662,8 +6692,9 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 runOrdinal: input.context.input.runOrdinal,
                 failureItemOrdinal: yield* resolveItemOrdinal(
                   input.context,
-                  `terminal-failure:${input.context.providerTurnId}`,
+                  codexFailureItemKey(input.context),
                 ),
+                ...(failureItemId === undefined ? {} : { failureItemId }),
                 status: terminalStatus,
                 failure:
                   failure.class === "usage_limit"
@@ -6721,6 +6752,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
           yield* emitProviderEvent(current);
           if (current.status === "failed" && current.failure.class === "usage_limit") {
             const item = makeProviderFailureTurnItem({
+              ...(current.failureItemId === undefined ? {} : { id: current.failureItemId }),
               driver: CODEX_PROVIDER,
               threadId: context.input.threadId,
               runId: context.input.runId,
@@ -7462,10 +7494,8 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                 retry: { attempt, maxAttempts: CODEX_CAPACITY_MAX_RETRIES, retryDelayMs },
                 itemOrdinal:
                   previous?.itemOrdinal ??
-                  (yield* resolveItemOrdinal(
-                    context,
-                    `terminal-failure:${context.providerTurnId}`,
-                  )),
+                  (yield* resolveItemOrdinal(context, codexFailureItemKey(context))),
+                id: previous === undefined ? codexFailureItemId(context) : previous.id,
                 startedAt: previous?.startedAt ?? now,
               };
               yield* Ref.update(providerRetries, (current) =>
@@ -7630,6 +7660,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
             itemPositions: new Map(),
             fileChangeKindsByItem: new Map(),
             messagePhases: new Map(),
+            asyncMessageIds: new Set(),
             runningCompactionItemIds: new Set(),
             runningWebSearchItems: new Map(),
           };
@@ -9228,7 +9259,6 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                   nativeConversationHeadRef: threadInput.providerThread.nativeConversationHeadRef,
                   updatedAt: codexTimestamp(response.thread.updatedAt),
                 },
-                providerTurns: [],
                 messages: [],
                 runtimeRequests: [],
                 providerPayload: response.thread,
@@ -9261,7 +9291,6 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                     nativeConversationHeadRef,
                     status: "idle" as const,
                   },
-                  providerTurns: [],
                   messages: [],
                   runtimeRequests: [],
                 };
@@ -9304,7 +9333,6 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                   status: "idle" as const,
                   updatedAt: codexTimestamp(response.thread.updatedAt),
                 },
-                providerTurns: [],
                 messages: [],
                 runtimeRequests: [],
                 providerPayload: response.thread,

@@ -2685,12 +2685,12 @@ const workflowTags = [
   WS_METHODS.workflowsResume,
   WS_METHODS.workflowsCancel,
 ] as const;
-const workflowRpcs = WsRpcGroup.omit(
-  ...[...WsRpcGroup.requests.keys()].filter(
+const workflowRpcs = CoreWsRpcGroup.omit(
+  ...[...CoreWsRpcGroup.requests.keys()].filter(
     (
       tag,
     ): tag is Exclude<
-      keyof typeof RpcAuthorization.RPC_REQUIRED_SCOPES,
+      RpcGroup.Rpcs<typeof CoreWsRpcGroup>["_tag"],
       (typeof workflowTags)[number]
     > => !(workflowTags as ReadonlyArray<string>).includes(tag),
   ),
@@ -2765,7 +2765,7 @@ const makeWorkflowClient = Effect.fn("test.makeWorkflowClient")(function* (
         {},
         yield* ServerBrowser.ServerBrowser,
         () => Effect.void,
-        { secretReferences: true },
+        { secretReferences: true, hermesUsage: true },
       ).pipe(Layer.provide(services), Layer.merge(RpcAuthorization.layer(scopes))),
     ),
   );

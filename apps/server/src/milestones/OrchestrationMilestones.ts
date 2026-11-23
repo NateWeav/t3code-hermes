@@ -44,7 +44,7 @@ export class OrchestrationMilestones extends Context.Service<
     readonly start: () => Effect.Effect<void, never, Scope.Scope>;
     readonly handle: (event: OrchestrationV2DomainEvent) => Effect.Effect<void>;
   }
->()("t3/milestones/OrchestrationMilestones") {}
+>()("t3-hermes/milestones/OrchestrationMilestones") {}
 
 const make = Effect.gen(function* () {
   const engine = yield* Orchestrator.OrchestratorV2;

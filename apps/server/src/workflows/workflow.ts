@@ -68,7 +68,7 @@ export class RunContext extends Context.Service<
     /** The steps running now, which a cancelled run's cleanup waits for. */
     readonly inFlight: InFlight;
   }
->()("t3/workflows/workflow/RunContext") {}
+>()("t3-hermes/workflows/workflow/RunContext") {}
 
 /** What a workflow body may require: the run it is in, the engine, and somewhere to run agents. */
 export type InRun =

@@ -18,7 +18,7 @@ import type { ReferenceInput, WorkflowStore } from "./WorkflowStore.ts";
 export class StepReferences extends Context.Service<
   StepReferences,
   { readonly note: (reference: ReferenceInput) => Effect.Effect<void> }
->()("t3/workflows/runReferences/StepReferences") {}
+>()("t3-hermes/workflows/runReferences/StepReferences") {}
 
 /** Keep that `runId` touched `reference`, from `step` or, with none, from what started it. */
 export const noteFor = (

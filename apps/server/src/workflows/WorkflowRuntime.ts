@@ -76,7 +76,7 @@ export class WorkflowDefinitions extends Context.Service<
     /** Take a file away, unless runs still need what it defines. */
     readonly remove: (name: string) => Effect.Effect<WorkflowDefinitionChangeResult>;
   }
->()("t3/workflows/WorkflowRuntime/WorkflowDefinitions") {}
+>()("t3-hermes/workflows/WorkflowRuntime/WorkflowDefinitions") {}
 
 const isDefinition = (value: unknown): value is WorkflowDefinition =>
   typeof value === "object" &&

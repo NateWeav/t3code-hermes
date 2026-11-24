@@ -24,16 +24,6 @@
           "hermesCommit": "5b32cfc230078417fc523e12b9aabbc9b59f684b",
           "hermesCommitDate": "2026-10-26T03:55:41Z",
           "file": "acp-central-ssh-execution/5b32cfc23007.patch"
-        },
-        {
-          "hermesCommit": "41dfcf2c1bd7146d4ad46aea08b7dd007900602e",
-          "hermesCommitDate": "2026-10-22T15:56:19Z",
-          "file": "acp-central-ssh-execution/41dfcf2c1bd7.patch"
-        },
-        {
-          "hermesCommit": "fcace146e9ec62a6455b5a0894f55e5298574903",
-          "hermesCommitDate": "2026-10-20T23:09:33Z",
-          "file": "acp-central-ssh-execution/fcace146e9ec.patch"
         }
       ]
     },
@@ -79,6 +69,11 @@
       "title": "Subagents in the turn",
       "neededFor": "Subagents that answer inside the turn and can launch their own, as Claude's do. Without it, Hermes runs every subagent in the background, so its answer arrives in a later turn, and a subagent cannot launch another.",
       "versions": [
+        {
+          "hermesCommit": "a15b9710395aa1c4858fb6dd9e4c5014c5ced4e9",
+          "hermesCommitDate": "2026-11-24T00:15:41Z",
+          "file": "acp-editor-delegation/a15b97103955.patch"
+        },
         {
           "hermesCommit": "da9c2bd62fa567ed0006866de022939ac14582cf",
           "hermesCommitDate": "2026-11-18T00:18:16Z",
@@ -231,6 +226,11 @@
       "neededFor": "Hermes asking you a clarifying question with choices you can pick from. Without it, Hermes's T3 sessions have no clarify tool, so it asks in its reply and you answer with a new message.",
       "versions": [
         {
+          "hermesCommit": "a15b9710395aa1c4858fb6dd9e4c5014c5ced4e9",
+          "hermesCommitDate": "2026-11-24T00:15:41Z",
+          "file": "acp-editor-clarify/a15b97103955.patch"
+        },
+        {
           "hermesCommit": "da9c2bd62fa567ed0006866de022939ac14582cf",
           "hermesCommitDate": "2026-11-18T00:18:16Z",
           "file": "acp-editor-clarify/da9c2bd62fa5.patch"
@@ -323,6 +323,11 @@
       "title": "Command approvals",
       "neededFor": "Approval before each shell command in Supervised and Auto-accept edits threads, as Claude Code asks before each Bash command. Without it, Hermes asks only before file edits and commands it flags as dangerous, and a file edit Hermes runs without asking shows no diff.",
       "versions": [
+        {
+          "hermesCommit": "a15b9710395aa1c4858fb6dd9e4c5014c5ced4e9",
+          "hermesCommitDate": "2026-11-24T00:15:41Z",
+          "file": "acp-command-approval/a15b97103955.patch"
+        },
         {
           "hermesCommit": "da9c2bd62fa567ed0006866de022939ac14582cf",
           "hermesCommitDate": "2026-11-18T00:18:16Z",

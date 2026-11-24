@@ -187,8 +187,9 @@ Both settings freeze into the session when it is created, so only sessions creat
 is applied and the gateway restarts get them. Verified against hermes-agent `eaac327fac2c` (`main`,
 2026-11-12), alone and after the other patches. Its `da9c2bd62f` version (`main`, 2026-11-18)
 refuses a malformed `delegation` with `AuthorityRefusal`: upstream removed `hermes_state_runtime`
-with the old session store (`be3d6affc8`), so the earlier version applies but fails the request. The
-patch's `tests/acp_adapter/test_gateway_editor_delegation.py` drives a real gateway daemon and a
+with the old session store (`be3d6affc8`), so the earlier version applies but fails the request. Its
+`a15b971039` version (`main`, 2026-11-24) is the same change beside the `client` field upstream added
+to the generated gateway contract's `CanonicalCreateParams` (`fe6b7dc93d`). The patch's `tests/acp_adapter/test_gateway_editor_delegation.py` drives a real gateway daemon and a
 real `hermes acp` process against a loopback model, covering foreground and background calls, a
 stock editor, each depth case, and a stop during a foreground call. Run it in a scratch checkout, as
 for `acp-delegation-progress`.
@@ -355,7 +356,9 @@ patches. Its `90d6b98fd8` version (`main`, 2026-11-06) is the same change on top
 its `981791d9d4` version (`main`, 2026-11-07) is the same again on current `main`; its
 `227845ae31` version (`main`, 2026-11-14) adds the capability after upstream's
 `session-list-cursor-v1`; its `da9c2bd62f` version (`main`, 2026-11-18) refuses a malformed
-`editor.clarify` with `AuthorityRefusal`, upstream's name for the store refusal since `be3d6affc8`.
+`editor.clarify` with `AuthorityRefusal`, upstream's name for the store refusal since `be3d6affc8`;
+its `a15b971039` version (`main`, 2026-11-24) adds the capability after upstream's
+`client-identity-v1` and `client-activity-v1` (`dcc20cede9`).
 Restart the Hermes gateway after applying it: the gateway decides the session's tools.
 Run the patch's `tests/acp_adapter/test_gateway_editor_clarify_toolset.py` in a scratch checkout,
 as for `acp-delegation-progress`.
@@ -476,7 +479,8 @@ its `d1b46d718f` version (`main`, 2026-11-15) is the same again after upstream m
 command the hardline scan could not finish one-shot, and keeps that rule for editor commands too;
 its `4162ecf11f` version (`main`, 2026-11-15) is the same again after upstream made an `osascript`
 program that can discard unsaved work one-shot too; its `da9c2bd62f` version (`main`, 2026-11-18)
-is the same again with upstream's `AuthorityRefusal`.
+is the same again with upstream's `AuthorityRefusal`; its `a15b971039` version (`main`, 2026-11-24)
+adds the capability after upstream's `client-identity-v1` and `client-activity-v1` (`dcc20cede9`).
 Restart the Hermes gateway after applying it: the gate runs there. Run the
 patch's `tests/acp_adapter/test_gateway_command_approval.py` in a scratch checkout, as for
 `acp-delegation-progress`.

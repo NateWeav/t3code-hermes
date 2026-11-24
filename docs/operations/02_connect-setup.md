@@ -22,8 +22,11 @@ Desktop release builds use the fork's GitHub release feed via `GITHUB_REPOSITORY
 Mobile uses `com.nateweav.t3hermes` with `.dev` and `.preview` variants. Set
 `T3CODE_APPLE_TEAM_ID` for your Apple team and configure signing for these IDs, including their
 widget and sharing extensions. Set `T3HERMES_EAS_PROJECT_ID` and `T3HERMES_EXPO_OWNER` to your
-own Expo project; OTA updates are disabled until a project ID is set. Configure your own App Store
-submission target in `apps/mobile/eas.json` before submitting.
+own Expo project; OTA updates are disabled until a project ID is set. Until then the app config
+carries the all-zeros project ID `00000000-0000-0000-0000-000000000000`, which Android's
+`expo-observe` needs to start. `eas` commands then fail looking up that project instead of
+offering to link one, so create the project on expo.dev and set its ID before running them.
+Configure your own App Store submission target in `apps/mobile/eas.json` before submitting.
 
 Desktop uses upstream's `t3code://app/` and `t3code-dev://app/` sign-in callbacks and
 renderer origins, so it can use upstream Clerk without registering Hermes-specific desktop

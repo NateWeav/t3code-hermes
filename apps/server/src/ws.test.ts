@@ -1993,7 +1993,7 @@ it.effect(
           Layer.mock(ServerEnvironment.ServerEnvironment)({}),
           Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
         );
-        const server = yield* RpcServer.makeNoSerialization(WsRpcGroup, {
+        const server = yield* RpcServer.makeNoSerialization(CoreWsRpcGroup, {
           ...WS_RPC_SERVER_OPTIONS,
           onFromServer: (response) =>
             response._tag === "Exit" ? Queue.offer(exits, response.exit._tag) : Effect.void,
@@ -2009,7 +2009,7 @@ it.effect(
               {},
               browser,
               () => Effect.void,
-              { secretReferences: true },
+              { secretReferences: true, hermesUsage: true },
             ).pipe(Layer.provide(services), Layer.merge(RpcAuthorization.layer(scopes))),
           ),
         );
@@ -2984,7 +2984,7 @@ const makeAcpRegistryClient = Effect.fn("test.makeAcpRegistryClient")(function* 
         {},
         yield* ServerBrowser.ServerBrowser,
         () => Effect.void,
-        { secretReferences: true },
+        { secretReferences: true, hermesUsage: true },
       ).pipe(Layer.provide(services), Layer.merge(RpcAuthorization.layer(scopes))),
     ),
   );

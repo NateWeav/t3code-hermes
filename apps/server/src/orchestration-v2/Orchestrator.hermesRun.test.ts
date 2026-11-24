@@ -24,6 +24,7 @@ import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as McpSessionRegistryTestkit from "../mcp/McpSessionRegistry.testkit.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ProjectService from "../project/ProjectService.ts";
+import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -116,6 +117,7 @@ const TestLayer = Layer.mergeAll(
     }),
   ),
   Layer.provide(Layer.mock(ProjectService.ProjectService)({ getById: () => Effect.succeedNone })),
+  Layer.provide(Layer.mock(ProjectSetupScriptRunner.ProjectSetupScriptRunner)({})),
   Layer.provide(layerNoTaskFolders),
   Layer.provide(PlatformTestLayer),
 );

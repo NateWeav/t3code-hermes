@@ -65,10 +65,16 @@ for (const code of ["ETARGET", "E404"]) {
   });
 }
 
+test("keeps retrying a tarball that 404s for minutes after publish", () => {
+  const result = verify({ failures: 20, code: "E404" });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.calls, 21);
+});
+
 test("fails after the bounded propagation window", () => {
-  const result = verify({ failures: 20 });
+  const result = verify({ failures: 100 });
   assert.equal(result.status, 1);
-  assert.equal(result.calls, 12);
+  assert.equal(result.calls, 60);
 });
 
 test("does not retry unrelated CLI or install failures", () => {

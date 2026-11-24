@@ -34,14 +34,14 @@ export function assertHermesBackgroundTaskAfterRootOutput(
     (event) =>
       event.type === "run.updated" &&
       event.runId === rootRun.id &&
-      event.payload.status === "waiting",
+      event.payload.status === "completed",
   );
   const waitingRootNodeIndex = result.domainEvents.findIndex(
     (event) =>
       event.type === "node.updated" &&
       event.payload.runId === rootRun.id &&
       event.payload.kind === "root_turn" &&
-      event.payload.status === "waiting",
+      event.payload.status === "completed",
   );
   const idleRosterIndex = result.domainEvents.findIndex(
     (event, index) =>

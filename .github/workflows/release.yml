@@ -1195,7 +1195,7 @@ jobs:
     needs: [preflight, build_bundle, release]
     if: ${{ !failure() && !cancelled() && github.repository == 'NateWeav/t3code-hermes' && needs.preflight.result == 'success' && needs.release.result == 'success' && needs.preflight.outputs.release_channel != 'preview' }}
     runs-on: ubuntu-24.04 # blacksmith-8vcpu-ubuntu-2404
-    timeout-minutes: 15
+    timeout-minutes: 25
     # npm's trusted publisher for `t3` names this environment, which admits only
     # main and v* tags.
     environment: production

@@ -54,7 +54,7 @@ import { m, type MessageResolver } from "../../i18n/messages";
 
 import { formatRelativeTime } from "../../timestampFormat";
 import { useClientSettings, useEnvironmentSettings } from "../../hooks/useSettings";
-import { getCustomModelOptionsByInstance } from "../../modelSelection";
+import { getCustomModelOptionsByInstance, selectsPlanAgent } from "../../modelSelection";
 import { providerInstanceEntriesFor } from "../../providerInstances";
 import { usePrimaryCloudLinkState } from "../../cloud/cloudLinkState";
 import { requestConfirmDialog } from "../../confirmDialog";
@@ -1560,9 +1560,6 @@ function ScheduledTaskEditorForm({
     instanceEntries.some((entry) => entry.instanceId === draftSelection.instanceId && entry.enabled)
       ? draftSelection
       : scheduledTaskDefaultModel(settings, selectedProject ?? null, instanceEntries);
-  const activeEntry = instanceEntries.find(
-    (entry) => entry.instanceId === activeSelection?.instanceId,
-  );
   const activeInstanceId =
     activeSelection?.instanceId ?? firstInstance?.instanceId ?? ("" as ProviderInstanceId);
   const activeModel = activeSelection?.model ?? "";
@@ -1576,6 +1573,7 @@ function ScheduledTaskEditorForm({
     : { instanceId: activeInstanceId, model: activeModel };
   const shownInstanceId = shownSelection?.instanceId ?? activeInstanceId;
   const shownModel = shownSelection?.model ?? "";
+  const activeEntry = instanceEntries.find((entry) => entry.instanceId === activeInstanceId);
   const modelOptionsByInstance = getCustomModelOptionsByInstance(
     settings,
     providers,
@@ -1938,7 +1936,7 @@ function ScheduledTaskEditorForm({
           </Field>
 
           <Field label={gt("Model")}>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-1.5">
               <ProviderModelPicker
                 environmentId={environmentId}
                 // The saved selection only seeds new threads; bound runs ignore it.
@@ -1950,33 +1948,29 @@ function ScheduledTaskEditorForm({
                 modelOptionsByInstance={modelOptionsByInstance}
                 isComposerOwned={false}
                 triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
-                onInstanceModelChange={(instanceId, model) =>
+                onInstanceModelChange={(instanceId, model) => {
+                  if (instanceId === activeSelection?.instanceId && model === activeSelection.model)
+                    return;
                   setDraft((current) => ({
                     ...current,
-                    modelSelection:
-                      activeSelection?.instanceId === instanceId && activeSelection.model === model
-                        ? activeSelection
-                        : createModelSelection(instanceId, model),
-                  }))
-                }
+                    modelSelection: createModelSelection(instanceId, model),
+                  }));
+                }}
               />
-              {activeSelection && activeEntry ? (
+              {!draft.threadId && activeSelection && activeEntry ? (
                 <TraitsPicker
-                  disabled={saving || !connected}
                   provider={activeEntry.driverKind}
                   models={activeEntry.models}
-                  model={activeSelection.model}
+                  model={activeModel}
                   modelOptions={activeSelection.options ?? []}
                   allowPromptInjectedEffort={false}
+                  includePlanAgent={selectsPlanAgent(activeSelection.options)}
+                  disabled={saving || !connected}
                   triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
                   onModelOptionsChange={(options) =>
                     setDraft((current) => ({
                       ...current,
-                      modelSelection: createModelSelection(
-                        activeSelection.instanceId,
-                        activeSelection.model,
-                        options,
-                      ),
+                      modelSelection: createModelSelection(activeInstanceId, activeModel, options),
                     }))
                   }
                 />

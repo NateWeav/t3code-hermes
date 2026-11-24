@@ -9,8 +9,7 @@ on:
       - .github/workflows/issue-labels.yml
   workflow_dispatch:
 
-permissions:
-  issues: write
+permissions: {}
 
 jobs:
   sync:
@@ -18,6 +17,8 @@ jobs:
     # Fork guard: label taxonomy is upstream's; the fork manages its own labels.
     if: github.repository == 'pingdotgg/t3code'
     runs-on: ubuntu-24.04
+    permissions:
+      issues: write
     steps:
       - name: Ensure managed issue labels exist
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0

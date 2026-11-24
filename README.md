@@ -125,5 +125,9 @@ stock T3 Code, report it [upstream](https://github.com/pingdotgg/t3code/issues) 
 ## Credits and license
 
 T3 Code is built by the [T3 Code team](https://github.com/pingdotgg/t3code) and its contributors. Hermes Agent is
-built by [Nous Research](https://github.com/NousResearch). This fork is MIT licensed, like upstream;
+built by [Nous Research](https://github.com/NousResearch). This fork's source code is MIT licensed, like upstream;
 see [LICENSE](./LICENSE).
+
+The MIT license covers only the source code. It grants no rights to T3 Tools, Inc.'s trademarks,
+branding, or trade dress. This fork is unofficial and is not affiliated with or endorsed by
+T3 Tools, Inc. See [TRADEMARK.md](./TRADEMARK.md) for upstream's trademark and branding policy.

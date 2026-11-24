@@ -1421,7 +1421,7 @@ it.effect("keeps a thread's tool result ids and the call limit its transport dec
       const sessionsContext = yield* Layer.build(McpProviderSessions.layer);
       const sessions = Context.get(sessionsContext, McpProviderSessions.McpProviderSessions);
       const DelegateToolkit = Toolkit.make(
-        Tool.make("delegate_probe", {
+        Tool.make("delegate_task", {
           description: "Starts a task.",
           parameters: Schema.Struct({ task: Schema.String }),
           success: Schema.Struct({ taskId: Schema.String, status: Schema.String }),
@@ -1434,7 +1434,7 @@ it.effect("keeps a thread's tool result ids and the call limit its transport dec
         McpHttpServer.toolkitRegistration(
           DelegateToolkit,
           McpToolAccess.toLayer(DelegateToolkit, {
-            delegate_probe: McpToolAccess.reads(() =>
+            delegate_task: McpToolAccess.reads(() =>
               McpInvocationContext.McpInvocationContext.pipe(
                 Effect.tap((scope) => Effect.sync(() => callLimits.push(scope.callLimitMs))),
                 Effect.as({ taskId: "node:probe-task", status: "running" }),
@@ -1477,7 +1477,7 @@ it.effect("keeps a thread's tool result ids and the call limit its transport dec
               "mcp-protocol-version": "2025-06-18",
             },
             body: HttpBody.text(
-              `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"delegate_probe","arguments":{"task":"Review"}}}`,
+              `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"delegate_task","arguments":{"task":"Review"}}}`,
               "application/json",
             ),
           });
@@ -1486,10 +1486,7 @@ it.effect("keeps a thread's tool result ids and the call limit its transport dec
       expect((yield* call({ "t3-mcp-call-limit-ms": "300000" })).status).toBe(200);
       expect((yield* call({})).status).toBe(200);
       expect(callLimits).toEqual([300_000, undefined]);
-      const take = sessions.takeToolResult(threadId, {
-        tool: "delegate_probe",
-        input: { task: "Review" },
-      });
+      const take = sessions.takeToolResult(threadId, "delegate_task", { task: "Review" });
       expect(yield* take).toEqual({ taskId: "node:probe-task" });
       expect(yield* take).toEqual({ taskId: "node:probe-task" });
       expect(yield* take).toBeUndefined();

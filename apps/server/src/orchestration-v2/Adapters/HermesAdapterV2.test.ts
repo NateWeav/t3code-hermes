@@ -849,7 +849,8 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
       const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
       yield* mcpSessions.recordToolResult(
         ThreadId.make("hermes-v2-t3-tool"),
-        { tool: "delegate_task", input: { mode: "wait", task: "Review the diff" } },
+        "delegate_task",
+        { mode: "wait", task: "Review the diff" },
         { taskId: "node:t3-tool-task", threadId: "thread:t3-tool-child" },
       );
       const title = "mcp__editor_t3_code_1a2b3c4d__delegate_task";

@@ -2,15 +2,19 @@
 import * as NodeCrypto from "node:crypto";
 import type { ThreadId } from "@t3tools/contracts";
 import type { HtmlRenderReference } from "@t3tools/shared/htmlRender";
+import { stableStringify } from "@t3tools/shared/relaySigning";
+import { resolveT3McpToolId } from "@t3tools/shared/t3McpToolPresentation";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Predicate from "effect/Predicate";
 import * as Ref from "effect/Ref";
 
 import type { McpProviderSessionConfig } from "./mcpSession.ts";
 
 // Other providers may never consume these references.
 const MAX_KEPT_HTML_RENDERS = 64;
+const MAX_KEPT_TOOL_RESULTS = 64;
 
 // Antigravity truncates long HTML arguments to a marked tail of at most 8,000 characters.
 const BOUNDED_TEXT_MARKER = "[Earlier output truncated]\n\n";
@@ -26,7 +30,24 @@ interface KeptHtmlRender {
   readonly reference: HtmlRenderReference;
 }
 
-const hashHtml = (html: string) => NodeCrypto.createHash("sha256").update(html).digest("hex");
+interface KeptToolResult {
+  readonly toolName: string;
+  readonly inputHash: string;
+  readonly outputJson: string;
+  readonly output: Record<string, unknown>;
+}
+
+interface ToolResultState {
+  readonly entries: ReadonlyMap<ThreadId, ReadonlyArray<KeptToolResult>>;
+  readonly epochs: ReadonlyMap<ThreadId, number>;
+}
+
+const hashText = (text: string) => NodeCrypto.createHash("sha256").update(text).digest("hex");
+
+export const hashToolInput = (input: unknown): string => {
+  const normalized = Predicate.isObject(input) && !Array.isArray(input) ? input : {};
+  return hashText(stableStringify(normalized));
+};
 
 export class McpProviderSessions extends Context.Service<
   McpProviderSessions,
@@ -44,17 +65,6 @@ export class McpProviderSessions extends Context.Service<
       },
       reference: HtmlRenderReference,
     ) => Effect.Effect<void>;
-    /** Keeps the ids clients read from a T3 tool result, for providers that report only a summary. */
-    readonly recordToolResult: (
-      threadId: ThreadId,
-      call: { readonly tool: string; readonly input: unknown },
-      output: unknown,
-    ) => Effect.Effect<void>;
-    // Prefers the call with identical input; otherwise only the tool's sole pending call counts.
-    readonly takeToolResult: (
-      threadId: ThreadId,
-      call: { readonly tool: string; readonly input: unknown },
-    ) => Effect.Effect<unknown>;
     // A reported attachment consumes that exact page; otherwise the oldest page for a path, or a
     // unique inline match.
     readonly takeHtmlRender: (
@@ -62,6 +72,26 @@ export class McpProviderSessions extends Context.Service<
       input: PageInput,
       reported?: HtmlRenderReference,
     ) => Effect.Effect<HtmlRenderReference | undefined>;
+    readonly toolResultEpoch: (threadId: ThreadId) => Effect.Effect<number>;
+    readonly recordToolResult: (
+      threadId: ThreadId,
+      toolName: string,
+      input: unknown,
+      output: Record<string, unknown>,
+      options?: {
+        readonly providerSessionId?: string | undefined;
+        readonly epoch?: number | undefined;
+      },
+    ) => Effect.Effect<void>;
+    // A reported output consumes only an exact (tool, input, output) match; input-only recovery
+    // consumes a match only when all matching candidates carry the same output.
+    readonly takeToolResult: (
+      threadId: ThreadId,
+      toolName: string,
+      input: unknown,
+      reported?: Record<string, unknown>,
+    ) => Effect.Effect<Record<string, unknown> | undefined>;
+    readonly clearToolResults: (threadId: ThreadId) => Effect.Effect<void>;
   }
 >()("@t3tools/provider-core/server/McpProviderSessions") {}
 
@@ -92,7 +122,7 @@ const matchingPageIndex = (kept: ReadonlyArray<KeptHtmlRender>, input: PageInput
   if (typeof html !== "string" || html.length === 0) {
     return -1;
   }
-  const htmlHash = hashHtml(html);
+  const htmlHash = hashText(html);
   const tail = html.startsWith(BOUNDED_TEXT_MARKER)
     ? html.slice(BOUNDED_TEXT_MARKER.length)
     : undefined;
@@ -114,29 +144,48 @@ const matchingPageIndex = (kept: ReadonlyArray<KeptHtmlRender>, input: PageInput
   return matches.length === 1 ? matches[0]! : -1;
 };
 
-interface KeptToolResult {
-  readonly tool: string;
-  readonly inputHash: string;
-  readonly output: unknown;
-}
-
-const MAX_KEPT_TOOL_RESULTS = 32;
-
-/** Key order differs between the agent's arguments and what reaches the server. */
-const canonicalJson = (value: unknown): string =>
-  JSON.stringify(value ?? {}, (_key, entry: unknown) =>
-    entry !== null && typeof entry === "object" && !Array.isArray(entry)
-      ? Object.fromEntries(Object.entries(entry).toSorted(([a], [b]) => (a < b ? -1 : 1)))
-      : entry,
+const matchingToolResultIndex = (
+  kept: ReadonlyArray<KeptToolResult>,
+  toolName: string,
+  input: unknown,
+  reported?: Record<string, unknown>,
+): number => {
+  const inputHash = hashToolInput(input);
+  if (reported !== undefined) {
+    const reportedJson = stableStringify(reported);
+    return kept.findIndex(
+      (entry) =>
+        entry.toolName === toolName &&
+        entry.inputHash === inputHash &&
+        entry.outputJson === reportedJson,
+    );
+  }
+  const matches = kept.flatMap((entry, index) =>
+    entry.toolName === toolName && entry.inputHash === inputHash ? [index] : [],
   );
+  if (matches.length === 0) return -1;
+  if (matches.length === 1) return matches[0]!;
+  // Identical outputs (e.g. repeated send_to_user calls) are interchangeable; differing outputs
+  // (e.g. parallel identical-input delegate_task calls) stay unclaimed to avoid misattribution.
+  const firstOutput = kept[matches[0]!]!.outputJson;
+  return matches.every((index) => kept[index]!.outputJson === firstOutput) ? matches[0]! : -1;
+};
 
-const hashInput = (input: unknown) =>
-  NodeCrypto.createHash("sha256").update(canonicalJson(input)).digest("hex");
+const clearThreadToolResults = (state: ToolResultState, threadId: ThreadId): ToolResultState => {
+  const entries = new Map(state.entries);
+  entries.delete(threadId);
+  const epochs = new Map(state.epochs);
+  epochs.set(threadId, (state.epochs.get(threadId) ?? 0) + 1);
+  return { entries, epochs };
+};
 
 const make = Effect.gen(function* () {
   const sessions = yield* Ref.make(new Map<ThreadId, McpProviderSessionConfig>());
   const htmlRenders = yield* Ref.make(new Map<ThreadId, ReadonlyArray<KeptHtmlRender>>());
-  const toolResults = yield* Ref.make(new Map<ThreadId, ReadonlyArray<KeptToolResult>>());
+  const toolResultState = yield* Ref.make<ToolResultState>({
+    entries: new Map(),
+    epochs: new Map(),
+  });
   return McpProviderSessions.of({
     set: Effect.fn("McpProviderSessions.set")(function* (config) {
       const current = yield* Ref.get(sessions);
@@ -146,11 +195,9 @@ const make = Effect.gen(function* () {
           next.delete(config.threadId);
           return next;
         });
-        yield* Ref.update(toolResults, (kept) => {
-          const next = new Map(kept);
-          next.delete(config.threadId);
-          return next;
-        });
+        yield* Ref.update(toolResultState, (state) =>
+          clearThreadToolResults(state, config.threadId),
+        );
       }
       yield* Ref.update(sessions, (current) => new Map(current).set(config.threadId, config));
     }),
@@ -171,50 +218,9 @@ const make = Effect.gen(function* () {
           }),
         ),
         Effect.andThen(
-          Ref.update(toolResults, (current) => {
-            const next = new Map(current);
-            next.delete(threadId);
-            return next;
-          }),
+          Ref.update(toolResultState, (state) => clearThreadToolResults(state, threadId)),
         ),
       );
-    }),
-    recordToolResult: Effect.fn("McpProviderSessions.recordToolResult")(
-      function (threadId, call, output) {
-        return Ref.update(toolResults, (current) =>
-          new Map(current).set(
-            threadId,
-            [
-              ...(current.get(threadId) ?? []),
-              { tool: call.tool, inputHash: hashInput(call.input), output },
-            ].slice(-MAX_KEPT_TOOL_RESULTS),
-          ),
-        );
-      },
-    ),
-    takeToolResult: Effect.fn("McpProviderSessions.takeToolResult")(function (threadId, call) {
-      return Ref.modify(toolResults, (current) => {
-        const kept = current.get(threadId) ?? [];
-        const inputHash = hashInput(call.input);
-        let index = kept.findIndex(
-          (entry) => entry.tool === call.tool && entry.inputHash === inputHash,
-        );
-        if (index === -1) {
-          const sameTool = kept.flatMap((entry, keptIndex) =>
-            entry.tool === call.tool ? [keptIndex] : [],
-          );
-          index = sameTool.length === 1 ? sameTool[0]! : -1;
-        }
-        if (index === -1) return [undefined, current];
-        const rest = kept.filter((_, keptIndex) => keptIndex !== index);
-        const next = new Map(current);
-        if (rest.length === 0) {
-          next.delete(threadId);
-        } else {
-          next.set(threadId, rest);
-        }
-        return [kept[index]!.output, next];
-      });
     }),
     recordHtmlRender: Effect.fn("McpProviderSessions.recordHtmlRender")(
       function (threadId, input, reference) {
@@ -228,7 +234,7 @@ const make = Effect.gen(function* () {
                 title: input.title,
                 height: input.height,
                 htmlLength: input.html.length,
-                htmlHash: hashHtml(input.html),
+                htmlHash: hashText(input.html),
                 // Copy the tail so its backing storage cannot retain the entire HTML string.
                 htmlEnd: Buffer.from(input.html.slice(-KEPT_HTML_END_LENGTH), "utf16le").toString(
                   "utf16le",
@@ -262,6 +268,67 @@ const make = Effect.gen(function* () {
         });
       },
     ),
+    toolResultEpoch: Effect.fn("McpProviderSessions.toolResultEpoch")(function (threadId) {
+      return Ref.get(toolResultState).pipe(Effect.map((state) => state.epochs.get(threadId) ?? 0));
+    }),
+    recordToolResult: Effect.fn("McpProviderSessions.recordToolResult")(
+      function* (threadId, toolName, input, output, options) {
+        const providerSessionId = options?.providerSessionId;
+        if (providerSessionId !== undefined) {
+          const activeSession = (yield* Ref.get(sessions)).get(threadId);
+          // A handler finishing after session replacement must not populate the new session.
+          if (
+            activeSession !== undefined &&
+            activeSession.providerSessionId !== providerSessionId
+          ) {
+            return;
+          }
+        }
+        const canonicalTool = resolveT3McpToolId(toolName) ?? toolName;
+        const entry: KeptToolResult = {
+          toolName: canonicalTool,
+          inputHash: hashToolInput(input),
+          outputJson: stableStringify(output),
+          output,
+        };
+        const expectedEpoch = options?.epoch;
+        yield* Ref.update(toolResultState, (state) => {
+          // A handler finishing after its turn closed must not populate the next turn.
+          if (expectedEpoch !== undefined && (state.epochs.get(threadId) ?? 0) !== expectedEpoch) {
+            return state;
+          }
+          const entries = new Map(state.entries);
+          entries.set(
+            threadId,
+            [...(entries.get(threadId) ?? []), entry].slice(-MAX_KEPT_TOOL_RESULTS),
+          );
+          return { ...state, entries };
+        });
+      },
+    ),
+    takeToolResult: Effect.fn("McpProviderSessions.takeToolResult")(
+      function (threadId, toolName, input, reported) {
+        const canonicalTool = resolveT3McpToolId(toolName) ?? toolName;
+        return Ref.modify(toolResultState, (state) => {
+          const kept = state.entries.get(threadId) ?? [];
+          const index = matchingToolResultIndex(kept, canonicalTool, input, reported);
+          if (index === -1) {
+            return [undefined, state];
+          }
+          const rest = kept.filter((_, keptIndex) => keptIndex !== index);
+          const entries = new Map(state.entries);
+          if (rest.length === 0) {
+            entries.delete(threadId);
+          } else {
+            entries.set(threadId, rest);
+          }
+          return [kept[index]!.output, { ...state, entries }];
+        });
+      },
+    ),
+    clearToolResults: Effect.fn("McpProviderSessions.clearToolResults")(function (threadId) {
+      return Ref.update(toolResultState, (state) => clearThreadToolResults(state, threadId));
+    }),
   });
 });
 

@@ -119,6 +119,7 @@ import Migration0107 from "./Migrations/107_DeferredSlashCommandIndex.ts";
 import Migration0108 from "./Migrations/108_AgentFeedback.ts";
 import Migration0109 from "./Migrations/109_IssueTrackerAccounts.ts";
 import Migration0110 from "./Migrations/110_Workflows.ts";
+import Migration0111 from "./Migrations/111_SupersededRunAttemptIndex.ts";
 
 const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
@@ -232,6 +233,7 @@ const migrationEntries = [
   [108, "AgentFeedback", Migration0108],
   [109, "IssueTrackerAccounts", Migration0109],
   [110, "Workflows", Migration0110],
+  [111, "SupersededRunAttemptIndex", Migration0111],
   // Fork: never add fork migrations here. Any id this fork takes is one upstream
   // will assign later, and the migrator would skip upstream's migration at it
   // (see reconcileForkMigrations).

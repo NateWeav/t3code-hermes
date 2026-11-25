@@ -19,6 +19,11 @@ export interface UsageLimitSourceWrite<EnvironmentId extends string> {
   readonly patch: ServerSettingsPatch;
 }
 
+// HTTP quota sources answer for one environment's providers; only hubs span environments.
+function hubEntries(sources: Sources): ReadonlyArray<readonly [string, UsageLimitSourceConfig]> {
+  return Object.entries(sources).filter(([, source]) => source.kind === "cliproxy");
+}
+
 // Environments name the same hub differently, so its URL is its identity.
 function hubKey(url: string): string {
   const trimmed = url.trim();
@@ -32,7 +37,7 @@ function hubKey(url: string): string {
 /** The entry already saved for `url`, or an id that leaves every other hub in place. */
 function usageLimitSourceId(url: string, sources: Sources): UsageLimitSourceId {
   const key = hubKey(url);
-  const saved = Object.entries(sources).find(([, source]) => hubKey(source.url) === key);
+  const saved = hubEntries(sources).find(([, source]) => hubKey(source.url) === key);
   if (saved) return UsageLimitSourceId.make(saved[0]);
   let host = url;
   try {
@@ -79,7 +84,7 @@ export function planUsageLimitSourceRemoval<EnvironmentId extends string>(
 ): ReadonlyArray<UsageLimitSourceWrite<EnvironmentId>> {
   const key = hubKey(url);
   return targets.flatMap((target) => {
-    const removed = Object.entries(target.sources).flatMap(([id, source]) =>
+    const removed = hubEntries(target.sources).flatMap(([id, source]) =>
       hubKey(source.url) === key ? [[UsageLimitSourceId.make(id), null] as const] : [],
     );
     return removed.length === 0
@@ -109,7 +114,7 @@ export function listUsageLimitSources<EnvironmentId extends string>(
     { url: string; label: string | undefined; enabled: boolean; present: Set<EnvironmentId> }
   >();
   for (const target of targets) {
-    for (const source of Object.values(target.sources)) {
+    for (const [, source] of hubEntries(target.sources)) {
       const key = hubKey(source.url);
       const hub = hubs.get(key) ?? {
         url: source.url,

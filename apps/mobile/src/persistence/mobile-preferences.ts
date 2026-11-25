@@ -156,6 +156,8 @@ export interface Preferences {
   readonly mathRenderingEnabled?: boolean;
   /** Unset means on: crash reports are sent unless the user turns them off. */
   readonly crashReportsEnabled?: boolean;
+  /** Unset means on: connection traces are sent unless the user turns them off. */
+  readonly connectionTracesEnabled?: boolean;
   readonly connectOnboardingOptOutAccounts?: ReadonlyArray<string>;
   readonly collapsedProjectGroups?: readonly string[];
   readonly dismissedDatabaseStorageNotices?: readonly string[];
@@ -174,6 +176,8 @@ export interface Preferences {
   readonly showMemoryActivityRows?: boolean;
   readonly toolCallVisibility?: ToolCallVisibility;
   readonly workingShelfEnabled?: boolean;
+  /** The kind of question the Workflows tab's Needs you list was last narrowed to. */
+  readonly workflowQuestionKind?: string;
   readonly useLastProjectForNewThreads?: boolean;
   readonly lastThreadProject?: typeof ThreadProject.Type;
   readonly modelFavorites?: ReadonlyArray<{
@@ -253,6 +257,7 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     codeWordBreak?: boolean;
     mathRenderingEnabled?: boolean;
     crashReportsEnabled?: boolean;
+    connectionTracesEnabled?: boolean;
     connectOnboardingOptOutAccounts?: ReadonlyArray<string>;
     collapsedProjectGroups?: readonly string[];
     dismissedDatabaseStorageNotices?: readonly string[];
@@ -267,6 +272,7 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     showMemoryActivityRows?: boolean;
     toolCallVisibility?: ToolCallVisibility;
     workingShelfEnabled?: boolean;
+    workflowQuestionKind?: string;
     useLastProjectForNewThreads?: boolean;
     lastThreadProject?: typeof ThreadProject.Type;
     modelFavorites?: Preferences["modelFavorites"];
@@ -355,6 +361,9 @@ function sanitizePreferences(parsed: Preferences): Preferences {
   if (typeof parsed.crashReportsEnabled === "boolean") {
     preferences.crashReportsEnabled = parsed.crashReportsEnabled;
   }
+  if (typeof parsed.connectionTracesEnabled === "boolean") {
+    preferences.connectionTracesEnabled = parsed.connectionTracesEnabled;
+  }
   if (Array.isArray(parsed.connectOnboardingOptOutAccounts)) {
     preferences.connectOnboardingOptOutAccounts = parsed.connectOnboardingOptOutAccounts.filter(
       (account): account is string => typeof account === "string",
@@ -417,6 +426,9 @@ function sanitizePreferences(parsed: Preferences): Preferences {
   }
   if (typeof parsed.workingShelfEnabled === "boolean") {
     preferences.workingShelfEnabled = parsed.workingShelfEnabled;
+  }
+  if (typeof parsed.workflowQuestionKind === "string") {
+    preferences.workflowQuestionKind = parsed.workflowQuestionKind;
   }
   if (typeof parsed.useLastProjectForNewThreads === "boolean") {
     preferences.useLastProjectForNewThreads = parsed.useLastProjectForNewThreads;

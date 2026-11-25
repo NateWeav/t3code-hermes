@@ -106,4 +106,30 @@ describe("usage limit sources", () => {
     apply(planUsageLimitSourceRemoval(targets(), "http://10.0.0.7:8317/"));
     expect(environments.map(({ settings }) => settings.usageLimitSources)).toEqual([{}, {}]);
   });
+
+  it("leaves HTTP quota sources out of hub listing, adds and removals", () => {
+    const httpId = UsageLimitSourceId.make("http-quota.test");
+    const sources = {
+      [httpId]: {
+        kind: "http" as const,
+        url: "https://quota.test/v1",
+        managementKey: "token",
+        enabled: true,
+      },
+    };
+    const targets = [
+      { environmentId: "local", label: "Local", sources },
+      { environmentId: "laptop", label: "Laptop", sources: {} },
+    ];
+
+    expect(listUsageLimitSources(targets)).toEqual([]);
+    expect(planUsageLimitSourceRemoval(targets, "https://quota.test/v1")).toEqual([]);
+    const [write] = planUsageLimitSourceAdd(targets, {
+      url: "https://quota.test/v1",
+      managementKey: "hub-key",
+    });
+    const added = Object.keys(write!.patch.usageLimitSources ?? {});
+    expect(added).toHaveLength(1);
+    expect(added[0]).not.toBe(httpId);
+  });
 });

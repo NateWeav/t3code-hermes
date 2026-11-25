@@ -365,7 +365,6 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
             stdout: patches,
             stderr: result.failureOutput ?? "",
             exitCode: result.updateFailed ? 1 : 0,
-            timedOut: false,
             stdoutTruncated: false,
             stderrTruncated: false,
           };
@@ -375,7 +374,6 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
             stdout: "",
             stderr: error.detail,
             exitCode: 1,
-            timedOut: false,
             stdoutTruncated: false,
             stderrTruncated: false,
           }),

@@ -116,7 +116,6 @@ export function useHindsightMemory(environmentId: EnvironmentId | null) {
         setIsRetaining(false);
       }
     },
-    // oxlint-disable-next-line react/memo-dependencies -- retry and the command change with the bank's queries, so a retain must not call a stale one.
     [bank, environmentId, retainCommand, retry],
   );
 
@@ -136,7 +135,6 @@ export function useHindsightMemory(environmentId: EnvironmentId | null) {
     } finally {
       setIsReflecting(false);
     }
-    // oxlint-disable-next-line react/memo-dependencies -- The reflection reads the current query and refreshes the current bank's stats.
   }, [bank, environmentId, isReflecting, reflectCommand, refreshStats, submittedQuery]);
 
   const memories = activeQuery.data?.memories ?? [];

@@ -147,8 +147,8 @@ it("names Hermes skill rows only once the user opts into them", () => {
     0,
   );
   const activityFor = (agentActivityRows?: { skills: boolean; memory: boolean }) =>
-    buildThreadFeed([row], agentActivityRows ? { agentActivityRows } : undefined).flatMap(
-      (entry) => (entry.type === "activity-group" ? entry.activities : []),
+    buildThreadFeed([row], agentActivityRows ? { agentActivityRows } : undefined).flatMap((entry) =>
+      entry.type === "activity-group" ? entry.activities : [],
     )[0];
 
   expect(activityFor()?.workEntry.agentActivity).toBeUndefined();

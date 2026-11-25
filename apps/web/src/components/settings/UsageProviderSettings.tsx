@@ -79,13 +79,7 @@ export function UsageProviderSettings({
   readonly environmentId: EnvironmentId;
 }) {
   const targets = useUsageLimitSourceTargets();
-  const hubTargets = targets.map((target) => ({
-    ...target,
-    sources: Object.fromEntries(
-      Object.entries(target.sources).filter(([, source]) => source.kind === "cliproxy"),
-    ),
-  }));
-  const hubs = listUsageLimitSources(hubTargets);
+  const hubs = listUsageLimitSources(targets);
   const persistHubs = useAtomCommand(serverEnvironment.updateSettings, {
     label: "hub settings update",
     reportFailure: false,
@@ -110,7 +104,7 @@ export function UsageProviderSettings({
   const gt = useGT();
   const searchableSetting = useSearchableSetting();
   const [adding, setAdding] = useState<"cliproxy" | "http" | null>(null);
-  const hubsReadOnly = hubTargets.length === 0;
+  const hubsReadOnly = targets.length === 0;
   // HTTP quota sources answer for one environment's providers, so they stay per environment.
   const current = targets.find((target) => target.environmentId === environmentId);
   const httpSources = current
@@ -123,7 +117,7 @@ export function UsageProviderSettings({
     readonly label: string;
   }) => {
     if (input.kind === "cliproxy") {
-      void writeHubs(planUsageLimitSourceAdd(hubTargets, input));
+      void writeHubs(planUsageLimitSourceAdd(targets, input));
       return;
     }
     if (!current) return;
@@ -192,9 +186,7 @@ export function UsageProviderSettings({
                   <RemoveUsageProviderButton
                     label={hub.label}
                     description={HUB_REMOVAL_DESCRIPTION}
-                    onConfirm={() =>
-                      void writeHubs(planUsageLimitSourceRemoval(hubTargets, hub.url))
-                    }
+                    onConfirm={() => void writeHubs(planUsageLimitSourceRemoval(targets, hub.url))}
                   />
                 }
               />

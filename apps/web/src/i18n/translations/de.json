@@ -67,7 +67,7 @@
   "2f6e4f7cd364da73": "Erwartet",
   "9d11c93d4035de3e": "Tatsächlich passiert",
   "c87d0595693704f9": "Stattdessen getan",
-  "d7a4ea6ce5af44e0": "{speaker} · {count} Zeichen",
+  "ed5c85bb4aecb472": "{count, plural, one {{speaker} · {count} Zeichen} other {{speaker} · {count} Zeichen}}",
   "f5114fb9c40fd929": "Du",
   "cd03eb1b84271c02": "Agent",
   "bfe1a60f3f9c60fb": "Runde {turn} · {what}",
@@ -874,6 +874,10 @@
   "05b16c85cb1e18bd": "Keine Repositorys",
   "04ea9e0e663983fd": "Alle Repositorys",
   "c07bd24ff49e85d9": "{count, plural, one {{count} Repository} other {{count} Repositorys}}",
+  "1b799ebfa94c2408": "Genehmigung für Push-Hooks",
+  "81d703184fe5112e": "Push-Hooks dieses Repositorys ausführen?",
+  "027b0d65c7a67af6": "Hook-Datei",
+  "ade585910165bb52": "Konfigurierter Hook",
   "e94aa66471dae6aa": "Warum werde ich das gefragt?",
   "228a325b5708e675": "Vollzugriff überspringt Genehmigungen, aber eine Nachfrageregel in den Einstellungen des Agenten trifft auf diese Aktion zu, daher fragt er trotzdem. Entferne diese Regel oder schränke sie ein, um diese Nachfragen zu beenden.",
   "3f9101f696c738a8": "Vollzugriff überspringt Genehmigungen, aber der Agent hält trotzdem für einige eigene Sicherheitsprüfungen an, die keine Einstellung überspringen kann, etwa beim Löschen eines Pfads, den er nicht prüfen kann. T3 Code kann diese nicht abschalten. Prüfe also die Anfrage und genehmige sie, wenn sie deinen Erwartungen entspricht.",
@@ -1299,7 +1303,7 @@
   "c13753167634f7aa": "Datei gelesen",
   "5ce648cd03020fd9": "{path} gelesen +{count} weitere",
   "5d6c2898401c94e6": "{path} gelesen",
-  "612170d804b03320": "{count, plural, one {{count} fehlerhafter oder inkonsistenter Nutzungseintrag wurde übersprungen; die Nutzung ist möglicherweise unvollständig.} other {{count} fehlerhafte oder inkonsistente Nutzungseinträge wurden übersprungen; die Nutzung ist möglicherweise unvollständig.}}",
+  "69150fe436b3a0c2": "{count, plural, one {{count} fehlerhafter oder inkonsistenter Nutzungseintrag wurde übersprungen; die Nutzung ist möglicherweise unvollständig.} other {{count} fehlerhafte oder inkonsistente Nutzungseinträge wurden übersprungen; die Nutzung ist möglicherweise unvollständig.}}",
   "ee448ceb6820ce2f": "{environment} verwendet eine ältere Serverversion und wird nicht in die Summen einbezogen.",
   "732708950237004e": "Dieser Client ist älter als der Server auf {environment}; seine Nutzung wird nicht in die Summen einbezogen.",
   "9758c2ede06aa19b": "heute {hour}",
@@ -1859,7 +1863,7 @@
   "67f5b13c3c7bcd40": "Mit Gast teilen",
   "82da5b8b340217ac": "Agentensitzung neu starten",
   "963d099509eabcd6": "Die Agentensitzung wird neu gestartet",
-  "1d384d4fe7888a09": "Deine nächste Nachricht startet eine neue Sitzung.",
+  "71ed7c0da0b93c77": "Deine nächste Nachricht startet den Agenten neu. Diese Unterhaltung bleibt erhalten.",
   "e4b61c891fed297e": "Gehe zu Datei",
   "d2ccdb8cd3297212": "Projekt hinzufügen",
   "594bcbef04093f72": "WSL-Ordner öffnen",
@@ -4148,6 +4152,8 @@
   "ac7416afe98ba5f8": "Terminal-Auszug, {label}",
   "bf04d61dc50685dc": "Zeile {lineStart}",
   "000e3bef072f07c8": "Zeilen {lineStart}–{lineEnd}",
+  "f3c70064a22a0c76": "{terminalLabel} Zeile {lineStart}",
+  "8ba6febaabeb6f14": "{terminalLabel} Zeilen {lineStart}–{lineEnd}",
   "b3336a0e9a6e3fba": "Erfasste Terminal-Ausgabe",
   "8d24730972ce4fd3": "Terminal-Auszug, {label}, abgelaufen",
   "dd8f1439c88ef92b": "Terminal-Kontext abgelaufen. Entferne {label} und füge es erneut hinzu, um es in deine Nachricht aufzunehmen.",
@@ -5597,7 +5603,7 @@
     },
     "-Dateien unterstützt."
   ],
-  "774654575f014b55": "Speichere sie, um sie in einer App zu öffnen, die dieses Dateiformat unterstützt.",
+  "d3170aa2bb08efbd": "Speichere sie, um sie in einer App zu öffnen, die dieses Dateiformat unterstützt.",
   "46f943a30e259620": "Audio nicht verfügbar. {name} öffnen",
   "e2cf6b944d1d095d": "Audio nicht verfügbar. {name} erneut versuchen",
   "f08fb460ad4617d6": "{name} wird geladen",
@@ -9522,7 +9528,7 @@
   "33fbce50a4ea67e6": "Zusätzliche CLI-Argumente, die beim Sitzungsstart übergeben werden.",
   "abdee70d90cb26a3": "Nach 100.000 bis 1.000.000 Tokens komprimieren. Leer lassen, um den Standard von Claude zu verwenden.",
   "f907b2466603538e": "Wann ein inaktiver Thread mit über 200.000 Tokens komprimiert wird: nachdem du zurückkommst, kurz bevor sein Prompt-Cache abläuft, oder nie. Überschreibt den Standard unter Anbieter > Erweitert.",
-  "484df18e29b21047": "Google-Konten nutzen dein Abonnement; API-Schlüssel und Agent Platform rechnen nach Nutzung ab.",
+  "9610fb9f4d9849ec": "Google-Konto und Gemini Enterprise nutzen deinen bestehenden Tarif. Gemini-API-Schlüssel und Agent Platform rechnen pro Nutzung über deinen Schlüssel oder dein Google-Cloud-Projekt ab.",
   "931df01584748bf9": "Express-Schlüssel für Gemini oder Vertex AI. Wird separat auf dem Host gespeichert.",
   "8bf0f6ed8dd4b77e": "Erforderlich für Gemini Enterprise. Agent Platform verwendet es, wenn kein API-Schlüssel gesetzt ist.",
   "7c735c8fbd3fb6e3": "Region für Gemini Enterprise oder Agent Platform.",
@@ -12402,7 +12408,6 @@
   "d2d071e45a2d6b89": "Wähle eine Umgebung, um Limits zu sehen.",
   "c9180daea905a0a6": "Wähle eine Umgebung, um die Nutzung zu sehen.",
   "f0297ec79e896a13": "{environment}: {error}",
-  "6dcbf651d51d4023": "{count, plural, one {{formatted} Sitzung} other {{formatted} Sitzungen}}",
   "b01bf98dd90ee819": "API-Schätzung",
   "bab34b28e9ee8e88": "Details zur Nutzung ohne Preis",
   "61571f4542da9903": "{count, plural, one {{formatted} Sitzung} other {{formatted} Sitzungen}}",
@@ -12966,5 +12971,144 @@
   "27d76249d09eb69f": "Review-Leitfaden bereit",
   "faa3bb26abb39c93": "Review-Leitfaden fehlgeschlagen",
   "b7df38b7d8792d78": "Leitfaden öffnen",
-  "9e91e9a77b664e4e": "Review-Leitfaden konnte nicht gestartet werden"
+  "9e91e9a77b664e4e": "Review-Leitfaden konnte nicht gestartet werden",
+  "99d51127f573296b": "Weiteres Konto",
+  "8ec2c57414669b79": "Verbinde einen zweiten {tracker}-Workspace oder -Nutzer.",
+  "99963c0142e17f00": "Für das neue {tracker}-Konto.",
+  "6d8e4ebc889bace9": "Konto hinzufügen",
+  "8a883c4fbc127b68": "Auto-Merge für den Stack wird aktiviert...",
+  "5fb2a26ae31e8983": "Auto-Merge für den Stack konnte nicht aktiviert werden",
+  "986d0dcbf4dd0098": "Auto-Merge für den Stack aktiviert",
+  "f3ed1f63c8a3eef2": "{host} mergt den Stack bis #{number}, sobald die Anforderungen erfüllt sind.",
+  "bd536a0a1754f6cb": "Auto-Merge für den Stack konnte nicht abgebrochen werden",
+  "bb90ac3b2f3a72d5": "Der Host hat das Abbrechen des Auto-Merge abgelehnt. Aktualisiere und versuche es erneut.",
+  "9c28753c777c37b7": "{count, plural, one {Auto-Merge für {count} {term, select, mr {Merge Request} cr {Änderungsanfrage} other {Pull Request}}?} other {Auto-Merge für {count} {term, select, mr {Merge Requests} cr {Änderungsanfragen} other {Pull Requests}}?}}",
+  "a86b49982e18784d": "#{number} und die darunterliegenden nicht gemergten Ebenen per {method} in {base} mergen, sobald jede davon die Anforderungen auf {host} erfüllt. Das kann sofort passieren.",
+  "b1afda5c964deee4": [
+    "Auto-Merge für Stack (",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    ")"
+  ],
+  "33d18dda74f6d7b3": "Auto-Merge für Stack abbrechen",
+  "012c67c7f1a99e33": "Auto-Merge für Stack",
+  "4a18481bea4b4ad5": "Neues Gerät bei {environmentLabel} angemeldet",
+  "4144ab6aa487528a": "{device} hat sich über {product} verbunden. Warst du das nicht? Prüfe es.",
+  "a10cfdb27152c757": "{count, plural, one {{count} Gerät hat} other {{count} Geräte haben}} sich über {product} verbunden. Warst du das nicht? Prüfe sie.",
+  "e0856d6a402ad821": "Die Richtlinie von {organization} erlaubt keine Worktree-Layout-Befehle von Projekten.",
+  "206811f6f441bfc7": "Dieses Projekt richtet Worktrees mit einem eigenen Befehl ein, den in seiner jetzigen Form niemand genehmigt hat. Über diese Verbindung lässt er sich nicht genehmigen: Genehmige ihn in einem Client, der das Terminal verwenden darf.",
+  "b8087c9a70c26da9": "Der Worktree-Layout-Befehl konnte nicht genehmigt werden.",
+  "49eda70cfd56e621": "Läuft, wenn ein Worktree-Thread startet und wenn sein Ordner wiederhergestellt wird",
+  "188ccaa1199f5611": "Läuft, wenn der Worktree eines Threads entfernt wird",
+  "7e8476e7306acabe": "Darf dieses Projekt seine Worktree-Befehle ausführen?",
+  "8e11914556fd8b13": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " richtet Worktree-Threads mit eigenen Befehlen aus ",
+    {
+      "t": "code",
+      "i": 2,
+      "c": "t3.json"
+    },
+    " ein. Sie laufen auf dem Rechner dieser Umgebung mit deinen Berechtigungen, außerhalb jeder Agenten-Sandbox. Du wirst erneut gefragt, sobald sich ihr Text ändert."
+  ],
+  "46807acd02a4ff72": "Genehmigen und fortfahren",
+  "a9cb97fca6a6576b": "Befehl zum Erstellen",
+  "90f45a354884ccdd": "Befehl zum Entfernen",
+  "78e308ada516928b": "Der Befehl konnte nicht genehmigt werden",
+  "a0c772d32a233da6": "Die Genehmigung konnte nicht widerrufen werden",
+  "0cdc8cdbed3e5eae": "Worktree-Layout",
+  "c17b25519e2b194e": "Die Worktree-Layout-Befehle konnten nicht geladen werden",
+  "5ccd5614c65f8d1f": "Genehmigung des Befehls {kind} widerrufen",
+  "80c3794a5fa12f3a": "Befehl {kind} genehmigen",
+  "f206891e124c77b0": [
+    "Die ",
+    {
+      "t": "code",
+      "i": 1,
+      "c": "t3.json"
+    },
+    " dieses Projekts richtet Worktree-Threads mit eigenen Befehlen ein. Sie laufen auf dem Rechner dieser Umgebung mit deinen Berechtigungen und nur so, wie sie hier genehmigt wurden: Ändert sich der Text eines Befehls, muss er erneut genehmigt werden."
+  ],
+  "f6a91589456cca50": "Genehmigt",
+  "c92657bb7f2293ff": "Genehmigung nötig",
+  "f1e5c1be1ac92361": "Genehmigen",
+  "fcb5f3c4d4753326": "Über diese Verbindung lassen sich keine Befehle genehmigen. Verwende einen Client, der das Terminal verwenden darf.",
+  "7150557773b3818b": "In der Warteschlange",
+  "efbeb3993ee2c3f5": "Wartet auf {pool}",
+  "0398ca6c1d24b92d": "wartet, als Nächstes dran",
+  "0af6d5ffd5166214": "{count, plural, one {wartet, {count} davor} other {wartet, {count} davor}}",
+  "49be26a27dcb30e5": "gewartet",
+  "4e96712d839ccbff": "{who} hat {choice} gesagt",
+  "19097cfb8f5a79cf": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " hat",
+    " ",
+    {
+      "t": "span",
+      "i": 2,
+      "c": {
+        "i": 3,
+        "k": "_gt_value_3",
+        "v": "v"
+      }
+    },
+    " gesagt."
+  ],
+  "e7bbf693910057bf": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " hat",
+    " ",
+    {
+      "t": "span",
+      "i": 2,
+      "c": {
+        "i": 3,
+        "k": "_gt_value_3",
+        "v": "v"
+      }
+    },
+    " gesagt: ",
+    {
+      "i": 4,
+      "k": "_gt_value_4",
+      "v": "v"
+    }
+  ],
+  "3759768c5d342c22": [
+    "beantwortet",
+    " ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    }
+  ],
+  "e114d37b32ab0dc7": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " braucht eine Begründung."
+  ],
+  "91aadfc843c600de": "Google-Konto bestätigen",
+  "201490988858b511": "zurückgezogen von {by}",
+  "99451a5d2d40440f": "Zurückgezogen von {by}.",
+  "3ee30a50b70fffab": "Zurückgezogen von {by}: {reason}",
+  "92e129bf413a1220": "zurückgezogen"
 }

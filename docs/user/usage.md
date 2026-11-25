@@ -197,8 +197,8 @@ and management key. T3 adds the hub to every connected environment you manage, s
 can all reach. A hub missing from an environment that was offline, or paired later, says so in the
 list; add it again with its key to include it. Removing a hub removes it everywhere.
 
-The hub's Codex, Claude, xAI (shown as Grok) and Antigravity accounts appear under **Usage → Limits**;
-accounts for other providers are not read. Codex accounts show banked reset credits; select an
+The hub's Codex, Claude and xAI (shown as Grok) accounts appear under **Usage → Limits**;
+accounts for other providers, including Antigravity, are not read. Codex accounts show banked reset credits; select an
 account and choose **Use reset** to redeem one. No hub plugin is required.
 
 This connection supplies usage information; configure the provider separately to send agent

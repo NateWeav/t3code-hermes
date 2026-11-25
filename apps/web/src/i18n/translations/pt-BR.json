@@ -67,7 +67,7 @@
   "2f6e4f7cd364da73": "Resultado esperado",
   "9d11c93d4035de3e": "O que aconteceu",
   "c87d0595693704f9": "Alternativa utilizada",
-  "d7a4ea6ce5af44e0": "{speaker} · {count} caracteres",
+  "ed5c85bb4aecb472": "{count, plural, one {{speaker} · {count} caractere} other {{speaker} · {count} caracteres}}",
   "f5114fb9c40fd929": "Você",
   "cd03eb1b84271c02": "Agente",
   "bfe1a60f3f9c60fb": "Turno {turn} · {what}",
@@ -874,6 +874,10 @@
   "05b16c85cb1e18bd": "Nenhum repositório",
   "04ea9e0e663983fd": "Todos os repositórios",
   "c07bd24ff49e85d9": "{count, plural, one {{count} repositório} other {{count} repositórios}}",
+  "1b799ebfa94c2408": "Aprovação de hooks de push",
+  "81d703184fe5112e": "Executar os hooks de push deste repositório?",
+  "027b0d65c7a67af6": "Arquivo de hook",
+  "ade585910165bb52": "Hook configurado",
   "e94aa66471dae6aa": "Por que estou recebendo esta pergunta?",
   "228a325b5708e675": "O acesso total ignora as aprovações, mas uma regra de pergunta nas configurações do próprio agente corresponde a esta ação, então ele ainda pergunta. Remova ou restrinja essa regra para parar esses pedidos.",
   "3f9101f696c738a8": "O acesso total ignora as aprovações, mas o agente ainda para em algumas verificações de segurança próprias que nenhuma configuração ignora, como uma exclusão cujo caminho ele não consegue verificar. O T3 Code não consegue desativá-las, então confira a solicitação e aprove se for o que você espera.",
@@ -1299,7 +1303,7 @@
   "c13753167634f7aa": "Leu o arquivo",
   "5ce648cd03020fd9": "Leu {path} e mais {count}",
   "5d6c2898401c94e6": "Leu {path}",
-  "612170d804b03320": "{count, plural, one {{count} registro de uso malformado ou inconsistente foi ignorado; o uso pode estar incompleto.} other {{count} registros de uso malformados ou inconsistentes foram ignorados; o uso pode estar incompleto.}}",
+  "69150fe436b3a0c2": "{count, plural, one {{count} registro de uso malformado ou inconsistente foi ignorado; o uso pode estar incompleto.} other {{count} registros de uso malformados ou inconsistentes foram ignorados; o uso pode estar incompleto.}}",
   "ee448ceb6820ce2f": "{environment} roda uma versão mais antiga do servidor e fica fora dos totais.",
   "732708950237004e": "Este cliente é mais antigo que o servidor em {environment}; o uso dele fica fora dos totais.",
   "9758c2ede06aa19b": "Hoje às {hour}",
@@ -1860,7 +1864,7 @@
   "67f5b13c3c7bcd40": "Compartilhar com convidado",
   "82da5b8b340217ac": "Reiniciar a sessão do agente",
   "963d099509eabcd6": "A sessão do agente será reiniciada",
-  "1d384d4fe7888a09": "Sua próxima mensagem inicia uma nova sessão.",
+  "71ed7c0da0b93c77": "Sua próxima mensagem reinicia o agente. Esta conversa é mantida.",
   "e4b61c891fed297e": "Ir para arquivo",
   "d2ccdb8cd3297212": "Adicionar projeto",
   "594bcbef04093f72": "Abrir pasta do WSL",
@@ -4145,6 +4149,8 @@
   "ac7416afe98ba5f8": "Trecho do terminal, {label}",
   "bf04d61dc50685dc": "Linha {lineStart}",
   "000e3bef072f07c8": "Linhas {lineStart}–{lineEnd}",
+  "f3c70064a22a0c76": "{terminalLabel} linha {lineStart}",
+  "8ba6febaabeb6f14": "{terminalLabel} linhas {lineStart}–{lineEnd}",
   "b3336a0e9a6e3fba": "Saída do terminal capturada",
   "8d24730972ce4fd3": "Trecho do terminal, {label}, expirado",
   "dd8f1439c88ef92b": "O contexto do terminal expirou. Remova e adicione {label} de novo para incluí-lo na mensagem.",
@@ -5596,7 +5602,7 @@
     },
     "."
   ],
-  "774654575f014b55": "Salve-o para abrir em um app compatível com este formato.",
+  "d3170aa2bb08efbd": "Salve-o para abrir em um app compatível com este formato.",
   "46f943a30e259620": "Áudio indisponível. Abrir {name}",
   "e2cf6b944d1d095d": "Áudio indisponível. Tentar {name} novamente",
   "f08fb460ad4617d6": "Carregando {name}",
@@ -9522,7 +9528,7 @@
   "33fbce50a4ea67e6": "Argumentos de CLI adicionais passados no início da sessão.",
   "abdee70d90cb26a3": "Compactar após 100.000 a 1.000.000 tokens. Deixe vazio para usar o padrão do Claude.",
   "f907b2466603538e": "Quando compactar uma thread ociosa com mais de 200.000 tokens: depois que você voltar, pouco antes de o cache do prompt expirar ou nunca. Substitui o padrão em Provedores > Avançado.",
-  "484df18e29b21047": "Contas Google usam sua assinatura; chaves de API e o Agent Platform cobram pelo uso.",
+  "9610fb9f4d9849ec": "Conta Google e Gemini Enterprise usam seu plano atual. Chave de API do Gemini e Agent Platform cobram por uso na sua chave ou projeto do Google Cloud.",
   "931df01584748bf9": "Chave express do Gemini ou do Vertex AI. Armazenada separadamente no host.",
   "8bf0f6ed8dd4b77e": "Obrigatório para o Gemini Enterprise. O Agent Platform usa quando nenhuma chave de API está definida.",
   "7c735c8fbd3fb6e3": "Região do Gemini Enterprise ou do Agent Platform.",
@@ -12400,7 +12406,6 @@
   "d2d071e45a2d6b89": "Selecione um ambiente para ver os limites.",
   "c9180daea905a0a6": "Selecione um ambiente para ver o uso.",
   "f0297ec79e896a13": "{environment}: {error}",
-  "6dcbf651d51d4023": "{count, plural, one {{formatted} sessão} other {{formatted} sessões}}",
   "b01bf98dd90ee819": "Estimativa da API",
   "bab34b28e9ee8e88": "Detalhes do uso sem preço",
   "61571f4542da9903": "{count, plural, one {{formatted} sessão} other {{formatted} sessões}}",
@@ -12966,5 +12971,144 @@
   "27d76249d09eb69f": "Guia de revisão pronto",
   "faa3bb26abb39c93": "O guia de revisão falhou",
   "b7df38b7d8792d78": "Abrir guia",
-  "9e91e9a77b664e4e": "Não foi possível iniciar um guia de revisão"
+  "9e91e9a77b664e4e": "Não foi possível iniciar um guia de revisão",
+  "99d51127f573296b": "Outra conta",
+  "8ec2c57414669b79": "Conecte um segundo espaço de trabalho ou usuário do {tracker}.",
+  "99963c0142e17f00": "Para a nova conta do {tracker}.",
+  "6d8e4ebc889bace9": "Adicionar conta",
+  "8a883c4fbc127b68": "Ativando o merge automático da pilha...",
+  "5fb2a26ae31e8983": "Não foi possível ativar o merge automático da pilha",
+  "986d0dcbf4dd0098": "Merge automático da pilha ativado",
+  "f3ed1f63c8a3eef2": "{host} vai mesclar a pilha até o #{number} quando os requisitos forem atendidos.",
+  "bd536a0a1754f6cb": "Não foi possível cancelar o merge automático da pilha",
+  "bb90ac3b2f3a72d5": "O host recusou o cancelamento do merge automático. Atualize e tente novamente.",
+  "9c28753c777c37b7": "{count, plural, one {Mesclar automaticamente {count} {term, select, mr {merge request} cr {solicitação de alteração} other {pull request}}?} other {Mesclar automaticamente {count} {term, select, mr {merge requests} cr {solicitações de alteração} other {pull requests}}?}}",
+  "a86b49982e18784d": "Mescla o #{number} e as camadas não mescladas abaixo dele em {base} usando {method} quando todas atenderem aos requisitos de {host}. Isso pode acontecer imediatamente.",
+  "b1afda5c964deee4": [
+    "Merge automático da pilha (",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    ")"
+  ],
+  "33d18dda74f6d7b3": "Cancelar merge automático da pilha",
+  "012c67c7f1a99e33": "Merge automático da pilha",
+  "4a18481bea4b4ad5": "Novo dispositivo conectado a {environmentLabel}",
+  "4144ab6aa487528a": "{device} se conectou pelo {product}. Não foi você? Revise.",
+  "a10cfdb27152c757": "{count, plural, one {{count} dispositivo se conectou} other {{count} dispositivos se conectaram}} pelo {product}. Não foi você? Revise.",
+  "e0856d6a402ad821": "A política de {organization} não permite comandos de layout de worktree de projetos.",
+  "206811f6f441bfc7": "Este projeto prepara os worktrees com um comando próprio, que ninguém aprovou como está escrito agora. Esta conexão não pode aprová-lo: aprove-o em um cliente que possa usar o terminal.",
+  "b8087c9a70c26da9": "Não foi possível aprovar o comando de layout de worktree.",
+  "49eda70cfd56e621": "Executado quando uma thread em worktree começa e quando a pasta dela é restaurada",
+  "188ccaa1199f5611": "Executado quando o worktree de uma thread é removido",
+  "7e8476e7306acabe": "Permitir que este projeto execute seus comandos de worktree?",
+  "8e11914556fd8b13": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " prepara as threads em worktree com comandos próprios de ",
+    {
+      "t": "code",
+      "i": 2,
+      "c": "t3.json"
+    },
+    ". Eles são executados na máquina deste ambiente com as suas permissões, fora de qualquer sandbox de agente. Você será perguntado de novo sempre que o texto deles mudar."
+  ],
+  "46807acd02a4ff72": "Aprovar e continuar",
+  "a9cb97fca6a6576b": "Comando de criação",
+  "90f45a354884ccdd": "Comando de remoção",
+  "78e308ada516928b": "Não foi possível aprovar o comando",
+  "a0c772d32a233da6": "Não foi possível revogar a aprovação",
+  "0cdc8cdbed3e5eae": "Layout de worktree",
+  "c17b25519e2b194e": "Não foi possível carregar os comandos de layout de worktree",
+  "5ccd5614c65f8d1f": "Revogar a aprovação do comando {kind}",
+  "80c3794a5fa12f3a": "Aprovar o comando {kind}",
+  "f206891e124c77b0": [
+    "O ",
+    {
+      "t": "code",
+      "i": 1,
+      "c": "t3.json"
+    },
+    " deste projeto prepara as threads em worktree com comandos próprios. Eles são executados na máquina deste ambiente com as suas permissões e somente como aprovados aqui: um comando cujo texto muda precisa de aprovação de novo."
+  ],
+  "f6a91589456cca50": "Aprovado",
+  "c92657bb7f2293ff": "Precisa de aprovação",
+  "f1e5c1be1ac92361": "Aprovar",
+  "fcb5f3c4d4753326": "Esta conexão não pode aprovar comandos. Use um cliente que possa usar o terminal.",
+  "7150557773b3818b": "Na fila",
+  "efbeb3993ee2c3f5": "Na fila de {pool}",
+  "0398ca6c1d24b92d": "na fila, o próximo",
+  "0af6d5ffd5166214": "{count, plural, one {na fila, {count} à frente} other {na fila, {count} à frente}}",
+  "49be26a27dcb30e5": "na fila",
+  "4e96712d839ccbff": "{who} disse {choice}",
+  "19097cfb8f5a79cf": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " disse",
+    " ",
+    {
+      "t": "span",
+      "i": 2,
+      "c": {
+        "i": 3,
+        "k": "_gt_value_3",
+        "v": "v"
+      }
+    },
+    "."
+  ],
+  "e7bbf693910057bf": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " disse",
+    " ",
+    {
+      "t": "span",
+      "i": 2,
+      "c": {
+        "i": 3,
+        "k": "_gt_value_3",
+        "v": "v"
+      }
+    },
+    ": ",
+    {
+      "i": 4,
+      "k": "_gt_value_4",
+      "v": "v"
+    }
+  ],
+  "3759768c5d342c22": [
+    "respondida",
+    " ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    }
+  ],
+  "e114d37b32ab0dc7": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " precisa de um motivo."
+  ],
+  "91aadfc843c600de": "Verificar conta Google",
+  "201490988858b511": "retirada por {by}",
+  "99451a5d2d40440f": "Retirada por {by}.",
+  "3ee30a50b70fffab": "Retirada por {by}: {reason}",
+  "92e129bf413a1220": "retirada"
 }

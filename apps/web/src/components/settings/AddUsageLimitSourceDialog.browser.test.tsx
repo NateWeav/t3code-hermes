@@ -20,6 +20,7 @@ describe("AddUsageLimitSourceDialog", () => {
         open
         onOpenChange={onOpenChange}
         environmentId={EnvironmentId.make("local")}
+        environmentLabel="Local"
         onAdd={onAdd}
       />,
     );
@@ -29,10 +30,37 @@ describe("AddUsageLimitSourceDialog", () => {
 
     expect(onAdd).toHaveBeenCalledOnce();
     expect(onAdd).toHaveBeenCalledWith({
+      kind: "cliproxy",
       url: "https://hub.example.ts.net:8318",
       managementKey: "secret-key",
       label: "",
     });
     expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it("adds an HTTP source without a bearer token", async () => {
+    const onAdd = vi.fn();
+    await using _screen = await render(
+      <AddUsageLimitSourceDialog
+        open
+        onOpenChange={vi.fn()}
+        environmentId={EnvironmentId.make("local")}
+        environmentLabel="Local"
+        kind="http"
+        onAdd={onAdd}
+      />,
+    );
+
+    await userEvent.type(
+      page.getByLabelText("Endpoint URL"),
+      "https://quota.example.test/v1{Enter}",
+    );
+
+    expect(onAdd).toHaveBeenCalledWith({
+      kind: "http",
+      url: "https://quota.example.test/v1",
+      managementKey: "",
+      label: "",
+    });
   });
 });

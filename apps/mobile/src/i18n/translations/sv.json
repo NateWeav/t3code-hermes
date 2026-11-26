@@ -5705,5 +5705,11 @@
   "99451a5d2d40440f": "Återkallad av {by}.",
   "3ee30a50b70fffab": "Återkallad av {by}: {reason}",
   "201490988858b511": "återkallad av {by}",
-  "46d614fa7b4bf1e5": "Arbetsflödeskörningar"
+  "46d614fa7b4bf1e5": "Arbetsflödeskörningar",
+  "280ee733d6375db3": "Allt",
+  "ef5278f9768195da": "All tid",
+  "07f3ef35dffc788f": "Kostnad per månad",
+  "1ac9b81130adeaca": "Bearbetade tokens per månad",
+  "d4ac0d4d9581d8a8": "Kostnad per vecka",
+  "f8755b370f303955": "Bearbetade tokens per vecka"
 }

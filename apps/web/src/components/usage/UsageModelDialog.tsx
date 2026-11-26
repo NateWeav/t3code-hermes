@@ -1,6 +1,7 @@
 import { T, useGT, useLocale, Var } from "gt-react";
 import { formatPercent, formatTokens, formatUsd } from "@t3tools/shared/usageFormat";
 import { isModelCostUnknown, type ModelRow } from "@t3tools/shared/usageMerge";
+import type { UsageChartGrain } from "@t3tools/shared/usagePeriods";
 
 import { mergeAnsweredUsage, type EnvironmentUsageStatus } from "../../state/usage";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
@@ -29,6 +30,7 @@ export interface UsageChartWindow {
   readonly days: readonly string[];
   readonly hours: readonly string[];
   readonly resolution: "day" | "hour";
+  readonly grain: UsageChartGrain;
   readonly timeZone: string;
   readonly referenceTime: string | undefined;
   readonly hour12: boolean;
@@ -116,6 +118,7 @@ export function UsageModelDialog({
               metric={costUnknown ? "tokens" : metric}
               referenceTime={chartWindow.referenceTime}
               resolution={chartWindow.resolution}
+              grain={chartWindow.grain}
               timeZone={chartWindow.timeZone}
               hour12={chartWindow.hour12}
             />

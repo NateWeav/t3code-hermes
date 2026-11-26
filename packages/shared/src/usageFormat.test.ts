@@ -7,6 +7,8 @@ import {
   formatHourShort,
   formatTokens,
   makeWindow,
+  USAGE_ALL_TIME_DAYS,
+  USAGE_ALL_TIME_SINCE_DAY,
   usageSourceMessages,
 } from "./usageFormat.ts";
 import { usageSourceMessages as localizedUsageSourceMessages } from "./usageFormatCopy.ts";
@@ -217,6 +219,14 @@ describe("hourly usage formatting", () => {
     expect(window.resolution).toBe("hour");
     expect(window.sinceTime).toBe("2026-08-10T12:37:00.000Z");
     expect(window.untilTime).toBe("2026-08-11T12:37:00.000Z");
+  });
+
+  it("opens an all-time window from before any kept history through today", () => {
+    const window = makeWindow(USAGE_ALL_TIME_DAYS, new Date("2026-08-11T12:37:42.123Z"));
+
+    expect(window.sinceDay).toBe(USAGE_ALL_TIME_SINCE_DAY);
+    expect(window.untilDay).toBe(makeWindow(1, new Date("2026-08-11T12:37:42.123Z")).untilDay);
+    expect(window.sinceTime).toBeUndefined();
   });
 
   it("degrades an unknown resolved zone to UTC instead of crashing", () => {

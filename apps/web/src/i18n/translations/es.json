@@ -13157,5 +13157,18 @@
       "v": "v"
     },
     " más en Elementos vinculados"
-  ]
+  ],
+  "def19423ca8b0cde": "Uso: Periodo: Todo el historial",
+  "d4fee7165147bb3b": "Mes",
+  "7230aa962e07bf63": "Semana",
+  "1ac9b81130adeaca": "Tokens procesados por mes",
+  "07f3ef35dffc788f": "Costo mensual",
+  "f8755b370f303955": "Tokens procesados por semana",
+  "d4ac0d4d9581d8a8": "Costo semanal",
+  "d90d584a298b8d9c": "Semana del {day}",
+  "3a06bf512ece89cd": "Tokens procesados por mes y proveedor",
+  "b1f76c4ea488f646": "Costo mensual por proveedor",
+  "1d3934788d9b6c08": "Tokens procesados por semana y proveedor",
+  "850b79181d4c892d": "Costo semanal por proveedor",
+  "ef5278f9768195da": "Todo el historial"
 }

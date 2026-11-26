@@ -35,6 +35,7 @@ describe("UsageModelDialog", () => {
           days: [],
           hours: [],
           resolution: "day",
+          grain: "day",
           timeZone: "UTC",
           referenceTime: undefined,
           hour12: false,

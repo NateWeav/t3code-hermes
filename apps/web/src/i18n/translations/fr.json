@@ -13162,5 +13162,18 @@
       "v": "v"
     },
     " de plus dans Éléments associés"
-  ]
+  ],
+  "def19423ca8b0cde": "Utilisation : Période : Depuis le début",
+  "d4fee7165147bb3b": "Mois",
+  "7230aa962e07bf63": "Semaine",
+  "1ac9b81130adeaca": "Jetons traités par mois",
+  "07f3ef35dffc788f": "Coût mensuel",
+  "f8755b370f303955": "Jetons traités par semaine",
+  "d4ac0d4d9581d8a8": "Coût hebdomadaire",
+  "d90d584a298b8d9c": "Semaine du {day}",
+  "3a06bf512ece89cd": "Jetons traités par mois et par fournisseur",
+  "b1f76c4ea488f646": "Coût mensuel par fournisseur",
+  "1d3934788d9b6c08": "Jetons traités par semaine et par fournisseur",
+  "850b79181d4c892d": "Coût hebdomadaire par fournisseur",
+  "ef5278f9768195da": "Depuis le début"
 }

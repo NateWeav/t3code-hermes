@@ -13169,5 +13169,18 @@
       "v": "v"
     },
     " till i Länkade objekt"
-  ]
+  ],
+  "def19423ca8b0cde": "Användning: Period: All tid",
+  "d4fee7165147bb3b": "Månad",
+  "7230aa962e07bf63": "Vecka",
+  "1ac9b81130adeaca": "Bearbetade tokens per månad",
+  "07f3ef35dffc788f": "Kostnad per månad",
+  "f8755b370f303955": "Bearbetade tokens per vecka",
+  "d4ac0d4d9581d8a8": "Kostnad per vecka",
+  "d90d584a298b8d9c": "Veckan från {day}",
+  "3a06bf512ece89cd": "Bearbetade tokens per månad och leverantör",
+  "b1f76c4ea488f646": "Kostnad per månad och leverantör",
+  "1d3934788d9b6c08": "Bearbetade tokens per vecka och leverantör",
+  "850b79181d4c892d": "Kostnad per vecka och leverantör",
+  "ef5278f9768195da": "All tid"
 }

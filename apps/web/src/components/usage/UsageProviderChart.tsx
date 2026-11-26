@@ -7,10 +7,12 @@ import type { DailyTotals, HourlyTotals } from "@t3tools/shared/usageMerge";
 import {
   formatDayShort,
   formatHourShort,
+  formatMonthShort,
   formatTokens,
   formatUsd,
 } from "@t3tools/shared/usageFormat";
 import { formatRelativeHourShort } from "@t3tools/shared/usageFormatCopy";
+import { rollUpDaily, usagePeriods, type UsageChartGrain } from "@t3tools/shared/usagePeriods";
 import { cn } from "~/lib/utils";
 import { PROVIDER_ORDER, PROVIDER_PRESENTATION } from "./usageProviders";
 import { observeResize } from "~/lib/observeResize";
@@ -33,6 +35,8 @@ interface UsageProviderChartProps {
   readonly metric: UsageChartMetric;
   readonly referenceTime: string | undefined;
   readonly resolution: "day" | "hour";
+  /** Day-resolution data is summed into this grain; omitted means daily. */
+  readonly grain?: UsageChartGrain;
   readonly timeZone: string;
   readonly hour12: boolean;
 }
@@ -415,14 +419,16 @@ export function UsageProviderChart({
   metric,
   referenceTime,
   resolution,
+  grain = "day",
   timeZone,
   hour12,
 }: UsageProviderChartProps) {
   const gt = useGT();
   const locale = useLocale();
   const m = useMessages();
-  const periods = resolution === "hour" ? hours : days;
-  const totals: readonly (DailyTotals | HourlyTotals)[] = resolution === "hour" ? hourly : daily;
+  const periods = resolution === "hour" ? hours : usagePeriods(days, grain);
+  const totals: readonly (DailyTotals | HourlyTotals)[] =
+    resolution === "hour" ? hourly : rollUpDaily(daily, grain);
   const byPeriod = new Map(
     totals.map((entry) => ["hourStart" in entry ? entry.hourStart : entry.day, entry]),
   );
@@ -441,11 +447,15 @@ export function UsageProviderChart({
   const formatPeriod = (period: string) =>
     resolution === "hour"
       ? formatHourShort(period, timeZone, hour12, locale)
-      : formatDayShort(period, locale);
+      : grain === "month"
+        ? formatMonthShort(period, locale)
+        : formatDayShort(period, locale);
   const formatTooltipPeriod = (period: string) =>
     resolution === "hour" && referenceTime !== undefined
       ? formatRelativeHourShort(period, referenceTime, timeZone, hour12, m, locale)
-      : formatPeriod(period);
+      : grain === "week"
+        ? gt("Week of {day}", { day: formatDayShort(period, locale) })
+        : formatPeriod(period);
 
   return (
     <div className="flex flex-col gap-1">
@@ -539,13 +549,29 @@ export function UsageProviderChart({
               ? metric === "tokens"
                 ? gt("Hourly processed tokens by provider")
                 : gt("Hourly cost by provider")
-              : metric === "tokens"
-                ? gt("Daily processed tokens by provider")
-                : gt("Daily cost by provider")}
+              : grain === "month"
+                ? metric === "tokens"
+                  ? gt("Monthly processed tokens by provider")
+                  : gt("Monthly cost by provider")
+                : grain === "week"
+                  ? metric === "tokens"
+                    ? gt("Weekly processed tokens by provider")
+                    : gt("Weekly cost by provider")
+                  : metric === "tokens"
+                    ? gt("Daily processed tokens by provider")
+                    : gt("Daily cost by provider")}
           </caption>
           <thead>
             <tr>
-              <th scope="col">{resolution === "hour" ? gt("Hour") : gt("Day")}</th>
+              <th scope="col">
+                {resolution === "hour"
+                  ? gt("Hour")
+                  : grain === "month"
+                    ? gt("Month")
+                    : grain === "week"
+                      ? gt("Week")
+                      : gt("Day")}
+              </th>
               {providers.map((provider) => (
                 <th key={provider} scope="col">
                   {PROVIDER_PRESENTATION[provider].label}

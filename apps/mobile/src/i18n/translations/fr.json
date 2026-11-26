@@ -5699,5 +5699,11 @@
   "99451a5d2d40440f": "Retirée par {by}.",
   "3ee30a50b70fffab": "Retirée par {by} : {reason}",
   "201490988858b511": "retirée par {by}",
-  "46d614fa7b4bf1e5": "Exécutions de workflow"
+  "46d614fa7b4bf1e5": "Exécutions de workflow",
+  "280ee733d6375db3": "Tout",
+  "ef5278f9768195da": "Depuis le début",
+  "07f3ef35dffc788f": "Coût mensuel",
+  "1ac9b81130adeaca": "Jetons traités par mois",
+  "d4ac0d4d9581d8a8": "Coût hebdomadaire",
+  "f8755b370f303955": "Jetons traités par semaine"
 }

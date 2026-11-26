@@ -531,6 +531,7 @@ const USAGE_COMMAND_LABELS: Record<
   "usage.period.week": msg("Usage: Period: 7 days"),
   "usage.period.month": msg("Usage: Period: 30 days"),
   "usage.period.quarter": msg("Usage: Period: 90 days"),
+  "usage.period.allTime": msg("Usage: Period: All time"),
 };
 
 const LATE_COMMAND_LABELS: Partial<Record<KeybindingCommand, string>> = {

@@ -147,6 +147,19 @@ export function formatDayShort(day: string, locale?: string): string {
   return `${MONTHS[month - 1] ?? ""} ${dayOfMonth}`;
 }
 
+/** "Nov 2026" for a period that starts on `day` and spans its month. */
+export function formatMonthShort(day: string, locale?: string): string {
+  const [year, month] = day.split("-").map((part) => Number(part));
+  if (year === undefined || month === undefined) return day;
+  const date = new Date(Date.UTC(year, month - 1, 1));
+  if (Number.isNaN(date.getTime())) return day;
+  return dateTimeFormatter(formatLocale(locale), {
+    timeZone: "UTC",
+    month: "short",
+    year: "numeric",
+  }).format(date);
+}
+
 export function enumerateDays(sinceDay: string, untilDay: string): readonly string[] {
   const days: string[] = [];
   const start = Date.parse(`${sinceDay}T00:00:00Z`);
@@ -290,6 +303,11 @@ export function formatRelativeHourShort(
   return formatDateTimeShort(hourStart, timeZone, hour12, locale);
 }
 
+/** `makeWindow` length for an open-ended window back to the oldest kept history. */
+export const USAGE_ALL_TIME_DAYS = 0;
+/** Start of an all-time window: before any coding-agent transcript, so it covers everything kept. */
+export const USAGE_ALL_TIME_SINCE_DAY = "2000-01-01";
+
 export function makeWindow(
   days: number,
   now = new Date(),
@@ -326,6 +344,14 @@ export function makeWindow(
       resolution,
       sinceTime: sinceTime.toISOString(),
       untilTime: untilTime.toISOString(),
+    };
+  }
+  if (days === USAGE_ALL_TIME_DAYS) {
+    return {
+      sinceDay: UsageDay.make(USAGE_ALL_TIME_SINCE_DAY),
+      untilDay: UsageDay.make(untilDay),
+      timeZone,
+      resolution,
     };
   }
   // Use calendar arithmetic in UTC; fixed millisecond subtraction crosses DST days incorrectly.

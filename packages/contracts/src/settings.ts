@@ -109,6 +109,18 @@ export const AppearanceContrast = Schema.Int.check(
 );
 export type AppearanceContrast = typeof AppearanceContrast.Type;
 const DEFAULT_APPEARANCE_CONTRAST: AppearanceContrast = 100;
+
+export const MIN_WALLPAPER_BACKDROP_TINT = 0;
+export const MAX_WALLPAPER_BACKDROP_TINT = 60;
+/** Darkening percentage over the wallpaper, in the spirit of Discord glass themes. */
+export const WallpaperBackdropTint = Schema.Int.check(
+  Schema.isBetween({
+    minimum: MIN_WALLPAPER_BACKDROP_TINT,
+    maximum: MAX_WALLPAPER_BACKDROP_TINT,
+  }),
+);
+export type WallpaperBackdropTint = typeof WallpaperBackdropTint.Type;
+const DEFAULT_WALLPAPER_BACKDROP_TINT: WallpaperBackdropTint = 15;
 export const MIN_PANEL_ANIMATION_DURATION_MS = 0;
 export const MAX_PANEL_ANIMATION_DURATION_MS = 400;
 export const PanelAnimationDurationMs = Schema.Int.check(
@@ -333,6 +345,17 @@ export const ClientSettingsSchema = Schema.Struct({
   loadBalancingWeights: LoadBalancingWeights.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   appearanceContrast: AppearanceContrast.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_APPEARANCE_CONTRAST)),
+  ),
+  /**
+   * Paint the spanned desktop wallpaper behind see-through app surfaces so a
+   * maximized browser window looks transparent. The image itself is stored
+   * per browser, not in these settings. Fork opt-in.
+   */
+  wallpaperBackdropEnabled: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(false)),
+  ),
+  wallpaperBackdropTint: WallpaperBackdropTint.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_WALLPAPER_BACKDROP_TINT)),
   ),
   // Panel motion defaults to zero because width and height transitions cause
   // layout work on every frame, which is noticeable on lower-power clients.
@@ -1793,6 +1816,8 @@ export const ClientSettingsPatch = Schema.Struct({
   loadBalancingEnabled: Schema.optionalKey(Schema.Boolean),
   loadBalancingWeights: Schema.optionalKey(LoadBalancingWeights),
   appearanceContrast: Schema.optionalKey(AppearanceContrast),
+  wallpaperBackdropEnabled: Schema.optionalKey(Schema.Boolean),
+  wallpaperBackdropTint: Schema.optionalKey(WallpaperBackdropTint),
   panelAnimationDurationMs: Schema.optionalKey(PanelAnimationDurationMs),
   browserDefaultViewport: Schema.optionalKey(PreviewViewportSetting),
   browserDefaultZoomFactor: Schema.optionalKey(PreviewZoomFactor),

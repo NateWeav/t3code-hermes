@@ -285,6 +285,13 @@ function resolveBrowserChromeSurface(): HTMLElement {
 
 export function syncBrowserChromeTheme() {
   if (typeof document === "undefined" || typeof getComputedStyle === "undefined") return;
+  // The fork's wallpaper backdrop needs the root surfaces see-through; the
+  // wallpaper sync component re-applies solid colors when it turns off.
+  if (document.documentElement.hasAttribute("data-wallpaper-backdrop")) {
+    document.documentElement.style.backgroundColor = "transparent";
+    document.body.style.backgroundColor = "transparent";
+    return;
+  }
   const rootStyles = getComputedStyle(document.documentElement);
   const themeChromeColor = document.documentElement.dataset.themeId
     ? normalizeThemeColor(rootStyles.getPropertyValue("--app-chrome-background"))

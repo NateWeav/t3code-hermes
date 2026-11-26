@@ -17,6 +17,7 @@ import { useEffect, useEffectEvent, useRef, useState } from "react";
 import { APP_BASE_NAME, APP_DISPLAY_NAME, APP_STAGE_LABEL, APP_VERSION } from "../branding";
 import { resolveServerBackedAppDisplayName } from "../branding.logic";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
+import { WallpaperBackdropLayer, WallpaperBackdropSync } from "../WallpaperBackdrop";
 import { CommandPalette } from "../components/CommandPalette";
 import { CustomSnoozeDialogHost } from "../components/CustomSnoozeDialog";
 import { AddProjectToMachineDialogHost } from "../components/AddProjectToMachineDialog";
@@ -185,6 +186,8 @@ function RootRouteView() {
           <ContrastAppearanceSync />
           <EnvironmentThemeSync />
           <GlassAppearanceSync />
+          <WallpaperBackdropSync />
+          <WallpaperBackdropLayer />
           <FontAppearanceSync />
           <ProviderAuthCallbackCoordinator />
           <CustomSnoozeDialogHost />
@@ -224,6 +227,8 @@ function RootRouteView() {
         <ContrastAppearanceSync />
         <EnvironmentThemeSync />
         <GlassAppearanceSync />
+        <WallpaperBackdropSync />
+        <WallpaperBackdropLayer />
         <FontAppearanceSync />
         <ProviderAuthCallbackCoordinator />
         <ChatGptWelcomeCoordinator />

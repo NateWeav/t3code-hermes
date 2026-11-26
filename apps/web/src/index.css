@@ -2523,3 +2523,43 @@ code {
     }
   }
 }
+
+/* Fork: desktop wallpaper backdrop (Settings → Appearance → Wallpaper). While
+   `html[data-wallpaper-backdrop]` is set, the main app surfaces become
+   see-through over a fixed layer that paints the spanned desktop wallpaper at
+   the position a maximized window would reveal. Portals and code surfaces keep
+   solid fills, matching how Discord glass themes keep inputs and code readable. */
+html[data-wallpaper-backdrop] {
+  --wallpaper-tint: color-mix(in srgb, var(--background) var(--wallpaper-backdrop-tint, 15%), transparent);
+}
+
+/* Solid, not tinted: the body background only shows in overscroll regions
+   behind the fixed wallpaper layer, and the layer paints its own solid base. */
+html[data-wallpaper-backdrop] body {
+  background-color: var(--background) !important;
+}
+
+html[data-wallpaper-backdrop] [data-app-sidebar],
+html[data-wallpaper-backdrop] [data-slot="sidebar-inset"],
+html[data-wallpaper-backdrop] [data-chat-header],
+html[data-wallpaper-backdrop] [data-chat-canvas],
+html[data-wallpaper-backdrop] [data-chat-column],
+html[data-wallpaper-backdrop] [data-timeline-loading],
+html[data-wallpaper-backdrop] [data-settings-page-scroll],
+html[data-wallpaper-backdrop] main {
+  background-color: var(--wallpaper-tint) !important;
+}
+
+/* Termination layer for portals (dialogs, menus, popovers, sheets, toasts) and
+   code surfaces. Their own backgrounds stay opaque, so they need no overrides;
+   only descendants that used the now-clear app surface get a solid base. */
+html[data-wallpaper-backdrop] [data-slot="dialog-backdrop"],
+html[data-wallpaper-backdrop] [data-slot="sheet-backdrop"] {
+  background-color: color-mix(in srgb, var(--background) 60%, transparent) !important;
+}
+
+html[data-wallpaper-backdrop] .chat-markdown pre,
+html[data-wallpaper-backdrop] .diff-render-surface,
+html[data-wallpaper-backdrop] [data-slot="terminal"] {
+  background-color: color-mix(in srgb, var(--code-background, var(--card)) 96%, var(--background)) !important;
+}

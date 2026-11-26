@@ -38,6 +38,7 @@ import {
 } from "./composerDraftStore";
 import { startDefaultThemeAdoption } from "./hooks/useDefaultTheme";
 import { startEnvironmentThemeRepaint } from "./hooks/useEnvironmentTheme";
+import { applyGlassSurfaces } from "./glassSurfaces";
 import { startThemeBackground } from "./themeBackground";
 import { readLocalStorageValue, subscribeLocalStorageKey } from "./hooks/useLocalStorage";
 import { startHostEnvironmentLookup } from "./state/primaryEnvironment";
@@ -104,6 +105,9 @@ function startClientAppearance(): void {
       } else {
         root.style.removeProperty("--glass-blur");
       }
+    }
+    if (previous?.glassSurfaces !== settings.glassSurfaces) {
+      applyGlassSurfaces(root, settings.glassSurfaces);
     }
     if (
       previous?.fontFamilySans !== settings.fontFamilySans ||

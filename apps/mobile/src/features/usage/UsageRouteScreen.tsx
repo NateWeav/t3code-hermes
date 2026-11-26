@@ -16,14 +16,20 @@ import {
   type MergedUsage,
 } from "@t3tools/shared/usageMerge";
 import {
-  enumerateDays,
   enumerateHourStarts,
   formatCount,
   formatPercent,
   formatTokens,
   formatUsd,
   makeWindow,
+  USAGE_ALL_TIME_DAYS,
 } from "@t3tools/shared/usageFormat";
+import {
+  rollUpDaily,
+  usageChartGrain,
+  usagePeriods,
+  usageWindowDays,
+} from "@t3tools/shared/usagePeriods";
 import { formatUsageContractMismatch, usageSourceMessages } from "@t3tools/shared/usageFormatCopy";
 import { msg, T, useGT, useLocale, useMessages, Var } from "gt-react-native";
 import { use, useRef, useState, type ReactNode } from "react";
@@ -78,6 +84,11 @@ const WINDOW_OPTIONS = [
     value: 90,
     label: msg("90d", { $context: "short label for the past 90 days" }),
     accessibilityLabel: msg("Past 90 days"),
+  },
+  {
+    value: USAGE_ALL_TIME_DAYS,
+    label: msg("All", { $context: "short label for all usage history" }),
+    accessibilityLabel: msg("All time"),
   },
 ] as const;
 
@@ -149,11 +160,12 @@ function UsageScreen(props: {
     (environment) => environment.canReadDiagnostics,
   );
 
-  const days = enumerateDays(window.sinceDay, window.untilDay);
+  const days = usageWindowDays(window.sinceDay, window.untilDay, merged.daily);
+  const grain = isPast24Hours ? "day" : usageChartGrain(days.length);
   const chartDays =
     isPast24Hours && window.sinceTime !== undefined && window.untilTime !== undefined
       ? enumerateHourStarts(window.sinceTime, window.untilTime)
-      : days;
+      : usagePeriods(days, grain);
   const chartTotals: readonly DailyTotals[] = isPast24Hours
     ? merged.hourly.map((hour) => ({
         day: hour.hourStart,
@@ -161,7 +173,7 @@ function UsageScreen(props: {
         totalTokens: hour.totalTokens,
         byProvider: hour.byProvider,
       }))
-    : merged.daily;
+    : rollUpDaily(merged.daily, grain);
 
   const [refreshingUsage, setRefreshingUsage] = useState(false);
   const refreshingRef = useRef(false);
@@ -205,7 +217,7 @@ function UsageScreen(props: {
     days: chartDays,
     daily: chartTotals,
     metric,
-    sinceDay: window.sinceDay,
+    sinceDay: days[0] ?? window.untilDay,
     untilDay: window.untilDay,
     isPast24Hours,
     timeZone: window.timeZone,
@@ -378,9 +390,17 @@ function UsageScreen(props: {
                                     ? metric === "cost"
                                       ? gt("Hourly cost")
                                       : gt("Hourly processed tokens")
-                                    : metric === "cost"
-                                      ? gt("Daily cost")
-                                      : gt("Daily processed tokens")
+                                    : grain === "month"
+                                      ? metric === "cost"
+                                        ? gt("Monthly cost")
+                                        : gt("Monthly processed tokens")
+                                      : grain === "week"
+                                        ? metric === "cost"
+                                          ? gt("Weekly cost")
+                                          : gt("Weekly processed tokens")
+                                        : metric === "cost"
+                                          ? gt("Daily cost")
+                                          : gt("Daily processed tokens")
                                 }
                               />
                             </View>

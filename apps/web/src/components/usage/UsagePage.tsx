@@ -45,18 +45,24 @@ import { shortcutLabelForCommand } from "../../keybindings";
 import { useUsage, type EnvironmentUsageStatus } from "../../state/usage";
 import { useAtomCommand } from "../../state/use-atom-command";
 import {
-  enumerateDays,
   enumerateHourStarts,
   formatCount,
   formatDateTimeShort,
   formatDayShort,
   formatHourShort,
+  formatMonthShort,
   formatPercent,
   formatTokens,
   formatUsd,
   makeWindow,
 } from "@t3tools/shared/usageFormat";
 import { formatUsageContractMismatch, usageSourceMessages } from "@t3tools/shared/usageFormatCopy";
+import {
+  rollUpDaily,
+  usageChartGrain,
+  usageWindowDays,
+  type UsageChartGrain,
+} from "@t3tools/shared/usagePeriods";
 import { Button, InlineButton } from "../ui/button";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import {
@@ -354,7 +360,8 @@ export function UsagePage() {
     if (showingLimits && connectedLimitsEnvironments) autoRefreshLimits();
   }, [showingLimits, connectedLimitsEnvironments]);
 
-  const days = enumerateDays(shownWindow.sinceDay, shownWindow.untilDay);
+  const days = usageWindowDays(shownWindow.sinceDay, shownWindow.untilDay, merged.daily);
+  const grain: UsageChartGrain = shownHourly ? "day" : usageChartGrain(days.length);
   const hours =
     shownWindow.sinceTime === undefined || shownWindow.untilTime === undefined
       ? []
@@ -374,7 +381,7 @@ export function UsagePage() {
           end: formatDateTimeShort(shownWindow.untilTime, shownWindow.timeZone, hour12, locale),
         })
       : gt("{start} to {end}", {
-          start: formatDayShort(shownWindow.sinceDay, locale),
+          start: formatDayShort(days[0] ?? shownWindow.sinceDay, locale),
           end: formatDayShort(shownWindow.untilDay, locale),
         });
   const windowOptionLabel = WINDOW_OPTIONS.find((option) => option.days === windowDays)?.label;
@@ -568,6 +575,7 @@ export function UsagePage() {
                 shownWindow={shownWindow}
                 hour12={hour12}
                 days={days}
+                grain={grain}
                 hours={hours}
                 showingKept={showingKept}
                 metric={metric === "tokens" ? "tokens" : "cost"}
@@ -595,6 +603,7 @@ export function UsagePage() {
             days,
             hours,
             resolution: shownHourly ? "hour" : "day",
+            grain,
             timeZone: shownWindow.timeZone,
             referenceTime: shownWindow.untilTime,
             hour12,
@@ -621,6 +630,7 @@ function UsageOverview({
   shownWindow,
   hour12,
   days,
+  grain,
   hours,
   showingKept,
   metric,
@@ -637,6 +647,7 @@ function UsageOverview({
   readonly shownWindow: UsageSummaryInput;
   readonly hour12: boolean;
   readonly days: readonly string[];
+  readonly grain: UsageChartGrain;
   readonly hours: readonly string[];
   readonly showingKept: boolean;
   readonly metric: "tokens" | "cost";
@@ -680,8 +691,15 @@ function UsageOverview({
     m,
   );
   const breakdownPeriods: readonly (DailyTotals | HourlyTotals)[] = (
-    shownHourly ? merged.hourly : merged.daily
+    shownHourly ? merged.hourly : rollUpDaily(merged.daily, grain)
   ).toReversed();
+  const periodLabel = shownHourly
+    ? gt("Hour")
+    : grain === "month"
+      ? gt("Month")
+      : grain === "week"
+        ? gt("Week")
+        : gt("Day");
   const breakdownModels =
     breakdown === "model" && metric === "tokens" ? sortModelsByTokens(modelRows) : modelRows;
   const breakdownPeak = breakdownModels.reduce(
@@ -825,9 +843,17 @@ function UsageOverview({
               ? metric === "tokens"
                 ? gt("Hourly processed tokens")
                 : gt("Hourly cost")
-              : metric === "tokens"
-                ? gt("Daily processed tokens")
-                : gt("Daily cost")}
+              : grain === "month"
+                ? metric === "tokens"
+                  ? gt("Monthly processed tokens")
+                  : gt("Monthly cost")
+                : grain === "week"
+                  ? metric === "tokens"
+                    ? gt("Weekly processed tokens")
+                    : gt("Weekly cost")
+                  : metric === "tokens"
+                    ? gt("Daily processed tokens")
+                    : gt("Daily cost")}
           </h2>
           <UsageProviderChart
             providers={activeProviders}
@@ -839,6 +865,7 @@ function UsageOverview({
             metric={metric}
             referenceTime={shownWindow.untilTime}
             resolution={shownHourly ? "hour" : "day"}
+            grain={grain}
             timeZone={shownWindow.timeZone}
             hour12={hour12}
           />
@@ -938,7 +965,7 @@ function UsageOverview({
               {(
                 [
                   { value: "model", label: gt("Model") },
-                  { value: "time", label: shownHourly ? gt("Hour") : gt("Day") },
+                  { value: "time", label: periodLabel },
                 ] as const
               ).map((option) => (
                 <Toggle key={option.value} value={option.value}>
@@ -1064,7 +1091,7 @@ function UsageOverview({
               </colgroup>
               <thead>
                 <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                  <th className="py-2 pl-2 font-normal">{shownHourly ? gt("Hour") : gt("Day")}</th>
+                  <th className="py-2 pl-2 font-normal">{periodLabel}</th>
                   {activeProviders.map((provider) => (
                     <th key={provider} className="py-2 pl-4 text-right font-normal">
                       {PROVIDER_PRESENTATION[provider].label}
@@ -1097,7 +1124,11 @@ function UsageOverview({
                       <td className="py-2 pl-2 text-foreground">
                         {"hourStart" in period
                           ? formatHourShort(period.hourStart, shownWindow.timeZone, hour12, locale)
-                          : formatDayShort(period.day, locale)}
+                          : grain === "month"
+                            ? formatMonthShort(period.day, locale)
+                            : grain === "week"
+                              ? gt("Week of {day}", { day: formatDayShort(period.day, locale) })
+                              : formatDayShort(period.day, locale)}
                       </td>
                       {activeProviders.map((provider) => (
                         <td

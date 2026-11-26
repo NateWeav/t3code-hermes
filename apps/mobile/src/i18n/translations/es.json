@@ -5699,5 +5699,11 @@
   "99451a5d2d40440f": "Retirada por {by}.",
   "3ee30a50b70fffab": "Retirada por {by}: {reason}",
   "201490988858b511": "retirada por {by}",
-  "46d614fa7b4bf1e5": "Ejecuciones de flujos de trabajo"
+  "46d614fa7b4bf1e5": "Ejecuciones de flujos de trabajo",
+  "280ee733d6375db3": "Todo",
+  "ef5278f9768195da": "Todo el historial",
+  "07f3ef35dffc788f": "Costo mensual",
+  "1ac9b81130adeaca": "Tokens procesados por mes",
+  "d4ac0d4d9581d8a8": "Costo semanal",
+  "f8755b370f303955": "Tokens procesados por semana"
 }

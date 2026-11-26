@@ -13171,5 +13171,18 @@
       "v": "v"
     },
     " more in Linked items"
-  ]
+  ],
+  "def19423ca8b0cde": "Usage: Period: All time",
+  "d4fee7165147bb3b": "Month",
+  "7230aa962e07bf63": "Week",
+  "1ac9b81130adeaca": "Monthly processed tokens",
+  "07f3ef35dffc788f": "Monthly cost",
+  "f8755b370f303955": "Weekly processed tokens",
+  "d4ac0d4d9581d8a8": "Weekly cost",
+  "d90d584a298b8d9c": "Week of {day}",
+  "3a06bf512ece89cd": "Monthly processed tokens by provider",
+  "b1f76c4ea488f646": "Monthly cost by provider",
+  "1d3934788d9b6c08": "Weekly processed tokens by provider",
+  "850b79181d4c892d": "Weekly cost by provider",
+  "ef5278f9768195da": "All time"
 }

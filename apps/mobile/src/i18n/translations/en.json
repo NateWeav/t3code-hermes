@@ -5707,5 +5707,11 @@
   "99451a5d2d40440f": "Withdrawn by {by}.",
   "3ee30a50b70fffab": "Withdrawn by {by}: {reason}",
   "201490988858b511": "withdrawn by {by}",
-  "46d614fa7b4bf1e5": "Workflow runs"
+  "46d614fa7b4bf1e5": "Workflow runs",
+  "280ee733d6375db3": "All",
+  "ef5278f9768195da": "All time",
+  "07f3ef35dffc788f": "Monthly cost",
+  "1ac9b81130adeaca": "Monthly processed tokens",
+  "d4ac0d4d9581d8a8": "Weekly cost",
+  "f8755b370f303955": "Weekly processed tokens"
 }

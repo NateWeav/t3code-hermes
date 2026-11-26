@@ -199,6 +199,7 @@ export type AcpSessionRuntimeBinding = Pick<
   | "onTermination"
   | "onOutgoingResponseFailure"
   | "onOutgoingResponse"
+  | "onUndecodableNotification"
 >;
 
 export interface AcpSessionRequestLogEvent {
@@ -1812,9 +1813,8 @@ export const make = Effect.fn("AcpSessionRuntime.make")(function* (
       onOutgoingResponseFailure: (requestId, error) =>
         binding.onOutgoingResponseFailure?.(requestId, error) ?? Effect.void,
       onOutgoingResponse: (requestId) => binding.onOutgoingResponse?.(requestId) ?? Effect.void,
-      ...(options.onUndecodableNotification
-        ? { onUndecodableNotification: options.onUndecodableNotification }
-        : {}),
+      onUndecodableNotification: (method, payload) =>
+        binding.onUndecodableNotification?.(method, payload) ?? Effect.void,
     }),
   ).pipe(Effect.provideService(Scope.Scope, runtimeScope));
 

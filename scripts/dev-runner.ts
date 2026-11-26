@@ -828,7 +828,7 @@ export const runDevRunnerWithInput = Effect.fn("dev-runner.runDevRunnerWithInput
   if (input.mode !== "dev:web") {
     const path = yield* Path.Path;
     yield* acquireDevRunnerLock(
-      env.T3CODE_HOME ? path.join(env.T3CODE_HOME, "userdata") : path.join(baseDir, "dev"),
+      env.T3HERMES_HOME ? path.join(env.T3HERMES_HOME, "userdata") : path.join(baseDir, "dev"),
       `pid ${String(process.pid)}, ${input.mode}, server port ${String(env.T3CODE_PORT)}, web port ${String(env.PORT)}`,
     );
   }

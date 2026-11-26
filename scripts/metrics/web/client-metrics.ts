@@ -234,7 +234,7 @@ const startSeededApp = Effect.fn("clientMetrics.startSeededApp")(function* (
   }
   yield* forge.setupProject(project);
 
-  const dropped = new Set(["T3CODE_HOME", "XDG_CONFIG_HOME", "VITE_HTTP_URL", "VITE_WS_URL"]);
+  const dropped = new Set(["T3HERMES_HOME", "XDG_CONFIG_HOME", "VITE_HTTP_URL", "VITE_WS_URL"]);
   const env: Record<string, string> = {
     ...Object.fromEntries(
       Object.entries(hostEnvironment).filter(

@@ -195,6 +195,10 @@ Pinned threads stay above the folders, and Snoozed and Settled stay below them. 
 can drag a thread onto the composer to mention it, but not within the sidebar, and the Working
 section is off. Each device keeps its own choice.
 
+With the boring sidebar on, turn on **Machine icons on folder rows** under it to show which
+machine each thread runs on, left of its title. Pick each machine's icon in **Settings →
+Connections** (the **⋯** menu on a machine, then **Icon**), so every machine looks different.
+
 ## Settle finished work
 
 Choose **Settle thread** from its menu to move finished work out of the active list

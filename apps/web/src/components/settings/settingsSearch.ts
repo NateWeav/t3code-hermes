@@ -556,6 +556,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     targetId: "boring-sidebar",
     searchTerms: [msg("beta boring sidebar folder rows multiline branch pull request details")],
   },
+  {
+    id: "boring-sidebar-machine-icons",
+    title: msg("Machine icons on folder rows"),
+    to: "/settings/labs",
+    targetId: "boring-sidebar",
+    searchTerms: [msg("beta boring sidebar folder rows machine environment host icon")],
+  },
 
   {
     id: "tool-call-visibility",

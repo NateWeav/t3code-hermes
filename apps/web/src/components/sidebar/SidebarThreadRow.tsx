@@ -639,6 +639,8 @@ type SidebarThreadRowProps = {
   providerEntryByInstanceId: ReadonlyMap<string, SidebarProviderEntry>;
   /** Settings > Appearance > Motion; off by default, which draws no rings at all. */
   statusRings: boolean;
+  /** Labs > Boring sidebar; draws the thread's machine icon in the folder row's leading indent. */
+  folderMachineIcon?: boolean | undefined;
   timestampFormat: TimestampFormat;
   onThreadClick: (event: ReactMouseEvent, threadRef: ScopedThreadRef) => void;
   onThreadActivate: (threadRef: ScopedThreadRef) => void;
@@ -1408,6 +1410,17 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           >
             {/* Folder rows stand in for the default view's cards, so they carry its ring. */}
             {inFolder ? <ThreadStatusRing ring={statusRing} /> : null}
+            {inFolder && props.folderMachineIcon ? (
+              // Sits in the folder header's favicon column; h-9 centers it on the title line in both folder variants.
+              <span className="pointer-events-none absolute start-2.5 top-0 flex h-9 w-4 items-center justify-center">
+                <EnvironmentMachineIcon
+                  role="img"
+                  aria-label={props.environmentLabel ?? undefined}
+                  kind={props.environmentMachine}
+                  className="size-3.5 text-icon-muted"
+                />
+              </span>
+            ) : null}
             {/* `contents` keeps one-line rows a single flex row. */}
             <div className={multiline ? "flex h-6 min-w-0 items-center gap-2.5" : "contents"}>
               {inFolder ? null : (

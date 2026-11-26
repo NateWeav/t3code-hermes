@@ -13110,5 +13110,8 @@
   "201490988858b511": "retirée par {by}",
   "99451a5d2d40440f": "Retirée par {by}.",
   "3ee30a50b70fffab": "Retirée par {by} : {reason}",
-  "92e129bf413a1220": "retirée"
+  "92e129bf413a1220": "retirée",
+  "18802658a3b7dcf4": "Icônes de machine sur les lignes de dossier",
+  "f6e2739721115058": "Affiche à gauche du titre l’icône de la machine sur laquelle s’exécute chaque fil du dossier.",
+  "25dce222e893fa01": "bêta barre latérale sobre dossier lignes machine environnement hôte icône"
 }

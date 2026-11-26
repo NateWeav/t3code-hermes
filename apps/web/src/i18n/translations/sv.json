@@ -13117,5 +13117,8 @@
   "201490988858b511": "återkallad av {by}",
   "99451a5d2d40440f": "Återkallad av {by}.",
   "3ee30a50b70fffab": "Återkallad av {by}: {reason}",
-  "92e129bf413a1220": "återkallad"
+  "92e129bf413a1220": "återkallad",
+  "18802658a3b7dcf4": "Maskinikoner på mapprader",
+  "f6e2739721115058": "Visar ikonen för maskinen som varje tråd i mappen körs på, till vänster om titeln.",
+  "25dce222e893fa01": "beta tråkigt sidofält mapp rader maskin miljö värd ikon"
 }

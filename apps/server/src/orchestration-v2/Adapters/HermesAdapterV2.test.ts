@@ -1504,6 +1504,26 @@ describe.skipIf(windowsHost)("HermesAdapterV2 against the mock agent", () => {
       }).pipe(Effect.provide(testLayer), Effect.scoped),
   );
 
+  it.effect("keeps the root thread subscribed while a command that will wake Hermes runs", () =>
+    Effect.gen(function* () {
+      let pending: boolean | undefined;
+      yield* runMockTurn({
+        name: "background-root-probe",
+        mockEnvironment: {},
+        promptUpdates: hermesBackgroundStart({
+          toolCallId: "tc-tests",
+          processId: TESTS_PROC,
+          notify: true,
+        }),
+        afterTurn: ({ session, providerThread }) =>
+          Effect.gen(function* () {
+            pending = yield* session.hasPendingBackgroundWorkForThread!(providerThread);
+          }),
+      });
+      assert.isTrue(pending);
+    }).pipe(Effect.provide(testLayer), Effect.scoped),
+  );
+
   // Hermes's wake names no process: it releases every listed one, and names a lone one.
   it.effect.each([
     {

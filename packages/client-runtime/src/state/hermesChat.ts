@@ -82,6 +82,24 @@ export function hermesChatConversationSubtitle(
     .join(" · ");
 }
 
+/**
+ * A linked conversation's pill status: `working` while the gateway runs a turn in it, `done`
+ * once it has activity newer than the user last saw, otherwise null. A conversation never
+ * seen counts as seen, so it starts quiet.
+ */
+export function hermesChatPillStatus(conversation: {
+  readonly running: boolean;
+  readonly lastActivityAt: string;
+  readonly lastSeenAt: string | null;
+}): "working" | "done" | null {
+  if (conversation.running) return "working";
+  if (conversation.lastSeenAt === null) return null;
+  const activity = Date.parse(conversation.lastActivityAt);
+  const seen = Date.parse(conversation.lastSeenAt);
+  if (!Number.isFinite(activity) || !Number.isFinite(seen)) return null;
+  return activity > seen ? "done" : null;
+}
+
 /** "now", "5m", "3h", "2d", then a date. */
 export function formatHermesChatAge(iso: string, now = Date.now()): string {
   const at = Date.parse(iso);

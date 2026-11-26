@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   describeHermesChatTools,
+  hermesChatPillStatus,
   formatHermesChatAge,
   hermesChatConversationSubtitle,
   hermesChatConversationTitle,
@@ -95,5 +96,39 @@ describe("hermesChatTranscriptItems", () => {
     expect(tools?.kind === "tools" && describeHermesChatTools(tools)).toBe(
       "Used terminal, skill_view",
     );
+  });
+});
+
+describe("hermesChatPillStatus", () => {
+  const at = (minute: number) => `2026-11-27T10:${String(minute).padStart(2, "0")}:00.000Z`;
+
+  it("is working while the gateway runs a turn, whatever was seen", () => {
+    expect(hermesChatPillStatus({ running: true, lastActivityAt: at(5), lastSeenAt: at(1) })).toBe(
+      "working",
+    );
+    expect(hermesChatPillStatus({ running: true, lastActivityAt: at(1), lastSeenAt: at(5) })).toBe(
+      "working",
+    );
+  });
+
+  it("is done once activity is newer than the last look", () => {
+    expect(hermesChatPillStatus({ running: false, lastActivityAt: at(5), lastSeenAt: at(1) })).toBe(
+      "done",
+    );
+  });
+
+  it("rests when seen at or after the newest activity, never seen, or unparseable", () => {
+    expect(
+      hermesChatPillStatus({ running: false, lastActivityAt: at(5), lastSeenAt: at(5) }),
+    ).toBeNull();
+    expect(
+      hermesChatPillStatus({ running: false, lastActivityAt: at(1), lastSeenAt: at(5) }),
+    ).toBeNull();
+    expect(
+      hermesChatPillStatus({ running: false, lastActivityAt: at(5), lastSeenAt: null }),
+    ).toBeNull();
+    expect(
+      hermesChatPillStatus({ running: false, lastActivityAt: "soon", lastSeenAt: at(1) }),
+    ).toBeNull();
   });
 });

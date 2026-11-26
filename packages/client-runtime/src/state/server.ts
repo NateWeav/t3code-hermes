@@ -1883,6 +1883,16 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:hermes-chat-unlink",
       tag: WS_METHODS.hermesChatUnlink,
     }),
+    /** One thread's linked conversations for its details pills; the pills poll it. */
+    hermesChatThreadConversations: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:hermes-chat-thread-conversations",
+      tag: WS_METHODS.hermesChatThreadConversations,
+      staleTimeMs: 2_000,
+    }),
+    hermesChatMarkSeen: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:hermes-chat-mark-seen",
+      tag: WS_METHODS.hermesChatMarkSeen,
+    }),
     /**
      * Hermes Kanban boards, read on demand: their databases have no change feed
      * this server listens to, so the surface asks when it opens and on refresh.

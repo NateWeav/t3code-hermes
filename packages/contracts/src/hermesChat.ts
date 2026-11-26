@@ -133,6 +133,62 @@ export const HermesChatLinksResult = Schema.Struct({
 });
 export type HermesChatLinksResult = typeof HermesChatLinksResult.Type;
 
+export const HermesChatThreadConversationsInput = Schema.Struct({
+  threadId: ThreadId,
+});
+export type HermesChatThreadConversationsInput = typeof HermesChatThreadConversationsInput.Type;
+
+/**
+ * One conversation linked to a thread, with just what its pill needs: the
+ * fields `hermesChatConversationTitle` reads, its activity, and its status.
+ */
+export const HermesChatThreadConversation = Schema.Struct({
+  sessionKey: TrimmedNonEmptyString,
+  displayName: Schema.NullOr(Schema.String),
+  title: Schema.NullOr(Schema.String),
+  userName: Schema.NullOr(Schema.String),
+  chatType: Schema.NullOr(Schema.String),
+  lastActivityAt: IsoDateTime,
+  /** A turn is running in the gateway now; false when the gateway cannot say. */
+  running: Schema.Boolean,
+  /** When the user last saw it, on any device. */
+  lastSeenAt: Schema.NullOr(IsoDateTime),
+  source: Schema.Literals(["manual", "hub"]),
+});
+export type HermesChatThreadConversation = typeof HermesChatThreadConversation.Type;
+
+export const HermesChatThreadConversationsResult = Schema.Struct({
+  availability: HermesChatAvailability,
+  /** Newest activity first. */
+  conversations: ForwardCompatibleArray(HermesChatThreadConversation),
+});
+export type HermesChatThreadConversationsResult = typeof HermesChatThreadConversationsResult.Type;
+
+export const HermesChatMarkSeenInput = Schema.Struct({
+  sessionKey: TrimmedNonEmptyString,
+});
+export type HermesChatMarkSeenInput = typeof HermesChatMarkSeenInput.Type;
+
+export const HermesChatMarkSeenResult = Schema.Struct({
+  sessionKey: TrimmedNonEmptyString,
+  lastSeenAt: IsoDateTime,
+});
+export type HermesChatMarkSeenResult = typeof HermesChatMarkSeenResult.Type;
+
+export class HermesChatSeenError extends Schema.TaggedError<HermesChatSeenError>()(
+  "HermesChatSeenError",
+  {
+    reason: Schema.Literals(["unknownConversation", "writeFailed"]),
+    /** Stable, bounded description. The underlying failure travels in `cause`. */
+    detail: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  override get message(): string {
+    return `Hermes conversation seen request failed (${this.reason}): ${this.detail}`;
+  }
+}
+
 /** One configured hub, as `hermes.hubList` and the `hermes_hub_list` tool report it. */
 export const HermesChatHub = Schema.Struct({
   id: TrimmedNonEmptyString,

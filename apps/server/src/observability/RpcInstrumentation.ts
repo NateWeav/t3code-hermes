@@ -118,6 +118,8 @@ const RPC_AGGREGATES = {
   [WS_METHODS.hermesChatLinks]: "server",
   [WS_METHODS.hermesChatLink]: "server",
   [WS_METHODS.hermesChatUnlink]: "server",
+  [WS_METHODS.hermesChatThreadConversations]: "server",
+  [WS_METHODS.hermesChatMarkSeen]: "server",
   [WS_METHODS.hermesKanbanListBoards]: "server",
   [WS_METHODS.hermesKanbanGetBoard]: "server",
   [WS_METHODS.hermesKanbanGetTask]: "server",

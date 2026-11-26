@@ -13,12 +13,26 @@ export async function startFakeGateway(options: {
   readonly home: string;
   readonly pid: number;
   readonly supervisor?: string;
+  /**
+   * The raw line answering `active-work`, or null to answer as a Hermes
+   * without the verb (`ok:false`). Defaults to null.
+   */
+  readonly activeWork?: string | null;
 }) {
   const pidFile = NodePath.join(options.home, "gateway.pid");
   NodeFS.writeFileSync(pidFile, JSON.stringify({ pid: options.pid, kind: "hermes-gateway" }));
   let answeredPid: number | null = null;
+  let activeWork = options.activeWork ?? null;
   const server = NodeNet.createServer((socket) => {
-    socket.once("data", () => {
+    socket.once("data", (chunk) => {
+      const request = JSON.parse(chunk.toString("utf8").trim()) as { verb?: string; id?: unknown };
+      if (request.verb === "active-work") {
+        socket.end(
+          activeWork ??
+            `${JSON.stringify({ ok: false, protocol: 1, id: request.id, error: "unknown verb" })}\n`,
+        );
+        return;
+      }
       const recorded = (JSON.parse(NodeFS.readFileSync(pidFile, "utf8")) as { pid: number }).pid;
       socket.end(
         `${JSON.stringify({
@@ -41,6 +55,10 @@ export async function startFakeGateway(options: {
     /** Answer with this pid whatever `gateway.pid` says; null follows the file again. */
     answerPid: (pid: number | null) => {
       answeredPid = pid;
+    },
+    /** The raw `active-work` answer from now on; null answers `ok:false`. */
+    answerActiveWork: (line: string | null) => {
+      activeWork = line;
     },
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };

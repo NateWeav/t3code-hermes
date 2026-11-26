@@ -24,6 +24,7 @@ import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as TurnItemPositionStore from "../orchestration-v2/TurnItemPositionStore.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import { startFakeGateway } from "./hermesGatewayFixtures.ts";
 import { HERMES_STATE_DDL, insertHermesGatewaySession } from "./hermesRunFixtures.ts";
 import * as HermesChatHubService from "./HermesChatHubService.ts";
 
@@ -114,6 +115,8 @@ function makeLayer(
     readonly existingItems?: ReadonlyArray<OrchestrationV2TurnItem>;
     /** Fails every mark-unread, as a hub thread with no completed run would. */
     readonly rejectMarkUnread?: boolean;
+    /** A fixed server base dir, so two instances share their state files. */
+    readonly baseDir?: string;
   } = {},
 ) {
   const dispatched: OrchestrationV2ServerCommand[] = [];
@@ -170,7 +173,7 @@ function makeLayer(
       },
       integrations: { hermesHubs: options.hubs ?? [hubSettings()] },
     }),
-    ServerConfig.layerTest(process.cwd(), { prefix: "t3-hermes-hubs-" }),
+    ServerConfig.layerTest(process.cwd(), options.baseDir ?? { prefix: "t3-hermes-hubs-" }),
   );
   return {
     dispatched,
@@ -458,6 +461,155 @@ describe("HermesChatHubService", () => {
       );
       yield* service.sync;
       expect(cardEvents()[0]?.summary).toBe("get nick a girlfriend");
+    }).pipe(Effect.provide(layer), Effect.ensuring(Effect.sync(() => hermes.cleanup())));
+  });
+
+  it.live(
+    "lists a thread's linked conversations, seeded as seen, and keeps seen across a restart",
+    () => {
+      const hermes = makeHermesHome();
+      const baseDir = NodeFS.realpathSync(
+        NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-hermes-seen-")),
+      );
+      const HUB_KEY = "agent:main:discord:thread:111:a";
+      const MANUAL_KEY = "agent:main:discord:thread:555:b";
+      const DETACHED_KEY = "agent:main:discord:thread:111:c";
+      const first = makeLayer(hermes.home, { baseDir });
+      const seenFile = NodePath.join(baseDir, "userdata", "hermes-chat-seen.json");
+      return Effect.gen(function* () {
+        const service = yield* HermesChatHubService.HermesChatHubService;
+        const startedAt = (yield* nowSeconds) - 600;
+        hermes.conversation(HUB_KEY, { channelIds: ["111"], startedAt, lastActivityAt: startedAt });
+        hermes.conversation(DETACHED_KEY, {
+          channelIds: ["111"],
+          startedAt,
+          lastActivityAt: startedAt + 5,
+        });
+        hermes.conversation(MANUAL_KEY, {
+          channelIds: ["555"],
+          startedAt,
+          lastActivityAt: startedAt + 10,
+        });
+        yield* service.link({ sessionKey: MANUAL_KEY, threadId: HUB_THREAD });
+        yield* service.unlink({ sessionKey: DETACHED_KEY, threadId: HUB_THREAD });
+
+        // Both sources show, newest first; the detached conversation does not.
+        // A conversation never seen is seeded at its own activity, so it starts quiet.
+        const listed = yield* service.threadConversations({ threadId: HUB_THREAD });
+        expect(listed.availability).toBe("ready");
+        expect(
+          listed.conversations.map((entry) => [entry.sessionKey, entry.source, entry.running]),
+        ).toEqual([
+          [MANUAL_KEY, "manual", false],
+          [HUB_KEY, "hub", false],
+        ]);
+        for (const entry of listed.conversations) {
+          expect(entry.lastSeenAt).toBe(entry.lastActivityAt);
+        }
+        // Seeds persist, keys sorted, and nothing but the user's own state.
+        expect(JSON.parse(NodeFS.readFileSync(seenFile, "utf8"))).toEqual({
+          version: 1,
+          seen: {
+            [HUB_KEY]: listed.conversations[1]!.lastActivityAt,
+            [MANUAL_KEY]: listed.conversations[0]!.lastActivityAt,
+          },
+        });
+        // Another thread sees none of them.
+        const other = yield* service.threadConversations({ threadId: OTHER_THREAD });
+        expect(other.conversations).toEqual([]);
+
+        // New activity lands after the seed: still seen at the seed, so the pill reads Done.
+        hermes.touch(HUB_KEY, startedAt + 60);
+        const moved = yield* service.threadConversations({ threadId: HUB_THREAD });
+        const hub = moved.conversations.find((entry) => entry.sessionKey === HUB_KEY)!;
+        expect(Date.parse(hub.lastActivityAt)).toBeGreaterThan(Date.parse(hub.lastSeenAt!));
+
+        // Marking it seen moves lastSeenAt past the activity.
+        const marked = yield* service.markSeen({ sessionKey: HUB_KEY });
+        expect(Date.parse(marked.lastSeenAt)).toBeGreaterThanOrEqual(
+          Date.parse(hub.lastActivityAt),
+        );
+
+        // An unlinked or detached key is refused and leaves no orphan entry.
+        const unknown = yield* service.markSeen({ sessionKey: "agent:nope" }).pipe(Effect.flip);
+        expect(unknown).toMatchObject({
+          _tag: "HermesChatSeenError",
+          reason: "unknownConversation",
+        });
+        const detached = yield* service.markSeen({ sessionKey: DETACHED_KEY }).pipe(Effect.flip);
+        expect(detached.reason).toBe("unknownConversation");
+        expect(Object.keys(JSON.parse(NodeFS.readFileSync(seenFile, "utf8")).seen)).toEqual([
+          HUB_KEY,
+          MANUAL_KEY,
+        ]);
+
+        // A fresh process reads the same seen state back.
+        const restarted = makeLayer(hermes.home, { baseDir });
+        const again = yield* HermesChatHubService.HermesChatHubService.pipe(
+          Effect.provide(restarted.layer),
+        );
+        const reread = yield* again.threadConversations({ threadId: HUB_THREAD });
+        expect(reread.conversations.find((entry) => entry.sessionKey === HUB_KEY)?.lastSeenAt).toBe(
+          marked.lastSeenAt,
+        );
+      }).pipe(
+        Effect.provide(first.layer),
+        Effect.ensuring(
+          Effect.sync(() => {
+            hermes.cleanup();
+            NodeFS.rmSync(baseDir, { recursive: true, force: true });
+          }),
+        ),
+      );
+    },
+  );
+
+  it.live("marks a linked conversation running only while the gateway reports its chat", () => {
+    const hermes = makeHermesHome();
+    const KEY = "agent:main:discord:thread:111:a";
+    const { layer } = makeLayer(hermes.home);
+    return Effect.gen(function* () {
+      const service = yield* HermesChatHubService.HermesChatHubService;
+      const startedAt = (yield* nowSeconds) - 600;
+      hermes.conversation(KEY, { channelIds: ["111"], startedAt, lastActivityAt: startedAt });
+
+      // No gateway socket: unknown, so nothing reads as running, and the read still succeeds.
+      const quiet = yield* service.threadConversations({ threadId: HUB_THREAD });
+      expect(quiet.conversations.map((entry) => entry.running)).toEqual([false]);
+
+      const gateway = yield* Effect.promise(() =>
+        startFakeGateway({
+          home: hermes.home,
+          pid: 394,
+          activeWork: `${JSON.stringify({
+            ok: true,
+            result: {
+              active_work: [
+                { kind: "chat", session: KEY },
+                { kind: "cron", session: "x" },
+              ],
+            },
+          })}\n`,
+        }),
+      );
+      yield* Effect.gen(function* () {
+        const busy = yield* service.threadConversations({ threadId: HUB_THREAD });
+        expect(busy.conversations.map((entry) => entry.running)).toEqual([true]);
+        // A gateway without the verb is unknown again, not a failure.
+        gateway.answerActiveWork(null);
+        const older = yield* service.threadConversations({ threadId: HUB_THREAD });
+        expect(older.conversations.map((entry) => entry.running)).toEqual([false]);
+      }).pipe(Effect.ensuring(Effect.promise(() => gateway.close())));
+    }).pipe(Effect.provide(layer), Effect.ensuring(Effect.sync(() => hermes.cleanup())));
+  });
+
+  it.live("reports hermes-off and lists nothing when Hermes is disabled", () => {
+    const hermes = makeHermesHome();
+    const { layer } = makeLayer(hermes.home, { hermesEnabled: false });
+    return Effect.gen(function* () {
+      const service = yield* HermesChatHubService.HermesChatHubService;
+      const result = yield* service.threadConversations({ threadId: HUB_THREAD });
+      expect(result).toEqual({ availability: "hermes-off", conversations: [] });
     }).pipe(Effect.provide(layer), Effect.ensuring(Effect.sync(() => hermes.cleanup())));
   });
 });

@@ -48,6 +48,7 @@ import {
   THREAD_DETAILS_PANEL_LABEL_CLASS,
 } from "./threadDetailsPanelStyles";
 import { Menu, MenuPopup } from "../ui/menu";
+import { HermesChatThreadPills } from "../hermes/HermesChatThreadPills";
 
 interface ThreadDetailsPanelProps extends Pick<
   ComponentProps<typeof ThreadDetailsCard>,
@@ -181,8 +182,13 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
         event.preventDefault();
         setMenuPosition({ x: event.clientX, y: event.clientY });
       }}
+      belowCard={
+        props.isServerThread && !props.draftId ? (
+          <HermesChatThreadPills threadRef={activeThreadRef} layout="stack" />
+        ) : null
+      }
     >
-      {(density) => {
+      {(density, mode) => {
         // Section flags follow the rows that will render, so no empty section steals the divider rule.
         const show = {
           environment: density === "full" && visible.environment,
@@ -331,6 +337,10 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
 
               {visible.context && props.usage.contextWindow ? (
                 <ThreadDetailsContext usage={props.usage.contextWindow} />
+              ) : null}
+
+              {mode === "popover" && props.isServerThread && !props.draftId ? (
+                <HermesChatThreadPills threadRef={activeThreadRef} layout="section" />
               ) : null}
 
               {/* Shown only when no section above has content, so an emptied card can be refilled. */}

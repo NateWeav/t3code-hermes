@@ -26,6 +26,7 @@ export function ThreadDetailsCard({
   handle,
   contentKey,
   onContextMenu,
+  belowCard,
   children,
 }: {
   threadRef: ScopedThreadRef;
@@ -34,7 +35,9 @@ export function ThreadDetailsCard({
   /** Changes when the set of rendered items changes, so cached heights are measured again. */
   contentKey: string;
   onContextMenu?: MouseEventHandler<HTMLDivElement>;
-  children: (density: "full" | "compact" | "essential") => ReactNode;
+  /** Shown under the card as its own elements, only while the card is inline. */
+  belowCard?: ReactNode;
+  children: (density: "full" | "compact" | "essential", mode: "inline" | "popover") => ReactNode;
 }) {
   const gt = useGT();
   const detailsArea = workspaceAreaProps("details", 3, gt("Thread details"));
@@ -126,7 +129,7 @@ export function ThreadDetailsCard({
       data-thread-details-card
     >
       <ScrollArea scrollFade className="min-h-0">
-        <div ref={setContentElement}>{children(density)}</div>
+        <div ref={setContentElement}>{children(density, mode)}</div>
       </ScrollArea>
     </div>
   );
@@ -167,6 +170,7 @@ export function ThreadDetailsCard({
           data-thread-details-panel="inline"
         >
           {card}
+          {belowCard}
         </aside>
       ) : null}
       {/* Rendered in both modes: base-ui keeps a popup that unmounts mid-open

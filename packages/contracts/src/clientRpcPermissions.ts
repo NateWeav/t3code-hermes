@@ -89,6 +89,8 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   // part of operating threads; listing the links is a read.
   [WS_METHODS.hermesChatLink]: AuthOrchestrationOperateScope,
   [WS_METHODS.hermesChatUnlink]: AuthOrchestrationOperateScope,
+  // Seen state is shared by every device, so a read-only client never clears it.
+  [WS_METHODS.hermesChatMarkSeen]: AuthOrchestrationOperateScope,
   // A board's linked project and icon are T3 Code preferences shared by every client.
   [WS_METHODS.hermesKanbanSetBoardProject]: AuthOrchestrationOperateScope,
   [WS_METHODS.hermesKanbanSetBoardIcon]: AuthOrchestrationOperateScope,

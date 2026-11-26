@@ -2553,7 +2553,7 @@ export function buildThreadFeed(
     /** Keys the caches; text comes from `resolve`. */
     readonly locale?: string;
   },
-): ThreadFeedEntry[] {
+): ReadonlyArray<ThreadFeedEntry> {
   const agentActivityRows = options?.agentActivityRows;
   // Flipping a skill/memory setting re-derives rows once instead of reusing stale identities.
   const agentActivityKey = `${agentActivityRows?.skills === true}:${agentActivityRows?.memory === true}`;
@@ -2614,6 +2614,8 @@ export function buildThreadFeed(
       restartIndex -= 1;
     }
   }
+  // Unchanged rows rebuild the same feed; returning it keeps the screen's props equal.
+  if (restartIndex !== -1 && previous!.rows === visibleTurnItems) return previous!.feed;
   const restart = restartIndex === -1 ? null : previous!.restarts[restartIndex]!;
   const prefix = restart === null ? [] : previous!.feed.slice(0, restart.feedLength);
   const restarts = restart === null ? [] : previous!.restarts.slice(0, restartIndex + 1);

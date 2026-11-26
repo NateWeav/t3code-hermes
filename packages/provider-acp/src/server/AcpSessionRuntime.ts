@@ -176,6 +176,7 @@ export interface AcpSessionRuntimeOptions {
   readonly onTermination?: (error: EffectAcpErrors.AcpError) => Effect.Effect<void>;
   readonly onOutgoingResponseFailure?: EffectAcpClient.AcpClientOptions["onOutgoingResponseFailure"];
   readonly onOutgoingResponse?: EffectAcpClient.AcpClientOptions["onOutgoingResponse"];
+  readonly onUndecodableNotification?: EffectAcpClient.AcpClientOptions["onUndecodableNotification"];
   /** Unadvertised model IDs accepted by the config option; the agent validates them. */
   readonly customModels?: ReadonlyArray<string>;
 }
@@ -198,6 +199,7 @@ export type AcpSessionRuntimeBinding = Pick<
   | "onTermination"
   | "onOutgoingResponseFailure"
   | "onOutgoingResponse"
+  | "onUndecodableNotification"
 >;
 
 export interface AcpSessionRequestLogEvent {
@@ -1811,6 +1813,8 @@ export const make = Effect.fn("AcpSessionRuntime.make")(function* (
       onOutgoingResponseFailure: (requestId, error) =>
         binding.onOutgoingResponseFailure?.(requestId, error) ?? Effect.void,
       onOutgoingResponse: (requestId) => binding.onOutgoingResponse?.(requestId) ?? Effect.void,
+      onUndecodableNotification: (method, payload) =>
+        binding.onUndecodableNotification?.(method, payload) ?? Effect.void,
     }),
   ).pipe(Effect.provideService(Scope.Scope, runtimeScope));
 

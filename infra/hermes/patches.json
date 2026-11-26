@@ -19,11 +19,6 @@
           "hermesCommit": "647db4ddbf754867c1af8a10368d9979f73532c2",
           "hermesCommitDate": "2026-11-12T19:41:12Z",
           "file": "acp-central-ssh-execution/647db4ddbf75.patch"
-        },
-        {
-          "hermesCommit": "5b32cfc230078417fc523e12b9aabbc9b59f684b",
-          "hermesCommitDate": "2026-10-26T03:55:41Z",
-          "file": "acp-central-ssh-execution/5b32cfc23007.patch"
         }
       ]
     },
@@ -56,11 +51,6 @@
           "hermesCommit": "27cbcb122ff47a1d6878cf3c390b24395f98ee14",
           "hermesCommitDate": "2026-11-04T16:58:03Z",
           "file": "acp-delegation-progress/27cbcb122ff4.patch"
-        },
-        {
-          "hermesCommit": "5b32cfc230078417fc523e12b9aabbc9b59f684b",
-          "hermesCommitDate": "2026-10-26T03:55:41Z",
-          "file": "acp-delegation-progress/5b32cfc23007.patch"
         }
       ]
     },
@@ -133,11 +123,6 @@
           "hermesCommit": "27cbcb122ff47a1d6878cf3c390b24395f98ee14",
           "hermesCommitDate": "2026-11-04T16:58:03Z",
           "file": "acp-fast-mode/27cbcb122ff4.patch"
-        },
-        {
-          "hermesCommit": "d05095663342556788cf2a198bfa7844cc7968ab",
-          "hermesCommitDate": "2026-10-25T15:41:09Z",
-          "file": "acp-fast-mode/d05095663342.patch"
         }
       ]
     },
@@ -178,11 +163,6 @@
           "hermesCommit": "c419cf7c864ac0ee511dbd9f7091a8bba0b567ee",
           "hermesCommitDate": "2026-10-31T10:03:49Z",
           "file": "acp-reasoning-once/c419cf7c864a.patch"
-        },
-        {
-          "hermesCommit": "749cb638ff43f9ce5333c186a1e4f67d473aa4f2",
-          "hermesCommitDate": "2026-10-26T01:54:09Z",
-          "file": "acp-reasoning-once/749cb638ff43.patch"
         }
       ]
     },
@@ -212,11 +192,6 @@
           "hermesCommit": "27cbcb122ff47a1d6878cf3c390b24395f98ee14",
           "hermesCommitDate": "2026-11-04T16:58:03Z",
           "file": "acp-launch-yolo-resume/27cbcb122ff4.patch"
-        },
-        {
-          "hermesCommit": "5b32cfc230078417fc523e12b9aabbc9b59f684b",
-          "hermesCommitDate": "2026-10-26T03:55:41Z",
-          "file": "acp-launch-yolo-resume/5b32cfc23007.patch"
         }
       ]
     },
@@ -370,6 +345,11 @@
       "title": "Subagent models and follow-ups",
       "neededFor": "Apply after Live subagent progress. Lets Hermes pick a subagent's model from the ones your profile lists, and send a finished subagent a follow-up that shows under it. Without it, every subagent runs on the default model, and a finished one either can't be asked anything more or its follow-up doesn't show in T3 Code.",
       "versions": [
+        {
+          "hermesCommit": "ccd8fab2fa1d830a46cfeefe47c155d5d6a9aeea",
+          "hermesCommitDate": "2026-11-26T03:33:38Z",
+          "file": "acp-subagent-model-continue/ccd8fab2fa1d.patch"
+        },
         {
           "hermesCommit": "da9c2bd62fa567ed0006866de022939ac14582cf",
           "hermesCommitDate": "2026-11-18T00:18:16Z",

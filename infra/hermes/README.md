@@ -530,7 +530,9 @@ upstream re-resolves a continue from after a restart, and keeps the viewer chang
 version (`main`, 2026-11-16) is the same change, reading delegation config through
 `tools.delegate_tool_config`, where upstream moved it (`43dc9a0a28`). Its `da9c2bd62f` version
 (`main`, 2026-11-18) is the same change, with its test's stand-in children saving their transcripts
-through the storage interface, where upstream's `continue` now reads them. Run the patch's
+through the storage interface, where upstream's `continue` now reads them. Its `ccd8fab2fa1d`
+version (`main`, 2026-11-26) is the same change, with the prompt-surface snapshot re-baselined on
+upstream's corrected `delegate_task` text (`8cccef5dea`). Run the patch's
 `tests/gateway/test_delegation_task_model.py` and `tests/acp_adapter/test_gateway_delegation_continue.py`
 (which reuses the progress patch's `test_gateway_delegation_progress.py`) in a scratch checkout, as
 for `acp-delegation-progress`.

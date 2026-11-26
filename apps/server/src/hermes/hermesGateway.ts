@@ -88,6 +88,44 @@ async function identifyHermesGateway(home: string): Promise<HermesGatewayIdentit
 }
 
 /**
+ * Gateway session keys of the chat turns running now, from the control socket's `active-work`
+ * verb. Null means unknown: no socket, no answer in time, a malformed answer, or `ok:false` from
+ * a Hermes without the verb. Cron, managed, api, and deferred work is not a chat and is skipped.
+ */
+export function readHermesActiveChatSessions(home: string): Promise<ReadonlySet<string> | null> {
+  return readActiveChatSessions(home).catch(() => null);
+}
+
+async function readActiveChatSessions(home: string): Promise<ReadonlySet<string> | null> {
+  const socketPath = await resolveControlSocketPath(home);
+  if (socketPath === null) return null;
+  const line = await requestLine(
+    socketPath,
+    `${JSON.stringify({ protocol: 1, verb: "active-work", id: "t3" })}\n`,
+  );
+  if (line === null) return null;
+  try {
+    const response: unknown = JSON.parse(line);
+    if (typeof response !== "object" || response === null) return null;
+    const { ok, result } = response as { ok?: unknown; result?: unknown };
+    if (ok !== true || typeof result !== "object" || result === null) return null;
+    const work = (result as { active_work?: unknown }).active_work;
+    if (!Array.isArray(work)) return null;
+    const sessions = new Set<string>();
+    for (const entry of work) {
+      if (typeof entry !== "object" || entry === null) continue;
+      const { kind, session } = entry as { kind?: unknown; session?: unknown };
+      if (kind === "chat" && typeof session === "string" && session.trim() !== "") {
+        sessions.add(session.trim());
+      }
+    }
+    return sessions;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The live gateway serving `home` and when it started, or null when none
  * answers or its `gateway.pid` belongs to another process.
  */

@@ -40,6 +40,20 @@ conversation. To link the conversation you are
 reading to the thread the panel belongs to, use **Link to this thread** in its header, and
 **Unlink** to undo it. Opening a conversation never links it.
 
+### Linked conversations beside a thread
+
+Each conversation linked to a thread, by hand or through a hub, also appears as a pill under the
+thread details card, with its name and how long ago it last moved. Select one to open it in the
+right panel. When the window is too narrow for the card to sit beside the chat, the pills move into
+the card's popover instead. A thread with no linked conversations shows nothing extra.
+
+With **Thread status rings** on in Settings › Appearance, a pill is outlined while Hermes is answering in
+that conversation and turns green once it has news you have not read. Opening the conversation,
+from the pill or the panel, clears it on every device. A conversation that was linked before you
+first saw its pill starts as read. Working needs a Hermes gateway that reports its active work;
+with an older gateway the pills only show Done. The pills are on web and desktop; the mobile app
+does not show them yet.
+
 ## Thread hubs
 
 A hub is one pinned thread that collects the conversations from Discord channels you name. Set

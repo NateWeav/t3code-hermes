@@ -25,7 +25,7 @@ import type {
   ScopedThreadRef,
 } from "@t3tools/contracts";
 import { ArrowLeftRightIcon, ChevronRightIcon, MessagesSquare } from "lucide-react";
-import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { useRightPanelStore } from "~/rightPanelStore";
 import { useEnvironmentQuery } from "~/state/query";
@@ -39,27 +39,8 @@ import { RefreshIcon } from "../ui/refresh-icon";
 import { ScrollArea } from "../ui/scroll-area";
 import { Skeleton } from "../ui/skeleton";
 import { stackedThreadToast, toastManager } from "../ui/toast";
-
-const LIVE_REFRESH_MS = 5_000;
-
-/**
- * Rereads every few seconds while the surface is mounted. A hidden tab skips
- * its ticks and a read still in flight is never doubled, so a slow store
- * cannot pile reads up.
- */
-function useHermesChatLiveRefresh(query: {
-  readonly refresh: () => void;
-  readonly isPending: boolean;
-}) {
-  const tick = useEffectEvent(() => {
-    if (document.visibilityState === "visible" && !query.isPending) query.refresh();
-  });
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- interval timer that refreshes the Hermes chat query while mounted
-  useEffect(() => {
-    const timer = setInterval(tick, LIVE_REFRESH_MS);
-    return () => clearInterval(timer);
-  }, []);
-}
+import { useHermesChatLiveRefresh } from "./useHermesChatLiveRefresh";
+import { useHermesChatMarkSeen } from "./useHermesChatMarkSeen";
 
 function Unavailable(props: { readonly title: string; readonly detail: string }) {
   return (
@@ -282,6 +263,20 @@ function HermesChatTranscriptView(props: {
   const unavailable = result === null ? null : describeHermesChatAvailability(result.availability);
   const items = result === null ? [] : hermesChatTranscriptItems(result.messages);
   const newestId = result?.messages.at(-1)?.id ?? null;
+
+  // Reading the transcript clears its pill's Done, once per activity it shows.
+  const markSeen = useHermesChatMarkSeen(props.environmentId);
+  const shownActivity = conversation?.lastActivityAt ?? null;
+  const markedActivityRef = useRef<string | null>(null);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- records on the server that the user saw the activity this visible transcript shows
+  useEffect(() => {
+    // Keyed on each successful read too, so a refresh after the tab comes back marks it.
+    if (markSeen === null || shownActivity === null || query.dataUpdatedAt === 0) return;
+    if (document.visibilityState !== "visible") return;
+    if (markedActivityRef.current === shownActivity) return;
+    markedActivityRef.current = shownActivity;
+    void markSeen(props.sessionKey);
+  }, [markSeen, shownActivity, query.dataUpdatedAt, props.sessionKey]);
 
   // Follow new messages only while the reader is already at the bottom.
   const bottomRef = useRef<HTMLDivElement>(null);

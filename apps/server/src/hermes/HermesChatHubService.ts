@@ -9,9 +9,15 @@ import {
   EventId,
   ThreadId,
   TurnItemId,
+  HermesChatSeenError,
   type HermesChatHubsResult,
   type HermesChatLinkInput,
   type HermesChatLinksResult,
+  type HermesChatMarkSeenInput,
+  type HermesChatMarkSeenResult,
+  type HermesChatThreadConversation,
+  type HermesChatThreadConversationsInput,
+  type HermesChatThreadConversationsResult,
   type HermesChatUnlinkInput,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2ServerCommand,
@@ -41,6 +47,13 @@ import * as TurnItemPositionStore from "../orchestration-v2/TurnItemPositionStor
 import { forkParked } from "../serverActivation.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { resolveEnabledHermesInstance, resolveHermesHome } from "./hermesCronState.ts";
+import { readHermesActiveChatSessions } from "./hermesGateway.ts";
+import {
+  HERMES_CHAT_SEEN_FILENAME,
+  parseHermesChatSeen,
+  serializeHermesChatSeen,
+} from "./hermesChatSeen.ts";
+import { isoFromSeconds } from "./hermesRunTranscript.ts";
 import {
   readHermesChatChannels,
   readHermesChatTranscript,
@@ -64,6 +77,8 @@ const AFTER_CHANGE_INTERVAL = Duration.seconds(5);
 const HUB_WINDOW_SECONDS = 30 * 24 * 60 * 60;
 /** Longest card summary or detail line. */
 const CARD_TEXT_MAX = 200;
+/** Most pills one thread shows; each costs a store read per refresh. Newest first. */
+const THREAD_CONVERSATIONS_MAX = 20;
 /** Id prefix every hub card turn item carries, so restarts recognize their own. */
 const CARD_ID_PREFIX = ":hermes-chat:";
 
@@ -171,6 +186,18 @@ export class HermesChatHubService extends Context.Service<
     readonly links: Effect.Effect<HermesChatLinksResult>;
     /** The links that currently hold: manual plus hub-derived, newest activity first. */
     readonly effectiveLinkedConversations: Effect.Effect<ReadonlyArray<EffectiveHermesChatLink>>;
+    /**
+     * The conversations linked to one thread, with whether each runs in the gateway now and
+     * when the user last saw it. A conversation never seen before is seeded as seen at its
+     * current activity, so it starts quiet.
+     */
+    readonly threadConversations: (
+      input: HermesChatThreadConversationsInput,
+    ) => Effect.Effect<HermesChatThreadConversationsResult>;
+    /** Records the user saw a linked conversation now. Unlinked keys are refused. */
+    readonly markSeen: (
+      input: HermesChatMarkSeenInput,
+    ) => Effect.Effect<HermesChatMarkSeenResult, HermesChatSeenError>;
     /** One watcher pass: tail the links file, then write cards that moved. */
     readonly sync: Effect.Effect<void>;
     /** Starts the watcher loop. Called once from the orchestration reactor. */
@@ -189,6 +216,8 @@ const make = Effect.gen(function* () {
   const positions = yield* TurnItemPositionStore.TurnItemPositionStoreV2;
 
   const statePath = path.join(config.stateDir, STATE_FILENAME);
+  const seenPath = path.join(config.stateDir, HERMES_CHAT_SEEN_FILENAME);
+  const seenMutex = yield* Semaphore.make(1);
   const stateMutex = yield* Semaphore.make(1);
   const wake = yield* Queue.sliding<void>(1);
 
@@ -232,6 +261,30 @@ const make = Effect.gen(function* () {
       detachedLinks.set(linkKey(detached.threadId, sessionKey), detached);
     }
   });
+
+  /** Session key → ISO last-seen time. Only the user's own reading lands here. */
+  const seen = parseHermesChatSeen(
+    yield* fs.readFileString(seenPath).pipe(Effect.orElseSucceed(() => "")),
+  );
+
+  /** Merges `changes` under the lock and adopts them only once the write took. */
+  const writeSeen = (changes: ReadonlyMap<string, string>) =>
+    seenMutex.withPermits(1)(
+      Effect.suspend(() =>
+        writeFileStringAtomically({
+          filePath: seenPath,
+          contents: serializeHermesChatSeen(new Map([...seen, ...changes])),
+        }),
+      ).pipe(
+        Effect.provideService(FileSystem.FileSystem, fs),
+        Effect.provideService(Path.Path, path),
+        Effect.tap(() =>
+          Effect.sync(() => {
+            for (const [key, value] of changes) seen.set(key, value);
+          }),
+        ),
+      ),
+    );
 
   const saveState = stateMutex.withPermits(1)(
     Effect.gen(function* () {
@@ -348,6 +401,96 @@ const make = Effect.gen(function* () {
           hub.threadId === null ? 0 : links.filter((link) => link.threadId === hub.threadId).length,
       })),
     } satisfies HermesChatHubsResult;
+  });
+
+  const threadConversations: HermesChatHubService["Service"]["threadConversations"] = Effect.fn(
+    "HermesChatHubService.threadConversations",
+  )(function* (input) {
+    const context = yield* settingsContext;
+    if (context === null) return { availability: "unavailable" as const, conversations: [] };
+    if (context.home === null) return { availability: "hermes-off" as const, conversations: [] };
+    const home = context.home;
+    const dbPath = path.join(home, "state.db");
+    const nowSeconds = (yield* Clock.currentTimeMillis) / 1000;
+    const rows = yield* Effect.sync(() =>
+      readHermesChatChannels(dbPath, { sinceSeconds: nowSeconds - HUB_WINDOW_SECONDS }),
+    );
+    if (rows === null) return { availability: "unavailable" as const, conversations: [] };
+    const links = effectiveLinkedConversations({
+      hubs: context.settings.integrations.hermesHubs,
+      manualLinks: [...manualLinks.values()],
+      detached: [...detachedLinks.values()],
+      conversations: rows,
+    })
+      .filter((link) => link.threadId === input.threadId)
+      .slice(0, THREAD_CONVERSATIONS_MAX);
+    if (links.length === 0) return { availability: "ready" as const, conversations: [] };
+
+    // Unknown (null) means no gateway answered: nothing reads as running.
+    // The reader resolves null on every failure, so it never rejects.
+    const running = yield* Effect.promise(() => readHermesActiveChatSessions(home));
+    const conversations: HermesChatThreadConversation[] = [];
+    const seeds = new Map<string, string>();
+    for (const link of links) {
+      // A manual link may name a conversation older than the window, so its
+      // detail is read by key rather than from the window's rows.
+      const detail = yield* Effect.sync(() => readHermesChatTranscript(dbPath, link.sessionKey, 0));
+      const conversation = detail?.conversation ?? null;
+      if (conversation === null) continue;
+      const lastActivityAt = isoFromSeconds(conversation.lastActivityAt);
+      let lastSeenAt = seen.get(link.sessionKey) ?? null;
+      if (lastSeenAt === null) {
+        lastSeenAt = lastActivityAt;
+        seeds.set(link.sessionKey, lastActivityAt);
+      }
+      conversations.push({
+        sessionKey: link.sessionKey,
+        displayName: conversation.displayName,
+        title: conversation.title,
+        userName: conversation.userName,
+        chatType: conversation.chatType,
+        lastActivityAt,
+        running: running?.has(link.sessionKey) ?? false,
+        lastSeenAt,
+        source: link.source,
+      });
+    }
+    if (seeds.size > 0) {
+      // A failed seed only means the next read seeds again; the read never fails.
+      yield* writeSeen(seeds).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("Could not save Hermes chat seen state").pipe(
+            Effect.annotateLogs({ seenPath, cause }),
+          ),
+        ),
+      );
+    }
+    conversations.sort((a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt));
+    return { availability: "ready" as const, conversations };
+  });
+
+  const markSeen: HermesChatHubService["Service"]["markSeen"] = Effect.fn(
+    "HermesChatHubService.markSeen",
+  )(function* (input) {
+    const links = yield* effectiveLinks;
+    if (!links.some((link) => link.sessionKey === input.sessionKey)) {
+      return yield* new HermesChatSeenError({
+        reason: "unknownConversation",
+        detail: "No thread links a conversation with that key.",
+      });
+    }
+    const lastSeenAt = DateTime.formatIso(yield* DateTime.now);
+    yield* writeSeen(new Map([[input.sessionKey, lastSeenAt]])).pipe(
+      Effect.mapError(
+        (cause) =>
+          new HermesChatSeenError({
+            reason: "writeFailed",
+            detail: "Could not save the conversation's seen state.",
+            cause,
+          }),
+      ),
+    );
+    return { sessionKey: input.sessionKey, lastSeenAt };
   });
 
   const link: HermesChatHubService["Service"]["link"] = Effect.fn("HermesChatHubService.link")(
@@ -670,6 +813,8 @@ const make = Effect.gen(function* () {
     unlink,
     links: linksResult,
     effectiveLinkedConversations: effectiveLinks,
+    threadConversations,
+    markSeen,
     sync: Effect.asVoid(safePass),
     start,
   });

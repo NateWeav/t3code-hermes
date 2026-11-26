@@ -456,6 +456,11 @@ import {
   HermesChatTranscriptInput,
   HermesChatLinkInput,
   HermesChatLinksResult,
+  HermesChatMarkSeenInput,
+  HermesChatMarkSeenResult,
+  HermesChatSeenError,
+  HermesChatThreadConversationsInput,
+  HermesChatThreadConversationsResult,
   HermesChatUnlinkInput,
 } from "./hermesChat.ts";
 import {
@@ -746,6 +751,8 @@ export const WS_METHODS = {
   hermesChatLinks: "hermes.chatLinks",
   hermesChatLink: "hermes.chatLink",
   hermesChatUnlink: "hermes.chatUnlink",
+  hermesChatThreadConversations: "hermes.chatThreadConversations",
+  hermesChatMarkSeen: "hermes.chatMarkSeen",
   hermesKanbanListBoards: "hermesKanban.listBoards",
   hermesKanbanGetBoard: "hermesKanban.getBoard",
   hermesKanbanGetTask: "hermesKanban.getTask",
@@ -1433,6 +1440,20 @@ const WsHermesChatUnlinkRpc = Rpc.make(WS_METHODS.hermesChatUnlink, {
   payload: HermesChatUnlinkInput,
   success: HermesChatLinksResult,
   error: EnvironmentAuthorizationError,
+});
+
+/** The conversations linked to one thread, with whether each is running or unseen. */
+const WsHermesChatThreadConversationsRpc = Rpc.make(WS_METHODS.hermesChatThreadConversations, {
+  payload: HermesChatThreadConversationsInput,
+  success: HermesChatThreadConversationsResult,
+  error: EnvironmentAuthorizationError,
+});
+
+/** Records that the user saw a linked conversation's newest activity, for every device. */
+const WsHermesChatMarkSeenRpc = Rpc.make(WS_METHODS.hermesChatMarkSeen, {
+  payload: HermesChatMarkSeenInput,
+  success: HermesChatMarkSeenResult,
+  error: Schema.Union([EnvironmentAuthorizationError, HermesChatSeenError]),
 });
 
 /** Every Hermes Kanban board at a glance. Never fails for a missing or locked board. */
@@ -2897,6 +2918,8 @@ export const HermesWsRpcGroup = RpcGroup.make(
   WsHermesChatLinksRpc,
   WsHermesChatLinkRpc,
   WsHermesChatUnlinkRpc,
+  WsHermesChatThreadConversationsRpc,
+  WsHermesChatMarkSeenRpc,
   WsHermesKanbanListBoardsRpc,
   WsHermesKanbanGetBoardRpc,
   WsHermesKanbanGetTaskRpc,

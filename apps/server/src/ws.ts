@@ -3885,6 +3885,9 @@ const layerHermesWsRpc = HermesServerWsRpcGroup.toLayer(
       [WS_METHODS.hermesChatLinks]: () => hermesChatHubs.links,
       [WS_METHODS.hermesChatLink]: (input) => hermesChatHubs.link(input),
       [WS_METHODS.hermesChatUnlink]: (input) => hermesChatHubs.unlink(input),
+      [WS_METHODS.hermesChatThreadConversations]: (input) =>
+        hermesChatHubs.threadConversations(input),
+      [WS_METHODS.hermesChatMarkSeen]: (input) => hermesChatHubs.markSeen(input),
       [WS_METHODS.hermesKanbanListBoards]: () => hermesKanban.listBoards,
       [WS_METHODS.hermesKanbanGetBoard]: (input) => hermesKanban.getBoard(input),
       [WS_METHODS.hermesKanbanGetTask]: (input) => hermesKanban.getTask(input),

@@ -142,6 +142,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.hermesChatList]: AuthOrchestrationReadScope,
   [WS_METHODS.hermesChatTranscript]: AuthOrchestrationReadScope,
   [WS_METHODS.hermesChatLinks]: AuthOrchestrationReadScope,
+  [WS_METHODS.hermesChatThreadConversations]: AuthOrchestrationReadScope,
   [WS_METHODS.hermesKanbanListBoards]: AuthOrchestrationReadScope,
   [WS_METHODS.hermesKanbanGetBoard]: AuthOrchestrationReadScope,
   [WS_METHODS.hermesKanbanGetTask]: AuthOrchestrationReadScope,
@@ -152,6 +153,8 @@ export const RPC_REQUIRED_SCOPES = {
   // operating threads.
   [WS_METHODS.hermesChatLink]: AuthOrchestrationOperateScope,
   [WS_METHODS.hermesChatUnlink]: AuthOrchestrationOperateScope,
+  // Seen state is shared by every device, so clearing it operates the thread.
+  [WS_METHODS.hermesChatMarkSeen]: AuthOrchestrationOperateScope,
   [WS_METHODS.hermesPatchList]: AuthOrchestrationReadScope,
   // Patching rewrites the Hermes install itself, like a provider update.
   [WS_METHODS.hermesPatchApply]: AuthOrchestrationOperateScope,

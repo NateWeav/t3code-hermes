@@ -13110,5 +13110,8 @@
   "201490988858b511": "retirada por {by}",
   "99451a5d2d40440f": "Retirada por {by}.",
   "3ee30a50b70fffab": "Retirada por {by}: {reason}",
-  "92e129bf413a1220": "retirada"
+  "92e129bf413a1220": "retirada",
+  "18802658a3b7dcf4": "Ícones de máquina nas linhas da pasta",
+  "f6e2739721115058": "Mostra à esquerda do título o ícone da máquina em que cada conversa da pasta é executada.",
+  "25dce222e893fa01": "beta barra lateral simples pasta linhas máquina ambiente host ícone"
 }

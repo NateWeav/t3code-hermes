@@ -79,6 +79,7 @@ function BoringSidebarRow() {
       {settings.boringSidebarEnabled ? (
         <div className="mt-2 mb-2 border-l-2 border-border/60 ps-3">
           <BoringSidebarMultilineRow />
+          <BoringSidebarMachineIconsRow />
         </div>
       ) : null}
     </SettingsRow>
@@ -105,6 +106,32 @@ function BoringSidebarMultilineRow() {
             updateSettings({ boringSidebarMultilineRows: Boolean(checked) })
           }
           aria-label={gt("Two-line folder rows")}
+        />
+      }
+    />
+  );
+}
+
+function BoringSidebarMachineIconsRow() {
+  const searchableSetting = useSearchableSetting();
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  const gt = useGT();
+  return (
+    <SettingsRow
+      {...searchableSetting("boring-sidebar-machine-icons")}
+      devicePreference
+      className="px-0 py-2 sm:px-0"
+      description={gt(
+        "Show the icon of the machine each folder thread runs on, left of its title.",
+      )}
+      control={
+        <Switch
+          checked={settings.boringSidebarMachineIcons}
+          onCheckedChange={(checked) =>
+            updateSettings({ boringSidebarMachineIcons: Boolean(checked) })
+          }
+          aria-label={gt("Machine icons on folder rows")}
         />
       }
     />

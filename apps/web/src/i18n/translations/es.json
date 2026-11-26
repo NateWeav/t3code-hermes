@@ -13105,5 +13105,8 @@
   "201490988858b511": "retirada por {by}",
   "99451a5d2d40440f": "Retirada por {by}.",
   "3ee30a50b70fffab": "Retirada por {by}: {reason}",
-  "92e129bf413a1220": "retirada"
+  "92e129bf413a1220": "retirada",
+  "18802658a3b7dcf4": "Iconos de máquina en filas de carpeta",
+  "f6e2739721115058": "Muestra a la izquierda del título el icono de la máquina en la que se ejecuta cada hilo de la carpeta.",
+  "25dce222e893fa01": "beta barra lateral aburrida carpeta filas máquina entorno host icono"
 }

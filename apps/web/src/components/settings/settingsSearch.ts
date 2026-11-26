@@ -437,6 +437,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["favicon badge blink notification indicator color"],
   },
   {
+    id: "glass-surfaces",
+    title: msg("Glass surfaces"),
+    to: "/settings/appearance",
+    searchTerms: [
+      msg("translucent transparent blur frosted liquid glass background image wallpaper sidebar"),
+    ],
+  },
+  {
     id: "skill-activity-rows",
     title: "Skill activity",
     to: "/settings/appearance",

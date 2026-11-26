@@ -13113,5 +13113,19 @@
   "92e129bf413a1220": "zurückgezogen",
   "18802658a3b7dcf4": "Gerätesymbole in Ordnerzeilen",
   "f6e2739721115058": "Zeigt links neben dem Titel das Symbol des Rechners, auf dem jeder Ordner-Thread läuft.",
-  "25dce222e893fa01": "beta langweilige seitenleiste ordner zeilen rechner gerät umgebung host symbol"
+  "25dce222e893fa01": "beta langweilige seitenleiste ordner zeilen rechner gerät umgebung host symbol",
+  "7e7bb028adc6b0f4": "Chat header",
+  "01c17785b81a8d70": "Chat area",
+  "9326a20d82d5ceaa": "Menus and popovers",
+  "abaacbe607fe5f4f": "Floating buttons and banners",
+  "f7239b6b72860035": "Dialogs",
+  "30d7d6f869a01d31": "Glass surfaces",
+  "f98ceda55608c0ea": "Make panels translucent and blur the theme's background image behind them. Set a surface to 100% to keep it solid.",
+  "6962c73f166caacb": "Reset glass surfaces to default",
+  "ad1ea65eb01f6b2b": "Blur",
+  "9e174d1e65016123": "How strongly each glass surface blurs what is behind it.",
+  "afbc8268ce68d2c8": "Glass blur",
+  "867d49d29ade1366": "{surface} opacity",
+  "5718d0d57b6dcca5": "Solid",
+  "62ecd1fdbd2d92e3": "translucent transparent blur frosted liquid glass background image wallpaper sidebar"
 }

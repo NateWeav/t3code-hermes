@@ -2760,3 +2760,82 @@ code {
 .messages-timeline-scroll:focus-visible {
   outline: none;
 }
+
+/* Fork: glass surfaces (Settings → Appearance → Glass surfaces). While a
+   surface is listed in `html[data-glass-surfaces]`, it turns translucent and
+   blurs what is behind it; the theme background image moves to the window so
+   it shows behind every glass surface. Surfaces already drawn with the glass
+   tokens only get their own opacity and blur. Tokens: glassSurfaces.ts. */
+html[data-glass-surfaces] body {
+  background-image: var(--theme-background-image, none);
+  background-position: center;
+  background-size: cover;
+  background-attachment: fixed;
+}
+
+html[data-glass-surfaces~="sidebar"] [data-app-sidebar] [data-sidebar="sidebar"],
+html[data-glass-surfaces~="sidebar"] [data-app-sidebar][data-sidebar="sidebar"] {
+  background: color-mix(
+    in srgb,
+    var(--sidebar) var(--glass-sidebar-opacity),
+    transparent
+  ) !important;
+  -webkit-backdrop-filter: blur(var(--glass-surface-blur)) saturate(var(--glass-saturation));
+  backdrop-filter: blur(var(--glass-surface-blur)) saturate(var(--glass-saturation));
+}
+
+/* The main area tints once at the inset; the layers inside it go clear so the
+   tint does not stack, including a theme's own image on the conversation. */
+html[data-glass-surfaces~="chat-area"] [data-slot="sidebar-inset"] {
+  background: color-mix(
+    in srgb,
+    var(--background) var(--glass-chat-area-opacity),
+    transparent
+  ) !important;
+}
+
+html[data-glass-surfaces~="chat-area"] [data-chat-workspace],
+html[data-glass-surfaces~="chat-area"] [data-workspace-area="conversation"] {
+  background: transparent !important;
+}
+
+html[data-glass-surfaces~="chat-header"] [data-chat-header] {
+  background: color-mix(
+    in srgb,
+    var(--toolbar-background) var(--glass-chat-header-opacity),
+    transparent
+  ) !important;
+  -webkit-backdrop-filter: blur(var(--glass-surface-blur)) saturate(var(--glass-saturation));
+  backdrop-filter: blur(var(--glass-surface-blur)) saturate(var(--glass-saturation));
+}
+
+html[data-glass-surfaces~="composer"] [data-slot="composer-shell"] {
+  --glass-opacity: var(--glass-composer-opacity);
+  --glass-blur: var(--glass-surface-blur);
+}
+
+html[data-glass-surfaces~="thread-details"] [data-thread-details-card] {
+  --glass-opacity: var(--glass-thread-details-opacity);
+  --glass-blur: var(--glass-surface-blur);
+}
+
+/* Positioners, because the select and combobox glass sits around their popup. */
+html[data-glass-surfaces~="menus"] [data-slot="menu-positioner"],
+html[data-glass-surfaces~="menus"] [data-slot="popover-positioner"],
+html[data-glass-surfaces~="menus"] [data-slot="select-positioner"],
+html[data-glass-surfaces~="menus"] [data-slot="combobox-positioner"],
+html[data-glass-surfaces~="menus"] [data-slot="tooltip-positioner"] {
+  --glass-opacity: var(--glass-menus-opacity);
+  --glass-blur: var(--glass-surface-blur);
+}
+
+html[data-glass-surfaces~="floating-controls"] [data-slot="button"],
+html[data-glass-surfaces~="floating-controls"] [data-slot="alert"] {
+  --glass-opacity: var(--glass-floating-controls-opacity);
+  --glass-blur: var(--glass-surface-blur);
+}
+
+html[data-glass-surfaces~="dialogs"] [data-slot="dialog-popup"] {
+  --glass-opacity: var(--glass-dialogs-opacity);
+  --glass-blur: var(--glass-surface-blur);
+}

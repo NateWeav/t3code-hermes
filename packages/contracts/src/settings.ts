@@ -148,6 +148,35 @@ export const GlassOpacity = Schema.Int.check(
 export type GlassOpacity = typeof GlassOpacity.Type;
 const DEFAULT_GLASS_OPACITY: GlassOpacity = 80;
 
+export const MIN_GLASS_SURFACE_BLUR = 0;
+export const MAX_GLASS_SURFACE_BLUR = 40;
+/** 100 is opaque: the surface is back to its normal fill and has no blur. */
+export const GLASS_SURFACE_OPAQUE = 100;
+const GlassSurfaceOpacity = Schema.Int.check(
+  Schema.isBetween({ minimum: 0, maximum: GLASS_SURFACE_OPAQUE }),
+);
+const glassSurfaceOpacity = (fallback: number) =>
+  GlassSurfaceOpacity.pipe(Schema.withDecodingDefault(Effect.succeed(fallback)));
+/**
+ * Fork: translucent, blurred app surfaces over the theme background image.
+ * Each surface keeps its own opacity; off restores upstream's look exactly.
+ */
+export const GlassSurfaces = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  blur: Schema.Int.check(
+    Schema.isBetween({ minimum: MIN_GLASS_SURFACE_BLUR, maximum: MAX_GLASS_SURFACE_BLUR }),
+  ).pipe(Schema.withDecodingDefault(Effect.succeed(24))),
+  sidebar: glassSurfaceOpacity(55),
+  chatHeader: glassSurfaceOpacity(55),
+  chatArea: glassSurfaceOpacity(25),
+  composer: glassSurfaceOpacity(60),
+  threadDetails: glassSurfaceOpacity(60),
+  menus: glassSurfaceOpacity(70),
+  floatingControls: glassSurfaceOpacity(70),
+  dialogs: glassSurfaceOpacity(80),
+});
+export type GlassSurfaces = typeof GlassSurfaces.Type;
+
 export const MIN_APPEARANCE_CONTRAST = 50;
 export const MAX_APPEARANCE_CONTRAST = 200;
 export const AppearanceContrast = Schema.Int.check(
@@ -506,6 +535,7 @@ export const ClientSettingsSchema = Schema.Struct({
   glassOpacity: GlassOpacity.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_GLASS_OPACITY)),
   ),
+  glassSurfaces: GlassSurfaces.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   fontSizeInterface: InterfaceFontSize.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_INTERFACE_FONT_SIZE)),
   ),
@@ -2311,6 +2341,7 @@ export const ClientSettingsPatch = Schema.Struct({
   diffLayout: Schema.optionalKey(DiffLayout),
   environmentIdentificationMode: Schema.optionalKey(EnvironmentIdentificationMode),
   glassOpacity: Schema.optionalKey(GlassOpacity),
+  glassSurfaces: Schema.optionalKey(GlassSurfaces),
   onboardingCompletedAt: Schema.optionalKey(Schema.NullOr(Schema.String)),
   fontSizeInterface: Schema.optionalKey(InterfaceFontSize),
   fontSizePrompt: Schema.optionalKey(PromptFontSize),

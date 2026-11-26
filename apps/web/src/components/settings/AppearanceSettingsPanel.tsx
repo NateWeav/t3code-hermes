@@ -38,6 +38,7 @@ import { AdvancedSettings } from "./AdvancedSettings";
 import { PanelAnimationsPreview } from "./PanelAnimationsPreview";
 import { TypographySection } from "./TypographySettings";
 import { ThreadDetailsItemsRow } from "./ThreadDetailsItemsRow";
+import { GlassSurfacesSection } from "./GlassSurfacesSettings";
 
 const ENVIRONMENT_IDENTIFICATION_LABELS: Record<EnvironmentIdentificationMode, string> = {
   artwork: msg("Artwork"),
@@ -591,6 +592,11 @@ export function AppearanceSettingsPanel() {
           }
         />
       </SettingsSection>
+
+      <GlassSurfacesSection
+        glassSurfaces={settings.glassSurfaces}
+        onChange={(glassSurfaces) => updateSettings({ glassSurfaces })}
+      />
 
       <SettingsSection id="behind-the-scenes" title="Behind the scenes">
         <SettingsRow

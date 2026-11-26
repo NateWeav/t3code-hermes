@@ -3567,6 +3567,7 @@ export default function ChatView(props: ChatViewProps) {
     <div
       ref={setWorkspaceLayoutElement}
       className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background"
+      data-chat-workspace
     >
       {embedded ? null : (
         <DeviceSetupDialogHost

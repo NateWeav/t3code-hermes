@@ -54,6 +54,14 @@ approval, and red when one fails. Amber and red blink a few times when they arri
 reduced motion keeps the dot still. It is off by default, saved per browser, and the desktop app
 keeps its dock and taskbar badge.
 
+## Glass surfaces
+
+Turn on **Glass surfaces** in **Settings → Appearance** to make the sidebar, chat header, composer,
+menus, and other panels translucent, with your theme's [background image](#background-image)
+blurred behind them. Each surface has its own opacity: set one to 100% to keep it solid, or turn
+the switch off to go back to the usual solid look. The blur strength applies to all of them. It is
+off by default and saved separately on each device or browser.
+
 ## Behind the scenes
 
 Turn these on in **Settings → Appearance → Behind the scenes** to see more of how an agent works.

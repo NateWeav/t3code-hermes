@@ -760,9 +760,7 @@
   "8360d689ebc7f829": "Push & create {shortLabel} from default branch?",
   "daa408bb99d21d18": "{kind, select, pr {This action will push local commits and create a PR on \"{branch}\". You can continue on this branch or create a feature branch and run the same action there.} mr {This action will push local commits and create an MR on \"{branch}\". You can continue on this branch or create a feature branch and run the same action there.} generic {This action will push local commits and create a change request on \"{branch}\". You can continue on this branch or create a feature branch and run the same action there.} other {This action will push local commits and create {changeRequest} on \"{branch}\". You can continue on this branch or create a feature branch and run the same action there.}}",
   "8471c4c5a50ffde3": "Issues cannot be browsed for this host yet.",
-  "2f4a47129f89fe22": "Not connected. Add a personal api key to list its issues.",
   "024baab60525a419": "The saved credential was rejected.",
-  "2613c232516f3c72": "Connected as {account} · no projects linked yet. Pick a team for a project to list its issues.",
   "77d07bfe2f8ee19d": "{count, plural, one {Connected as {account} · {count} project linked} other {Connected as {account} · {count} projects linked}}",
   "3eb9a01099aaf799": "{count}s",
   "3618302947c280f0": "{count}m",
@@ -3170,7 +3168,6 @@
   "c646366e142ba05f": "Desktop WSL state is unavailable.",
   "228dcd284ea651b3": "Failed to load WSL state.",
   "b08d105dd2553f8d": "The project did not appear in the desktop app.",
-  "7a4b3f3b83e121d7": "{organization} turned off anonymous usage data.",
   "d85822b18e9475df": "Managed by {organization}.",
   "a6dd531d58080010": "Connect to this server to check releases.",
   "314cdccee9c14774": "This server does not support registry lookups. Update it before switching tracks.",
@@ -3277,7 +3274,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "on the computer that opened this page"]
+      "c": [
+        " ",
+        "on the computer that opened this page"
+      ]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3289,7 +3289,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "· whoever runs it gets this access"]
+      "c": [
+        " ",
+        "· whoever runs it gets this access"
+      ]
     }
   ],
   "c54cc9c75db9dc58": "Only approve a sign-in you just started.",
@@ -6328,16 +6331,6 @@
   ],
   "216ab7514aea1d61": "Start without an agent",
   "501ce2d99da8bfd1": "Set up one agent to start.",
-  "71f3822326109c8e": [
-    "T3 Code collects anonymous usage data to improve the app. To opt out, see the",
-    " ",
-    {
-      "t": "a",
-      "i": 1,
-      "c": "privacy policy"
-    },
-    "."
-  ],
   "b33f35083757b42c": [
     "See the",
     " ",
@@ -8810,7 +8803,6 @@
   "a6a6dc235b108747": "Allow agents to use the shared browser. Projects can override it.",
   "ea5fed973bfc1aca": "Reset default browser access to default",
   "19e1f74805f4a1fb": "Agent browser access",
-  "b395b88284e3bca2": "Show the floating preview when an agent opens a browser or device unless the agent says otherwise.",
   "6aadfd59cf60b4b5": "Reset auto-show floating preview to default",
   "e4a7ec61190bc1f9": "Auto-show floating preview",
   "3705c53cb3e76a28": "Could not clear {name}''s data",
@@ -10405,7 +10397,6 @@
   "c424bee294b9f778": "This environment is managed by {organization}. Some settings and features follow its policy.",
   "82d9538af590f58c": "See your agents, import projects, and set up your phone.",
   "6a48fd0a37e725a1": "Legal",
-  "d6d3ea46ac979e1c": "How we handle your data, including the anonymous usage data T3 Code collects.",
   "e741b1ab9396053a": "How we handle your data. {telemetryOff}",
   "0bffbbf4d7f780c0": "Notices for dependencies, assets, and optional tools used by T3 Code.",
   "e39a57514be028e9": "Review",
@@ -13068,5 +13059,32 @@
   "27d76249d09eb69f": "Review guide ready",
   "faa3bb26abb39c93": "Review guide failed",
   "b7df38b7d8792d78": "Open guide",
-  "9e91e9a77b664e4e": "Could not start a review guide"
+  "9e91e9a77b664e4e": "Could not start a review guide",
+  "4a727b074bbbc5b2": "Not connected. Add your personal API key to list its issues.",
+  "b40c70c4488dcebe": "Not connected. Add your API token to list its issues.",
+  "1e89798e3a9050c6": "Connected as {account} · no projects linked yet. Link one to a Linear team to list its issues.",
+  "c3ab6f9e8b29fbf1": "Connected as {account} · no projects linked yet. Link one to a Jira project to list its issues.",
+  "cb5c27218e96e407": "Username",
+  "182a659d70f8ea72": "Password",
+  "bf45d68027d21097": "{organization} turned off product usage data.",
+  "fdf273ca647a967f": "Delete",
+  "1bd21d5284dc2d8e": "iOS Devices",
+  "f28d1d2b5f30a8cd": "Physical",
+  "b089e0792d542bed": [
+    "T3 Code collects pseudonymous product usage data to improve the app. To opt out, see the",
+    " ",
+    {
+      "t": "a",
+      "i": 1,
+      "c": "privacy policy"
+    },
+    "."
+  ],
+  "d6ccca83a1676fcb": "Show the floating preview when an agent opens a browser or device unless the agent says otherwise, and when you close the right panel.",
+  "bcbd81fcef7fff67": "How we handle your data, including the pseudonymous product usage data T3 Code collects.",
+  "4a12506938295127": "Enter the {field} first.",
+  "5807c08e225c6b3d": "Download",
+  "0d50b5bfe7151ece": "Could not download file",
+  "eb1fd384ad5919dd": "Internal note",
+  "b45f0b467e9406d0": "Reply to customer"
 }

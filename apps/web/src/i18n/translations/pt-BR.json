@@ -760,9 +760,7 @@
   "8360d689ebc7f829": "Fazer push e criar {shortLabel} a partir do branch padrão?",
   "daa408bb99d21d18": "{kind, select, pr {Esta ação vai fazer push dos commits locais e criar um PR em \"{branch}\". Você pode continuar neste branch ou criar um branch de feature e executar a mesma ação nele.} mr {Esta ação vai fazer push dos commits locais e criar um MR em \"{branch}\". Você pode continuar neste branch ou criar um branch de feature e executar a mesma ação nele.} generic {Esta ação vai fazer push dos commits locais e criar uma solicitação de alteração em \"{branch}\". Você pode continuar neste branch ou criar um branch de feature e executar a mesma ação nele.} other {Esta ação vai fazer push dos commits locais e criar {changeRequest} em \"{branch}\". Você pode continuar neste branch ou criar um branch de feature e executar a mesma ação nele.}}",
   "8471c4c5a50ffde3": "Ainda não é possível navegar pelas issues deste host.",
-  "2f4a47129f89fe22": "Não conectado. Adicione uma chave de API pessoal para listar as issues.",
   "024baab60525a419": "A credencial salva foi recusada.",
-  "2613c232516f3c72": "Conectado como {account} · nenhum projeto vinculado ainda. Escolha uma equipe para um projeto para listar as issues dele.",
   "77d07bfe2f8ee19d": "{count, plural, one {Conectado como {account} · {count} projeto vinculado} other {Conectado como {account} · {count} projetos vinculados}}",
   "3eb9a01099aaf799": "{count}s",
   "3618302947c280f0": "{count}min",
@@ -3170,7 +3168,6 @@
   "c646366e142ba05f": "O estado do WSL do desktop não está disponível.",
   "228dcd284ea651b3": "Falha ao carregar o estado do WSL.",
   "b08d105dd2553f8d": "O projeto não apareceu no app para desktop.",
-  "7a4b3f3b83e121d7": "{organization} desativou os dados de uso anônimos.",
   "d85822b18e9475df": "Gerenciado por {organization}.",
   "a6dd531d58080010": "Conecte-se a este servidor para verificar as versões.",
   "314cdccee9c14774": "Este servidor não permite consultas ao registro. Atualize-o antes de trocar de canal.",
@@ -3277,7 +3274,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "no computador que abriu esta página"]
+      "c": [
+        " ",
+        "no computador que abriu esta página"
+      ]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3289,7 +3289,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "· quem executar recebe este acesso"]
+      "c": [
+        " ",
+        "· quem executar recebe este acesso"
+      ]
     }
   ],
   "c54cc9c75db9dc58": "Aprove apenas um login que você acabou de iniciar.",
@@ -6326,16 +6329,6 @@
   ],
   "216ab7514aea1d61": "Começar sem agente",
   "501ce2d99da8bfd1": "Configure um agente para começar.",
-  "71f3822326109c8e": [
-    "O T3 Code coleta dados de uso anônimos para melhorar o app. Para recusar, consulte a",
-    " ",
-    {
-      "t": "a",
-      "i": 1,
-      "c": "política de privacidade"
-    },
-    "."
-  ],
   "b33f35083757b42c": [
     "Consulte a",
     " ",
@@ -8800,7 +8793,6 @@
   "a6a6dc235b108747": "Permite que os agentes usem o navegador compartilhado. Os projetos podem substituir isso.",
   "ea5fed973bfc1aca": "Redefinir o acesso padrão ao navegador para o padrão",
   "19e1f74805f4a1fb": "Acesso dos agentes ao navegador",
-  "b395b88284e3bca2": "Mostra a pré-visualização flutuante quando um agente abre um navegador ou dispositivo, a menos que o agente diga o contrário.",
   "6aadfd59cf60b4b5": "Redefinir \"Mostrar pré-visualização flutuante automaticamente\" para o padrão",
   "e4a7ec61190bc1f9": "Mostrar pré-visualização flutuante automaticamente",
   "3705c53cb3e76a28": "Não foi possível limpar os dados de {name}",
@@ -10395,7 +10387,6 @@
   "c424bee294b9f778": "Este ambiente é gerenciado por {organization}. Algumas configurações e recursos seguem a política dela.",
   "82d9538af590f58c": "Veja seus agentes, importe projetos e configure seu celular.",
   "6a48fd0a37e725a1": "Jurídico",
-  "d6d3ea46ac979e1c": "Como tratamos seus dados, incluindo os dados de uso anônimos que o T3 Code coleta.",
   "e741b1ab9396053a": "Como tratamos seus dados. {telemetryOff}",
   "0bffbbf4d7f780c0": "Avisos de dependências, recursos e ferramentas opcionais usados pelo T3 Code.",
   "e39a57514be028e9": "Revisar",
@@ -13059,5 +13050,32 @@
   "27d76249d09eb69f": "Guia de revisão pronto",
   "faa3bb26abb39c93": "O guia de revisão falhou",
   "b7df38b7d8792d78": "Abrir guia",
-  "9e91e9a77b664e4e": "Não foi possível iniciar um guia de revisão"
+  "9e91e9a77b664e4e": "Não foi possível iniciar um guia de revisão",
+  "4a727b074bbbc5b2": "Não conectado. Adicione sua chave de API pessoal para listar as issues.",
+  "b40c70c4488dcebe": "Não conectado. Adicione seu token de API para listar as issues.",
+  "1e89798e3a9050c6": "Conectado como {account} · nenhum projeto vinculado ainda. Vincule um a uma equipe do Linear para listar as issues dele.",
+  "c3ab6f9e8b29fbf1": "Conectado como {account} · nenhum projeto vinculado ainda. Vincule um a um projeto do Jira para listar as issues dele.",
+  "cb5c27218e96e407": "Nome de usuário",
+  "182a659d70f8ea72": "Senha",
+  "bf45d68027d21097": "{organization} desativou os dados de uso do produto.",
+  "fdf273ca647a967f": "Excluir",
+  "1bd21d5284dc2d8e": "Dispositivos iOS",
+  "f28d1d2b5f30a8cd": "Físico",
+  "b089e0792d542bed": [
+    "O T3 Code coleta dados de uso do produto pseudonimizados para melhorar o app. Para recusar, consulte a",
+    " ",
+    {
+      "t": "a",
+      "i": 1,
+      "c": "política de privacidade"
+    },
+    "."
+  ],
+  "d6ccca83a1676fcb": "Mostra a pré-visualização flutuante quando um agente abre um navegador ou dispositivo, a menos que o agente diga o contrário, e quando você fecha o painel direito.",
+  "bcbd81fcef7fff67": "Como tratamos seus dados, incluindo os dados de uso do produto pseudonimizados que o T3 Code coleta.",
+  "4a12506938295127": "Informe primeiro {field}.",
+  "5807c08e225c6b3d": "Baixar",
+  "0d50b5bfe7151ece": "Não foi possível baixar o arquivo",
+  "eb1fd384ad5919dd": "Nota interna",
+  "b45f0b467e9406d0": "Responder ao cliente"
 }

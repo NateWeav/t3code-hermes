@@ -760,9 +760,7 @@
   "8360d689ebc7f829": "Pushen & {shortLabel} aus dem Standard-Branch erstellen?",
   "daa408bb99d21d18": "{kind, select, pr {Diese Aktion pusht lokale Commits und erstellt einen PR auf „{branch}“. Du kannst auf diesem Branch weitermachen oder einen Feature-Branch erstellen und dieselbe Aktion dort ausführen.} mr {Diese Aktion pusht lokale Commits und erstellt einen MR auf „{branch}“. Du kannst auf diesem Branch weitermachen oder einen Feature-Branch erstellen und dieselbe Aktion dort ausführen.} generic {Diese Aktion pusht lokale Commits und erstellt eine Änderungsanfrage auf „{branch}“. Du kannst auf diesem Branch weitermachen oder einen Feature-Branch erstellen und dieselbe Aktion dort ausführen.} other {Diese Aktion pusht lokale Commits und erstellt {changeRequest} auf „{branch}“. Du kannst auf diesem Branch weitermachen oder einen Feature-Branch erstellen und dieselbe Aktion dort ausführen.}}",
   "8471c4c5a50ffde3": "Issues dieses Hosts können noch nicht angezeigt werden.",
-  "2f4a47129f89fe22": "Nicht verbunden. Füge einen persönlichen API-Schlüssel hinzu, um die Issues aufzulisten.",
   "024baab60525a419": "Die gespeicherten Anmeldedaten wurden abgelehnt.",
-  "2613c232516f3c72": "Verbunden als {account} · noch keine Projekte verknüpft. Wähle für ein Projekt ein Team, um seine Issues aufzulisten.",
   "77d07bfe2f8ee19d": "{count, plural, one {Verbunden als {account} · {count} Projekt verknüpft} other {Verbunden als {account} · {count} Projekte verknüpft}}",
   "3eb9a01099aaf799": "{count} s",
   "3618302947c280f0": "{count} Min.",
@@ -3171,7 +3169,6 @@
   "c646366e142ba05f": "Der WSL-Status des Desktops ist nicht verfügbar.",
   "228dcd284ea651b3": "Der WSL-Status konnte nicht geladen werden.",
   "b08d105dd2553f8d": "Das Projekt ist nicht in der Desktop-App erschienen.",
-  "7a4b3f3b83e121d7": "{organization} hat anonyme Nutzungsdaten deaktiviert.",
   "d85822b18e9475df": "Verwaltet von {organization}.",
   "a6dd531d58080010": "Verbinde dich mit diesem Server, um nach Releases zu suchen.",
   "314cdccee9c14774": "Dieser Server unterstützt keine Registry-Abfragen. Aktualisiere ihn, bevor du den Kanal wechselst.",
@@ -3278,7 +3275,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "auf dem Computer, der diese Seite geöffnet hat"]
+      "c": [
+        " ",
+        "auf dem Computer, der diese Seite geöffnet hat"
+      ]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3290,7 +3290,10 @@
     {
       "t": "span",
       "i": 2,
-      "c": [" ", "· wer es ausführt, erhält diesen Zugriff"]
+      "c": [
+        " ",
+        "· wer es ausführt, erhält diesen Zugriff"
+      ]
     }
   ],
   "c54cc9c75db9dc58": "Genehmige nur eine Anmeldung, die du gerade selbst gestartet hast.",
@@ -6325,16 +6328,6 @@
   ],
   "216ab7514aea1d61": "Ohne Agenten starten",
   "501ce2d99da8bfd1": "Richte einen Agenten ein, um zu starten.",
-  "71f3822326109c8e": [
-    "T3 Code erfasst anonyme Nutzungsdaten, um die App zu verbessern. Wie du widersprichst, steht in der",
-    " ",
-    {
-      "t": "a",
-      "i": 1,
-      "c": "Datenschutzerklärung"
-    },
-    "."
-  ],
   "b33f35083757b42c": [
     "Siehe",
     " ",
@@ -8802,7 +8795,6 @@
   "a6a6dc235b108747": "Agenten den gemeinsamen Browser nutzen lassen. Projekte können das überschreiben.",
   "ea5fed973bfc1aca": "Standard-Browserzugriff auf Standard zurücksetzen",
   "19e1f74805f4a1fb": "Browserzugriff für Agenten",
-  "b395b88284e3bca2": "Die schwebende Vorschau anzeigen, wenn ein Agent einen Browser oder ein Gerät öffnet, sofern der Agent nichts anderes angibt.",
   "6aadfd59cf60b4b5": "Schwebende Vorschau automatisch anzeigen auf Standard zurücksetzen",
   "e4a7ec61190bc1f9": "Schwebende Vorschau automatisch anzeigen",
   "3705c53cb3e76a28": "Daten von {name} konnten nicht gelöscht werden",
@@ -10396,7 +10388,6 @@
   "c424bee294b9f778": "Diese Umgebung wird von {organization} verwaltet. Einige Einstellungen und Funktionen folgen deren Richtlinie.",
   "82d9538af590f58c": "Sieh deine Agenten, importiere Projekte und richte dein Smartphone ein.",
   "6a48fd0a37e725a1": "Rechtliches",
-  "d6d3ea46ac979e1c": "Wie wir mit deinen Daten umgehen, einschließlich der anonymen Nutzungsdaten, die T3 Code erfasst.",
   "e741b1ab9396053a": "Wie wir mit deinen Daten umgehen. {telemetryOff}",
   "0bffbbf4d7f780c0": "Hinweise zu Abhängigkeiten, Assets und optionalen Tools, die T3 Code verwendet.",
   "e39a57514be028e9": "Review",
@@ -13059,5 +13050,32 @@
   "27d76249d09eb69f": "Review-Leitfaden bereit",
   "faa3bb26abb39c93": "Review-Leitfaden fehlgeschlagen",
   "b7df38b7d8792d78": "Leitfaden öffnen",
-  "9e91e9a77b664e4e": "Review-Leitfaden konnte nicht gestartet werden"
+  "9e91e9a77b664e4e": "Review-Leitfaden konnte nicht gestartet werden",
+  "4a727b074bbbc5b2": "Nicht verbunden. Füge deinen persönlichen API-Schlüssel hinzu, um die Issues aufzulisten.",
+  "b40c70c4488dcebe": "Nicht verbunden. Füge dein API-Token hinzu, um die Issues aufzulisten.",
+  "1e89798e3a9050c6": "Verbunden als {account} · noch keine Projekte verknüpft. Verknüpfe eines mit einem Linear-Team, um seine Issues aufzulisten.",
+  "c3ab6f9e8b29fbf1": "Verbunden als {account} · noch keine Projekte verknüpft. Verknüpfe eines mit einem Jira-Projekt, um seine Issues aufzulisten.",
+  "cb5c27218e96e407": "Benutzername",
+  "182a659d70f8ea72": "Passwort",
+  "bf45d68027d21097": "{organization} hat Produktnutzungsdaten deaktiviert.",
+  "fdf273ca647a967f": "Löschen",
+  "1bd21d5284dc2d8e": "iOS-Geräte",
+  "f28d1d2b5f30a8cd": "Physisch",
+  "b089e0792d542bed": [
+    "T3 Code erfasst pseudonyme Produktnutzungsdaten, um die App zu verbessern. Wie du widersprichst, steht in der",
+    " ",
+    {
+      "t": "a",
+      "i": 1,
+      "c": "Datenschutzerklärung"
+    },
+    "."
+  ],
+  "d6ccca83a1676fcb": "Die schwebende Vorschau anzeigen, wenn ein Agent einen Browser oder ein Gerät öffnet, sofern der Agent nichts anderes angibt, und wenn du das rechte Panel schließt.",
+  "bcbd81fcef7fff67": "Wie wir mit deinen Daten umgehen, einschließlich der pseudonymen Produktnutzungsdaten, die T3 Code erfasst.",
+  "4a12506938295127": "Gib zuerst {field} ein.",
+  "5807c08e225c6b3d": "Herunterladen",
+  "0d50b5bfe7151ece": "Datei konnte nicht heruntergeladen werden",
+  "eb1fd384ad5919dd": "Interne Notiz",
+  "b45f0b467e9406d0": "Dem Kunden antworten"
 }

@@ -68,6 +68,7 @@ import {
   type CachedFile,
   type ScanCache,
 } from "./usageScanCache.ts";
+import { readUsageImports } from "./usageImports.ts";
 
 const LITELLM_RATES_URL =
   "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json";
@@ -820,11 +821,25 @@ export const make = Effect.gen(function* () {
     );
 
     // Scan independent sources together, directories sequentially to bound open files; keep order, since the first copy decides a duplicate's bucket.
-    const [transcripts, scanDirs] = yield* Effect.all(
-      [Effect.forEach(dirs, (dir) => scanTranscriptDir(dir, windowStartMs, fromMemory)), scans],
+    const imports = readUsageImports(config.stateDir).pipe(
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(Path.Path, path),
+    );
+    const [transcripts, scanDirs, imported] = yield* Effect.all(
+      [
+        Effect.forEach(dirs, (dir) => scanTranscriptDir(dir, windowStartMs, fromMemory)),
+        scans,
+        imports,
+      ],
       { concurrency: "unbounded" },
     );
-    const scanned: readonly ScannedDir[] = [...transcripts, ...pending, ...scanDirs.flat()];
+    // Imports come last: a transcript read here keeps any response both contain.
+    const scanned: readonly ScannedDir[] = [
+      ...transcripts,
+      ...pending,
+      ...scanDirs.flat(),
+      ...imported.map((source) => ({ ...source, volumeId: "" })),
+    ];
     return scanned;
   });
 

@@ -792,6 +792,55 @@ describe("UsageService", () => {
     }),
   );
 
+  it.effect("counts imported usage under its own host and once when a transcript has it", () =>
+    Effect.gen(function* () {
+      const { transcript, settings, home } = yield* setup;
+      yield* Effect.promise(() => NodeFSP.writeFile(transcript, claudeLine(1, 5)));
+      const imported = (id: number, outputTokens: number) => ({
+        provider: "claude",
+        timestamp: "2026-08-01T11:00:00Z",
+        model: "claude-fable-5",
+        sessionId: "laptop-session",
+        uncachedInputTokens: 10,
+        cachedInputTokens: 0,
+        cacheCreationTokens: 0,
+        outputTokens,
+        dedupeKey: `msg_${id}:req_${id}`,
+      });
+      const summary = yield* Effect.gen(function* () {
+        const { stateDir } = yield* ServerConfig.ServerConfig;
+        const importsDir = NodePath.join(stateDir, "usage-imports");
+        yield* Effect.promise(async () => {
+          await NodeFSP.mkdir(importsDir, { recursive: true });
+          await NodeFSP.writeFile(
+            NodePath.join(importsDir, "laptop.json"),
+            encodeUnknownJsonString({
+              version: 1,
+              hostId: "laptop",
+              records: [imported(1, 5), imported(2, 7)],
+            }),
+          );
+          await NodeFSP.writeFile(NodePath.join(importsDir, "broken.json"), "{");
+        });
+        const service = yield* UsageService.make;
+        return yield* service.readSummary(WINDOW);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(layerService({ prefix: "usage-imports", home, settings })),
+      );
+      // The transcript already holds msg_1, so only msg_2's 7 output tokens are added.
+      assert.strictEqual(totalOutputTokens(summary), 12);
+      const laptop = summary.sources.find((source) => source.fingerprint.hostId === "laptop");
+      assert.strictEqual(laptop?.fingerprint.provider, "claude");
+      assert.strictEqual(laptop?.status, "ok");
+      assert.strictEqual(laptop?.distinctSessions, 1);
+      const broken = summary.sources.find((source) =>
+        source.fingerprint.resolvedHomePath.endsWith("broken.json"),
+      );
+      assert.strictEqual(broken?.status, "failed");
+    }),
+  );
+
   it.effect("keeps the first host identity across recreation and explicit override removal", () =>
     Effect.gen(function* () {
       const { transcript, settings, home } = yield* setup;

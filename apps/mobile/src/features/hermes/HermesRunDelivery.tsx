@@ -6,7 +6,6 @@ import { Pressable, View } from "react-native";
 import { AppText as Text } from "../../components/ui/AppText";
 import { resolveNativeMarkdownTypography } from "../../lib/appearancePreferences";
 import { tryOpenExternalUrl } from "../../lib/openExternalUrl";
-import { FONT_FAMILIES } from "../../lib/fontFamilies";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
 import { SelectableMarkdownText } from "../../native/SelectableMarkdownText";
 import { serverEnvironment } from "../../state/server";
@@ -171,10 +170,10 @@ function RunOutput(props: {
 }
 
 function RunOutputMarkdown({ content }: { readonly content: string }) {
-  const { appearance } = useAppearancePreferences();
+  const { appearance, fontFamilies, monoFontFamily } = useAppearancePreferences();
   const theme = useUniwindTheme();
-  const fontFamily = FONT_FAMILIES.regular;
-  const boldFontFamily = FONT_FAMILIES.bold;
+  const fontFamily = fontFamilies.regular;
+  const boldFontFamily = fontFamilies.bold;
   const textStyle = useMemo(
     () => ({
       ...resolveNativeMarkdownTypography(appearance.baseFontSize),
@@ -193,8 +192,9 @@ function RunOutputMarkdown({ content }: { readonly content: string }) {
       fontFamily,
       headingFontFamily: boldFontFamily,
       boldFontFamily,
+      monoFontFamily,
     }),
-    [appearance.baseFontSize, boldFontFamily, fontFamily, theme],
+    [appearance.baseFontSize, boldFontFamily, fontFamily, monoFontFamily, theme],
   );
 
   return (

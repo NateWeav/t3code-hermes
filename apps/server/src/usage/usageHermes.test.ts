@@ -83,6 +83,25 @@ describe("readHermesUsageRecords", () => {
     });
   });
 
+  it("reports the session's API call count so context tiers price each call", () => {
+    withDatabase((dbPath, database) => {
+      database.exec("ALTER TABLE sessions ADD COLUMN api_call_count INTEGER DEFAULT 0");
+      const insert = database.prepare(`
+        INSERT INTO sessions (id, model, started_at, input_tokens, output_tokens, api_call_count)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `);
+      insert.run("many", "model-a", 100, 600_000, 10, 12);
+      insert.run("one", "model-a", 200, 50, 10, 1);
+
+      const records = readHermesUsageRecords(dbPath, 0);
+
+      expect(records?.map((record) => [record.sessionId, record.modelCalls])).toEqual([
+        ["many", 12],
+        ["one", undefined],
+      ]);
+    });
+  });
+
   it("uses estimated cost when actual cost is absent and filters by last activity", () => {
     withDatabase((dbPath, database) => {
       database

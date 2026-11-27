@@ -223,7 +223,12 @@ export const make = Effect.gen(function* () {
       }
       return snapshot;
     }
-    return { ...base, accounts: accounts.success };
+    const { unreadProviders } = accounts.success;
+    return {
+      ...base,
+      accounts: accounts.success.accounts,
+      ...(unreadProviders.length > 0 ? { unreadProviders } : {}),
+    };
   });
 
   const publish = Effect.fn("UsageLimitSources.publish")(function* (

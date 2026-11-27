@@ -14,6 +14,29 @@ Turn on **Merge providers** to show a model used through several providers, such
 - **Retention**: Servers keep scanned usage history for **92 days** by default (preserving Claude history after Claude's 30-day cleanup). Change `usageHistoryRetentionDays` in `<t3-home>/userdata/settings.json` (e.g. `365` or `"unlimited"`). **All time** shows everything kept from the first recorded day, by week past 90 days and by month past a year.
 - **Custom data directories**: Honors `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, `GROK_HOME`, `PI_CODING_AGENT_DIR` / `PI_CODING_AGENT_SESSION_DIR`, `OPENCODE_DATA_DIR`, `ANTIGRAVITY_DATA_DIR`, and `XDG_DATA_HOME` (Muse). Use absolute or `~/` paths. Set `T3CODE_HOST_ID` to pin a container's host identity.
 - **Exclusions**: Codex and Claude Code 2.0.63+ text-generation runs (titles, commits, PR text, review guides) and Grok turns without a saved completed-turn record are not included.
+- **Imported history (Hermes fork)**: To count usage from a machine the server can't scan, such as an old laptop, drop a JSON file in `<t3-home>/userdata/usage-imports/`. It shows as its own source under the `hostId` it names. Deleting the file removes that usage. Records that carry the provider's own `dedupeKey` (Claude: `<message id>:<request id>`) count once if the same response is also in a transcript the server reads.
+
+```json
+{
+  "version": 1,
+  "hostId": "old-laptop",
+  "records": [
+    {
+      "provider": "claude",
+      "timestamp": "2026-07-20T15:22:42Z",
+      "model": "claude-sonnet-5",
+      "sessionId": "a000659a-…",
+      "uncachedInputTokens": 12,
+      "cachedInputTokens": 20480,
+      "cacheCreationTokens": 1024,
+      "outputTokens": 310,
+      "dedupeKey": "msg_…:req_…"
+    }
+  ]
+}
+```
+
+A file with any invalid record is skipped as a whole and reported under the Usage source warnings.
 
 ## Custom model prices and filtering
 

@@ -29,6 +29,7 @@ interface HermesSessionRow {
   readonly reasoning_tokens: unknown;
   readonly estimated_cost_usd: unknown;
   readonly actual_cost_usd: unknown;
+  readonly api_call_count: unknown;
 }
 
 function nonNegativeInt(value: unknown): number {
@@ -65,6 +66,10 @@ export function readHermesUsageRecords(
   }
 
   try {
+    // Older Hermes databases predate the per-session API call counter.
+    const hasCallCount = database
+      .prepare("SELECT 1 FROM pragma_table_info('sessions') WHERE name = 'api_call_count'")
+      .get();
     const rows = database
       .prepare(`
         SELECT
@@ -79,7 +84,8 @@ export function readHermesUsageRecords(
           s.cache_write_tokens,
           s.reasoning_tokens,
           s.estimated_cost_usd,
-          s.actual_cost_usd
+          s.actual_cost_usd,
+          ${hasCallCount ? "s.api_call_count" : "NULL"} AS api_call_count
         FROM sessions s
         LEFT JOIN messages m ON m.session_id = s.id
         GROUP BY s.id
@@ -120,6 +126,7 @@ export function readHermesUsageRecords(
         unixSeconds(row.started_at);
       if (timestampSeconds === null) continue;
 
+      const modelCalls = nonNegativeInt(row.api_call_count);
       records.push({
         provider: "hermes",
         timestampMs: timestampSeconds * 1000,
@@ -131,6 +138,8 @@ export function readHermesUsageRecords(
         // provider-reported price: let T3's model-rate table estimate it.
         reportedCostUsd:
           positiveFiniteNumber(row.actual_cost_usd) ?? positiveFiniteNumber(row.estimated_cost_usd),
+        // Session counters sum every model call, so context-tier pricing needs the call count.
+        ...(modelCalls > 1 ? { modelCalls } : {}),
         dedupeKey: null,
       });
     }

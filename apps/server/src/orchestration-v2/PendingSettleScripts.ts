@@ -15,7 +15,7 @@ export class PendingSettleScripts extends Context.Service<
       threadId: ThreadId,
     ) => <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
   }
->()("t3/orchestration-v2/PendingSettleScripts") {}
+>()("t3-hermes/orchestration-v2/PendingSettleScripts") {}
 
 export const layer = Layer.sync(PendingSettleScripts, () => {
   const counts = new Map<ThreadId, number>();

@@ -311,6 +311,9 @@ that commit's first 12 characters.
      `enablePostSettleContinuation` plus `isUnpromptedTurnUpdate`.
    - `preserveRuntimeOnSettledInterrupt`: it only skips the restart that
      `restartRuntimeOnEveryInterrupt` asks for, and Hermes never restarts on interrupt.
+   - `deferMcpTools`: set only for agents that cannot take every T3 tool up front (Copilot, and
+     `"proxy"` for the Antigravity CLI, which freezes its tools per turn). Hermes declares every T3
+     tool directly; deferring them would change its model-facing tool surface.
 2. New optional inputs. In `git diff R -- packages/provider-core/src/server packages/provider-acp/src/server`,
    find optional fields added to input types and options. Where Hermes builds that input itself,
    check that it passes the field on as its siblings do.

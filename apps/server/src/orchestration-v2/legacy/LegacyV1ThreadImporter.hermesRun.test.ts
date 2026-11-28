@@ -1,5 +1,6 @@
 // Fork: threads mirrored from Hermes runs before V2 keep their run.
 import { assert, it } from "@effect/vitest";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { ThreadId, type ThreadHermesRun } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -15,7 +16,10 @@ import * as LegacyV1ThreadImporter from "./LegacyV1ThreadImporter.ts";
 const storesProvided = Layer.mergeAll(
   SqlitePersistence.layerMemory,
   EventStore.layer.pipe(Layer.provideMerge(SqlitePersistence.layerMemory)),
-  ProjectionStore.layer.pipe(Layer.provideMerge(SqlitePersistence.layerMemory)),
+  ProjectionStore.layer.pipe(
+    Layer.provide(NodeCrypto.layerDigest),
+    Layer.provideMerge(SqlitePersistence.layerMemory),
+  ),
 );
 const eventSinkProvided = EventSink.layer.pipe(Layer.provide(storesProvided));
 const TestLayer = Layer.mergeAll(

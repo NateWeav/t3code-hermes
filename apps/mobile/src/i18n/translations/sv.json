@@ -5730,5 +5730,6 @@
   "9103c6fa7accc088": "Visa diff för {path}, {additions} tillägg, {deletions, plural, one {{deletions} borttagning} other {{deletions} borttagningar}}",
   "f6cf1627f4acc5ef": "Kommentarens synlighet",
   "eb1fd384ad5919dd": "Intern anteckning",
-  "b45f0b467e9406d0": "Svara kunden"
+  "b45f0b467e9406d0": "Svara kunden",
+  "15e5597f8f93ce12": "{start} till {end}"
 }

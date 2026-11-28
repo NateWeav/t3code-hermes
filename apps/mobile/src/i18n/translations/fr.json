@@ -5724,5 +5724,6 @@
   "9103c6fa7accc088": "Voir le diff de {path}, {additions, plural, =1 {{additions} ajout} other {{additions} ajouts}}, {deletions, plural, =1 {{deletions} suppression} other {{deletions} suppressions}}",
   "f6cf1627f4acc5ef": "Visibilité du commentaire",
   "eb1fd384ad5919dd": "Note interne",
-  "b45f0b467e9406d0": "Répondre au client"
+  "b45f0b467e9406d0": "Répondre au client",
+  "15e5597f8f93ce12": "{start} à {end}"
 }
